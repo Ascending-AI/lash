@@ -174,7 +174,9 @@ pub fn ensure_trace_schema_version(actual: u32) -> Result<(), TraceSchemaVersion
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceLevel {
     #[default]
@@ -188,7 +190,7 @@ impl TraceLevel {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
@@ -210,7 +212,11 @@ pub struct TraceContext {
     /// `llm:<call_id>`, `tool:<call_id>`). Populated by the runtime for turn /
     /// llm / tool / session records so a consumer can build a nested span tree
     /// from `(graph_node_id, parent_graph_node_id)` with a single `id -> span`
-    /// map. Lashlang execution sets its own graph node id here.
+    /// map. A language-execution record for a node event carries the observed
+    /// node's structural id here, equal to the `WorkflowGraph` node id (ADR
+    /// 0100 R0), so a host joins trace to graph on this key; a child start
+    /// carries its parent node's id, and execution start and finish leave it
+    /// unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph_node_id: Option<String>,
     /// Id of the enclosing span — the value of some other record's
@@ -301,6 +307,45 @@ pub struct TraceRecord {
     pub event: TraceEvent,
 }
 
+/// The record's JSON Schema describes its serialized form: the timestamp is an
+/// RFC 3339 string, and the event's `type` tag and fields sit beside the
+/// envelope fields.
+impl schemars::JsonSchema for TraceRecord {
+    fn schema_name() -> String {
+        "TraceRecord".to_string()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        // Schema-only mirror of the serialized record; Serde never reads it.
+        /// One durable trace record: the envelope fields plus the flattened
+        /// event, whose `type` tag names the variant.
+        #[derive(schemars::JsonSchema)]
+        #[allow(dead_code, reason = "fields exist only to describe the schema")]
+        struct TraceRecordSchema {
+            schema_version: u32,
+            id: String,
+            #[schemars(schema_with = "rfc3339_timestamp_schema")]
+            timestamp: String,
+            context: TraceContext,
+            #[serde(flatten)]
+            event: TraceEvent,
+        }
+
+        TraceRecordSchema::json_schema(generator)
+    }
+}
+
+fn rfc3339_timestamp_schema(
+    _generator: &mut schemars::r#gen::SchemaGenerator,
+) -> schemars::schema::Schema {
+    schemars::schema::SchemaObject {
+        instance_type: Some(schemars::schema::InstanceType::String.into()),
+        format: Some("date-time".to_string()),
+        ..Default::default()
+    }
+    .into()
+}
+
 #[derive(Deserialize)]
 struct TraceRecordWire {
     schema_version: u32,
@@ -383,7 +428,7 @@ impl TraceRecord {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(
     clippy::large_enum_variant,
@@ -585,7 +630,7 @@ pub enum TraceEvent {
 }
 
 /// The compile/link result, independent of the program's later runtime outcome.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum TraceRlmStepOutcome {
     /// The program compiled and linked successfully.
@@ -599,7 +644,7 @@ pub enum TraceRlmStepOutcome {
 
 /// One provider or tool retry attempt projected from the retry owner's sealed
 /// record. The trace does not own retry bookkeeping; it only renders it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceRetryAttempt {
     pub ordinal: u32,
     pub outcome: TraceRetryAttemptOutcome,
@@ -636,7 +681,7 @@ pub struct TraceRetryAttempt {
 ///
 /// Reporting integrations exhaustively render these dispositions when
 /// explaining a call whose usage never arrived.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceAttemptUsageDisposition {
     /// The provider reported usage for this attempt.
@@ -655,7 +700,7 @@ pub enum TraceAttemptUsageDisposition {
 ///
 /// Trace consumers exhaustively render these outcomes when explaining which
 /// attempt completed a call and why earlier attempts did not.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceRetryAttemptOutcome {
     /// The attempt completed successfully.
@@ -676,7 +721,7 @@ pub enum TraceRetryAttemptOutcome {
 /// # Integrator class
 ///
 /// Reporting integrations exhaustively render these typed denial reasons.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceChargeSafetyDenialReason {
     /// Host policy requires a provider idempotency or resume guarantee.
@@ -695,7 +740,7 @@ pub enum TraceChargeSafetyDenialReason {
 ///
 /// Reporting integrations consume this optional component on an LLM retry
 /// attempt.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum TraceChargeSafetyDecision {
     /// Host policy permits this otherwise unsafe retry.
@@ -717,7 +762,7 @@ pub enum TraceChargeSafetyDecision {
 }
 
 /// Provider-reported facts attached to one sealed LLM attempt.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceExecutionEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub served_model: Option<String>,
@@ -862,7 +907,7 @@ impl TraceEvent {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceToolCallOutput {
     pub outcome: TraceToolCallOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -891,7 +936,7 @@ impl TraceToolCallOutput {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "status", content = "payload", rename_all = "snake_case")]
 pub enum TraceToolCallOutcome {
     Success(Value),
@@ -899,7 +944,7 @@ pub enum TraceToolCallOutcome {
     Cancelled(Value),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceToolCallStatus {
     Success,
@@ -907,7 +952,7 @@ pub enum TraceToolCallStatus {
     Cancelled,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceExecToolCall {
     pub call_id: Option<String>,
     pub name: String,
@@ -915,7 +960,7 @@ pub struct TraceExecToolCall {
     pub status: TraceToolCallStatus,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TracePromptComponent {
     pub id: String,
     pub kind: String,
@@ -924,7 +969,7 @@ pub struct TracePromptComponent {
     pub chars: Option<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLlmRequest {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -952,13 +997,13 @@ impl TraceLlmRequest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLlmMessage {
     pub role: String,
     pub blocks: Vec<TraceContentBlock>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TraceContentBlock {
     Text {
@@ -994,7 +1039,7 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceAttachment {
     pub source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1007,7 +1052,7 @@ pub struct TraceAttachment {
     pub bytes_len: Option<usize>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceToolSpec {
     pub name: String,
     pub description: String,
@@ -1015,7 +1060,7 @@ pub struct TraceToolSpec {
     pub output_schema: Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLlmResponse {
     pub text: String,
     pub duration_ms: u64,
@@ -1033,7 +1078,7 @@ pub struct TraceLlmResponse {
     pub generation_disposition: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceProviderRequestEvent {
     pub provider: String,
     pub sequence: u64,
@@ -1054,7 +1099,7 @@ pub struct TraceProviderRequestEvent {
 /// A missing minting route identifies a session written before provenance was
 /// introduced (or another unstamped producer); it is intentionally not
 /// inferred from the currently selected route.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceProviderReplayKind {
     ResponseText,
@@ -1072,7 +1117,7 @@ impl TraceProviderReplayKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceProviderReplayDropReason {
     Unstamped,
@@ -1088,14 +1133,14 @@ impl TraceProviderReplayDropReason {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceProviderRouteIdentity {
     pub provider: String,
     pub endpoint: String,
     pub model: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceProviderReplayDropEvent {
     pub replay_kind: TraceProviderReplayKind,
     pub reason: TraceProviderReplayDropReason,
@@ -1107,14 +1152,14 @@ pub struct TraceProviderReplayDropEvent {
 /// Structural differences between the canonical envelopes on a failed durable
 /// replay validation. This event may contain prompt and tool-result values and
 /// must therefore only be emitted through the extended-trace gate.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceEffectEnvelopeDiffEvent {
     pub recorded_envelope_hash: String,
     pub reconstructed_envelope_hash: String,
     pub divergent_paths: Vec<TraceEffectEnvelopeDiffEntry>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceEffectEnvelopeDiffEntry {
     pub path: String,
     pub recorded: TraceEffectEnvelopeDiffValue,
@@ -1125,7 +1170,7 @@ pub struct TraceEffectEnvelopeDiffEntry {
 ///
 /// Large values are omitted whole. Their exact serialized length and digest
 /// remain available, but no prefix is retained.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TraceEffectEnvelopeDiffValue {
     Missing,
@@ -1139,7 +1184,7 @@ pub enum TraceEffectEnvelopeDiffValue {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceProviderStreamEvent {
     pub provider: String,
     pub sequence: u64,
@@ -1155,7 +1200,7 @@ pub struct TraceProviderStreamEvent {
     pub raw_json: Option<Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceRuntimeStreamEvent {
     pub sequence: u64,
     pub elapsed_ms: u64,
@@ -1183,7 +1228,7 @@ pub struct TraceRuntimeStreamEvent {
     pub usage: Option<TraceTokenUsage>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceTokenUsage {
     pub input_tokens: i64,
     pub output_tokens: i64,
@@ -1192,7 +1237,7 @@ pub struct TraceTokenUsage {
     pub reasoning_output_tokens: i64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceAgentFrameSwitch {
     pub frame_key: String,
 }
@@ -1216,7 +1261,7 @@ fn wire_tag<T: Serialize>(value: &T) -> String {
 /// produced it.
 ///
 /// [`TurnStop::Cancelled`]: lash_sansio::session_model::TurnStop::Cancelled
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceTurnCancellationEvidence {
     pub request_id: String,
     /// Opaque host-domain data. Lash records and returns it unchanged.
@@ -1234,7 +1279,7 @@ pub struct TraceTurnCancellationEvidence {
 /// and a cancellation cannot be reported without its evidence. Cancellation is
 /// its own variant rather than a failure reason — [`Self::is_failed`] is
 /// `false` for it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum TraceTurnOutcome {
     /// The turn reached a terminal result the caller asked for.
@@ -1292,7 +1337,7 @@ impl TraceTurnOutcome {
 }
 
 /// Why a [`TraceTurnOutcome::Completed`] turn finished.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceTurnCompletionReason {
     AssistantMessage,
@@ -1309,7 +1354,7 @@ impl TraceTurnCompletionReason {
 
 /// Why a [`TraceTurnOutcome::Failed`] turn stopped. Mirrors the non-cancelled
 /// `TurnStop` reasons.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceTurnFailureReason {
     Incomplete,
@@ -1332,7 +1377,7 @@ impl TraceTurnFailureReason {
 }
 
 /// Terminal status of a journaled `ctx.run` effect.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceJournaledEffectStatus {
     Completed,
@@ -1356,7 +1401,7 @@ impl TraceJournaledEffectStatus {
 }
 
 /// How a durable wait left its park.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceDurableWaitResolution {
     /// The awaited event delivered a value.
@@ -1400,7 +1445,7 @@ impl TraceDurableWaitResolution {
 }
 
 /// How a durable timer left its sleep.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceDurableTimerStatus {
     /// The timer elapsed.
@@ -1429,7 +1474,7 @@ impl TraceDurableTimerStatus {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceRuntimeScope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
@@ -1463,7 +1508,7 @@ impl TraceRuntimeScope {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TraceRuntimeSubject {
     Effect {
@@ -1484,7 +1529,9 @@ impl TraceRuntimeSubject {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct TraceLanguageExecutionGeneration {
     attempt: u32,
     incarnation: u64,
@@ -1507,7 +1554,7 @@ impl TraceLanguageExecutionGeneration {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct TraceLanguageExecutionIdentity {
     pub scope: TraceRuntimeScope,
     pub subject: TraceRuntimeSubject,
@@ -1598,7 +1645,7 @@ impl TraceLanguageExecutionIdentity {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLanguageExecution {
     pub event_key: String,
     pub identity: TraceLanguageExecutionIdentity,
@@ -1606,7 +1653,7 @@ pub struct TraceLanguageExecution {
     pub payload: TraceLanguageExecutionPayload,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLanguageChildExecution {
     pub scope: TraceRuntimeScope,
     pub process_id: lash_sansio::ProcessId,
@@ -1632,7 +1679,7 @@ impl TraceLanguageChildExecution {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceLanguageExecutionStatus {
     Running,
@@ -1651,7 +1698,7 @@ impl TraceLanguageExecutionStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceBranchSelection {
     Then,
@@ -1662,7 +1709,7 @@ pub enum TraceBranchSelection {
 /// [`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity
 /// (`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the
 /// enclosing [`TraceLanguageExecutionIdentity`]; the map never restates it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLanguageExecutionMap {
     #[serde(default)]
     pub nodes: Vec<TraceLanguageExecutionMapNode>,
@@ -1670,7 +1717,7 @@ pub struct TraceLanguageExecutionMap {
     pub edges: Vec<TraceLanguageExecutionMapEdge>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLanguageExecutionMapNode {
     pub id: String,
     pub site: lash_sansio::WorkflowExecutionSite,
@@ -1683,20 +1730,20 @@ pub struct TraceLanguageExecutionMapNode {
     pub label_metadata: Option<TraceLabelMetadata>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceBranchMembership {
     pub branch_node_id: String,
     pub arm: TraceBranchSelection,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLabelMetadata {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLanguageExecutionMapEdge {
     pub id: String,
     pub from: String,
@@ -1704,7 +1751,7 @@ pub struct TraceLanguageExecutionMapEdge {
     pub label: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceError {
     pub message: String,
     pub retryable: bool,

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The observed cause of a failed language node.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TraceLanguageExecutionFailure {
     /// A dispatched tool effect failed with its recorded classification and

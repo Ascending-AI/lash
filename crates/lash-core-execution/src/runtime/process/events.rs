@@ -1189,7 +1189,9 @@ impl ProcessEventKind {
     }
 }
 
-pub(super) fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
+/// The registered type of a runtime-owned process event kind, including its
+/// payload schema, or `None` for a producer-declared kind.
+pub fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
     match ProcessEventKind::from_event_type(name) {
         ProcessEventKind::Custom | ProcessEventKind::UnknownRuntime => None,
         ProcessEventKind::EffectOutcome => Some(ProcessEventType {

@@ -40,5 +40,6 @@ path = "src/bin/remote_schema_generator.rs"
 required-features = ["core-conversions"]
 
 [dev-dependencies]
+jsonschema = { workspace = true, default-features = false }
 lash-core = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["rt"] }

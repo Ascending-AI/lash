@@ -114,6 +114,56 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "process_event_schema_generator__bin",
+    crate_features = [
+        "default",
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "process_event_schema_generator",
+    crate_root = "src/bin/process_event_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":lash-core-execution",
+    library_crate_name = "lash_core_execution",
+    manifest_dir = "crates/lash-core-execution",
+    package_name = "lash-internal-core-execution",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_unit_test(
+    name = "process_event_schema_generator__bin__unit_test",
+    crate_features = [
+        "default",
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "process_event_schema_generator",
+    crate_root = "src/bin/process_event_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    library = ":lash-core-execution",
+    library_crate_name = "lash_core_execution",
+    manifest_dir = "crates/lash-core-execution",
+    package_name = "lash-internal-core-execution",
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "effect_model__test",
     crate_features = [
@@ -186,6 +236,7 @@ lash_batch_test(
     tests = [
         ":effect_model__test",
         ":lash-core-execution__unit_test",
+        ":process_event_schema_generator__bin__unit_test",
         ":process_model__test",
     ],
 )
@@ -205,6 +256,7 @@ filegroup(
 # tools/bazel/feature_variants.py.
 load(
     "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_binary",
     "lash_rust_feature_library",
     "lash_rust_feature_test",
 )
@@ -869,6 +921,32 @@ lash_rust_feature_library(
     extra_compile_data = [],
     manifest_dir = "crates/lash-core-execution",
     package_name = "lash-internal-core-execution",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_acf2157d", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-memory": "//crates/lash-core-memory:lash-core-memory__fv_691bdd6c", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "process_event_schema_generator__bin__fv_ecbe9667",
+    crate_features = [],
+    crate_name = "process_event_schema_generator",
+    crate_root = "src/bin/process_event_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-core-execution:lash-core-execution__fv_ecbe9667",
+    library_crate_name = "lash_core_execution",
+    manifest_dir = "crates/lash-core-execution",
+    package_name = "lash-internal-core-execution",
+    rustc_env = {},
     tags = [
         "feature-lane",
         "manual",

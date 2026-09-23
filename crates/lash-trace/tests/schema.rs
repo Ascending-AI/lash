@@ -2076,3 +2076,265 @@ fn rlm_compile_link_outcomes_have_pinned_wire_tags() {
         );
     }
 }
+
+fn published_schema(document: &str) -> Result<jsonschema::JSONSchema, String> {
+    let schema: serde_json::Value = serde_json::from_str(document)
+        .map_err(|error| format!("published trace schema does not parse: {error}"))?;
+    jsonschema::JSONSchema::compile(&schema)
+        .map_err(|error| format!("published trace schema does not compile: {error}"))
+}
+
+fn assert_schema_accepts(
+    validator: &jsonschema::JSONSchema,
+    value: &serde_json::Value,
+    what: &str,
+) {
+    if let Err(errors) = validator.validate(value) {
+        panic!(
+            "published schema rejected {what}:\n{}",
+            errors
+                .map(|error| format!("{} at {}", error, error.instance_path))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+}
+
+/// One language-execution payload of every kind, in an order the graph fold
+/// accepts: the execution map first, then the observed nodes, then the finish.
+fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
+    let site = |path: &[u32], kind, label: &str| {
+        lash_sansio::WorkflowExecutionSite::new("main", path, kind, label)
+    };
+    vec![
+        TraceLanguageExecutionPayload::ExecutionStarted {
+            execution_map: TraceLanguageExecutionMap {
+                nodes: vec![
+                    TraceLanguageExecutionMapNode {
+                        id: "branch".to_string(),
+                        site: site(&[0], lash_sansio::ExecutionNodeKind::Branch, "if ready"),
+                        kind: lash_sansio::ExecutionNodeKind::Branch,
+                        label: "if ready".to_string(),
+                        branch_memberships: Vec::new(),
+                        label_metadata: Some(lash_trace::TraceLabelMetadata {
+                            title: "Ready?".to_string(),
+                            description: Some("gate".to_string()),
+                        }),
+                    },
+                    TraceLanguageExecutionMapNode {
+                        id: "then".to_string(),
+                        site: site(&[0, 1, 0], lash_sansio::ExecutionNodeKind::Call, "notify()"),
+                        kind: lash_sansio::ExecutionNodeKind::Call,
+                        label: "notify()".to_string(),
+                        branch_memberships: vec![lash_trace::TraceBranchMembership {
+                            branch_node_id: "branch".to_string(),
+                            arm: TraceBranchSelection::Then,
+                        }],
+                        label_metadata: None,
+                    },
+                ],
+                edges: vec![TraceLanguageExecutionMapEdge {
+                    id: "then-edge".to_string(),
+                    from: "branch".to_string(),
+                    to: "then".to_string(),
+                    label: "sequence".to_string(),
+                }],
+            },
+        },
+        TraceLanguageExecutionPayload::NodeStarted {
+            node_id: "branch".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Branch,
+            label: "if ready".to_string(),
+            occurrence: 1,
+            call_id: None,
+        },
+        TraceLanguageExecutionPayload::BranchSelected {
+            node_id: "branch".to_string(),
+            occurrence: 1,
+            edge_id: "then-edge".to_string(),
+            selected: TraceBranchSelection::Then,
+        },
+        TraceLanguageExecutionPayload::NodeCompleted {
+            node_id: "branch".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Branch,
+            label: "if ready".to_string(),
+            occurrence: 1,
+            call_id: None,
+        },
+        TraceLanguageExecutionPayload::NodeStarted {
+            node_id: "then".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Call,
+            label: "notify()".to_string(),
+            occurrence: 1,
+            call_id: Some("call-1".to_string()),
+        },
+        TraceLanguageExecutionPayload::NodeWaiting {
+            node_id: "then".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Call,
+            label: "notify()".to_string(),
+            occurrence: 1,
+            awaited: lash_trace::TraceNodeAwaited::Signal {
+                name: "approved".to_string(),
+                key: "approved:1".to_string(),
+            },
+        },
+        TraceLanguageExecutionPayload::NodeResumed {
+            node_id: "then".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Call,
+            label: "notify()".to_string(),
+            occurrence: 1,
+            resolution: lash_trace::TraceNodeWaitResolution::Resumed,
+        },
+        TraceLanguageExecutionPayload::ChildStarted {
+            parent_node_id: "then".to_string(),
+            occurrence: 1,
+            child: TraceLanguageChildExecution {
+                scope: TraceRuntimeScope::new("s1"),
+                process_id: ProcessId::from("child-1"),
+                incarnation: 1,
+                attempt: Some(1),
+                module_ref: Some("child-module".to_string()),
+                entry_ref: None,
+                entry_name: Some("child".to_string()),
+            },
+        },
+        TraceLanguageExecutionPayload::NodeFailed {
+            node_id: "then".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Call,
+            label: "notify()".to_string(),
+            occurrence: 1,
+            call_id: Some("call-1".to_string()),
+            failure: lash_trace::TraceLanguageExecutionFailure::Runtime {
+                code: "boom".to_string(),
+                message: "notify failed".to_string(),
+            },
+        },
+        TraceLanguageExecutionPayload::NodeStarted {
+            node_id: "then".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Call,
+            label: "notify()".to_string(),
+            occurrence: 2,
+            call_id: None,
+        },
+        TraceLanguageExecutionPayload::NodeCancelled {
+            node_id: "then".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Call,
+            label: "notify()".to_string(),
+            occurrence: 2,
+        },
+        TraceLanguageExecutionPayload::ExecutionFinished {
+            status: TraceLanguageExecutionStatus::Failed,
+            error: Some("notify failed".to_string()),
+        },
+    ]
+}
+
+fn language_execution_records() -> Vec<TraceRecord> {
+    language_execution_payload_samples()
+        .into_iter()
+        .enumerate()
+        .map(|(index, payload)| {
+            TraceRecord::new(
+                TraceContext::default().for_session("s1"),
+                TraceEvent::LanguageExecution {
+                    language: "lashlang".to_string(),
+                    event: TraceLanguageExecution {
+                        event_key: format!("process:p1:{index}"),
+                        identity: lashlang_identity(),
+                        payload,
+                    },
+                },
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
+    let validator = published_schema(include_str!(
+        "../../../schemas/host/trace-record/v31.schema.json"
+    ))
+    .expect("published trace schema");
+    let context = TraceContext {
+        run_id: Some("run".to_string()),
+        graph_node_id: Some("turn:s1:t1".to_string()),
+        turn_index: Some(0),
+        metadata: [("k".to_string(), json!(1))].into_iter().collect(),
+        ..TraceContext::default()
+            .for_session("s1")
+            .for_turn("t1")
+            .for_llm_call("llm-1")
+    };
+    for event in event_samples() {
+        let kind = event.kind();
+        let record = TraceRecord::new(context.clone(), event);
+        let value = serde_json::to_value(&record).expect("encode record");
+        assert_schema_accepts(&validator, &value, kind);
+    }
+    for record in language_execution_records() {
+        let value = serde_json::to_value(&record).expect("encode record");
+        assert_schema_accepts(&validator, &value, "a language execution record");
+    }
+}
+
+/// The published record schema enforces the matrix row: an additive field on a
+/// known record is tolerated, while an unknown event tag or a predecessor
+/// version is refused.
+#[test]
+fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_variants() {
+    let validator = published_schema(include_str!(
+        "../../../schemas/host/trace-record/v31.schema.json"
+    ))
+    .expect("published trace schema");
+    let record = TraceRecord::new(
+        TraceContext::default(),
+        TraceEvent::TurnStarted {
+            metadata: Default::default(),
+        },
+    );
+    let mut value = serde_json::to_value(&record).expect("encode record");
+    value["future_field"] = json!(true);
+    assert_schema_accepts(&validator, &value, "an additive record field");
+
+    let mut unknown = value.clone();
+    unknown["type"] = json!("future_event");
+    assert!(
+        !validator.is_valid(&unknown),
+        "unknown event tag must be refused"
+    );
+
+    let mut predecessor = value;
+    predecessor["schema_version"] = json!(lash_trace::TRACE_SCHEMA_VERSION - 1);
+    assert!(
+        !validator.is_valid(&predecessor),
+        "predecessor schema version must be refused"
+    );
+}
+
+#[test]
+fn published_graph_schema_accepts_a_folded_snapshot_and_enforces_its_row() {
+    let validator = published_schema(include_str!(
+        "../../../schemas/host/trace-lashlang-graph/v31.schema.json"
+    ))
+    .expect("published trace schema");
+    let graph = lash_trace::TraceLashlangGraphStore::fold(None, &language_execution_records())
+        .expect("fold every payload kind");
+    assert!(!graph.nodes.is_empty() && !graph.history.is_empty());
+    let mut value = serde_json::to_value(&graph).expect("encode graph");
+    assert_schema_accepts(&validator, &value, "a folded graph snapshot");
+
+    value["future_field"] = json!(true);
+    assert_schema_accepts(&validator, &value, "an additive snapshot field");
+    for (field, pointer) in [
+        ("graph status", "/status"),
+        ("completeness", "/completeness"),
+        ("node kind", "/nodes/0/kind"),
+    ] {
+        let mut changed = value.clone();
+        *changed.pointer_mut(pointer).expect(field) = json!("future_variant");
+        assert!(
+            !validator.is_valid(&changed),
+            "unknown {field} variant must be refused"
+        );
+    }
+}

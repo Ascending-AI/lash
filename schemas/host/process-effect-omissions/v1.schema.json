@@ -1,0 +1,50 @@
+{
+  "$id": "https://lash.dev/schemas/process-effect-omissions/v1",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "properties": {
+    "nodes": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelled": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failure": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "success": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "success",
+          "failure",
+          "cancelled"
+        ],
+        "type": "object"
+      },
+      "minProperties": 1,
+      "type": "object"
+    },
+    "occurrence_cap": {
+      "const": 8
+    },
+    "vocabulary_version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "vocabulary_version",
+    "occurrence_cap",
+    "nodes"
+  ],
+  "title": "ProcessEffectOmissions",
+  "type": "object",
+  "x-lash-event-type": "process.effect_omissions",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "PROCESS_EVENT_VOCABULARY_VERSION"
+}

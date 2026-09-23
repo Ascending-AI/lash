@@ -1624,6 +1624,30 @@ fn graph_decode_refuses_unknown_closed_variant_at_the_current_version() {
             changed["nodes"][0]["status"] = serde_json::json!("future_variant");
             changed
         }),
+        ("node kind", {
+            let mut changed = value.clone();
+            changed["nodes"][0]["kind"] = serde_json::json!("future_variant");
+            changed
+        }),
+        ("wait kind", {
+            let waiting = TraceLashlangGraphStore::fold(
+                None,
+                &[record_at(
+                    node_waiting(
+                        "sleep",
+                        lash_sansio::ExecutionNodeKind::Sleep,
+                        1,
+                        crate::TraceNodeAwaited::Sleep { deadline_ms: None },
+                    ),
+                    1_000,
+                )],
+            )
+            .expect("waiting graph");
+            let mut changed = serde_json::to_value(waiting).expect("encode waiting graph");
+            assert_eq!(changed["nodes"][0]["awaited"]["type"], "sleep");
+            changed["nodes"][0]["awaited"]["type"] = serde_json::json!("future_variant");
+            changed
+        }),
     ] {
         let error = serde_json::from_value::<TraceLashlangGraph>(changed)
             .expect_err(&format!("unknown {field} variant must be refused"));

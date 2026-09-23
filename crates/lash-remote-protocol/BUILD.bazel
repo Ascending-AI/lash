@@ -51,7 +51,9 @@ lash_rust_unit_test(
         "default",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//:host_schemas",
+    ],
     manifest_dir = "crates/lash-remote-protocol",
     package_name = "lash-internal-remote-protocol",
     tags = [],
@@ -310,7 +312,9 @@ lash_rust_feature_test(
         "default",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//:host_schemas",
+    ],
     manifest_dir = "crates/lash-remote-protocol",
     package_name = "lash-internal-remote-protocol",
     tags = [

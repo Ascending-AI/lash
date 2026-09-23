@@ -148,11 +148,59 @@ fn process_node_record() -> lash_trace::TraceRecord {
     )
 }
 
+/// The published observation-item schema: the snapshot graph and the node
+/// event record are typed trace shapes, not opaque JSON.
+fn published_observation_item_schema() -> jsonschema::JSONSchema {
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../schemas/host/remote-process-observation-item/v91.schema.json"
+    ))
+    .expect("published observation item schema parses");
+    assert_eq!(
+        schema["x-lash-schema-version"],
+        serde_json::json!(REMOTE_PROTOCOL_VERSION)
+    );
+    jsonschema::JSONSchema::compile(&schema).expect("published observation item schema compiles")
+}
+
 fn assert_process_observation_wire_contract(item: RemoteProcessObservationItem) {
     let wire = item.encode_json().expect("encode observation item");
     assert_eq!(
         RemoteProcessObservationItem::decode_json(&wire).expect("decode item"),
         item
+    );
+    let validator = published_observation_item_schema();
+    let mut body: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
+    body.as_object_mut()
+        .expect("item object")
+        .remove("protocol_version");
+    if let Err(errors) = validator.validate(&body) {
+        panic!(
+            "published schema rejected a real observation item:\n{}",
+            errors
+                .map(|error| format!("{} at {}", error, error.instance_path))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+    let mut untyped = body.clone();
+    let typed_field = match &item {
+        RemoteProcessObservationItem::Snapshot { .. } => Some("/projection/graph/status"),
+        RemoteProcessObservationItem::Event { .. } => Some("/record/type"),
+        RemoteProcessObservationItem::Gap { .. } => None,
+    };
+    if let Some(pointer) = typed_field {
+        *untyped.pointer_mut(pointer).expect("typed trace field") =
+            serde_json::json!("future_variant");
+        assert!(
+            !validator.is_valid(&untyped),
+            "the published schema types {pointer} as a closed trace enum"
+        );
+    }
+    let mut extra = body;
+    extra["retired_field"] = serde_json::json!(true);
+    assert!(
+        !validator.is_valid(&extra),
+        "item schema refuses unknown fields"
     );
     let mut value: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
     value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION - 1);

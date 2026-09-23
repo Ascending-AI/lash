@@ -447,6 +447,10 @@ def unit_test_compile_data(package_name: str) -> list[str]:
         data.append("//:perf_duration_level_shifts")
     if package_name in ("lash-runtime", "lash-internal-sqlite-store"):
         data.append("//crates/lashlang:old_module_fixture")
+    if package_name == "lash-internal-remote-protocol":
+        # The process-observation wire contracts validate real items against
+        # the published observation-item schema compiled into the test.
+        data.append("//:host_schemas")
     return data
 
 
@@ -511,6 +515,11 @@ def target_support(
         # The schema agreement test compiles the published graph schema into
         # the test and validates real serialized graph documents against it.
         extra_compile_data.append("//:workflow_graph_schema")
+    if package["name"] == "lash-internal-trace" and target["name"] == "schema":
+        # The schema agreement tests compile the published trace record and
+        # graph snapshot schemas into the test and validate real serialized
+        # records and snapshots against them.
+        extra_compile_data.append("//:host_schemas")
     if package["name"] == "lash-internal-lashlang" and target["name"] == "dialect_cost":
         # It holds the dialect to the corpus's own checked-in budget by
         # reading the budget file with `include_str!`, the way lash-perf
