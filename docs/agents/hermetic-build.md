@@ -814,3 +814,21 @@ registration in `rules_swift`'s `MODULE.bazel`; it does not replace the module,
 change the Bazel installation, or alter Rust, C/C++, or bindgen registrations.
 Fresh Linux CI previously spent 27s and 55s compiling a Swift feature probe in
 its lint and tail jobs. There is no Swift opt-out flag or fallback in Lash.
+
+### Per-package opt levels
+
+Bazel compiles the target configuration as `fastbuild` (`-Copt-level=0`).
+Cargo's `[profile.dev.package]` raises a few packages, and `kiln sync` mirrors
+those rows from `Cargo.toml`, the single source:
+
+- First-party packages become `per_crate_rustc_flag` lines in the generated
+  `tools/bazel/opt_levels.bazelrc`, imported by `.bazelrc`. The flag covers
+  every target of the package, as Cargo's override does. For `lash-regress`
+  (opt 2), its suites went from 23–34 s to 2–4 s per binary.
+- Third-party crates become `crate.annotation(rustc_flags = ...)` entries in
+  the generated `tools/bazel/opt_levels.MODULE.bazel`, included by
+  `MODULE.bazel`. rules_rs's `rust_crate` ignores per-crate flags.
+- `syn`, `quote` and `proc-macro2` are not mirrored. Cargo raises them because
+  they run inside the proc-macro host; Bazel already compiles those copies in
+  the `opt` exec configuration. An annotation would lower them to 2 and rekey
+  every proc macro.

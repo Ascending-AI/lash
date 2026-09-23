@@ -1448,8 +1448,89 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
         outputs[ROOT / f"tools/bazel/{service}_test_labels.txt"] = (
             "".join(f"{label}\n" for label in labels)
         )
+    outputs[ROOT / "tools/bazel/opt_levels.bazelrc"] = opt_levels_bazelrc(metadata)
+    outputs[ROOT / "tools/bazel/opt_levels.MODULE.bazel"] = opt_levels_module(metadata)
     validate_test_run_sizes()
     return outputs, inventory
+
+
+# Crates Cargo optimizes because they run inside the proc-macro host. Bazel
+# compiles the host-side copies in the `opt` exec configuration already, so
+# mirroring the override would only de-optimize those and rekey every proc
+# macro; the target-configuration copies link into nothing Cargo's reason
+# covers.
+PROC_MACRO_HOST_CRATES = {"proc-macro2", "quote", "syn"}
+
+
+def profile_opt_levels(metadata: dict) -> tuple[dict[str, int], dict[str, int]]:
+    """Cargo's `[profile.dev.package]` opt levels, split first-party / third-party."""
+    manifest = tomllib.loads((ROOT / "Cargo.toml").read_text())
+    overrides = manifest.get("profile", {}).get("dev", {}).get("package", {})
+    members = {
+        package["name"]
+        for package in metadata["packages"]
+        if package["id"] in set(metadata["workspace_members"])
+    }
+    known = {package["name"] for package in metadata["packages"]}
+    first_party: dict[str, int] = {}
+    third_party: dict[str, int] = {}
+    for name, profile in sorted(overrides.items()):
+        if set(profile) != {"opt-level"}:
+            raise SystemExit(
+                f"[profile.dev.package.{name}] sets {sorted(profile)}; only opt-level is mirrored in Bazel"
+            )
+        if name not in known:
+            raise SystemExit(f"[profile.dev.package.{name}] names no package in the resolved graph")
+        if name in members:
+            first_party[name] = profile["opt-level"]
+        elif name not in PROC_MACRO_HOST_CRATES:
+            third_party[name] = profile["opt-level"]
+    return first_party, third_party
+
+
+def opt_levels_bazelrc(metadata: dict) -> str:
+    """First-party `[profile.dev.package]` opt levels as per-crate rustc flags.
+
+    `per_crate_rustc_flag` reaches target-configuration compiles of first-party
+    targets only (rules_rs's third-party `rust_crate` opts out of it), and a
+    first-party override covers every target of the package, as Cargo's does.
+    """
+    first_party, _third_party = profile_opt_levels(metadata)
+    directories = {
+        package["name"]: relative(package["manifest_path"]).removesuffix("/Cargo.toml")
+        for package in metadata["packages"]
+        if package["name"] in first_party
+    }
+    lines = [
+        GENERATED_HEADER,
+        "# Cargo.toml `[profile.dev.package]` for first-party packages; the\n",
+        "# third-party rows are `tools/bazel/opt_levels.MODULE.bazel`.\n",
+    ]
+    for name, level in sorted(first_party.items()):
+        lines.append(
+            "build --@rules_rust//rust/settings:per_crate_rustc_flag="
+            f"//{directories[name]}:@-Copt-level={level}\n"
+        )
+    return "".join(lines)
+
+
+def opt_levels_module(metadata: dict) -> str:
+    """Third-party `[profile.dev.package]` opt levels as `@crates` annotations."""
+    _first_party, third_party = profile_opt_levels(metadata)
+    lines = [
+        GENERATED_HEADER,
+        "# Cargo.toml `[profile.dev.package]` for third-party crates, included by\n",
+        "# MODULE.bazel. The proc-macro host crates are left to the exec configuration.\n",
+        'crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")\n',
+    ]
+    for name, level in sorted(third_party.items()):
+        lines.append(
+            "crate.annotation(\n"
+            f"    crate = {quote(name)},\n"
+            f'    rustc_flags = ["-Copt-level={level}"],\n'
+            ")\n"
+        )
+    return "".join(lines)
 
 
 # ---------------------------------------------------------------------------

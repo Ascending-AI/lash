@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import collections
 import json
+import tomllib
 import importlib.util
 import os
 import pathlib
@@ -1313,6 +1314,26 @@ class CargoResolutionTests(unittest.TestCase):
                     )), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(generator.verify_resolution({}), expected)
+
+
+class OptLevelMirrorTests(unittest.TestCase):
+    def test_cargo_profile_opt_levels_reach_bazel(self):
+        sys.path.insert(0, str(ROOT / "tools/bazel"))
+        import generate_build_files as generator
+
+        profile = tomllib.loads((ROOT / "Cargo.toml").read_text())["profile"]["dev"]["package"]
+        rc = (ROOT / "tools/bazel/opt_levels.bazelrc").read_text()
+        module = (ROOT / "tools/bazel/opt_levels.MODULE.bazel").read_text()
+        self.assertIn('include("//tools/bazel:opt_levels.MODULE.bazel")', (ROOT / "MODULE.bazel").read_text())
+        self.assertIn("import %workspace%/tools/bazel/opt_levels.bazelrc", (ROOT / ".bazelrc").read_text())
+        for name, settings in profile.items():
+            level = settings["opt-level"]
+            if name in generator.PROC_MACRO_HOST_CRATES:
+                self.assertNotIn(f'crate = "{name}"', module)
+            elif name.startswith("lash-"):
+                self.assertIn(f"/{name}:@-Copt-level={level}", rc)
+            else:
+                self.assertIn(f'crate = "{name}",\n    rustc_flags = ["-Copt-level={level}"]', module)
 
 
 if __name__ == "__main__":
