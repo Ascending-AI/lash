@@ -22,6 +22,7 @@ lash_rust_library(
     declared_features = [
         "testing",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -45,7 +46,7 @@ lash_rust_unit_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -63,7 +64,7 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [
         "//examples:codemode_parity_cells",
         "//:workflow_graph_schema",
@@ -108,6 +109,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -127,6 +129,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -146,6 +149,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -165,6 +169,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",
@@ -184,6 +189,7 @@ lash_rust_feature_library(
     declared_features = [
         "testing",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-typescript",
     package_name = "lash-internal-typescript",

@@ -22,6 +22,7 @@ lash_rust_library(
     declared_features = [
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",
@@ -45,7 +46,7 @@ lash_rust_unit_test(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",
@@ -63,7 +64,7 @@ lash_rust_integration_test(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     library = ":lash-protocol-standard",
     library_crate_name = "lash_protocol_standard",
@@ -84,7 +85,7 @@ lash_rust_integration_test(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     library = ":lash-protocol-standard",
     library_crate_name = "lash_protocol_standard",
@@ -105,7 +106,7 @@ lash_rust_integration_test(
     declared_features = [
         "default",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     library = ":lash-protocol-standard",
     library_crate_name = "lash_protocol_standard",
@@ -120,6 +121,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
+    member_cpu_count = 4,
+    member_memory_kb = 4194304,
     tests = [
         ":embedded_builder__test",
         ":lash-protocol-standard__unit_test",
@@ -156,6 +159,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",
@@ -177,6 +181,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",
@@ -198,6 +203,7 @@ lash_rust_feature_library(
     declared_features = [
         "default",
     ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [],
     manifest_dir = "crates/lash-protocol-standard",
     package_name = "lash-internal-protocol-standard",

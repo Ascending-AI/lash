@@ -1,7 +1,0 @@
-crate=lash_core kind=lib 1048576 120.00 12.00 44.00
-crate=lash_core kind=lib 2097152 130.00 10.00 40.00
-crate=lash_core kind=test 3145728 200.00 20.00 300.00
-crate=tiny_helper kind=lib 65536 1.00 0.20 1.50
-crate=serial_bin kind=bin 262144 9.60 0.40 2.50
-crate=build_script_build kind=build-script 32768 0.10 0.00 0.00
-crate=wide_test kind=test 131072 300.00 60.00 20.00

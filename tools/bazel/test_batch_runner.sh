@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Batch runner for lash_test_batch (FIG-3365). The manifest lists one
-# runfiles-relative path per member test binary; each runs in parallel with
-# its output captured to its own log, and the action fails iff any member
-# fails, printing every failing log in full.
+# Batch runner for lash_batch_test (FIG-3365). The manifest lists one
+# runfiles-relative path per member test binary; at most LASH_BATCH_JOBS run
+# at once, each with its output captured to its own log, and the action fails
+# iff any member fails, printing every failing log in full.
 #
 # Bazel test actions execute with the runfiles root as cwd, which is the cwd
 # each member rust_test would have had alone. INSTA_WORKSPACE_ROOT matches the
@@ -15,9 +15,13 @@ cd "${TEST_SRCDIR:?}/${TEST_WORKSPACE:?}"
 logs="${TEST_TMPDIR:-$(mktemp -d)}/batch-logs"
 mkdir -p "$logs"
 
-jobs_cap=$(( $(nproc 2>/dev/null || echo 4) ))
-[ "$jobs_cap" -gt 8 ] && jobs_cap=8
-[ "$jobs_cap" -lt 1 ] && jobs_cap=1
+# The batch rule reserves LASH_BATCH_JOBS member-sized slots for this action;
+# the worker's own core count says nothing about that reservation.
+jobs_cap=${LASH_BATCH_JOBS:?LASH_BATCH_JOBS is set by lash_batch_test}
+if ! [[ "$jobs_cap" =~ ^[1-9][0-9]*$ ]]; then
+    echo "FAIL: LASH_BATCH_JOBS must be a positive integer, got '$jobs_cap'" >&2
+    exit 1
+fi
 
 args=("$@")
 list_only=0

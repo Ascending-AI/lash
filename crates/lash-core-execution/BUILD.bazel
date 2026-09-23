@@ -27,7 +27,7 @@ lash_rust_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -102,7 +102,7 @@ lash_rust_unit_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     srcs_patterns = [
         "src/lib.rs",
         "src/**/*.rs",
@@ -135,7 +135,7 @@ lash_rust_integration_test(
         "tests/runtime/effect/group.rs",
         "tests/runtime/effect/tool_child.rs",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     library = ":lash-core-execution",
     library_crate_name = "lash_core_execution",
@@ -166,7 +166,7 @@ lash_rust_integration_test(
         "tests/runtime/process/lease_serde_tests.rs",
         "tests/runtime/process/registry_transitions.rs",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     library = ":lash-core-execution",
     library_crate_name = "lash_core_execution",
@@ -181,6 +181,8 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
+    member_cpu_count = 4,
+    member_memory_kb = 4194304,
     tests = [
         ":effect_model__test",
         ":lash-core-execution__unit_test",
@@ -218,7 +220,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     library = "//crates/lash-core-execution:lash-core-execution__fv_ecbe9667",
     library_crate_name = "lash_core_execution",
@@ -246,7 +248,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -317,7 +319,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -388,7 +390,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -460,7 +462,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -532,7 +534,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -603,7 +605,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -675,7 +677,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -748,7 +750,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -817,7 +819,7 @@ lash_rust_feature_library(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "5242880"},
     test_srcs = [
         "src/plugin/state/tests.rs",
         "src/runtime/effect/effect_replay_driver/tests.rs",
@@ -886,7 +888,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
     library = "//crates/lash-core-execution:lash-core-execution__fv_ecbe9667",
     library_crate_name = "lash_core_execution",
