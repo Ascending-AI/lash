@@ -30,7 +30,6 @@ lash_rust_library(
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
     compile_data_patterns = [
-        "Cargo.toml",
         "schema.sql",
         "teardown.sql",
         "schema-shape.txt",
@@ -90,6 +89,11 @@ lash_rust_binary(
         "lashlang",
         "perf-witness",
         "testing",
+    ],
+    compile_data_patterns = [
+        "schema.sql",
+        "teardown.sql",
+        "schema-shape.txt",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [
@@ -528,7 +532,6 @@ lash_rust_feature_library(
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
     compile_data_patterns = [
-        "Cargo.toml",
         "schema.sql",
         "teardown.sql",
         "schema-shape.txt",
@@ -561,7 +564,6 @@ lash_rust_feature_library(
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
     compile_data_patterns = [
-        "Cargo.toml",
         "schema.sql",
         "teardown.sql",
         "schema-shape.txt",
@@ -592,7 +594,6 @@ lash_rust_feature_library(
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
     compile_data_patterns = [
-        "Cargo.toml",
         "schema.sql",
         "teardown.sql",
         "schema-shape.txt",
@@ -621,7 +622,6 @@ lash_rust_feature_library(
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
     compile_data_patterns = [
-        "Cargo.toml",
         "schema.sql",
         "teardown.sql",
         "schema-shape.txt",
@@ -652,7 +652,6 @@ lash_rust_feature_library(
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
     compile_data_patterns = [
-        "Cargo.toml",
         "schema.sql",
         "teardown.sql",
         "schema-shape.txt",

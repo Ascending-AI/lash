@@ -57,23 +57,40 @@ class SourceOwnershipTests(unittest.TestCase):
                 self.assertIn("tests/runtime/tests/turn_cancel_modes.rs", files)
         self.assertTrue(all(count > 1 for count in counts.values()), counts)
 
-    def test_library_variants_keep_embedded_schemas_and_lint_config(self):
-        for crate in ("lash-core", "lash-core-execution", "lashlang",
-                      "lash-postgres-store", "lash-sqlite-store"):
-            directory = f"crates/{crate}"
-            count = 0
+    def test_libraries_compile_in_only_declared_package_files(self):
+        """A library's non-Rust inputs are its declared embedded assets, no more."""
+        policy = generator.SOURCE_OWNERSHIP
+        for build in sorted(ROOT.glob("*/*/BUILD.bazel")):
+            directory = build.parent.relative_to(ROOT).as_posix()
+            declared = expanded(directory, policy.get(directory, {}).get("compile_data", []))
             for args in declarations(directory, {"lash_rust_library", "lash_rust_feature_library"}):
-                count += 1
-                files = expanded(directory, ast.literal_eval(args["compile_data_patterns"]))
-                self.assertIn("Cargo.toml", files)
-                self.assertFalse(any(path.startswith("tests/") for path in files))
-                self.assertNotIn("src/rendered_sql_pin.txt", files)
-                if (ROOT / directory / "clippy.toml").is_file():
-                    self.assertIn("clippy.toml", files)
-                if crate == "lash-postgres-store":
-                    self.assertTrue({"schema.sql", "teardown.sql", "schema-shape.txt"} <= files)
-                    self.assertNotIn("payload-schema-fingerprints.txt", files)
-            self.assertGreater(count, 1, crate)
+                patterns = ast.literal_eval(args["compile_data_patterns"]) if "compile_data_patterns" in args else []
+                files = expanded(directory, patterns)
+                self.assertEqual(files, declared, directory)
+                self.assertNotIn("Cargo.toml", files, directory)
+                self.assertFalse(any(path.startswith("tests/") for path in files), directory)
+        postgres = expanded("crates/lash-postgres-store", policy["crates/lash-postgres-store"]["compile_data"])
+        self.assertEqual(postgres, {"schema.sql", "teardown.sql", "schema-shape.txt"})
+
+    def test_trybuild_pins_reach_only_the_ui_harness(self):
+        directory = "crates/lash"
+        pins = expanded(directory, ["tests/ui/*.stderr"])
+        self.assertTrue(pins)
+        for args in declarations(directory, {"lash_rust_library", "lash_rust_feature_library"}):
+            patterns = ast.literal_eval(args["compile_data_patterns"]) if "compile_data_patterns" in args else []
+            self.assertFalse(expanded(directory, patterns) & pins)
+        functions = {"lash_rust_unit_test", "lash_rust_integration_test", "lash_rust_feature_test"}
+        seen = set()
+        for args in declarations(directory, functions):
+            name = ast.literal_eval(args["crate_name"])
+            seen.add(name)
+            excluded = expanded(directory, ast.literal_eval(args["data_exclude"])) if "data_exclude" in args else set()
+            if name == "ui":
+                self.assertFalse(excluded & pins)
+            else:
+                self.assertTrue(pins <= excluded, name)
+        self.assertIn("ui", seen)
+        self.assertIn("lash", seen)
 
     def test_named_feature_tests_keep_both_targets_without_a_unit_harness(self):
         command = feature_variants.parse_command([
@@ -114,11 +131,11 @@ class SourceOwnershipTests(unittest.TestCase):
         for patterns in (["../lash-core/Cargo.toml"], ["/tmp/asset"], ["missing.txt"],
                          ["src/lib.rs"], ["src/**"], "Cargo.toml", [1]):
             with self.subTest(patterns=patterns), patch.object(
-                generator, "SOURCE_OWNERSHIP", {directory: {"library_compile_data": patterns}}
+                generator, "SOURCE_OWNERSHIP", {directory: {"compile_data": patterns}}
             ):
                 with self.assertRaises(ValueError):
                     generator.validate_source_ownership(metadata)
-        with patch.object(generator, "SOURCE_OWNERSHIP", {directory: {"library_compile_data": []}}):
+        with patch.object(generator, "SOURCE_OWNERSHIP", {directory: {"compile_data": []}}):
             generator.validate_source_ownership(metadata)
 
 

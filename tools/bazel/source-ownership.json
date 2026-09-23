@@ -1,11 +1,53 @@
 {
   "crates/lash": {
     "tests": {
+      "attachments_evidence": [
+        "tests/attachments_evidence.rs"
+      ],
       "integration": [
         "tests/integration.rs",
         "tests/integration/**/*.rs"
+      ],
+      "observation_admin_evidence": [
+        "tests/observation_admin_evidence.rs"
+      ],
+      "otel_trace_evidence": [
+        "tests/otel_trace_evidence.rs"
+      ],
+      "processes_evidence": [
+        "tests/processes_evidence.rs"
+      ],
+      "processes_evidence_b": [
+        "tests/processes_evidence_b.rs"
+      ],
+      "protocol_evidence": [
+        "tests/protocol_evidence.rs"
+      ],
+      "sessions_evidence": [
+        "tests/sessions_evidence.rs"
+      ],
+      "triggers_evidence": [
+        "tests/triggers_evidence.rs"
+      ],
+      "ui": [
+        "tests/ui.rs",
+        "tests/ui/*.rs"
+      ]
+    },
+    "unit_test_sources": [
+      "src/lib.rs",
+      "src/**/*.rs"
+    ],
+    "test_data": {
+      "ui": [
+        "tests/ui/*"
       ]
     }
+  },
+  "crates/lash-conformance": {
+    "compile_data": [
+      "src/**/*.json"
+    ]
   },
   "crates/lash-core": {
     "tests": {
@@ -59,11 +101,7 @@
         "tests/runtime/tests/commit_placement.rs",
         "tests/runtime/tests/turn_cancel_modes.rs"
       ]
-    },
-    "library_compile_data": [
-      "Cargo.toml",
-      "clippy.toml"
-    ]
+    }
   },
   "crates/lash-core-execution": {
     "library_test_sources": [
@@ -124,28 +162,28 @@
         "tests/runtime/effect/group.rs",
         "tests/runtime/effect/tool_child.rs"
       ]
-    },
-    "library_compile_data": [
-      "Cargo.toml",
-      "clippy.toml"
-    ]
-  },
-  "crates/lashlang": {
-    "library_compile_data": [
-      "Cargo.toml"
-    ]
+    }
   },
   "crates/lash-postgres-store": {
-    "library_compile_data": [
-      "Cargo.toml",
+    "compile_data": [
       "schema.sql",
       "teardown.sql",
       "schema-shape.txt"
     ]
   },
-  "crates/lash-sqlite-store": {
-    "library_compile_data": [
-      "Cargo.toml"
+  "crates/lash-sim": {
+    "compile_data": [
+      "provider-scripts/**/*"
+    ]
+  },
+  "examples/agent-workbench": {
+    "compile_data": [
+      "assets/index.html"
+    ]
+  },
+  "examples/slack-clone": {
+    "compile_data": [
+      "assets/index.html"
     ]
   }
 }

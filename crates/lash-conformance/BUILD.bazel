@@ -23,6 +23,9 @@ lash_rust_library(
         "lashlang",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    compile_data_patterns = [
+        "src/**/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-conformance",
     package_name = "lash-internal-conformance",
@@ -81,6 +84,9 @@ lash_rust_feature_library(
         "lashlang",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    compile_data_patterns = [
+        "src/**/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-conformance",
     package_name = "lash-internal-conformance",
@@ -103,6 +109,9 @@ lash_rust_feature_library(
         "lashlang",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    compile_data_patterns = [
+        "src/**/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-conformance",
     package_name = "lash-internal-conformance",
@@ -123,6 +132,9 @@ lash_rust_feature_library(
         "lashlang",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    compile_data_patterns = [
+        "src/**/*.json",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-conformance",
     package_name = "lash-internal-conformance",

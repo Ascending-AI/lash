@@ -23,9 +23,6 @@ lash_rust_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "4194304"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lashlang",
     package_name = "lash-internal-lashlang",
@@ -391,9 +388,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "4194304"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lashlang",
     package_name = "lash-internal-lashlang",
@@ -414,9 +408,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "4194304"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lashlang",
     package_name = "lash-internal-lashlang",
@@ -439,9 +430,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "4194304"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lashlang",
     package_name = "lash-internal-lashlang",
@@ -462,9 +450,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "4194304"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lashlang",
     package_name = "lash-internal-lashlang",

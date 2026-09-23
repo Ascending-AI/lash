@@ -770,15 +770,24 @@ features, including no `testing` feature, against the production library.
 The lease-preimage and retained-tool-child mutation recipes select their
 integration targets as well as the unit tests.
 
-`library_compile_data` replaces the package-wide non-Rust glob for audited
-libraries, including their feature variants. Core, core-execution, Lashlang,
-PostgreSQL and SQLite declare their manifests, crate-local lint configuration
-where present, and embedded production assets. PostgreSQL retains `schema.sql`,
-`teardown.sql` and `schema-shape.txt`; test pins, regression files and predecessor
-fixtures no longer invalidate these production library actions. Cross-package
-`extra_compile_data` remains additive. Unlisted libraries retain the conservative
-glob, and tests retain their compile fixtures and runtime package files. Add new
-embedded assets to the owning library's declaration in the same change.
+Non-Rust compile inputs are declared, never globbed. A library or binary
+compiles in only the package files its `compile_data` entry lists, including
+feature variants; a package without an entry compiles in none. PostgreSQL
+declares `schema.sql`, `teardown.sql` and `schema-shape.txt`, conformance its
+regression JSON, lash-sim its provider scripts, and the workbench and
+slack-clone UIs their `index.html`. Manifests and `clippy.toml` are not compile
+inputs: the Clippy aspect supplies the nearest config itself. A library's
+runfiles are the same declared set, so a snapshot, pin or fixture edit no
+longer rebuilds the library or re-runs its dependents' tests. Cross-package
+`extra_compile_data` remains additive. Add a new embedded asset to the owning
+package's declaration in the same change; the hermetic compile fails until it
+is declared.
+
+`test_data` names package files that exactly one test target reads. Every other
+target of the package leaves them out of its inputs and runfiles. The facade's
+trybuild pins (`tests/ui/*`) belong to `ui`, so a pin edit re-runs only the UI
+harness and its fixtures. Test targets otherwise keep every package file as
+runfiles, because several tests read package sources at run time.
 The SQLite and PostgreSQL durable-read tests explicitly declare core's
 predecessor-fixture filegroup as runtime data, including their feature variants.
 

@@ -246,11 +246,28 @@ def test_source_patterns(directory: str, target: str) -> list[str]:
     )
 
 
-def library_data_patterns_argument(directory: str) -> str:
-    patterns = SOURCE_OWNERSHIP.get(directory, {}).get("library_compile_data")
-    if patterns is None:
-        return ""
-    return f"    compile_data_patterns = {string_list(patterns)},\n"
+def compile_data_argument(directory: str) -> str:
+    """The package files a library or binary compiles in (none unless declared)."""
+    patterns = SOURCE_OWNERSHIP.get(directory, {}).get("compile_data", [])
+    return f"    compile_data_patterns = {string_list(patterns)},\n" if patterns else ""
+
+
+def data_exclude_argument(directory: str, owner: str | None) -> str:
+    """Package files owned by a test target other than `owner`.
+
+    A `test_data` entry names files only one test target reads (trybuild pins,
+    say). Every other target of the package -- library, binaries, unit test and
+    sibling tests -- leaves them out of its inputs and runfiles, so editing them
+    re-runs only their owner.
+    """
+    owned = SOURCE_OWNERSHIP.get(directory, {}).get("test_data", {})
+    patterns = sorted({
+        pattern
+        for target, target_patterns in owned.items()
+        if target != owner
+        for pattern in target_patterns
+    })
+    return f"    data_exclude = {string_list(patterns)},\n" if patterns else ""
 
 
 def library_test_sources_argument(directory: str) -> str:
@@ -273,7 +290,7 @@ def validate_source_ownership(metadata: dict) -> None:
     for directory, policy in SOURCE_OWNERSHIP.items():
         if directory not in packages:
             raise ValueError(f"source ownership names unknown package {directory}")
-        if policy.keys() - {"tests", "library_test_sources", "unit_test_sources", "library_compile_data"}:
+        if policy.keys() - {"tests", "library_test_sources", "unit_test_sources", "compile_data", "test_data"}:
             raise ValueError(f"unknown source ownership keys for {directory}")
         package = packages[directory]
         tests = {
@@ -313,25 +330,45 @@ def validate_source_ownership(metadata: dict) -> None:
                     raise ValueError(f"invalid Rust source pattern {directory}/{pattern}")
                 if not any((ROOT / directory).glob(pattern)):
                     raise ValueError(f"source pattern matches nothing: {directory}/{pattern}")
-        if "library_compile_data" in policy:
-            if not any("lib" in target["kind"] for target in package["targets"]):
-                raise ValueError(f"library compile data names no library: {directory}")
-            patterns = policy["library_compile_data"]
+        if "compile_data" in policy:
+            if not any(
+                kind in ("lib", "bin", "example")
+                for target in package["targets"]
+                for kind in target["kind"]
+            ):
+                raise ValueError(f"compile data names no library or binary: {directory}")
+            patterns = policy["compile_data"]
             if not isinstance(patterns, list):
-                raise ValueError(f"library compile data must be a list: {directory}")
+                raise ValueError(f"compile data must be a list: {directory}")
             for pattern in patterns:
-                if (
-                    not isinstance(pattern, str)
-                    or pattern.startswith("/")
-                    or ".." in pathlib.PurePosixPath(pattern).parts
-                ):
-                    raise ValueError(f"invalid compile data pattern {directory}/{pattern}")
-                matches = [path for path in (ROOT / directory).glob(pattern) if path.is_file()]
-                if not matches or any(path.suffix == ".rs" for path in matches):
-                    raise ValueError(f"compile data pattern must match non-Rust files: {directory}/{pattern}")
+                validate_data_pattern(directory, pattern, rust_allowed=False)
+        test_data = policy.get("test_data", {})
+        if not isinstance(test_data, dict):
+            raise ValueError(f"test data must map test targets to patterns: {directory}")
+        for name, patterns in test_data.items():
+            if name not in tests:
+                raise ValueError(f"test data names unknown test {directory}:{name}")
+            if not isinstance(patterns, list) or not patterns:
+                raise ValueError(f"test data must be a non-empty list: {directory}:{name}")
+            for pattern in patterns:
+                validate_data_pattern(directory, pattern, rust_allowed=True)
         for source in policy.get("library_test_sources", []):
             if "*" in source or not (ROOT / directory / source).is_file():
                 raise ValueError(f"test-only source must name a file: {directory}/{source}")
+
+
+def validate_data_pattern(directory: str, pattern: object, rust_allowed: bool) -> None:
+    if (
+        not isinstance(pattern, str)
+        or pattern.startswith("/")
+        or ".." in pathlib.PurePosixPath(pattern).parts
+    ):
+        raise ValueError(f"invalid data pattern {directory}/{pattern}")
+    matches = [path for path in (ROOT / directory).glob(pattern) if path.is_file()]
+    if not matches:
+        raise ValueError(f"data pattern matches nothing: {directory}/{pattern}")
+    if not rust_allowed and any(path.suffix == ".rs" for path in matches):
+        raise ValueError(f"compile data pattern must match non-Rust files: {directory}/{pattern}")
 
 
 def cargo_metadata() -> dict:
@@ -775,7 +812,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    declared_features = {string_list(declared_features)},\n"
             + exec_properties_argument(package["name"], library["name"], "lib")
             + library_test_sources_argument(package_dir)
-            + library_data_patterns_argument(package_dir)
+            + compile_data_argument(package_dir)
             + f"    extra_compile_data = {string_list(extra_compile_data)},\n"
             f"    manifest_dir = {quote(package_dir)},\n"
             f"    package_name = {quote(package['name'])},\n"
@@ -836,6 +873,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                     f"//{package_dir}:{primary_target}__unit_test",
                 )
                 + unit_test_sources_argument(package_dir)
+                + data_exclude_argument(package_dir, None)
                 + f"    extra_compile_data = {string_list(unit_compile_data)},\n"
                 + (
                     f"    extra_data = {string_list(unit_extra_data)},\n"
@@ -942,6 +980,15 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         ]
         if kind == "test" and target["name"] in SOURCE_OWNERSHIP.get(package_dir, {}).get("tests", {}):
             args.append(f"    srcs_patterns = {string_list(test_source_patterns(package_dir, target['name']))},")
+        if kind in ("bin", "example", "bench"):
+            args.extend(
+                line
+                for line in (
+                    compile_data_argument(package_dir) + data_exclude_argument(package_dir, None)
+                ).splitlines()
+            )
+        else:
+            args.extend(data_exclude_argument(package_dir, target["name"]).splitlines())
         sized = exec_properties_argument(
             package["name"],
             crate_name,
@@ -1061,6 +1108,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             )
             if bin_unit_sized:
                 unit_args.append(bin_unit_sized)
+            unit_args.append(data_exclude_argument(package_dir, None))
             if extra_compile_data or binary_data:
                 unit_args.append(
                     f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
@@ -1883,7 +1931,7 @@ class FeatureLaneGraph:
             f"    declared_features = {string_list(sorted(package['features']))},\n"
             + exec_properties_argument(package_name, library["name"], "lib")
             + library_test_sources_argument(directory)
-            + library_data_patterns_argument(directory)
+            + compile_data_argument(directory)
             + f"    extra_compile_data = {string_list(library_compile_data(package_name) + feature_compile_data(package_name, features))},\n"
             f"    manifest_dir = {quote(directory)},\n"
             f"    package_name = {quote(package_name)},\n"
@@ -1964,6 +2012,8 @@ class FeatureLaneGraph:
                 f"    crate_root = {quote(crate_root)},\n"
                 f"    declared_features = {string_list(sorted(package['features']))},\n"
                 + exec_properties_argument(package_name, crate_name, "bin")
+                + compile_data_argument(directory)
+                + data_exclude_argument(directory, None)
                 + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
                 f"    include_dev_deps = {kind in ('example', 'bench')},\n"
                 f"    library = {quote(library_label) if library_label else 'None'},\n"
@@ -2005,6 +2055,7 @@ class FeatureLaneGraph:
                     package_name, library["name"], "test", f"//{directory}:{name}"
                 )
                 + unit_test_sources_argument(directory)
+                + data_exclude_argument(directory, None)
                 + f"    extra_compile_data = {string_list(compile_data)},\n"
                 + (
                     f"    extra_data = {string_list(unit_extra_data)},\n"
@@ -2043,6 +2094,7 @@ class FeatureLaneGraph:
                 + exec_properties_argument(
                     package_name, crate_name, "test", f"//{directory}:{name}"
                 )
+                + data_exclude_argument(directory, None)
                 + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
                 + (f"    extra_data = {string_list([WORKBENCH_NODE])},\n" if workbench_node else "")
                 + f"    library = {quote(library_label) if library_label else 'None'},\n"
@@ -2087,6 +2139,7 @@ class FeatureLaneGraph:
             + exec_properties_argument(
                 package_name, crate_name, "test", f"//{directory}:{name}"
             )
+            + data_exclude_argument(directory, target["name"])
             + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
             + (f"    extra_data = {string_list(extra_data)},\n" if extra_data else "")
             + f"    library = {quote(library_label) if library_label else 'None'},\n"

@@ -19,6 +19,9 @@ lash_rust_library(
     crate_name = "lash_sim",
     declared_features = [],
     exec_properties = {"cpu_count": "3", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "provider-scripts/**/*",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sim",
     package_name = "lash-sim",
@@ -59,6 +62,9 @@ lash_rust_binary(
     crate_name = "lash_sim",
     crate_root = "src/main.rs",
     declared_features = [],
+    compile_data_patterns = [
+        "provider-scripts/**/*",
+    ],
     exec_properties = {"cpu_count": "3", "memory_kb": "4194304"},
     extra_compile_data = [],
     include_dev_deps = False,
@@ -341,6 +347,9 @@ lash_rust_feature_library(
     crate_name = "lash_sim",
     declared_features = [],
     exec_properties = {"cpu_count": "3", "memory_kb": "4194304"},
+    compile_data_patterns = [
+        "provider-scripts/**/*",
+    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sim",
     package_name = "lash-sim",

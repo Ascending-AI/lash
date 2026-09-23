@@ -21,6 +21,9 @@ lash_rust_binary(
         "default",
         "provider-wire-fixtures",
     ],
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     exec_properties = {"cpu_count": "2", "memory_kb": "5767168"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
@@ -93,6 +96,9 @@ lash_rust_feature_binary(
         "provider-wire-fixtures",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "5767168"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
         "//crates/lash-sim:package_files",
@@ -122,6 +128,9 @@ lash_rust_feature_binary(
         "provider-wire-fixtures",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "5767168"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],

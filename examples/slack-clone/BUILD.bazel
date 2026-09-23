@@ -22,6 +22,9 @@ lash_rust_library(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -66,6 +69,9 @@ lash_rust_binary(
         "e2e",
         "live-e2e",
     ],
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     exec_properties = {"cpu_count": "3", "memory_kb": "2097152"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
@@ -88,6 +94,9 @@ lash_rust_binary(
     declared_features = [
         "e2e",
         "live-e2e",
+    ],
+    compile_data_patterns = [
+        "assets/index.html",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
     extra_compile_data = [
@@ -112,6 +121,9 @@ lash_rust_binary(
         "e2e",
         "live-e2e",
     ],
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
     extra_compile_data = [
         "//examples:shared_rust_sources",
@@ -134,6 +146,9 @@ lash_rust_binary(
     declared_features = [
         "e2e",
         "live-e2e",
+    ],
+    compile_data_patterns = [
+        "assets/index.html",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
     extra_compile_data = [
@@ -294,6 +309,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "3", "memory_kb": "2097152"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -323,6 +341,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "3", "memory_kb": "2097152"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -352,6 +373,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "3", "memory_kb": "2097152"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -381,6 +405,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "3", "memory_kb": "2097152"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -435,6 +462,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -464,6 +494,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -493,6 +526,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -520,6 +556,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -549,6 +588,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -578,6 +620,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2621440"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -605,6 +650,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -634,6 +682,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -663,6 +714,9 @@ lash_rust_feature_binary(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2097152"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -690,6 +744,9 @@ lash_rust_feature_library(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -715,6 +772,9 @@ lash_rust_feature_library(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
@@ -740,6 +800,9 @@ lash_rust_feature_library(
         "live-e2e",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3670016"},
+    compile_data_patterns = [
+        "assets/index.html",
+    ],
     extra_compile_data = [
         "//examples:shared_rust_sources",
     ],
