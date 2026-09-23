@@ -541,7 +541,7 @@ class RealTreeTests(unittest.TestCase):
         self.assertFalse(any(pair in laws for pairs in expected.values() for pair in pairs))
 
     def test_reopenable_inherits_shared_catalogue_only(self) -> None:
-        macros = MODULE.macro_blocks(MODULE.MACROS.read_text(encoding="utf-8"))
+        macros = MODULE.load_macros()
         plain = MODULE.suite_expected(macros, "runtime_persistence_tests")
         reopenable = MODULE.suite_expected(
             macros, "runtime_persistence_reopenable_tests"
@@ -554,13 +554,30 @@ class RealTreeTests(unittest.TestCase):
         self.assertTrue(reopenable - plain, "reopenable must keep its own rows")
 
     def test_process_registry_reopen_law_is_a_catalogue_row(self) -> None:
-        macros = MODULE.macro_blocks(MODULE.MACROS.read_text(encoding="utf-8"))
+        macros = MODULE.load_macros()
         reopenable = MODULE.suite_expected(
             macros, "process_registry_reopenable_tests"
         )
         self.assertIn(
             ("process_registry_reopen_conformance", "process-registry-reopen"),
             reopenable,
+        )
+
+    def test_a_catalogue_declared_beside_its_laws_is_owed(self) -> None:
+        """``drain_end_tests!`` lives in ``conformance/drain_end.rs``, not
+        ``macros.rs``; its rows must still be registered pairs, or every
+        receipt the suite writes is rejected as misclaimed (FIG-3419)."""
+        self.assertNotIn(
+            "macro_rules! drain_end_tests",
+            MODULE.MACROS.read_text(encoding="utf-8"),
+            "the precondition: this catalogue is outside macros.rs",
+        )
+        macros = MODULE.load_macros()
+        expected = MODULE.suite_expected(macros, "drain_end_tests")
+        self.assertEqual(len(expected), 7)
+        self.assertIn(
+            ("a_crash_after_the_drain_receipt_recovers_its_ledger_row", "drain-end-crash-window"),
+            expected,
         )
 
     def test_the_deferred_manifest_names_real_ignored_invocations(self) -> None:
@@ -582,7 +599,7 @@ class RealTreeTests(unittest.TestCase):
         dropping one suite's rows fails naming that suite's laws -- the
         entries share one file and claimant, so this pins the deferred
         claim resolving each entry to its own real invocation."""
-        macros = MODULE.macro_blocks(MODULE.MACROS.read_text(encoding="utf-8"))
+        macros = MODULE.load_macros()
         errors: list[str] = []
         index = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
