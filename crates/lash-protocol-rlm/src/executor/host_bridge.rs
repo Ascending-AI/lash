@@ -300,6 +300,8 @@ pub(super) struct LashlangExecutionTrace {
     resource_call_ids: std::sync::Arc<Mutex<BTreeMap<(String, u64), String>>>,
     pending_resource_starts:
         std::sync::Arc<Mutex<BTreeMap<(String, u64), lashlang::LashlangExecutionSite>>>,
+    active_nodes: std::sync::Arc<Mutex<HashSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,
+    waiting_nodes: lash_lashlang_runtime::TraceWaitBookkeeping,
 }
 
 impl LashlangExecutionTrace {
@@ -316,6 +318,8 @@ impl LashlangExecutionTrace {
             identity,
             resource_call_ids: std::sync::Arc::default(),
             pending_resource_starts: std::sync::Arc::default(),
+            active_nodes: std::sync::Arc::default(),
+            waiting_nodes: lash_lashlang_runtime::TraceWaitBookkeeping::default(),
         }
     }
 
@@ -385,6 +389,95 @@ impl LashlangExecutionTrace {
                 event,
             },
         ));
+    }
+
+    fn emit_waiting(
+        &self,
+        call_site: &lashlang::LashlangExecutionCallSite,
+        awaited: lash_lashlang_runtime::TraceNodeAwaited,
+    ) {
+        let site = &call_site.site;
+        self.waiting_nodes
+            .mark_waiting(&site.node_id, site.node_kind, call_site.occurrence);
+        self.emit(TraceLanguageExecution {
+            event_key: self.event_key(format!(
+                "node:{}:{}:waiting",
+                site.node_id, call_site.occurrence
+            )),
+            identity: self.identity.clone(),
+            payload: TraceLanguageExecutionPayload::NodeWaiting {
+                node_id: site.node_id.clone(),
+                node_kind: site.node_kind,
+                label: site.label.clone(),
+                occurrence: call_site.occurrence,
+                awaited,
+            },
+        });
+    }
+
+    fn emit_resumed(
+        &self,
+        call_site: &lashlang::LashlangExecutionCallSite,
+        resolution: lash_lashlang_runtime::TraceNodeWaitResolution,
+    ) {
+        let site = &call_site.site;
+        self.waiting_nodes
+            .finish(&site.node_id, site.node_kind, call_site.occurrence);
+        self.emit(TraceLanguageExecution {
+            event_key: self.event_key(format!(
+                "node:{}:{}:resumed",
+                site.node_id, call_site.occurrence
+            )),
+            identity: self.identity.clone(),
+            payload: TraceLanguageExecutionPayload::NodeResumed {
+                node_id: site.node_id.clone(),
+                node_kind: site.node_kind,
+                label: site.label.clone(),
+                occurrence: call_site.occurrence,
+                resolution,
+            },
+        });
+    }
+
+    fn emit_cancelled_wait(&self, site: &lashlang::LashlangExecutionSite, occurrence: u64) {
+        if self
+            .waiting_nodes
+            .finish(&site.node_id, site.node_kind, occurrence)
+        {
+            self.emit(TraceLanguageExecution {
+                event_key: self.event_key(format!("node:{}:{occurrence}:resumed", site.node_id)),
+                identity: self.identity.clone(),
+                payload: TraceLanguageExecutionPayload::NodeResumed {
+                    node_id: site.node_id.clone(),
+                    node_kind: site.node_kind,
+                    label: site.label.clone(),
+                    occurrence,
+                    resolution: lash_lashlang_runtime::TraceNodeWaitResolution::Cancelled,
+                },
+            });
+        }
+    }
+
+    fn emit_cancelled_site(&self, site: lashlang::LashlangExecutionSite, occurrence: u64) {
+        if !self.active_nodes.lock_recover().remove(&(
+            site.node_id.clone(),
+            site.node_kind,
+            occurrence,
+        )) {
+            return;
+        }
+        self.finish_resource_call(&site, occurrence);
+        self.emit_cancelled_wait(&site, occurrence);
+        self.emit(TraceLanguageExecution {
+            event_key: self.event_key(format!("node:{}:{occurrence}:cancelled", site.node_id)),
+            identity: self.identity.clone(),
+            payload: TraceLanguageExecutionPayload::NodeCancelled {
+                node_id: site.node_id,
+                node_kind: site.node_kind,
+                label: site.label,
+                occurrence,
+            },
+        });
     }
 
     fn record_resource_call(&self, call_site: &lashlang::LashlangExecutionCallSite, call_id: &str) {
@@ -572,6 +665,7 @@ impl HostBridge<'_> {
         let occurrence = batch.occurrence;
         let mut results = vec![None; batch.operations.len()];
         let mut positions = Vec::new();
+        let mut call_sites = Vec::new();
         let mut source_operations = Vec::new();
         let mut execution_indices = Vec::new();
         let mut invocations = Vec::new();
@@ -722,9 +816,28 @@ impl HostBridge<'_> {
             }
             replay_keys.push(invocation.id.clone());
             positions.push(source_index);
+            call_sites.push(call_site);
             source_operations.push(source_operation);
             execution_indices.push(execution_index);
             invocations.push(invocation);
+        }
+
+        if let Some(trace) = &self.lashlang_execution_trace {
+            let batch_id = lash_core::session::deterministic_tool_invocation_batch_id(
+                &invocations,
+                lash_core::session::ToolBatchOccurrence::Opener(occurrence),
+            );
+            if call_sites.len() > 1 {
+                for (position, call_site) in call_sites.iter().enumerate() {
+                    trace.emit_waiting(
+                        call_site,
+                        lash_lashlang_runtime::TraceNodeAwaited::ToolBatch {
+                            batch_id: batch_id.clone(),
+                            position,
+                        },
+                    );
+                }
+            }
         }
 
         let batch = self
@@ -753,6 +866,17 @@ impl HostBridge<'_> {
                 .record_executed_call(execution_index, source_operation, outcome, host_record)
                 .and(result);
             results[source_index] = Some(lashlang::ResourceOperationResult::from_result(result));
+        }
+        if !self.is_cancelled()
+            && call_sites.len() > 1
+            && let Some(trace) = &self.lashlang_execution_trace
+        {
+            for call_site in &call_sites {
+                trace.emit_resumed(
+                    call_site,
+                    lash_lashlang_runtime::TraceNodeWaitResolution::Resumed,
+                );
+            }
         }
 
         // The batch reports settlement in its own invocation positions; the VM
@@ -816,12 +940,35 @@ impl HostBridge<'_> {
     }
 
     async fn sleep(&self, sleep: Sleep) -> Result<FlowValue, ExecutionHostError> {
+        let call_site = sleep.call_site;
         let sleep = process_sleep(sleep.kind, &sleep.value)?;
+        if let Some(trace) = &self.lashlang_execution_trace
+            && let Some(call_site) = &call_site
+        {
+            trace.emit_waiting(
+                call_site,
+                lash_lashlang_runtime::TraceNodeAwaited::Sleep {
+                    deadline_ms: match sleep {
+                        lash_core::SleepSpec::Until { deadline_ms } => Some(deadline_ms),
+                        lash_core::SleepSpec::For { .. } => None,
+                    },
+                },
+            );
+        }
         let sequence = self.sleep_sequence.fetch_add(1, Ordering::Relaxed);
         self.ctx
             .sleep_process("foreground", sequence, sleep)
             .await
             .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+        if !self.is_cancelled()
+            && let Some(trace) = &self.lashlang_execution_trace
+            && let Some(call_site) = &call_site
+        {
+            trace.emit_resumed(
+                call_site,
+                lash_lashlang_runtime::TraceNodeWaitResolution::TimedOut,
+            );
+        }
         Ok(FlowValue::Null)
     }
 
@@ -890,7 +1037,98 @@ impl ExecutionHost for HostBridge<'_> {
         let Some(trace) = &self.lashlang_execution_trace else {
             return;
         };
+        let observation = match observation {
+            lashlang::LashlangExecutionObservation::NodeFailed {
+                site, occurrence, ..
+            } if self.is_cancelled()
+                && trace.active_nodes.lock_recover().contains(&(
+                    site.node_id.clone(),
+                    site.node_kind,
+                    occurrence,
+                )) =>
+            {
+                trace.emit_cancelled_site(site, occurrence);
+                return;
+            }
+            lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence }
+                if self.is_cancelled()
+                    && trace.waiting_nodes.is_waiting(
+                        &site.node_id,
+                        site.node_kind,
+                        occurrence,
+                    ) =>
+            {
+                trace.emit_cancelled_site(site, occurrence);
+                return;
+            }
+            observation => observation,
+        };
+        match &observation {
+            lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence } => {
+                trace.active_nodes.lock_recover().insert((
+                    site.node_id.clone(),
+                    site.node_kind,
+                    *occurrence,
+                ));
+            }
+            lashlang::LashlangExecutionObservation::ChildProcessWaiting {
+                site,
+                occurrence,
+                ..
+            } => {
+                trace
+                    .waiting_nodes
+                    .mark_waiting(&site.node_id, site.node_kind, *occurrence);
+            }
+            lashlang::LashlangExecutionObservation::NodeResumed { site, occurrence }
+            | lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence }
+            | lashlang::LashlangExecutionObservation::NodeFailed {
+                site, occurrence, ..
+            } => {
+                trace
+                    .waiting_nodes
+                    .finish(&site.node_id, site.node_kind, *occurrence);
+            }
+            _ => {}
+        }
+        if let lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence }
+        | lashlang::LashlangExecutionObservation::NodeFailed {
+            site, occurrence, ..
+        } = &observation
+        {
+            trace.active_nodes.lock_recover().remove(&(
+                site.node_id.clone(),
+                site.node_kind,
+                *occurrence,
+            ));
+        }
         let (suffix, payload) = match observation {
+            lashlang::LashlangExecutionObservation::ChildProcessWaiting {
+                site,
+                occurrence,
+                process_ids,
+            } => (
+                format!("node:{}:{occurrence}:waiting", site.node_id),
+                TraceLanguageExecutionPayload::NodeWaiting {
+                    node_id: site.node_id,
+                    node_kind: site.node_kind,
+                    label: site.label,
+                    occurrence,
+                    awaited: lash_lashlang_runtime::TraceNodeAwaited::ChildProcesses {
+                        process_ids,
+                    },
+                },
+            ),
+            lashlang::LashlangExecutionObservation::NodeResumed { site, occurrence } => (
+                format!("node:{}:{occurrence}:resumed", site.node_id),
+                TraceLanguageExecutionPayload::NodeResumed {
+                    node_id: site.node_id,
+                    node_kind: site.node_kind,
+                    label: site.label,
+                    occurrence,
+                    resolution: lash_lashlang_runtime::TraceNodeWaitResolution::Resumed,
+                },
+            ),
             lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence }
                 if site.node_kind == lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND =>
             {
@@ -990,6 +1228,9 @@ impl ExecutionHost for HostBridge<'_> {
 fn language_event_node_id(payload: &TraceLanguageExecutionPayload) -> Option<&str> {
     match payload {
         TraceLanguageExecutionPayload::NodeStarted { node_id, .. }
+        | TraceLanguageExecutionPayload::NodeWaiting { node_id, .. }
+        | TraceLanguageExecutionPayload::NodeResumed { node_id, .. }
+        | TraceLanguageExecutionPayload::NodeCancelled { node_id, .. }
         | TraceLanguageExecutionPayload::NodeCompleted { node_id, .. }
         | TraceLanguageExecutionPayload::NodeFailed { node_id, .. }
         | TraceLanguageExecutionPayload::BranchSelected { node_id, .. } => Some(node_id),

@@ -133,13 +133,13 @@ mod tests {
         LashlangExecutionCallSite {
             site: LashlangExecutionSite {
                 node_id: node_id.to_string(),
-                node_kind: "resource_operation".to_string(),
+                node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
                 label: "call".to_string(),
                 branch: None,
                 workflow_site: WorkflowExecutionSite::new(
                     "main",
                     [0u32],
-                    "resource_operation",
+                    lash_sansio::ExecutionNodeKind::ResourceOperation,
                     "call",
                 ),
             },

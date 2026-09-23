@@ -1325,7 +1325,7 @@ fn agent_contract_graph_facts(
                 .label_metadata
                 .as_ref()
                 .map(|label| label.title.as_str());
-            if node.kind == "resource_operation"
+            if node.kind == lash::tracing::ExecutionNodeKind::ResourceOperation
                 && matches!(
                     &node.observation,
                     lash::tracing::TraceLashlangNodeObservation::Completed { .. }
@@ -1334,7 +1334,7 @@ fn agent_contract_graph_facts(
             {
                 completed_labeled_resources.insert(title.to_string());
             }
-            if node.kind == "resource_operation"
+            if node.kind == lash::tracing::ExecutionNodeKind::ResourceOperation
                 && matches!(
                     &node.observation,
                     lash::tracing::TraceLashlangNodeObservation::Failed { .. }

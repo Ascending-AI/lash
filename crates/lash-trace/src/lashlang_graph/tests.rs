@@ -67,11 +67,12 @@ fn started_event(event_key: &str) -> TraceLanguageExecution {
                         site: lash_sansio::WorkflowExecutionSite::new(
                             "main",
                             [0],
-                            "branch",
+                            lash_sansio::ExecutionNodeKind::Branch,
                             "if ready",
                         ),
-                        kind: "branch".to_string(),
+                        kind: lash_sansio::ExecutionNodeKind::Branch,
                         label: "if ready".to_string(),
+                        branch_memberships: Vec::new(),
                         label_metadata: None,
                     },
                     TraceLanguageExecutionMapNode {
@@ -79,11 +80,15 @@ fn started_event(event_key: &str) -> TraceLanguageExecution {
                         site: lash_sansio::WorkflowExecutionSite::new(
                             "main",
                             [0, 1, 0],
-                            "call",
+                            lash_sansio::ExecutionNodeKind::Call,
                             "notify()",
                         ),
-                        kind: "call".to_string(),
+                        kind: lash_sansio::ExecutionNodeKind::Call,
                         label: "notify()".to_string(),
+                        branch_memberships: vec![crate::TraceBranchMembership {
+                            branch_node_id: "branch".to_string(),
+                            arm: TraceBranchSelection::Then,
+                        }],
                         label_metadata: None,
                     },
                     TraceLanguageExecutionMapNode {
@@ -91,11 +96,15 @@ fn started_event(event_key: &str) -> TraceLanguageExecution {
                         site: lash_sansio::WorkflowExecutionSite::new(
                             "main",
                             [0, 2, 0],
-                            "call",
+                            lash_sansio::ExecutionNodeKind::Call,
                             "skip()",
                         ),
-                        kind: "call".to_string(),
+                        kind: lash_sansio::ExecutionNodeKind::Call,
                         label: "skip()".to_string(),
+                        branch_memberships: vec![crate::TraceBranchMembership {
+                            branch_node_id: "branch".to_string(),
+                            arm: TraceBranchSelection::Else,
+                        }],
                         label_metadata: None,
                     },
                 ],
@@ -137,7 +146,7 @@ fn node_started_for(
         identity: identity(),
         payload: TraceLanguageExecutionPayload::NodeStarted {
             node_id: node_id.to_string(),
-            node_kind: node_kind.to_string(),
+            node_kind: node_kind.parse().expect("known node kind"),
             label: node_id.to_string(),
             occurrence,
             call_id: None,
@@ -160,7 +169,7 @@ fn node_completed_for(
         identity: identity(),
         payload: TraceLanguageExecutionPayload::NodeCompleted {
             node_id: node_id.to_string(),
-            node_kind: node_kind.to_string(),
+            node_kind: node_kind.parse().expect("known node kind"),
             label: node_id.to_string(),
             occurrence,
             call_id: None,
@@ -174,7 +183,7 @@ fn node_failed(event_key: &str, occurrence: u64, error: &str) -> TraceLanguageEx
         identity: identity(),
         payload: TraceLanguageExecutionPayload::NodeFailed {
             node_id: "branch".to_string(),
-            node_kind: "branch".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Branch,
             label: "if ready".to_string(),
             occurrence,
             call_id: None,
@@ -278,11 +287,12 @@ fn graph_store_keeps_distinct_site_kinds_for_one_structural_node() {
             site: lash_sansio::WorkflowExecutionSite::new(
                 "main",
                 [0],
-                "resource_operation",
+                lash_sansio::ExecutionNodeKind::ResourceOperation,
                 "condition",
             ),
-            kind: "resource_operation".to_string(),
+            kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
             label: "condition".to_string(),
+            branch_memberships: Vec::new(),
             label_metadata: None,
         });
     }
@@ -1132,6 +1142,444 @@ fn terminal_classification_is_exhaustive() {
         }
         .is_terminal()
     );
+}
+
+fn node_waiting(
+    node_id: &str,
+    node_kind: lash_sansio::ExecutionNodeKind,
+    occurrence: u64,
+    awaited: crate::TraceNodeAwaited,
+) -> TraceLanguageExecution {
+    TraceLanguageExecution {
+        event_key: format!("{node_id}:{occurrence}:waiting"),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::NodeWaiting {
+            node_id: node_id.to_string(),
+            node_kind,
+            label: node_id.to_string(),
+            occurrence,
+            awaited,
+        },
+    }
+}
+
+#[test]
+fn sleep_wait_uses_record_time_and_completion_dominates_permutations() {
+    use lash_sansio::ExecutionNodeKind as Kind;
+    let records = [
+        record_at(node_started_for("start", "sleep", "sleep", 1), 100),
+        record_at(
+            node_waiting(
+                "sleep",
+                Kind::Sleep,
+                1,
+                crate::TraceNodeAwaited::Sleep {
+                    deadline_ms: Some(2_000),
+                },
+            ),
+            200,
+        ),
+    ];
+    let waiting = TraceLashlangGraphStore::fold(None, &records).expect("waiting graph");
+    assert!(matches!(
+        waiting.nodes[0].observation,
+        TraceLashlangNodeObservation::Waiting {
+            occurrence: 1,
+            since,
+            awaited: crate::TraceNodeAwaited::Sleep { deadline_ms: Some(2_000) },
+            ..
+        } if since.timestamp_millis() == 200
+    ));
+    let resumed = TraceLanguageExecution {
+        event_key: "sleep:1:resumed".to_string(),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::NodeResumed {
+            node_id: "sleep".to_string(),
+            node_kind: Kind::Sleep,
+            label: "sleep".to_string(),
+            occurrence: 1,
+            resolution: crate::TraceNodeWaitResolution::TimedOut,
+        },
+    };
+    let mut finished = records.to_vec();
+    finished.push(record_at(resumed, 300));
+    finished.push(record_at(
+        node_completed_for("end", "sleep", "sleep", 1),
+        400,
+    ));
+    let expected = TraceLashlangGraphStore::fold(None, &finished).expect("completed graph");
+    assert!(matches!(
+        expected.nodes[0].observation,
+        TraceLashlangNodeObservation::Completed { occurrence: 1, .. }
+    ));
+    finished.reverse();
+    assert_eq!(
+        TraceLashlangGraphStore::fold(None, &finished).expect("permuted graph"),
+        expected
+    );
+}
+
+#[test]
+fn signal_and_effect_group_waits_keep_the_observed_awaited_identity() {
+    use lash_sansio::ExecutionNodeKind as Kind;
+    let signal = record_at(
+        node_waiting(
+            "signal",
+            Kind::Wait,
+            1,
+            crate::TraceNodeAwaited::Signal {
+                name: "ready".to_string(),
+                key: "process:p:signal:ready:1".to_string(),
+            },
+        ),
+        100,
+    );
+    let group = record_at(
+        node_waiting(
+            "tool",
+            Kind::ResourceOperation,
+            1,
+            crate::TraceNodeAwaited::EffectGroup {
+                group_key: "scope:group:batch:1".to_string(),
+                position: 2,
+                wake: lash_sansio::GroupWakePolicy::FirstSuccess,
+            },
+        ),
+        200,
+    );
+    let graph = TraceLashlangGraphStore::fold(None, &[signal, group]).expect("wait graph");
+    assert!(graph.nodes.iter().any(|node| matches!(
+        &node.observation,
+        TraceLashlangNodeObservation::Waiting {
+            awaited: crate::TraceNodeAwaited::Signal { name, key },
+            ..
+        } if name == "ready" && key == "process:p:signal:ready:1"
+    )));
+    assert!(graph.nodes.iter().any(|node| matches!(
+        &node.observation,
+        TraceLashlangNodeObservation::Waiting {
+            awaited: crate::TraceNodeAwaited::EffectGroup {
+                group_key,
+                position: 2,
+                wake: lash_sansio::GroupWakePolicy::FirstSuccess,
+            },
+            ..
+        } if group_key == "scope:group:batch:1"
+    )));
+}
+
+#[test]
+fn signal_wait_resolution_advances_only_its_own_occurrence() {
+    use lash_sansio::ExecutionNodeKind as Kind;
+    let start = record_at(node_started_for("signal-start", "signal", "wait", 1), 100);
+    let waiting = record_at(
+        node_waiting(
+            "signal",
+            Kind::Wait,
+            1,
+            crate::TraceNodeAwaited::Signal {
+                name: "ready".to_string(),
+                key: "signal-key".to_string(),
+            },
+        ),
+        200,
+    );
+    let resolved = record_at(
+        TraceLanguageExecution {
+            event_key: "signal-resolved".to_string(),
+            identity: identity(),
+            payload: TraceLanguageExecutionPayload::NodeResumed {
+                node_id: "signal".to_string(),
+                node_kind: Kind::Wait,
+                label: "signal".to_string(),
+                occurrence: 1,
+                resolution: crate::TraceNodeWaitResolution::Resumed,
+            },
+        },
+        300,
+    );
+    let graph = TraceLashlangGraphStore::fold(None, &[start, waiting, resolved])
+        .expect("resolved signal graph");
+    assert!(matches!(
+        graph.nodes[0].observation,
+        TraceLashlangNodeObservation::Running { occurrence: 1, .. }
+    ));
+    let completed = TraceLashlangGraphStore::fold(
+        Some(&graph),
+        &[record_at(
+            node_completed_for("signal-end", "signal", "wait", 1),
+            400,
+        )],
+    )
+    .expect("completed signal graph");
+    assert!(matches!(
+        completed.nodes[0].observation,
+        TraceLashlangNodeObservation::Completed { occurrence: 1, .. }
+    ));
+}
+
+#[test]
+fn cancellation_only_changes_the_observed_in_flight_occurrence() {
+    use lash_sansio::ExecutionNodeKind as Kind;
+    let cancelled = TraceLanguageExecution {
+        event_key: "active:1:cancelled".to_string(),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::NodeCancelled {
+            node_id: "active".to_string(),
+            node_kind: Kind::Wait,
+            label: "active".to_string(),
+            occurrence: 1,
+        },
+    };
+    let graph = TraceLashlangGraphStore::fold(
+        None,
+        &[
+            record_at(node_started_for("done-start", "done", "call", 1), 100),
+            record_at(node_completed_for("done-end", "done", "call", 1), 150),
+            record_at(node_started_for("active-start", "active", "wait", 1), 200),
+            record_at(cancelled, 300),
+        ],
+    )
+    .expect("cancelled graph");
+    assert!(matches!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "done")
+            .expect("done")
+            .observation,
+        TraceLashlangNodeObservation::Completed { .. }
+    ));
+    assert!(matches!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "active")
+            .expect("active")
+            .observation,
+        TraceLashlangNodeObservation::Cancelled { occurrence: 1, .. }
+    ));
+}
+
+#[test]
+fn branch_skip_is_qualified_by_the_observed_branch_iteration() {
+    let selected = |branch_occurrence, arm, edge_id: &str| TraceLanguageExecution {
+        event_key: format!("branch:{branch_occurrence}:selected"),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::BranchSelected {
+            node_id: "branch".to_string(),
+            occurrence: branch_occurrence,
+            edge_id: edge_id.to_string(),
+            selected: arm,
+        },
+    };
+    let mut records = vec![
+        record_at(started_event("map"), 0),
+        record_at(selected(1, TraceBranchSelection::Then, "then-edge"), 100),
+        record_at(node_completed_for("then-end", "then", "call", 1), 150),
+        record_at(selected(2, TraceBranchSelection::Else, "else-edge"), 200),
+        // The VM's own counter for the else node is still 1. The branch
+        // occurrence is a separate axis and must not conflict with it.
+        record_at(node_completed_for("else-end", "else", "call", 1), 250),
+    ];
+    let graph = TraceLashlangGraphStore::fold(None, &records).expect("two branch iterations");
+    assert!(matches!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "then")
+            .expect("then")
+            .observation,
+        TraceLashlangNodeObservation::Skipped {
+            branch_occurrence: 2,
+            ..
+        }
+    ));
+    assert!(matches!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "else")
+            .expect("else")
+            .observation,
+        TraceLashlangNodeObservation::Completed { occurrence: 1, .. }
+    ));
+    assert!(graph.conflicts.is_empty());
+    records.reverse();
+    assert_eq!(
+        TraceLashlangGraphStore::fold(None, &records).expect("permuted branch iterations"),
+        graph
+    );
+}
+
+#[test]
+fn missing_transitions_do_not_invent_observed_nodes() {
+    let resumed = TraceLanguageExecution {
+        event_key: "orphan-resume".to_string(),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::NodeResumed {
+            node_id: "orphan".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Sleep,
+            label: "orphan".to_string(),
+            occurrence: 1,
+            resolution: crate::TraceNodeWaitResolution::Resumed,
+        },
+    };
+    let cancelled = TraceLanguageExecution {
+        event_key: "orphan-cancel".to_string(),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::NodeCancelled {
+            node_id: "orphan".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Sleep,
+            label: "orphan".to_string(),
+            occurrence: 1,
+        },
+    };
+    let selected = TraceLanguageExecution {
+        event_key: "branch-selected".to_string(),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::BranchSelected {
+            node_id: "branch".to_string(),
+            occurrence: 1,
+            edge_id: "then-edge".to_string(),
+            selected: TraceBranchSelection::Then,
+        },
+    };
+    let graph = TraceLashlangGraphStore::fold(
+        None,
+        &[
+            record_at(resumed, 10),
+            record_at(cancelled, 20),
+            record_at(selected, 30),
+        ],
+    )
+    .expect("incomplete graph");
+    assert!(matches!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "orphan")
+            .expect("orphan")
+            .observation,
+        TraceLashlangNodeObservation::Unobserved
+    ));
+    assert!(!graph.nodes.iter().any(|node| matches!(
+        node.observation,
+        TraceLashlangNodeObservation::Skipped { .. }
+    )));
+    let graph = TraceLashlangGraphStore::fold(
+        None,
+        &[
+            record_at(started_event("map"), 0),
+            record_at(
+                TraceLanguageExecution {
+                    event_key: "finished".to_string(),
+                    identity: identity(),
+                    payload: TraceLanguageExecutionPayload::ExecutionFinished {
+                        status: LanguageExecutionStatus::Cancelled,
+                        error: None,
+                    },
+                },
+                40,
+            ),
+        ],
+    )
+    .expect("cancelled execution");
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .all(|node| matches!(node.observation, TraceLashlangNodeObservation::Unobserved))
+    );
+}
+
+#[test]
+fn truncation_partition_law_holds_for_late_cancel_and_branch_skip() {
+    let cancelled = TraceLanguageExecution {
+        event_key: "late-cancel".to_string(),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::NodeCancelled {
+            node_id: "active".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Wait,
+            label: "active".to_string(),
+            occurrence: 1,
+        },
+    };
+    let branch = TraceLanguageExecution {
+        event_key: "late-branch-selection".to_string(),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::BranchSelected {
+            node_id: "branch".to_string(),
+            occurrence: 1,
+            edge_id: "then-edge".to_string(),
+            selected: TraceBranchSelection::Then,
+        },
+    };
+    let p1 = vec![
+        record_at(started_event("map"), 0),
+        record_at(node_started_for("active-first", "active", "wait", 1), 10),
+        record_at(node_started_for("active-second", "active", "wait", 2), 30),
+        record_at(node_started_for("branch-first", "branch", "branch", 1), 11),
+        record_at(
+            TraceLanguageExecution {
+                event_key: "branch-second".to_string(),
+                identity: identity(),
+                payload: TraceLanguageExecutionPayload::BranchSelected {
+                    node_id: "branch".to_string(),
+                    occurrence: 2,
+                    edge_id: "else-edge".to_string(),
+                    selected: TraceBranchSelection::Else,
+                },
+            },
+            40,
+        ),
+    ];
+    let late_wait = TraceLanguageExecution {
+        event_key: "late-wait".to_string(),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::NodeWaiting {
+            node_id: "active".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Wait,
+            label: "active".to_string(),
+            occurrence: 1,
+            awaited: crate::TraceNodeAwaited::Signal {
+                name: "ready".to_string(),
+                key: "signal-key".to_string(),
+            },
+        },
+    };
+    let late_resume = TraceLanguageExecution {
+        event_key: "late-resume".to_string(),
+        identity: identity(),
+        payload: TraceLanguageExecutionPayload::NodeResumed {
+            node_id: "active".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Wait,
+            label: "active".to_string(),
+            occurrence: 1,
+            resolution: crate::TraceNodeWaitResolution::Cancelled,
+        },
+    };
+    let p2 = vec![
+        record_at(late_wait, 12),
+        record_at(late_resume, 19),
+        record_at(cancelled, 20),
+        record_at(branch, 21),
+    ];
+    let mut all = p1.clone();
+    all.extend(p2.clone());
+    let batched = TraceLashlangGraphStore::fold_with_history_limit(None, &all, 1).expect("batch");
+    let first =
+        TraceLashlangGraphStore::fold_with_history_limit(None, &p1, 1).expect("first partition");
+    let partitioned = TraceLashlangGraphStore::fold_with_history_limit(Some(&first), &p2, 1)
+        .expect("second partition");
+    assert_eq!(partitioned, batched);
+    assert!(batched.nodes.iter().any(|node| matches!(
+        node.observation,
+        TraceLashlangNodeObservation::Skipped {
+            branch_occurrence: 2,
+            ..
+        }
+    )));
 }
 
 #[test]

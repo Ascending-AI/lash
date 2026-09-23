@@ -2,6 +2,635 @@ use super::*;
 
 use lashlang::testing::ast_builders as b;
 
+#[test]
+fn effect_group_wait_identity_uses_the_durable_group_contract() {
+    let invocation = |replay_key: &str| {
+        lash_core::RuntimeEffectInvocation::new(
+            lash_core::EffectAddress::new(
+                lash_core::ExecutionScope::turn("session", "turn"),
+                replay_key,
+            )
+            .expect("valid test effect address"),
+            lash_core::RuntimeAttribution::for_session("session"),
+            "effect",
+        )
+    };
+    let group = lash_core::RuntimeEffectGroup::try_new(
+        invocation("group"),
+        "scope:group:batch:1",
+        vec![lash_core::RuntimeEffectEnvelope::new(
+            invocation("child"),
+            lash_core::RuntimeEffectCommand::Sleep {
+                spec: lash_core::SleepSpec::For { duration_ms: 1 },
+            },
+        )],
+        lash_core::GroupWakePolicy::FirstSuccess,
+        lash_core::LoserPolicy::RunToCompletion,
+    )
+    .expect("valid durable group");
+    let awaited = TraceNodeAwaited::EffectGroup {
+        group_key: group.group_key().to_string(),
+        position: 0,
+        wake: group.wake(),
+    };
+    assert_eq!(awaited.kind(), TraceNodeWaitKind::EffectGroup);
+    assert_eq!(
+        serde_json::to_value(awaited).expect("serialize group wait"),
+        serde_json::json!({
+            "type": "effect_group",
+            "group_key": group.group_key(),
+            "position": 0,
+            "wake": "first_success"
+        })
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn real_process_sleep_until_emits_deadline_and_completion() {
+    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let environment = LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        LashlangAbilities::default().with_sleep(),
+    );
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "process pause() -> null { finish await sleep_until(0) }",
+        program: process_module(
+            "pause",
+            Vec::new(),
+            lashlang::TypeExpr::Null,
+            b::sleep_until(b::num(0.0)),
+        ),
+        environment: &environment,
+    })
+    .expect("sleep process compiles");
+    store
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("sleep-fixture"),
+            &output.artifact,
+        )
+        .await
+        .expect("sleep process artifact publishes");
+    let input = LashlangProcessInput {
+        module_ref: output.module_ref.clone(),
+        process_ref: output
+            .artifact
+            .process_ref("pause")
+            .expect("pause export")
+            .clone(),
+        host_requirements_ref: output.host_requirements_ref.clone(),
+        process_name: "pause".to_string(),
+        args: serde_json::Map::new(),
+    };
+    let process_id = lash_core::ProcessId::from("sleep-process");
+    let registration = lash_core::ProcessRegistration::new(
+        process_id.clone(),
+        input.to_process_input().expect("valid process input"),
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+    )
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        input.process_identity(),
+    ));
+    let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
+    let effect_host = lash_core::facade_support::NativeEffectHost::default();
+    let scoped = lash_core::EffectHost::scoped_static(
+        &effect_host,
+        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
+            process_id.clone(),
+            incarnation,
+        )),
+    )
+    .expect("valid process scope")
+    .expect("native controller");
+    let parent = lash_core::RuntimeInvocation::effect(
+        lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::process(process_id.clone()),
+            "process-body",
+        )
+        .expect("valid process effect address"),
+        lash_core::RuntimeAttribution::none(),
+        "process-body",
+    );
+    let built = lash_core::testing::TestExecutionContextBuilder::new()
+        .borrowed_effect_controller(scoped.clone())
+        .runtime_parent_invocation(parent)
+        .build();
+    let plugins = Arc::clone(&built.dispatch.plugins);
+    let catalog = Arc::clone(&built.dispatch.tool_catalog);
+    let expected_catalog = Arc::clone(&catalog);
+    let registry: Arc<dyn lash_core::ProcessRegistry> =
+        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let context = lash_core::ProcessEngineRunContext::new(
+        registration,
+        incarnation,
+        lash_core::ProcessExecutionContext::default().with_execution_write_authority(
+            lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "sleep-run")
+                .bind_attempt(1),
+        ),
+        lash_core::testing::process_work_wiring_for_registry(registry),
+        lash_core::SessionId::from("sleep-session"),
+        plugins,
+        catalog,
+        None,
+        None,
+        Arc::new(lash_core::NoQueuedWork::new()),
+        lash_core::DeliveryPolicy::EarliestSafeBoundary,
+        Arc::new(lash_core::facade_support::SystemClock),
+        true,
+        lash_core::CancellationToken::new(),
+        None,
+        scoped,
+        None,
+        Box::new(move |catalog| {
+            assert!(Arc::ptr_eq(&catalog, &expected_catalog));
+            Ok(
+                lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
+                    built.into_runtime(),
+                    lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
+                        Box::pin(async { Ok(()) })
+                    }),
+                ),
+            )
+        }),
+    );
+    let graph_store = Arc::new(TraceLashlangGraphStore::default());
+    let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
+    let result = Box::pin(crate::process::run_lashlang_process(
+        LashlangProcessEngine::new(store, LashlangSurface::default())
+            .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
+        context,
+        serde_json::to_value(input).expect("process input serializes"),
+    ))
+    .await
+    .expect("process run succeeds");
+    assert!(result.is_terminal());
+    let graph = graph_store
+        .graphs()
+        .into_iter()
+        .next()
+        .expect("process graph");
+    assert!(graph.nodes.iter().any(|node| matches!(
+        node.observation,
+        TraceLashlangNodeObservation::Completed { .. }
+    )));
+    assert!(graph.history.iter().any(|event| matches!(
+        &event.event.payload,
+        TraceLanguageExecutionPayload::NodeWaiting {
+            awaited: TraceNodeAwaited::Sleep {
+                deadline_ms: Some(0)
+            },
+            ..
+        }
+    )));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
+    use lash_core::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
+
+    struct SignalSink {
+        graph: Arc<TraceLashlangGraphStore>,
+        waiting: tokio::sync::mpsc::UnboundedSender<()>,
+    }
+
+    impl lash_trace::TraceSink for SignalSink {
+        fn append(
+            &self,
+            record: &lash_trace::TraceRecord,
+        ) -> Result<(), lash_trace::TraceSinkError> {
+            lash_trace::TraceSink::append(&*self.graph, record)?;
+            if matches!(
+                &record.event,
+                lash_trace::TraceEvent::LanguageExecution {
+                    event: TraceLanguageExecution {
+                        payload: TraceLanguageExecutionPayload::NodeWaiting {
+                            awaited: TraceNodeAwaited::Signal { .. },
+                            ..
+                        },
+                        ..
+                    },
+                    ..
+                }
+            ) {
+                let _ = self.waiting.send(());
+            }
+            Ok(())
+        }
+    }
+
+    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "process listen() signals { ready: any } { await wait_signal(ready); finish null }",
+        program: b::module(
+            vec![b::process_with_signals(
+                "listen",
+                Vec::new(),
+                vec![b::signal("ready", lashlang::TypeExpr::Any)],
+                b::block(vec![
+                    b::assign("payload", b::wait_signal("ready")),
+                    b::finish(b::null()),
+                ]),
+            )],
+            Vec::new(),
+        ),
+        environment: &LashlangHostEnvironment::new(
+            lashlang::LashlangHostCatalog::new(),
+            LashlangAbilities::default(),
+        ),
+    })
+    .expect("signal process compiles");
+    store
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("signal-fixture"),
+            &output.artifact,
+        )
+        .await
+        .expect("signal process artifact publishes");
+    let input = LashlangProcessInput {
+        module_ref: output.module_ref.clone(),
+        process_ref: output
+            .artifact
+            .process_ref("listen")
+            .expect("listen export")
+            .clone(),
+        host_requirements_ref: output.host_requirements_ref.clone(),
+        process_name: "listen".to_string(),
+        args: serde_json::Map::new(),
+    };
+    let process_id = lash_core::ProcessId::from("signal-process");
+    let registration = || {
+        lash_core::ProcessRegistration::new(
+            process_id.clone(),
+            input.to_process_input().expect("valid process input"),
+            lash_core::RecoveryContract::Rerunnable,
+            lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        )
+        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+            input.process_identity(),
+        ))
+        .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
+            "signal-fixture-env",
+        )))
+    };
+    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    registry
+        .register_process(registration())
+        .await
+        .expect("signal process registers");
+    let owner = lash_core::LeaseOwnerIdentity::opaque("signal-worker", "signal-worker-run");
+    let lease = registry
+        .claim_process_lease(&process_id, &owner, 60_000)
+        .await
+        .expect("claim signal process")
+        .acquired()
+        .expect("signal process lease");
+    registry
+        .record_first_started_with_authority(
+            &process_id,
+            lash_core::ProcessStarted {
+                owner,
+                fencing_token: lease.fencing_token,
+                attempt: 1,
+                started_at_ms: 1,
+            },
+            &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
+        )
+        .await
+        .expect("record signal process start");
+    let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
+    let effect_host = lash_core::facade_support::NativeEffectHost::default();
+    let scoped = lash_core::EffectHost::scoped_static(
+        &effect_host,
+        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
+            process_id.clone(),
+            incarnation,
+        )),
+    )
+    .expect("valid process scope")
+    .expect("native controller");
+    let parent = lash_core::RuntimeInvocation::effect(
+        lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::process(process_id.clone()),
+            "process-body",
+        )
+        .expect("valid process effect address"),
+        lash_core::RuntimeAttribution::none(),
+        "process-body",
+    );
+    let built = lash_core::testing::TestExecutionContextBuilder::new()
+        .borrowed_effect_controller(scoped.clone())
+        .runtime_parent_invocation(parent)
+        .build();
+    let plugins = Arc::clone(&built.dispatch.plugins);
+    let catalog = Arc::clone(&built.dispatch.tool_catalog);
+    let expected_catalog = Arc::clone(&catalog);
+    let registry_port: Arc<dyn lash_core::ProcessRegistry> = registry;
+    let context = lash_core::ProcessEngineRunContext::new(
+        registration(),
+        incarnation,
+        lash_core::ProcessExecutionContext::default().with_execution_write_authority(
+            lash_core::ProcessExecutionWriteAuthority::lease(lease).bind_attempt(1),
+        ),
+        lash_core::testing::process_work_wiring_for_registry(registry_port),
+        lash_core::SessionId::from("signal-session"),
+        plugins,
+        catalog,
+        None,
+        None,
+        Arc::new(lash_core::NoQueuedWork::new()),
+        lash_core::DeliveryPolicy::EarliestSafeBoundary,
+        Arc::new(lash_core::facade_support::SystemClock),
+        true,
+        lash_core::CancellationToken::new(),
+        None,
+        scoped,
+        None,
+        Box::new(move |catalog| {
+            assert!(Arc::ptr_eq(&catalog, &expected_catalog));
+            Ok(
+                lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
+                    built.into_runtime(),
+                    lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
+                        Box::pin(async { Ok(()) })
+                    }),
+                ),
+            )
+        }),
+    );
+    let graph = Arc::new(TraceLashlangGraphStore::default());
+    let (waiting, mut observed_wait) = tokio::sync::mpsc::unbounded_channel();
+    let sink: Arc<dyn lash_trace::TraceSink> = Arc::new(SignalSink {
+        graph: Arc::clone(&graph),
+        waiting,
+    });
+    let run = Box::pin(crate::process::run_lashlang_process(
+        LashlangProcessEngine::new(store, LashlangSurface::default())
+            .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
+        context,
+        serde_json::to_value(input).expect("process input serializes"),
+    ));
+    let resolve = async {
+        if observed_wait.recv().await.is_none() {
+            return false;
+        }
+        let key = lash_core::AwaitEventResolver::await_event_key(
+            &effect_host,
+            &lash_core::ExecutionScope::process(process_id.clone()),
+            lash_core::AwaitEventWaitIdentity::process_signal(&process_id, "ready", 1),
+        )
+        .await
+        .expect("durable signal key");
+        assert!(matches!(
+            lash_core::AwaitEventResolver::resolve_await_event(
+                &effect_host,
+                &key,
+                lash_core::Resolution::Ok(serde_json::json!({ "received": true })),
+            )
+            .await
+            .expect("resolve signal"),
+            lash_core::ResolveOutcome::Accepted
+        ));
+        true
+    };
+    let (result, observed) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(run, resolve)
+    })
+    .await
+    .expect("signal process and resolver finish");
+    assert!(
+        observed,
+        "run ended before signal wait: {result:?}; graphs: {:?}",
+        graph.graphs()
+    );
+    assert!(result.expect("signal process runs").is_terminal());
+    let graph = graph.graphs().into_iter().next().expect("signal graph");
+    let expected_key = lash_core::facade_support::process_signal_wait_key(&process_id, "ready", 1);
+    assert!(graph.history.iter().any(|event| matches!(
+        &event.event.payload,
+        TraceLanguageExecutionPayload::NodeWaiting {
+            awaited: TraceNodeAwaited::Signal { name, key },
+            ..
+        } if name == "ready" && key == &expected_key
+    )));
+    assert!(graph.nodes.iter().any(|node| matches!(
+        node.observation,
+        TraceLashlangNodeObservation::Completed { .. }
+    )));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
+    let tool = lash_core::testing::fixture_echo_definition()
+        .with_tool_binding(ToolBinding::new(["tools"], "echo"));
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
+    let resources = lashlang_resources_from_tool_catalog(&catalog).expect("tool catalog imports");
+    let echo = |value: &str| {
+        b::unwrap(b::receiver_call(
+            b::resource(&["tools"]),
+            "echo",
+            vec![b::record(vec![("value", b::string(value))])],
+        ))
+    };
+    let store = Arc::new(InMemoryLashlangArtifactStore::new());
+    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "process batch() -> null { let values = await (tools.echo({value: 'a'})?, tools.echo({value: 'b'})?); finish null }",
+        program: b::module(
+            vec![b::process_returning(
+                "batch",
+                Vec::new(),
+                lashlang::TypeExpr::Null,
+                b::block(vec![
+                    b::assign("values", b::await_expr(b::tuple(vec![echo("a"), echo("b")]))),
+                    b::finish(b::null()),
+                ]),
+            )],
+            Vec::new(),
+        ),
+        environment: &LashlangHostEnvironment::new(resources, LashlangAbilities::default()),
+    })
+    .expect("batch process compiles");
+    store
+        .publish_module_artifact(
+            &lash_core::ArtifactOwner::host("batch-fixture"),
+            &output.artifact,
+        )
+        .await
+        .expect("batch process artifact publishes");
+    let input = LashlangProcessInput {
+        module_ref: output.module_ref.clone(),
+        process_ref: output
+            .artifact
+            .process_ref("batch")
+            .expect("batch export")
+            .clone(),
+        host_requirements_ref: output.host_requirements_ref.clone(),
+        process_name: "batch".to_string(),
+        args: serde_json::Map::new(),
+    };
+    let process_id = lash_core::ProcessId::from("batch-process");
+    let registration = lash_core::ProcessRegistration::new(
+        process_id.clone(),
+        input.to_process_input().expect("valid process input"),
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::ProcessProvenance::host(),
+        lash_core::ProcessLifecyclePolicy::new(
+            lash_core::ParentScope::Host,
+            lash_core::OnParentEnd::Abandon,
+        ),
+    )
+    .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+        input.process_identity(),
+    ));
+    let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
+    let effect_host = lash_core::facade_support::NativeEffectHost::default();
+    let scoped = lash_core::EffectHost::scoped_static(
+        &effect_host,
+        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
+            process_id.clone(),
+            incarnation,
+        )),
+    )
+    .expect("valid process scope")
+    .expect("native controller");
+    let parent = lash_core::RuntimeInvocation::effect(
+        lash_core::EffectAddress::new(
+            lash_core::ExecutionScope::process(process_id.clone()),
+            "process-body",
+        )
+        .expect("valid process effect address"),
+        lash_core::RuntimeAttribution::none(),
+        "process-body",
+    );
+    let built = lash_core::testing::TestExecutionContextBuilder::new()
+        .provider(Arc::new(lash_core::testing::FixtureTools::new()))
+        .tool_catalog(catalog)
+        .borrowed_effect_controller(scoped.clone())
+        .runtime_parent_invocation(parent)
+        .build();
+    let plugins = Arc::clone(&built.dispatch.plugins);
+    let catalog = Arc::clone(&built.dispatch.tool_catalog);
+    let expected_catalog = Arc::clone(&catalog);
+    let registry: Arc<dyn lash_core::ProcessRegistry> =
+        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let context = lash_core::ProcessEngineRunContext::new(
+        registration,
+        incarnation,
+        lash_core::ProcessExecutionContext::default().with_execution_write_authority(
+            lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "batch-run")
+                .bind_attempt(1),
+        ),
+        lash_core::testing::process_work_wiring_for_registry(registry),
+        lash_core::SessionId::from("batch-session"),
+        plugins,
+        catalog,
+        None,
+        None,
+        Arc::new(lash_core::NoQueuedWork::new()),
+        lash_core::DeliveryPolicy::EarliestSafeBoundary,
+        Arc::new(lash_core::facade_support::SystemClock),
+        true,
+        lash_core::CancellationToken::new(),
+        None,
+        scoped,
+        None,
+        Box::new(move |catalog| {
+            assert!(Arc::ptr_eq(&catalog, &expected_catalog));
+            Ok(
+                lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
+                    built.into_runtime(),
+                    lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
+                        Box::pin(async { Ok(()) })
+                    }),
+                ),
+            )
+        }),
+    );
+    let graph_store = Arc::new(TraceLashlangGraphStore::default());
+    let sink: Arc<dyn lash_trace::TraceSink> = graph_store.clone();
+    let result = Box::pin(crate::process::run_lashlang_process(
+        LashlangProcessEngine::new(store, LashlangSurface::default())
+            .with_execution_trace(Some(sink), lash_trace::TraceContext::default()),
+        context,
+        serde_json::to_value(input).expect("process input serializes"),
+    ))
+    .await
+    .expect("batch process runs");
+    assert!(result.is_terminal());
+    let graph = graph_store
+        .graphs()
+        .into_iter()
+        .next()
+        .expect("batch process graph");
+    assert!(
+        graph.conflicts.is_empty(),
+        "batch graph conflicts: {:?}",
+        graph.conflicts
+    );
+    let mut waits = graph
+        .history
+        .iter()
+        .filter_map(|event| match &event.event.payload {
+            TraceLanguageExecutionPayload::NodeWaiting {
+                node_id,
+                occurrence,
+                awaited: TraceNodeAwaited::ToolBatch { batch_id, position },
+                ..
+            } => Some((node_id, *occurrence, batch_id, *position)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    waits.sort_by_key(|(_, _, _, position)| *position);
+    assert_eq!(waits.len(), 2, "both tool leaves must await one batch");
+    assert_eq!(waits[0].3, 0);
+    assert_eq!(waits[1].3, 1);
+    assert_eq!(waits[0].2, waits[1].2);
+    let calls = waits
+        .iter()
+        .map(|(node_id, occurrence, _, position)| {
+            let call_id = graph
+                .history
+                .iter()
+                .find_map(|event| match &event.event.payload {
+                    TraceLanguageExecutionPayload::NodeStarted {
+                        node_id: started_node,
+                        occurrence: started_occurrence,
+                        call_id: Some(call_id),
+                        ..
+                    } if started_node == *node_id && started_occurrence == occurrence => {
+                        Some(call_id.clone())
+                    }
+                    _ => None,
+                })
+                .expect("resource leaf call id");
+            lash_core::facade_support::ToolInvocation::new(
+                call_id,
+                lash_core::ToolId::from("tool:fixture_echo"),
+                serde_json::json!({ "value": if *position == 0 { "a" } else { "b" } }),
+            )
+        })
+        .collect::<Vec<_>>();
+    let expected = lash_core::session::deterministic_tool_invocation_batch_id(
+        &calls,
+        lash_core::session::ToolBatchOccurrence::Opener(1),
+    );
+    assert_eq!(
+        waits[0].2.as_str(),
+        expected,
+        "reconstructed tool calls: {calls:?}; waits: {waits:?}"
+    );
+}
+
+#[path = "lib_tests/aggregate_child.rs"]
+mod aggregate_child;
+
 /// `process <name>(<params>) -> <return_ty> { finish <body> }` as a one-process
 /// module. ADR 0096 retired the Lashlang front-end, so the fixtures that used
 /// to be written as source state their AST instead; the source each one stood
@@ -1738,13 +2367,13 @@ fn test_start_site(node_id: &str, occurrence: u64) -> lashlang::LashlangExecutio
     lashlang::LashlangExecutionCallSite {
         site: lashlang::LashlangExecutionSite {
             node_id: node_id.to_string(),
-            node_kind: "child_process".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::Call,
             label: "start scan".to_string(),
             branch: None,
             workflow_site: lashlang::WorkflowExecutionSite::new(
                 "process:scan",
                 [],
-                "child_process",
+                lash_sansio::ExecutionNodeKind::Call,
                 "start scan",
             ),
         },

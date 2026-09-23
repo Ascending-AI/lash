@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-graph/v14",
+  "$id": "https://lash.dev/schemas/workflow-graph/v15",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -81,6 +81,21 @@
         "body"
       ],
       "type": "object"
+    },
+    "ExecutionNodeKind": {
+      "description": "Closed vocabulary of executable workflow sites.\n\nThis describes the site, not its current observation. A workflow node may expose more than one site kind. Declaration order is the canonical order: a node's execution sites sort by it, so reordering the variants changes the serialized workflow graph and needs a graph schema bump.",
+      "enum": [
+        "resource_operation",
+        "sleep",
+        "wait",
+        "terminal",
+        "process_event",
+        "branch",
+        "loop",
+        "call",
+        "step"
+      ],
+      "type": "string"
     },
     "Expr": {
       "oneOf": [
@@ -1774,7 +1789,7 @@
       "description": "Stable source-level location of one runtime site under a workflow node.",
       "properties": {
         "kind": {
-          "type": "string"
+          "$ref": "#/definitions/ExecutionNodeKind"
         },
         "label": {
           "type": "string"
@@ -2514,7 +2529,7 @@
     },
     "schema_version": {
       "enum": [
-        14
+        15
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -2532,6 +2547,6 @@
   ],
   "title": "WorkflowGraph",
   "type": "object",
-  "x-lash-schema-version": 14,
+  "x-lash-schema-version": 15,
   "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
 }

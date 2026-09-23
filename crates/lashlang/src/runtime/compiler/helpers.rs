@@ -2,10 +2,13 @@ use super::*;
 
 use std::borrow::Cow;
 
-pub(crate) const BRANCH_EXECUTION_SITE_KIND: &str = "branch";
-pub(crate) const LOOP_EXECUTION_SITE_KIND: &str = "loop";
-pub const RESOURCE_OPERATION_EXECUTION_SITE_KIND: &str = "resource_operation";
-pub(crate) const STEP_EXECUTION_SITE_KIND: &str = "step";
+use lash_sansio::ExecutionNodeKind;
+
+pub(crate) const BRANCH_EXECUTION_SITE_KIND: ExecutionNodeKind = ExecutionNodeKind::Branch;
+pub(crate) const LOOP_EXECUTION_SITE_KIND: ExecutionNodeKind = ExecutionNodeKind::Loop;
+pub const RESOURCE_OPERATION_EXECUTION_SITE_KIND: ExecutionNodeKind =
+    ExecutionNodeKind::ResourceOperation;
+pub(crate) const STEP_EXECUTION_SITE_KIND: ExecutionNodeKind = ExecutionNodeKind::Step;
 
 pub(super) fn expr_supports_forced_effect_site(expr: &Expr) -> bool {
     matches!(expr, Expr::ReceiverCall { .. } | Expr::Await(_))
@@ -124,24 +127,36 @@ pub(crate) fn expression_source_spans(program: &Program) -> FxHashMap<AstPath, S
         .collect()
 }
 
-pub fn execution_site_descriptor(expr: &Expr) -> Option<(&'static str, Cow<'_, str>)> {
+pub fn execution_site_descriptor(expr: &Expr) -> Option<(ExecutionNodeKind, Cow<'_, str>)> {
     Some(match expr {
         Expr::ReceiverCall { operation, .. } => (
             RESOURCE_OPERATION_EXECUTION_SITE_KIND,
             Cow::Borrowed(operation.as_str()),
         ),
-        Expr::SleepFor(_) => ("sleep", Cow::Borrowed("sleep for")),
-        Expr::SleepUntil(_) => ("sleep", Cow::Borrowed("sleep until")),
-        Expr::WaitSignal { .. } => ("wait", Cow::Borrowed("wait_signal")),
-        Expr::Finish(_) => ("terminal", Cow::Borrowed("result")),
-        Expr::Fail(_) => ("terminal", Cow::Borrowed("failure")),
-        Expr::Yield(_) => ("process_event", Cow::Borrowed("yield")),
+        Expr::SleepFor(_) => (ExecutionNodeKind::Sleep, Cow::Borrowed("sleep for")),
+        Expr::SleepUntil(_) => (ExecutionNodeKind::Sleep, Cow::Borrowed("sleep until")),
+        Expr::WaitSignal { .. } => (ExecutionNodeKind::Wait, Cow::Borrowed("wait_signal")),
+        Expr::Await(handle) if await_wraps_direct_operation(handle) => {
+            return None;
+        }
+        Expr::Await(_) => (ExecutionNodeKind::Wait, Cow::Borrowed("await")),
+        Expr::Finish(_) => (ExecutionNodeKind::Terminal, Cow::Borrowed("result")),
+        Expr::Fail(_) => (ExecutionNodeKind::Terminal, Cow::Borrowed("failure")),
+        Expr::Yield(_) => (ExecutionNodeKind::ProcessEvent, Cow::Borrowed("yield")),
         Expr::If { .. } => (BRANCH_EXECUTION_SITE_KIND, Cow::Borrowed("if")),
         Expr::For { .. } => (LOOP_EXECUTION_SITE_KIND, Cow::Borrowed("for")),
         Expr::While { .. } => (LOOP_EXECUTION_SITE_KIND, Cow::Borrowed("while")),
-        Expr::Call { .. } => ("call", Cow::Borrowed("function call")),
+        Expr::Call { .. } => (ExecutionNodeKind::Call, Cow::Borrowed("function call")),
         _ => return None,
     })
+}
+
+fn await_wraps_direct_operation(handle: &Expr) -> bool {
+    match handle {
+        Expr::ReceiverCall { .. } => true,
+        Expr::ResultUnwrap(inner) => matches!(inner.as_ref(), Expr::ReceiverCall { .. }),
+        _ => false,
+    }
 }
 
 pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {

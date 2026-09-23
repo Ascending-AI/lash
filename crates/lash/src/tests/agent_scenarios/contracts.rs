@@ -40,8 +40,11 @@ struct NodeFact {
 pub(super) enum NodeStatusFact {
     Unobserved,
     Running,
+    Waiting,
     Completed,
     Failed,
+    Cancelled,
+    Skipped,
 }
 
 #[allow(dead_code)]
@@ -89,16 +92,25 @@ impl GraphContract {
                             crate::tracing::TraceLashlangNodeObservation::Running { .. } => {
                                 (NodeStatusFact::Running, false)
                             }
+                            crate::tracing::TraceLashlangNodeObservation::Waiting { .. } => {
+                                (NodeStatusFact::Waiting, false)
+                            }
                             crate::tracing::TraceLashlangNodeObservation::Completed { .. } => {
                                 (NodeStatusFact::Completed, false)
                             }
                             crate::tracing::TraceLashlangNodeObservation::Failed { .. } => {
                                 (NodeStatusFact::Failed, true)
                             }
+                            crate::tracing::TraceLashlangNodeObservation::Cancelled { .. } => {
+                                (NodeStatusFact::Cancelled, false)
+                            }
+                            crate::tracing::TraceLashlangNodeObservation::Skipped { .. } => {
+                                (NodeStatusFact::Skipped, false)
+                            }
                         };
                         NodeFact {
                             graph_key: graph.graph_key.clone(),
-                            kind: node.kind.clone(),
+                            kind: node.kind.to_string(),
                             label: node.label.clone(),
                             label_title: node
                                 .label_metadata
@@ -118,7 +130,7 @@ impl GraphContract {
                 links.push(ChildLinkFact {
                     parent_graph_key: child.parent_graph_key.clone(),
                     parent_entry_name: graph.entry_name.clone(),
-                    parent_node_kind: parent.map(|node| node.kind.clone()),
+                    parent_node_kind: parent.map(|node| node.kind.to_string()),
                     parent_node_label_title: parent
                         .and_then(|node| node.label_metadata.as_ref())
                         .map(|label| label.title.clone()),

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
+use lash_sansio::ExecutionNodeKind;
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -406,10 +407,10 @@ fn materialize_graph(
     if let Some(map) = &execution_map {
         for node in &map.nodes {
             nodes.insert(
-                (node.id.clone(), node.site.kind.clone()),
+                (node.id.clone(), node.kind),
                 TraceLashlangGraphNode::unobserved(
                     node.id.clone(),
-                    node.kind.clone(),
+                    node.kind,
                     node.label.clone(),
                     node.label_metadata.clone(),
                 ),
@@ -417,11 +418,11 @@ fn materialize_graph(
         }
         for retention in &mut node_retention {
             if let Some(static_node) = map.nodes.iter().find(|node| node.id == retention.node_id) {
-                retention.node.kind = static_node.kind.clone();
+                retention.node.kind = static_node.kind;
                 retention.node.label = static_node.label.clone();
                 retention.node.label_metadata = static_node.label_metadata.clone();
                 if let Some(archived) = &mut retention.archived_node {
-                    archived.kind = static_node.kind.clone();
+                    archived.kind = static_node.kind;
                     archived.label = static_node.label.clone();
                     archived.label_metadata = static_node.label_metadata.clone();
                 }
@@ -441,9 +442,10 @@ fn materialize_graph(
         }
     }
     let mut occurrences = BTreeMap::<OccurrenceKey, OccurrenceFold>::new();
+    let mut skipped = BTreeMap::<(String, ExecutionNodeKind, String, u64), DateTime<Utc>>::new();
     let mut children = BTreeMap::new();
-    for retention in &node_retention {
-        let key = (retention.node.id.clone(), retention.node.kind.clone());
+    for retention in &mut node_retention {
+        let key = (retention.node.id.clone(), retention.node.kind);
         if let Some(node) = nodes.get_mut(&key) {
             node.branch_selection = retention.node.branch_selection;
             node.observation = retention.node.observation.clone();
@@ -459,6 +461,33 @@ fn materialize_graph(
         for child in &retention.children {
             children.insert(child_link_key(child), child.clone());
         }
+        if let Some(map) = &execution_map {
+            for retained in &retention.watermark_history {
+                if let TraceLanguageExecutionPayload::BranchSelected {
+                    node_id,
+                    occurrence,
+                    edge_id,
+                    selected,
+                } = &retained.event.payload
+                {
+                    if !retention.selected_edge_ids.contains(edge_id) {
+                        retention.selected_edge_ids.push(edge_id.clone());
+                        retention.selected_edge_ids.sort();
+                    }
+                    if let Some(edge) = edges.get_mut(edge_id) {
+                        edge.selection = TraceLashlangEdgeSelection::Selected;
+                    }
+                    register_branch_skips(
+                        map,
+                        &mut skipped,
+                        node_id,
+                        *occurrence,
+                        *selected,
+                        retained.timestamp,
+                    );
+                }
+            }
+        }
     }
     for item in &history {
         match &item.event.payload {
@@ -472,20 +501,66 @@ fn materialize_graph(
                 ..
             } => {
                 nodes
-                    .entry((node_id.clone(), node_kind.clone()))
+                    .entry((node_id.clone(), *node_kind))
                     .or_insert_with(|| {
-                        TraceLashlangGraphNode::unobserved(node_id, node_kind, label, None)
+                        TraceLashlangGraphNode::unobserved(node_id, *node_kind, label, None)
                     });
                 occurrences
                     .entry((
                         node_id.clone(),
-                        node_kind.clone(),
+                        *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
                         item.event.identity.incarnation(),
                     ))
                     .or_default()
                     .start = Some(item.timestamp);
+            }
+            TraceLanguageExecutionPayload::NodeWaiting {
+                node_id,
+                node_kind,
+                label,
+                occurrence,
+                awaited,
+            } => {
+                nodes
+                    .entry((node_id.clone(), *node_kind))
+                    .or_insert_with(|| {
+                        TraceLashlangGraphNode::unobserved(node_id, *node_kind, label, None)
+                    });
+                occurrences
+                    .entry((
+                        node_id.clone(),
+                        *node_kind,
+                        *occurrence,
+                        item.event.identity.attempt(),
+                        item.event.identity.incarnation(),
+                    ))
+                    .or_default()
+                    .waiting = Some((item.timestamp, awaited.clone()));
+            }
+            TraceLanguageExecutionPayload::NodeResumed {
+                node_id,
+                node_kind,
+                label,
+                occurrence,
+                ..
+            } => {
+                nodes
+                    .entry((node_id.clone(), *node_kind))
+                    .or_insert_with(|| {
+                        TraceLashlangGraphNode::unobserved(node_id, *node_kind, label, None)
+                    });
+                occurrences
+                    .entry((
+                        node_id.clone(),
+                        *node_kind,
+                        *occurrence,
+                        item.event.identity.attempt(),
+                        item.event.identity.incarnation(),
+                    ))
+                    .or_default()
+                    .resumed = Some(item.timestamp);
             }
             TraceLanguageExecutionPayload::NodeCompleted {
                 node_id,
@@ -495,14 +570,14 @@ fn materialize_graph(
                 ..
             } => {
                 nodes
-                    .entry((node_id.clone(), node_kind.clone()))
+                    .entry((node_id.clone(), *node_kind))
                     .or_insert_with(|| {
-                        TraceLashlangGraphNode::unobserved(node_id, node_kind, label, None)
+                        TraceLashlangGraphNode::unobserved(node_id, *node_kind, label, None)
                     });
                 occurrences
                     .entry((
                         node_id.clone(),
-                        node_kind.clone(),
+                        *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
                         item.event.identity.incarnation(),
@@ -519,14 +594,14 @@ fn materialize_graph(
                 ..
             } => {
                 nodes
-                    .entry((node_id.clone(), node_kind.clone()))
+                    .entry((node_id.clone(), *node_kind))
                     .or_insert_with(|| {
-                        TraceLashlangGraphNode::unobserved(node_id, node_kind, label, None)
+                        TraceLashlangGraphNode::unobserved(node_id, *node_kind, label, None)
                     });
                 occurrences
                     .entry((
                         node_id.clone(),
-                        node_kind.clone(),
+                        *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
                         item.event.identity.incarnation(),
@@ -535,6 +610,28 @@ fn materialize_graph(
                     .explicit_terminal =
                     Some(OccurrenceTerminal::Failed(item.timestamp, failure.clone()));
             }
+            TraceLanguageExecutionPayload::NodeCancelled {
+                node_id,
+                node_kind,
+                label,
+                occurrence,
+            } => {
+                nodes
+                    .entry((node_id.clone(), *node_kind))
+                    .or_insert_with(|| {
+                        TraceLashlangGraphNode::unobserved(node_id, *node_kind, label, None)
+                    });
+                occurrences
+                    .entry((
+                        node_id.clone(),
+                        *node_kind,
+                        *occurrence,
+                        item.event.identity.attempt(),
+                        item.event.identity.incarnation(),
+                    ))
+                    .or_default()
+                    .explicit_terminal = Some(OccurrenceTerminal::Cancelled(item.timestamp));
+            }
             TraceLanguageExecutionPayload::BranchSelected {
                 node_id,
                 occurrence,
@@ -542,15 +639,20 @@ fn materialize_graph(
                 selected,
             } => {
                 let node = nodes
-                    .entry((node_id.clone(), "branch".to_string()))
+                    .entry((node_id.clone(), ExecutionNodeKind::Branch))
                     .or_insert_with(|| {
-                        TraceLashlangGraphNode::unobserved(node_id, "branch", node_id, None)
+                        TraceLashlangGraphNode::unobserved(
+                            node_id,
+                            ExecutionNodeKind::Branch,
+                            node_id,
+                            None,
+                        )
                     });
                 node.branch_selection = Some(*selected);
                 occurrences
                     .entry((
                         node_id.clone(),
-                        "branch".to_string(),
+                        ExecutionNodeKind::Branch,
                         *occurrence,
                         item.event.identity.attempt(),
                         item.event.identity.incarnation(),
@@ -560,6 +662,16 @@ fn materialize_graph(
                 if let Some(edge) = edges.get_mut(edge_id) {
                     edge.selection = TraceLashlangEdgeSelection::Selected;
                 }
+                if let Some(map) = &execution_map {
+                    register_branch_skips(
+                        map,
+                        &mut skipped,
+                        node_id,
+                        *occurrence,
+                        *selected,
+                        item.timestamp,
+                    );
+                }
             }
             TraceLanguageExecutionPayload::ChildStarted {
                 parent_node_id,
@@ -567,11 +679,11 @@ fn materialize_graph(
                 ..
             } => {
                 nodes
-                    .entry((parent_node_id.clone(), "call".to_string()))
+                    .entry((parent_node_id.clone(), ExecutionNodeKind::Call))
                     .or_insert_with(|| {
                         TraceLashlangGraphNode::unobserved(
                             parent_node_id,
-                            "call",
+                            ExecutionNodeKind::Call,
                             parent_node_id,
                             None,
                         )
@@ -591,7 +703,7 @@ fn materialize_graph(
             }
         }
     }
-    apply_occurrences(&mut nodes, &occurrences);
+    apply_occurrences(&mut nodes, &occurrences, &skipped);
     TraceLashlangGraph {
         schema_version: TRACE_SCHEMA_VERSION,
         graph_key: identity.graph_key(),
@@ -619,23 +731,52 @@ fn materialize_graph(
     }
 }
 
+fn register_branch_skips(
+    map: &LanguageExecutionMap,
+    skipped: &mut BTreeMap<(String, ExecutionNodeKind, String, u64), DateTime<Utc>>,
+    branch_node_id: &str,
+    branch_occurrence: u64,
+    selected: crate::TraceBranchSelection,
+    timestamp: DateTime<Utc>,
+) {
+    for node in &map.nodes {
+        if node.branch_memberships.iter().any(|membership| {
+            membership.branch_node_id == branch_node_id && membership.arm != selected
+        }) {
+            skipped.insert(
+                (
+                    node.id.clone(),
+                    node.kind,
+                    branch_node_id.to_owned(),
+                    branch_occurrence,
+                ),
+                timestamp,
+            );
+        }
+    }
+}
+
 #[derive(Default)]
 struct OccurrenceFold {
     start: Option<DateTime<Utc>>,
+    waiting: Option<(DateTime<Utc>, crate::TraceNodeAwaited)>,
+    resumed: Option<DateTime<Utc>>,
     explicit_terminal: Option<OccurrenceTerminal>,
     provisional_terminal: Option<OccurrenceTerminal>,
 }
 
-type OccurrenceKey = (String, String, u64, Option<u32>, Option<u64>);
+type OccurrenceKey = (String, ExecutionNodeKind, u64, Option<u32>, Option<u64>);
 
 enum OccurrenceTerminal {
     Completed(DateTime<Utc>),
     Failed(DateTime<Utc>, TraceLanguageExecutionFailure),
+    Cancelled(DateTime<Utc>),
 }
 
 fn apply_occurrences(
-    nodes: &mut BTreeMap<(String, String), TraceLashlangGraphNode>,
+    nodes: &mut BTreeMap<(String, ExecutionNodeKind), TraceLashlangGraphNode>,
     occurrences: &BTreeMap<OccurrenceKey, OccurrenceFold>,
+    skipped: &BTreeMap<(String, ExecutionNodeKind, String, u64), DateTime<Utc>>,
 ) {
     for ((node_id, node_kind), node) in nodes {
         let matching = occurrences
@@ -653,10 +794,13 @@ fn apply_occurrences(
                 folded_terminal(folded).map(|terminal| {
                     let (status, end) = match terminal {
                         OccurrenceTerminal::Completed(end) => {
-                            (LanguageExecutionStatus::Completed, end.to_owned())
+                            (TraceLashlangNodeTerminalStatus::Completed, end.to_owned())
                         }
                         OccurrenceTerminal::Failed(end, _) => {
-                            (LanguageExecutionStatus::Failed, end.to_owned())
+                            (TraceLashlangNodeTerminalStatus::Failed, end.to_owned())
+                        }
+                        OccurrenceTerminal::Cancelled(end) => {
+                            (TraceLashlangNodeTerminalStatus::Cancelled, end.to_owned())
                         }
                     };
                     TraceLashlangNodeTerminalSummary {
@@ -682,45 +826,125 @@ fn apply_occurrences(
         .into_iter()
         .flatten()
         .max_by_key(|terminal| terminal.occurrence);
-        let Some(((_, _, occurrence, _, _), folded)) = matching.last() else {
-            continue;
-        };
-        node.observation = match folded_terminal(folded) {
-            Some(OccurrenceTerminal::Completed(end)) => TraceLashlangNodeObservation::Completed {
-                occurrence: *occurrence,
-                start: folded.start,
-                end: end.to_owned(),
-                duration_ms: folded
-                    .start
-                    .map(|start| end.signed_duration_since(start).num_milliseconds().max(0)),
-            },
-            Some(OccurrenceTerminal::Failed(end, failure)) => {
-                TraceLashlangNodeObservation::Failed {
-                    occurrence: *occurrence,
-                    start: folded.start,
-                    end: end.to_owned(),
-                    duration_ms: folded
-                        .start
-                        .map(|start| end.signed_duration_since(start).num_milliseconds().max(0)),
-                    failure: failure.clone(),
+        if let Some(((_, _, occurrence, _, _), folded)) = matching.last() {
+            node.observation = match folded_terminal(folded) {
+                Some(OccurrenceTerminal::Completed(end)) => {
+                    TraceLashlangNodeObservation::Completed {
+                        occurrence: *occurrence,
+                        start: folded.start,
+                        end: end.to_owned(),
+                        duration_ms: folded.start.map(|start| {
+                            end.signed_duration_since(start).num_milliseconds().max(0)
+                        }),
+                    }
                 }
+                Some(OccurrenceTerminal::Failed(end, failure)) => {
+                    TraceLashlangNodeObservation::Failed {
+                        occurrence: *occurrence,
+                        start: folded.start,
+                        end: end.to_owned(),
+                        duration_ms: folded.start.map(|start| {
+                            end.signed_duration_since(start).num_milliseconds().max(0)
+                        }),
+                        failure: failure.clone(),
+                    }
+                }
+                Some(OccurrenceTerminal::Cancelled(end)) => {
+                    TraceLashlangNodeObservation::Cancelled {
+                        occurrence: *occurrence,
+                        start: folded.start,
+                        end: *end,
+                    }
+                }
+                None => match &folded.waiting {
+                    Some((since, awaited))
+                        if folded.resumed.is_none_or(|resumed| resumed < *since) =>
+                    {
+                        TraceLashlangNodeObservation::Waiting {
+                            occurrence: *occurrence,
+                            start: folded.start,
+                            since: *since,
+                            awaited: awaited.clone(),
+                        }
+                    }
+                    _ => folded
+                        .start
+                        .map(|start| TraceLashlangNodeObservation::Running {
+                            occurrence: *occurrence,
+                            start,
+                        })
+                        .unwrap_or_default(),
+                },
+            };
+        }
+        let latest_skip = skipped
+            .iter()
+            .filter(|((id, kind, ..), _)| id == node_id && kind == node_kind)
+            .max_by_key(|(_, end)| *end);
+        let skipped_count = skipped
+            .keys()
+            .filter(|(id, kind, ..)| id == node_id && kind == node_kind)
+            .count() as u64;
+        node.summary.retained_occurrences += skipped_count;
+        node.summary.terminal_count += skipped_count;
+        if let Some(((.., branch_node_id, branch_occurrence), end)) = latest_skip {
+            let terminal = TraceLashlangNodeTerminalSummary {
+                occurrence: *branch_occurrence,
+                status: TraceLashlangNodeTerminalStatus::Skipped,
+                end: *end,
+            };
+            if node
+                .summary
+                .first_terminal
+                .as_ref()
+                .is_none_or(|first| *end < first.end)
+            {
+                node.summary.first_terminal = Some(terminal.clone());
             }
-            None => folded
-                .start
-                .map(|start| TraceLashlangNodeObservation::Running {
-                    occurrence: *occurrence,
-                    start,
-                })
-                .unwrap_or_default(),
-        };
+            if node
+                .summary
+                .last_terminal
+                .as_ref()
+                .is_none_or(|last| *end > last.end)
+            {
+                node.summary.last_terminal = Some(terminal);
+            }
+            if observation_timestamp(&node.observation).is_none_or(|current| *end > current) {
+                node.observation = TraceLashlangNodeObservation::Skipped {
+                    end: *end,
+                    branch_node_id: branch_node_id.clone(),
+                    branch_occurrence: *branch_occurrence,
+                };
+            }
+        }
+    }
+}
+
+fn observation_timestamp(observation: &TraceLashlangNodeObservation) -> Option<DateTime<Utc>> {
+    match observation {
+        TraceLashlangNodeObservation::Unobserved => None,
+        TraceLashlangNodeObservation::Running { start, .. } => Some(*start),
+        TraceLashlangNodeObservation::Waiting { since, .. } => Some(*since),
+        TraceLashlangNodeObservation::Completed { end, .. }
+        | TraceLashlangNodeObservation::Failed { end, .. }
+        | TraceLashlangNodeObservation::Cancelled { end, .. }
+        | TraceLashlangNodeObservation::Skipped { end, .. } => Some(*end),
     }
 }
 
 fn folded_terminal(folded: &OccurrenceFold) -> Option<&OccurrenceTerminal> {
-    folded
+    let terminal = folded
         .explicit_terminal
         .as_ref()
-        .or(folded.provisional_terminal.as_ref())
+        .or(folded.provisional_terminal.as_ref());
+    match terminal {
+        Some(OccurrenceTerminal::Cancelled(_))
+            if folded.start.is_none() && folded.waiting.is_none() =>
+        {
+            None
+        }
+        _ => terminal,
+    }
 }
 
 fn node_occurrence(identity: &TraceLashlangEventIdentity) -> Option<(&str, u64)> {
@@ -874,6 +1098,16 @@ fn merge_late_retained_event(
                     occurrence: retained,
                     start,
                     ..
+                }
+                | TraceLashlangNodeObservation::Cancelled {
+                    occurrence: retained,
+                    start,
+                    ..
+                }
+                | TraceLashlangNodeObservation::Waiting {
+                    occurrence: retained,
+                    start,
+                    ..
                 } if retained == occurrence => {
                     Some(start.map_or(timestamp, |start| start.min(timestamp)))
                 }
@@ -882,7 +1116,9 @@ fn merge_late_retained_event(
             if let Some(start) = start {
                 let previously_missing = match &retention.node.observation {
                     TraceLashlangNodeObservation::Completed { start, .. }
-                    | TraceLashlangNodeObservation::Failed { start, .. } => start.is_none(),
+                    | TraceLashlangNodeObservation::Failed { start, .. }
+                    | TraceLashlangNodeObservation::Cancelled { start, .. }
+                    | TraceLashlangNodeObservation::Waiting { start, .. } => start.is_none(),
                     _ => false,
                 };
                 retention.node.observation = match &retention.node.observation {
@@ -892,6 +1128,17 @@ fn merge_late_retained_event(
                             start,
                         }
                     }
+                    TraceLashlangNodeObservation::Waiting {
+                        occurrence,
+                        since,
+                        awaited,
+                        ..
+                    } => TraceLashlangNodeObservation::Waiting {
+                        occurrence: *occurrence,
+                        start: Some(start),
+                        since: *since,
+                        awaited: awaited.clone(),
+                    },
                     TraceLashlangNodeObservation::Completed {
                         occurrence, end, ..
                     } => TraceLashlangNodeObservation::Completed {
@@ -916,7 +1163,15 @@ fn merge_late_retained_event(
                         ),
                         failure: failure.clone(),
                     },
-                    TraceLashlangNodeObservation::Unobserved => return,
+                    TraceLashlangNodeObservation::Cancelled {
+                        occurrence, end, ..
+                    } => TraceLashlangNodeObservation::Cancelled {
+                        occurrence: *occurrence,
+                        start: Some(start),
+                        end: *end,
+                    },
+                    TraceLashlangNodeObservation::Unobserved
+                    | TraceLashlangNodeObservation::Skipped { .. } => return,
                 };
                 if previously_missing {
                     retention.node.summary.started_count += 1;
@@ -924,8 +1179,19 @@ fn merge_late_retained_event(
             }
         }
         TraceLanguageExecutionPayload::NodeCompleted { occurrence, .. }
-        | TraceLanguageExecutionPayload::NodeFailed { occurrence, .. } => {
+        | TraceLanguageExecutionPayload::NodeFailed { occurrence, .. }
+        | TraceLanguageExecutionPayload::NodeCancelled { occurrence, .. } => {
             if retention.node.observation.is_terminal() {
+                return;
+            }
+            if matches!(
+                &event.payload,
+                TraceLanguageExecutionPayload::NodeCancelled { .. }
+            ) && !matches!(&retention.node.observation,
+                    TraceLashlangNodeObservation::Running { occurrence: retained, .. }
+                    | TraceLashlangNodeObservation::Waiting { occurrence: retained, .. }
+                    if retained == occurrence)
+            {
                 return;
             }
             let start = match retention.node.observation {
@@ -937,7 +1203,7 @@ fn merge_late_retained_event(
             };
             let (status, observation) = match &event.payload {
                 TraceLanguageExecutionPayload::NodeCompleted { .. } => (
-                    LanguageExecutionStatus::Completed,
+                    TraceLashlangNodeTerminalStatus::Completed,
                     TraceLashlangNodeObservation::Completed {
                         occurrence: *occurrence,
                         start,
@@ -951,7 +1217,7 @@ fn merge_late_retained_event(
                     },
                 ),
                 TraceLanguageExecutionPayload::NodeFailed { failure, .. } => (
-                    LanguageExecutionStatus::Failed,
+                    TraceLashlangNodeTerminalStatus::Failed,
                     TraceLashlangNodeObservation::Failed {
                         occurrence: *occurrence,
                         start,
@@ -963,6 +1229,14 @@ fn merge_late_retained_event(
                                 .max(0)
                         }),
                         failure: failure.clone(),
+                    },
+                ),
+                TraceLanguageExecutionPayload::NodeCancelled { .. } => (
+                    TraceLashlangNodeTerminalStatus::Cancelled,
+                    TraceLashlangNodeObservation::Cancelled {
+                        occurrence: *occurrence,
+                        start,
+                        end: timestamp,
                     },
                 ),
                 _ => unreachable!(),
@@ -1008,7 +1282,9 @@ fn merge_late_retained_event(
             }
         }
         TraceLanguageExecutionPayload::ExecutionStarted { .. }
-        | TraceLanguageExecutionPayload::ExecutionFinished { .. } => {}
+        | TraceLanguageExecutionPayload::ExecutionFinished { .. }
+        | TraceLanguageExecutionPayload::NodeWaiting { .. }
+        | TraceLanguageExecutionPayload::NodeResumed { .. } => {}
     }
 }
 
@@ -1046,12 +1322,35 @@ fn event_identity(event: &TraceLanguageExecution) -> TraceLashlangEventIdentity 
             Some(*occurrence),
             TraceLashlangEventTransition::NodeStarted,
         ),
+        TraceLanguageExecutionPayload::NodeWaiting {
+            node_id,
+            occurrence,
+            ..
+        } => (
+            Some(node_id.clone()),
+            Some(*occurrence),
+            TraceLashlangEventTransition::NodeWaiting,
+        ),
+        TraceLanguageExecutionPayload::NodeResumed {
+            node_id,
+            occurrence,
+            ..
+        } => (
+            Some(node_id.clone()),
+            Some(*occurrence),
+            TraceLashlangEventTransition::NodeResumed,
+        ),
         TraceLanguageExecutionPayload::NodeCompleted {
             node_id,
             occurrence,
             ..
         }
         | TraceLanguageExecutionPayload::NodeFailed {
+            node_id,
+            occurrence,
+            ..
+        }
+        | TraceLanguageExecutionPayload::NodeCancelled {
             node_id,
             occurrence,
             ..
@@ -1082,6 +1381,19 @@ fn event_identity(event: &TraceLanguageExecution) -> TraceLashlangEventIdentity 
     TraceLashlangEventIdentity {
         generation: event.identity.generation,
         node_id,
+        node_kind: match &event.payload {
+            TraceLanguageExecutionPayload::NodeStarted { node_kind, .. }
+            | TraceLanguageExecutionPayload::NodeWaiting { node_kind, .. }
+            | TraceLanguageExecutionPayload::NodeResumed { node_kind, .. }
+            | TraceLanguageExecutionPayload::NodeCompleted { node_kind, .. }
+            | TraceLanguageExecutionPayload::NodeFailed { node_kind, .. }
+            | TraceLanguageExecutionPayload::NodeCancelled { node_kind, .. } => Some(*node_kind),
+            TraceLanguageExecutionPayload::BranchSelected { .. } => Some(ExecutionNodeKind::Branch),
+            TraceLanguageExecutionPayload::ChildStarted { .. } => Some(ExecutionNodeKind::Call),
+            TraceLanguageExecutionPayload::ExecutionStarted { .. }
+            | TraceLanguageExecutionPayload::ExecutionFinished { .. } => None,
+        },
+        branch_node_id: None,
         occurrence,
         transition,
     }

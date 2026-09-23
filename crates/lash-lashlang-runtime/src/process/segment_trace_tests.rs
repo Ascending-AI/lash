@@ -10,13 +10,214 @@ use super::{
     process_lashlang_execution_result, process_trace_session_id, record_segment_boundary_decline,
     resolve_child_max_attempts, validate_lashlang_program_hash,
 };
+use lash_sansio::ExecutionNodeKind;
 use lash_sansio::sync::MutexExt;
+use lash_trace::{
+    TraceBranchMembership, TraceBranchSelection, TraceLanguageExecutionMap,
+    TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLashlangGraphStore,
+    TraceLashlangNodeObservation, TraceNodeAwaited, TraceNodeWaitResolution,
+};
+use std::sync::Arc;
 
 /// `finish null`
 fn finish_null() -> lashlang::Program {
     use lashlang::testing::ast_builders as b;
 
     b::program(vec![b::finish(b::null())])
+}
+
+fn traced_process() -> (LashlangProcessExecutionTrace, Arc<TraceLashlangGraphStore>) {
+    let hash = lashlang::ContentHash::new("trace-occurrence-tests");
+    let store = Arc::new(TraceLashlangGraphStore::default());
+    let trace = LashlangProcessExecutionTrace::new(
+        Some(store.clone()),
+        lash_trace::TraceContext::default(),
+        LashlangProcessTraceIdentity {
+            session_id: None,
+            process_id: lash_core::ProcessId::from("process"),
+            source_identity: "source-identity".to_string(),
+            module_ref: lashlang::ModuleRef::new(&hash),
+            process_ref: lashlang::ProcessRef::new(hash, 0),
+            process_name: "main".to_string(),
+            attempt: 1,
+            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+            restate_invocation_id: None,
+        },
+    );
+    (trace, store)
+}
+
+fn execution_site(node_id: &str, kind: ExecutionNodeKind) -> lashlang::LashlangExecutionSite {
+    lashlang::LashlangExecutionSite {
+        node_id: node_id.to_string(),
+        node_kind: kind,
+        label: node_id.to_string(),
+        branch: None,
+        workflow_site: lashlang::WorkflowExecutionSite::new("main", [0], kind, node_id),
+    }
+}
+
+#[test]
+fn process_wait_resolution_and_cancellation_follow_only_the_active_occurrence() {
+    let (trace, store) = traced_process();
+    let completed = execution_site("completed", ExecutionNodeKind::Sleep);
+    trace.emit_observation(lashlang::LashlangExecutionObservation::NodeStarted {
+        site: completed.clone(),
+        occurrence: 1,
+    });
+    let completed_call = lashlang::LashlangExecutionCallSite {
+        site: completed.clone(),
+        occurrence: 1,
+    };
+    trace.emit_waiting(
+        &completed_call,
+        TraceNodeAwaited::Sleep {
+            deadline_ms: Some(42),
+        },
+    );
+    let graph = store.graphs().pop().expect("wait graph");
+    assert!(matches!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "completed")
+            .expect("completed node")
+            .observation,
+        TraceLashlangNodeObservation::Waiting {
+            awaited: TraceNodeAwaited::Sleep {
+                deadline_ms: Some(42)
+            },
+            ..
+        }
+    ));
+    trace.emit_resumed(&completed_call, TraceNodeWaitResolution::TimedOut);
+    trace.emit_observation(lashlang::LashlangExecutionObservation::NodeCompleted {
+        site: completed,
+        occurrence: 1,
+    });
+
+    let cancelled = execution_site("cancelled", ExecutionNodeKind::Wait);
+    trace.emit_observation(lashlang::LashlangExecutionObservation::NodeStarted {
+        site: cancelled.clone(),
+        occurrence: 1,
+    });
+    trace.emit_waiting(
+        &lashlang::LashlangExecutionCallSite {
+            site: cancelled,
+            occurrence: 1,
+        },
+        TraceNodeAwaited::Signal {
+            name: "ready".to_string(),
+            key: "signal-key".to_string(),
+        },
+    );
+    trace.emit_cancelled_in_flight();
+
+    let graph = store.graphs().pop().expect("terminal graph");
+    assert!(matches!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "completed")
+            .expect("completed node")
+            .observation,
+        TraceLashlangNodeObservation::Completed { .. }
+    ));
+    assert!(matches!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "cancelled")
+            .expect("cancelled node")
+            .observation,
+        TraceLashlangNodeObservation::Cancelled { .. }
+    ));
+    assert!(graph.history.iter().any(|item| matches!(
+        item.event.payload,
+        TraceLanguageExecutionPayload::NodeResumed {
+            resolution: TraceNodeWaitResolution::Cancelled,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn process_branch_selection_derives_the_untaken_arm_in_each_iteration() {
+    let (mut trace, store) = traced_process();
+    let branch_node_id = "branch".to_string();
+    let arm_node = |id: &str, arm| TraceLanguageExecutionMapNode {
+        id: id.to_string(),
+        site: lashlang::WorkflowExecutionSite::new("main", [0], ExecutionNodeKind::Call, id),
+        kind: ExecutionNodeKind::Call,
+        label: id.to_string(),
+        branch_memberships: vec![TraceBranchMembership {
+            branch_node_id: branch_node_id.clone(),
+            arm,
+        }],
+        label_metadata: None,
+    };
+    trace.execution_map = Some(Arc::new(TraceLanguageExecutionMap {
+        nodes: vec![
+            arm_node("then", TraceBranchSelection::Then),
+            arm_node("else", TraceBranchSelection::Else),
+        ],
+        edges: Vec::new(),
+    }));
+    trace.emit(lash_trace::TraceLanguageExecution {
+        event_key: trace.event_key("started"),
+        identity: trace.identity(),
+        payload: TraceLanguageExecutionPayload::ExecutionStarted {
+            execution_map: trace
+                .execution_map
+                .as_ref()
+                .expect("test execution map")
+                .as_ref()
+                .clone(),
+        },
+    });
+    let branch = execution_site("branch", ExecutionNodeKind::Branch);
+    for (occurrence, selected) in [
+        (1, lashlang::ProcessBranchSelection::Then),
+        (2, lashlang::ProcessBranchSelection::Else),
+    ] {
+        trace.emit_observation(lashlang::LashlangExecutionObservation::BranchSelected {
+            site: branch.clone(),
+            occurrence,
+            edge_id: format!("edge-{occurrence}"),
+            selected,
+        });
+        let taken = if occurrence == 1 { "then" } else { "else" };
+        trace.emit_observation(lashlang::LashlangExecutionObservation::NodeCompleted {
+            site: execution_site(taken, ExecutionNodeKind::Call),
+            occurrence: 1,
+        });
+        if occurrence == 1 {
+            let first = store.graphs().pop().expect("first branch graph");
+            assert!(first.nodes.iter().any(|node| {
+                node.id == "else"
+                    && matches!(
+                        node.observation,
+                        TraceLashlangNodeObservation::Skipped {
+                            branch_occurrence: 1,
+                            ..
+                        }
+                    )
+            }));
+        }
+    }
+    let graph = store.graphs().pop().expect("branch graph");
+    let mut skipped = graph
+        .nodes
+        .iter()
+        .filter_map(|node| match node.observation {
+            TraceLashlangNodeObservation::Skipped {
+                branch_occurrence, ..
+            } => Some((node.id.as_str(), branch_occurrence)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    skipped.sort_unstable();
+    assert_eq!(skipped, [("then", 2)]);
 }
 
 #[test]
@@ -93,7 +294,7 @@ fn interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generati
     };
     let site = lashlang::LashlangExecutionSite {
         node_id: "node:read".to_string(),
-        node_kind: lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND.to_string(),
+        node_kind: lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND,
         label: "read".to_string(),
         branch: None,
         workflow_site: lashlang::WorkflowExecutionSite::new(
@@ -179,7 +380,7 @@ fn untraced_completed_resource_calls_retain_no_correlation_state() {
     for occurrence in 1..=8 {
         let site = lashlang::LashlangExecutionSite {
             node_id: "node:resource".to_string(),
-            node_kind: lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND.to_string(),
+            node_kind: lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND,
             label: "echo".to_string(),
             branch: None,
             workflow_site: lashlang::WorkflowExecutionSite::new(
@@ -208,6 +409,13 @@ fn untraced_completed_resource_calls_retain_no_correlation_state() {
 
     assert!(trace.resource_call_ids.lock_recover().is_empty());
     assert!(trace.pending_resource_starts.lock_recover().is_empty());
+    let call_site = lashlang::LashlangExecutionCallSite {
+        site: execution_site("untraced-wait", ExecutionNodeKind::Sleep),
+        occurrence: 1,
+    };
+    trace.emit_waiting(&call_site, TraceNodeAwaited::Sleep { deadline_ms: None });
+    trace.emit_resumed(&call_site, TraceNodeWaitResolution::TimedOut);
+    assert!(trace.waiting_nodes.is_empty());
 }
 use std::sync::atomic::Ordering;
 

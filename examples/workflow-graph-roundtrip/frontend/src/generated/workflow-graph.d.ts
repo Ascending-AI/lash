@@ -78,6 +78,13 @@ export type WorkflowEdgeKind =
   | {
       kind: 'sequence';
     };
+/**
+ * Closed vocabulary of executable workflow sites.
+ *
+ * This describes the site, not its current observation. A workflow node may expose more than one site kind. Declaration order is the canonical order: a node's execution sites sort by it, so reordering the variants changes the serialized workflow graph and needs a graph schema bump.
+ */
+export type ExecutionNodeKind =
+  'resource_operation' | 'sleep' | 'wait' | 'terminal' | 'process_event' | 'branch' | 'loop' | 'call' | 'step';
 export type WorkflowNodeKind =
   | {
       binding?: AssignTarget | null;
@@ -548,7 +555,7 @@ export interface WorkflowGraph {
   declarations?: WorkflowDeclaration[];
   facet_schema_version?: number | null;
   main: WorkflowSubgraph;
-  schema_version: 14;
+  schema_version: 15;
   /**
    * Content identity of the projected definition.
    *
@@ -597,7 +604,7 @@ export interface WorkflowNode {
  * Stable source-level location of one runtime site under a workflow node.
  */
 export interface WorkflowExecutionSite {
-  kind: string;
+  kind: ExecutionNodeKind;
   label: string;
   owner: string;
   path?: number[];

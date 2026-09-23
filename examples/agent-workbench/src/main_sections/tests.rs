@@ -10,7 +10,7 @@ use lash::rlm::RlmTurnBuilderExt;
 #[path = "tests/restate_endpoint.rs"]
 mod restate_endpoint;
 use lash::tracing::{
-    TraceBranchSelection, TraceLanguageChildExecution, TraceLanguageExecution,
+    ExecutionNodeKind, TraceBranchSelection, TraceLanguageChildExecution, TraceLanguageExecution,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
     TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
     TraceLashlangEdgeSelection, TraceLashlangGraphChildLink, TraceRuntimeScope,
@@ -345,10 +345,16 @@ fn lashlang_graph_store_builds_graph_state() {
             execution_map: TraceLanguageExecutionMap {
                 nodes: vec![TraceLanguageExecutionMapNode {
                     id: "branch".to_string(),
-                    site: lashlang::WorkflowExecutionSite::new("main", [0], "branch", "if"),
-                    kind: "branch".to_string(),
+                    site: lashlang::WorkflowExecutionSite::new(
+                        "main",
+                        [0],
+                        ExecutionNodeKind::Branch,
+                        "if",
+                    ),
+                    kind: ExecutionNodeKind::Branch,
                     label: "if".to_string(),
                     label_metadata: None,
+                    branch_memberships: Vec::new(),
                 }],
                 edges: vec![
                     TraceLanguageExecutionMapEdge {

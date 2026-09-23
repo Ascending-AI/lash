@@ -18115,6 +18115,7 @@
         "async-trait",
         "chrono",
         "lash-internal-core",
+        "lash-internal-core-execution",
         "lash-internal-core-worker",
         "lash-internal-lashlang",
         "lash-internal-remote-protocol",

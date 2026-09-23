@@ -332,18 +332,17 @@ pub(super) fn execution_started_inventory_matches_lifecycle() {
             let lifecycle_ids = evidence.lifecycle.keys().collect::<Vec<_>>();
             assert_eq!(
                 declared_ids, lifecycle_ids,
-                "{language}: execution_started and lifecycle node-id sets must be equal"
+                "{language}: execution_started and lifecycle node-site sets must be equal"
             );
 
-            for (node_id, (node_kind, node_label)) in &evidence.lifecycle {
-                let (declared_kind, declared_label) = evidence
+            for (node_key, node_label) in &evidence.lifecycle {
+                let declared_label = evidence
                     .declared
-                    .get(node_id)
+                    .get(node_key)
                     .expect("lifecycle node is pre-declared");
                 assert_eq!(
-                    (node_kind, node_label),
-                    (declared_kind, declared_label),
-                    "{language}: lifecycle metadata must match execution_started for {node_id}"
+                    node_label, declared_label,
+                    "{language}: lifecycle metadata must match execution_started for {node_key:?}"
                 );
             }
         }
@@ -352,8 +351,8 @@ pub(super) fn execution_started_inventory_matches_lifecycle() {
 
 #[derive(Debug)]
 pub(super) struct InventoryEvidence {
-    declared: BTreeMap<String, (String, String)>,
-    lifecycle: BTreeMap<String, (String, String)>,
+    declared: BTreeMap<(String, lash_sansio::ExecutionNodeKind), String>,
+    lifecycle: BTreeMap<(String, lash_sansio::ExecutionNodeKind), String>,
     lifecycle_event_count: usize,
 }
 
@@ -438,10 +437,11 @@ pub(super) async fn execute_and_collect_inventory(
     for node in &started[0].nodes {
         assert!(
             declared
-                .insert(node.id.clone(), (node.kind.clone(), node.label.clone()))
+                .insert((node.id.clone(), node.kind), node.label.clone())
                 .is_none(),
-            "{language}: execution_started contains duplicate node id {}",
-            node.id
+            "{language}: execution_started contains duplicate node site ({}, {})",
+            node.id,
+            node.kind
         );
     }
     let mut lifecycle = BTreeMap::new();
@@ -470,11 +470,12 @@ pub(super) async fn execute_and_collect_inventory(
         };
         if let Some((node_id, node_kind, label)) = node {
             lifecycle_event_count += 1;
-            if let Some(previous) = lifecycle.insert(node_id.clone(), (node_kind, label)) {
+            let key = (node_id, node_kind);
+            if let Some(previous) = lifecycle.insert(key.clone(), label) {
                 assert_eq!(
-                    lifecycle.get(&node_id),
+                    lifecycle.get(&key),
                     Some(&previous),
-                    "{language}: lifecycle metadata changed for {node_id}"
+                    "{language}: lifecycle metadata changed for {key:?}"
                 );
             }
         }

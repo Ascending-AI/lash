@@ -1,4 +1,5 @@
 use super::*;
+use crate::LashlangExecutionObservation;
 
 /// `process echo(value: str) { finish value }`
 fn echo_process() -> Declaration {
@@ -228,6 +229,155 @@ async fn process_handles_can_be_started_awaited_and_cancelled() {
         .expect("await should return wrapped result");
     assert_eq!(record["ok"], Value::Bool(true));
     assert_eq!(record["value"], Value::String("done".into()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn process_handle_await_reports_the_child_and_its_resolution() {
+    struct ObservingHost(std::sync::Mutex<Vec<LashlangExecutionObservation>>);
+
+    impl ExecutionHost for ObservingHost {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+            AsyncHost.perform(op).await
+        }
+
+        fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(observation);
+        }
+    }
+
+    let program = builders::module(
+        vec![echo_process()],
+        vec![
+            builders::assign("handle", start_echo("done")),
+            builders::assign("result", builders::await_expr(builders::var("handle"))),
+            builders::finish(builders::var("result")),
+        ],
+    );
+    let host = ObservingHost(std::sync::Mutex::new(Vec::new()));
+    let mut state = State::new();
+    execute_program(&program, &mut state, &host)
+        .await
+        .expect("process handle await succeeds");
+    let observations = host
+        .0
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let waiting = observations
+        .iter()
+        .find_map(|observation| match observation {
+            LashlangExecutionObservation::ChildProcessWaiting {
+                site,
+                occurrence,
+                process_ids,
+            } => Some((site, occurrence, process_ids)),
+            _ => None,
+        });
+    let (site, occurrence, process_ids) = waiting.expect("observed child-process wait");
+    assert_eq!(process_ids, &[lash_sansio::ProcessId::from("proc-1")]);
+    assert!(observations.iter().any(|observation| matches!(
+        observation,
+        LashlangExecutionObservation::NodeResumed {
+            site: resumed_site,
+            occurrence: resumed_occurrence,
+        } if resumed_site.node_id == site.node_id && resumed_occurrence == occurrence
+    )));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn aggregate_await_reports_all_children_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct ObservingHost {
+        next_child: AtomicUsize,
+        observations: std::sync::Mutex<Vec<LashlangExecutionObservation>>,
+    }
+
+    impl ExecutionHost for ObservingHost {
+        async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+            let starting = matches!(&op, AbilityOp::ResourceOperation(operation) if operation.operation == "start");
+            let result = AsyncHost.perform(op).await?;
+            if starting {
+                let AbilityResult::Value(Value::Record(record)) = result else {
+                    panic!("start must return a process handle");
+                };
+                let ordinal = self.next_child.fetch_add(1, Ordering::Relaxed) + 1;
+                let mut record = record.as_ref().clone();
+                record.insert(
+                    "id".to_string(),
+                    Value::String(
+                        lash_sansio::handle::HandleId::process(&format!("proc-{ordinal}"), 1)
+                            .as_str()
+                            .into(),
+                    ),
+                );
+                return Ok(AbilityResult::Value(Value::Record(Arc::new(record))));
+            }
+            Ok(result)
+        }
+
+        fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
+            self.observations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(observation);
+        }
+    }
+
+    let program = builders::module(
+        vec![echo_process()],
+        vec![
+            builders::assign("first", start_echo("one")),
+            builders::assign("second", start_echo("two")),
+            builders::assign(
+                "results",
+                builders::await_expr(builders::tuple(vec![
+                    builders::var("first"),
+                    builders::var("second"),
+                ])),
+            ),
+            builders::finish(builders::var("results")),
+        ],
+    );
+    let host = ObservingHost {
+        next_child: AtomicUsize::new(0),
+        observations: std::sync::Mutex::new(Vec::new()),
+    };
+    execute_program(&program, &mut State::new(), &host)
+        .await
+        .expect("aggregate child await succeeds");
+    let observations = host
+        .observations
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let waits = observations
+        .iter()
+        .filter_map(|observation| match observation {
+            LashlangExecutionObservation::ChildProcessWaiting { process_ids, .. } => {
+                Some(process_ids)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        waits,
+        [&vec![
+            lash_sansio::ProcessId::from("proc-1"),
+            lash_sansio::ProcessId::from("proc-2")
+        ]]
+    );
+    assert_eq!(
+        observations
+            .iter()
+            .filter(|observation| matches!(
+                observation,
+                LashlangExecutionObservation::NodeResumed { .. }
+            ))
+            .count(),
+        1,
+    );
 }
 
 #[test]

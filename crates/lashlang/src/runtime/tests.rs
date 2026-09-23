@@ -123,7 +123,7 @@ impl ExecutionHost for RecordingProcessHost {
                 self.sleeps.lock_recover().push(sleep);
                 Ok(AbilityResult::Value(Value::Null))
             }
-            AbilityOp::WaitSignal { name } => {
+            AbilityOp::WaitSignal { name, .. } => {
                 assert_eq!(name, "ready");
                 Ok(AbilityResult::Value(Value::String("signal-payload".into())))
             }

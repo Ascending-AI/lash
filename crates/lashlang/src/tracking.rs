@@ -1,4 +1,4 @@
-use lash_sansio::{ProcessId, WorkflowExecutionSite};
+use lash_sansio::{ExecutionNodeKind, ProcessId, WorkflowExecutionSite};
 use serde::{Deserialize, Serialize};
 
 use crate::{ModuleRef, ProcessRef, WorkflowNodePath, workflow_node_id};
@@ -52,15 +52,14 @@ impl LashlangExecutionSiteBuilder<'_> {
     pub(crate) fn node_site(
         &self,
         node_path: &WorkflowNodePath,
-        kind: impl Into<String>,
+        kind: ExecutionNodeKind,
         label: impl Into<String>,
     ) -> LashlangExecutionSite {
-        let kind = kind.into();
         let label = label.into();
         LashlangExecutionSite {
             node_id: workflow_node_id(&self.context.entry.workflow_owner(), node_path.indices())
                 .to_string(),
-            node_kind: kind.clone(),
+            node_kind: kind,
             label: label.clone(),
             branch: None,
             workflow_site: WorkflowExecutionSite::new(
@@ -76,7 +75,7 @@ impl LashlangExecutionSiteBuilder<'_> {
         LashlangExecutionSite {
             node_id: workflow_node_id(&self.context.entry.workflow_owner(), node_path.indices())
                 .to_string(),
-            node_kind: "branch".to_string(),
+            node_kind: ExecutionNodeKind::Branch,
             label: "if".to_string(),
             branch: Some(LashlangBranchSite {
                 then_edge_id: self.branch_edge_id(node_path, ProcessBranchSelection::Then),
@@ -85,7 +84,7 @@ impl LashlangExecutionSiteBuilder<'_> {
             workflow_site: WorkflowExecutionSite::new(
                 self.context.entry.workflow_owner(),
                 node_path.indices(),
-                "branch",
+                ExecutionNodeKind::Branch,
                 "if",
             ),
         }
@@ -114,7 +113,7 @@ pub fn process_ref_key(process_ref: &ProcessRef) -> String {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LashlangExecutionSite {
     pub node_id: String,
-    pub node_kind: String,
+    pub node_kind: ExecutionNodeKind,
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<LashlangBranchSite>,
@@ -180,6 +179,15 @@ pub struct LashlangExecutionChild {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LashlangExecutionObservation {
     NodeStarted {
+        site: LashlangExecutionSite,
+        occurrence: u64,
+    },
+    ChildProcessWaiting {
+        site: LashlangExecutionSite,
+        occurrence: u64,
+        process_ids: Vec<ProcessId>,
+    },
+    NodeResumed {
         site: LashlangExecutionSite,
         occurrence: u64,
     },

@@ -260,6 +260,9 @@ impl RunHost {
                 self.emit(node_id, RunStatus::Succeeded, DisplayDelta::default(), None);
             }
             TraceLanguageExecutionPayload::ChildStarted { .. }
+            | TraceLanguageExecutionPayload::NodeWaiting { .. }
+            | TraceLanguageExecutionPayload::NodeResumed { .. }
+            | TraceLanguageExecutionPayload::NodeCancelled { .. }
             | TraceLanguageExecutionPayload::ExecutionStarted { .. }
             | TraceLanguageExecutionPayload::ExecutionFinished { .. } => {}
         }
@@ -285,7 +288,7 @@ impl ExecutionHost for RunHost {
                 ))
             }
             AbilityOp::Sleep(sleep) => self.perform_sleep(sleep).await,
-            AbilityOp::WaitSignal { name } => {
+            AbilityOp::WaitSignal { name, .. } => {
                 self.emit_waiting();
                 tokio::time::sleep(self.timing.signal_delay).await;
                 Ok(AbilityResult::Value(from_json(serde_json::json!({

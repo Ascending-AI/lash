@@ -28,7 +28,7 @@ exports_files([
 
 filegroup(
     name = "workflow_graph_schema",
-    srcs = ["schemas/host/workflow-graph/v14.schema.json"],
+    srcs = ["schemas/host/workflow-graph/v15.schema.json"],
     testonly = True,
     visibility = ["//visibility:public"],
 )

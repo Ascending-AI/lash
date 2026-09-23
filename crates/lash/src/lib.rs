@@ -910,6 +910,7 @@ pub mod tracing {
         facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
         facade_support::TraceSinkError, facade_support::parse_jsonl_records,
     };
+    pub use lash_sansio::ExecutionNodeKind;
     /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
     /// can name — match on, take in a signature, or build in a test — what a
     /// `TurnCompleted` or tool-call variant carries. The `LanguageExecution`
@@ -918,19 +919,21 @@ pub mod tracing {
     pub use lash_trace::{
         DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT, ExecCodeFailureReason, TRACE_SCHEMA_VERSION,
         TextProjectionMetadata, TraceAgentFrameSwitch, TraceAttemptUsageDisposition,
-        TraceDurableTimerStatus, TraceDurableWaitResolution, TraceExecToolCall,
-        TraceExecutionEvidence, TraceJournaledEffectStatus, TraceLanguageChildExecution,
-        TraceLanguageExecution, TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration,
-        TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
-        TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
-        TraceLashlangEdgeSelection, TraceLashlangEventIdentity, TraceLashlangEventTransition,
-        TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness,
-        TraceLashlangGraphConflict, TraceLashlangGraphConflictKind, TraceLashlangGraphEdge,
-        TraceLashlangGraphFoldError, TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode,
-        TraceLashlangGraphStore, TraceLashlangNodeObservation, TraceLashlangNodeSummary,
-        TraceLashlangNodeTerminalSummary, TraceRetryAttempt, TraceRetryAttemptOutcome,
-        TraceRlmStepOutcome, TraceToolCallStatus, TraceTurnCancellationEvidence,
-        TraceTurnCompletionReason, TraceTurnFailureReason, TraceTurnOutcome, fold_lashlang_graph,
+        TraceBranchMembership, TraceDurableTimerStatus, TraceDurableWaitResolution,
+        TraceExecToolCall, TraceExecutionEvidence, TraceJournaledEffectStatus,
+        TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,
+        TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity,
+        TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
+        TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
+        TraceLashlangEventIdentity, TraceLashlangEventTransition, TraceLashlangGraph,
+        TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
+        TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
+        TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphStore,
+        TraceLashlangNodeObservation, TraceLashlangNodeSummary, TraceLashlangNodeTerminalStatus,
+        TraceLashlangNodeTerminalSummary, TraceNodeAwaited, TraceNodeWaitKind,
+        TraceNodeWaitResolution, TraceRetryAttempt, TraceRetryAttemptOutcome, TraceRlmStepOutcome,
+        TraceToolCallStatus, TraceTurnCancellationEvidence, TraceTurnCompletionReason,
+        TraceTurnFailureReason, TraceTurnOutcome, fold_lashlang_graph,
     };
     pub use lash_trace::{
         StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,

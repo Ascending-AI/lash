@@ -559,7 +559,7 @@ fn workflow_graph_ir_json_golden_is_exact() {
     let graph =
         workflow_graph_from_source("await tools.lookup({ query: \"x\" });\nawait sleep(\"1s\");\n")
             .expect("fixture projects");
-    assert_eq!(graph.schema_version, 14);
+    assert_eq!(graph.schema_version, 15);
     let kinds = serde_json::Value::Array(
         graph
             .main
@@ -2096,7 +2096,7 @@ fn while_collects_condition_sites_without_duplicating_body_sites() {
             .iter()
             .map(|site| (site.kind.as_str(), site.label.as_str()))
             .collect::<Vec<_>>(),
-        vec![("loop", "while"), ("resource_operation", "ready")]
+        vec![("resource_operation", "ready"), ("loop", "while")]
     );
     assert_eq!(body.nodes[0].execution_sites[0].label, "tick");
     assert_lens_laws(source);

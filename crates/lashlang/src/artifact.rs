@@ -30,7 +30,7 @@ use crate::linker::{
 
 pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v9";
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v10";
 
 /// Durability tier established by the execution path's concrete store or host.
 #[derive(

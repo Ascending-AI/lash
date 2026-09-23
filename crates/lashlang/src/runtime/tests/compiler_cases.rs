@@ -1499,11 +1499,9 @@ fn aggregate_resource_sites_share_their_structural_node() {
             .collect::<Vec<_>>(),
         [vec![0], vec![0]]
     );
-    assert!(
-        tuple_sites
-            .iter()
-            .all(|site| { site.node_kind == "resource_operation" && site.label == "echo" })
-    );
+    assert!(tuple_sites.iter().all(|site| {
+        site.node_kind == lash_sansio::ExecutionNodeKind::ResourceOperation && site.label == "echo"
+    }));
     assert_eq!(
         tuple_sites[0].node_id, tuple_sites[1].node_id,
         "aggregate leaves are occurrences of one authored workflow node"
@@ -1560,7 +1558,7 @@ fn compiled_site_descriptors(compiled: &CompiledProgram) -> Vec<(String, String,
         .flatten()
         .map(|site| {
             (
-                site.node_kind.clone(),
+                site.node_kind.to_string(),
                 site.label.clone(),
                 site.workflow_site.path.clone(),
             )

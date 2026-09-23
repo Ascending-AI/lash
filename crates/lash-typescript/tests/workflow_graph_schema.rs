@@ -107,7 +107,7 @@ finish(values);
     );
 
     let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/host/workflow-graph/v14.schema.json"
+        "../../../schemas/host/workflow-graph/v15.schema.json"
     ))
     .expect("published graph schema parses");
     let validator = jsonschema::JSONSchema::compile(&schema).expect("graph schema compiles");

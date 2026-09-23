@@ -1,14 +1,38 @@
 use super::*;
 
 #[derive(Default)]
-struct StepSink(Mutex<Vec<lash_core::facade_support::TraceRecord>>);
+struct StepSink {
+    records: Mutex<Vec<lash_core::facade_support::TraceRecord>>,
+    /// Cancels the token when the `n`th sleep wait (1-based) is recorded.
+    cancel_on_sleep_wait: Option<(lash_core::CancellationToken, usize)>,
+    sleep_waits: AtomicUsize,
+}
 
 impl TraceSink for StepSink {
     fn append(
         &self,
         record: &lash_core::facade_support::TraceRecord,
     ) -> Result<(), lash_core::facade_support::TraceSinkError> {
-        self.0.lock().unwrap().push(record.clone());
+        self.records.lock().unwrap().push(record.clone());
+        if let Some((cancel, cancel_at)) = &self.cancel_on_sleep_wait
+            && matches!(
+                &record.event,
+                lash_trace::TraceEvent::LanguageExecution {
+                    event: lash_lashlang_runtime::TraceLanguageExecution {
+                        payload:
+                            lash_lashlang_runtime::TraceLanguageExecutionPayload::NodeWaiting {
+                                awaited: lash_lashlang_runtime::TraceNodeAwaited::Sleep { .. },
+                                ..
+                            },
+                        ..
+                    },
+                    ..
+                }
+            )
+            && self.sleep_waits.fetch_add(1, Ordering::SeqCst) + 1 == *cancel_at
+        {
+            cancel.cancel();
+        }
         Ok(())
     }
 }
@@ -31,23 +55,37 @@ impl lash_lashlang_runtime::DeferredToolResolver for InboxResolver {
 
 async fn run_step(code: &str) -> (ExecResponse, Vec<lash_core::facade_support::TraceRecord>) {
     let sink = Arc::new(StepSink::default());
+    let response = run_step_with_sink(code, sink.clone(), None).await;
+    let records = sink.records.lock().unwrap().clone();
+    (response, records)
+}
+
+async fn run_step_with_sink(
+    code: &str,
+    sink: Arc<StepSink>,
+    cancellation: Option<lash_core::CancellationToken>,
+) -> ExecResponse {
     let executions = Arc::new(AtomicUsize::new(0));
-    let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-        Arc::new(BindingRecordingDeferredProvider {
-            executions: executions.clone(),
-            observed_bindings: Default::default(),
-            enumerations: Default::default(),
-        }),
-        lash_core::ToolCatalog::default(),
-        lash_core::testing::exec_code_invocation(
-            "trace-session",
-            "trace-turn",
-            2,
-            7,
-            "trace-exec",
-            "exec:trace",
-        ),
-    );
+    let mut ctx =
+        lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+            Arc::new(BindingRecordingDeferredProvider {
+                executions: executions.clone(),
+                observed_bindings: Default::default(),
+                enumerations: Default::default(),
+            }),
+            lash_core::ToolCatalog::default(),
+            lash_core::testing::exec_code_invocation(
+                "trace-session",
+                "trace-turn",
+                2,
+                7,
+                "trace-exec",
+                "exec:trace",
+            ),
+        );
+    if let Some(cancellation) = cancellation {
+        ctx = ctx.with_cancellation_token(cancellation);
+    }
     let response = execute_code_unbounded_for_tests(
         &mut RlmExecutionState::new(),
         ctx,
@@ -67,8 +105,131 @@ async fn run_step(code: &str) -> (ExecResponse, Vec<lash_core::facade_support::T
     )
     .await;
     assert_eq!(executions.load(Ordering::SeqCst), 0);
-    let records = sink.0.lock().unwrap().clone();
-    (response, records)
+    response
+}
+
+#[test]
+fn real_foreground_sleep_reduces_waiting_then_completed() {
+    block_on(async {
+        let (response, records) = Box::pin(run_step("await sleep(0); finish(null);")).await;
+        assert!(response.error.is_none(), "{:?}", response.error);
+        let store = lash_lashlang_runtime::TraceLashlangGraphStore::default();
+        let mut awaited_node = None;
+        for record in &records {
+            store.append(record).expect("reduce real foreground trace");
+            if let lash_trace::TraceEvent::LanguageExecution { event, .. } = &record.event
+                && let lash_lashlang_runtime::TraceLanguageExecutionPayload::NodeWaiting {
+                    node_id,
+                    awaited: lash_lashlang_runtime::TraceNodeAwaited::Sleep { deadline_ms: None },
+                    ..
+                } = &event.payload
+            {
+                let graph = store
+                    .graph(&event.identity.graph_key())
+                    .expect("waiting graph");
+                assert!(graph.nodes.iter().any(|node| {
+                    node.id == *node_id
+                        && matches!(
+                            node.observation,
+                            lash_lashlang_runtime::TraceLashlangNodeObservation::Waiting { .. }
+                        )
+                }));
+                awaited_node = Some((event.identity.graph_key(), node_id.clone()));
+            }
+        }
+        let (graph_key, node_id) = awaited_node.expect("sleep emitted a wait");
+        let graph = store.graph(&graph_key).expect("completed graph");
+        assert!(graph.nodes.iter().any(|node| {
+            node.id == node_id
+                && matches!(
+                    node.observation,
+                    lash_lashlang_runtime::TraceLashlangNodeObservation::Completed { .. }
+                )
+        }));
+    });
+}
+
+fn reduce(
+    records: &[lash_core::facade_support::TraceRecord],
+) -> lash_lashlang_runtime::TraceLashlangGraph {
+    let store = lash_lashlang_runtime::TraceLashlangGraphStore::default();
+    for record in records {
+        store.append(record).expect("reduce foreground trace");
+    }
+    store.graphs().into_iter().next().expect("execution graph")
+}
+
+fn observations_of_kind(
+    graph: &lash_lashlang_runtime::TraceLashlangGraph,
+    kind: lash_sansio::ExecutionNodeKind,
+) -> Vec<(String, lash_lashlang_runtime::TraceLashlangNodeObservation)> {
+    graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == kind)
+        .map(|node| (node.id.clone(), node.observation.clone()))
+        .collect()
+}
+
+/// Cancellation after partial completion: the first sleep completed, the
+/// second is parked when the cell is cancelled, and the third never starts.
+#[test]
+fn real_foreground_cancel_after_partial_completion_keeps_each_occurrence_honest() {
+    use lash_lashlang_runtime::TraceLashlangNodeObservation as Observation;
+    block_on(async {
+        let cancellation = lash_core::CancellationToken::new();
+        let sink = Arc::new(StepSink {
+            cancel_on_sleep_wait: Some((cancellation.clone(), 2)),
+            ..StepSink::default()
+        });
+        let _response = Box::pin(run_step_with_sink(
+            "await sleep(0); await sleep(0); await sleep(0); finish(null);",
+            sink.clone(),
+            Some(cancellation.clone()),
+        ))
+        .await;
+        assert!(
+            cancellation.is_cancelled(),
+            "the second sleep wait must trigger cancellation"
+        );
+        let records = sink.records.lock().unwrap().clone();
+        let graph = reduce(&records);
+        assert!(graph.conflicts.is_empty(), "{:?}", graph.conflicts);
+        let sleeps = observations_of_kind(&graph, lash_sansio::ExecutionNodeKind::Sleep);
+        assert_eq!(sleeps.len(), 3, "{sleeps:#?}");
+        let count = |matches: fn(&Observation) -> bool| {
+            sleeps
+                .iter()
+                .filter(|(_, observation)| matches(observation))
+                .count()
+        };
+        assert_eq!(
+            count(|o| matches!(o, Observation::Completed { .. })),
+            1,
+            "{sleeps:#?}"
+        );
+        assert_eq!(
+            count(|o| matches!(o, Observation::Cancelled { .. })),
+            1,
+            "{sleeps:#?}"
+        );
+        assert_eq!(
+            count(|o| matches!(o, Observation::Unobserved)),
+            1,
+            "{sleeps:#?}"
+        );
+        assert!(records.iter().any(|record| matches!(
+            &record.event,
+            lash_trace::TraceEvent::LanguageExecution { event, .. }
+                if matches!(
+                    event.payload,
+                    lash_lashlang_runtime::TraceLanguageExecutionPayload::NodeResumed {
+                        resolution: lash_lashlang_runtime::TraceNodeWaitResolution::Cancelled,
+                        ..
+                    }
+                )
+        )));
+    });
 }
 
 #[test]
