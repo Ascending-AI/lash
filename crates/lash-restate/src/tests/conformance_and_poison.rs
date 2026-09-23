@@ -391,19 +391,21 @@ lash_conformance::wake_delivery_crash_tests!({
     )
 });
 
-/// The Restate crash-matrix fixture: a SQLite state carrier per scenario and
-/// the recording-context controller.
-fn restate_turn_crash_fixture() -> (
+/// The Restate crash-matrix fixture: the tempdir guard, a SQLite state
+/// carrier per scenario, and the recording-context invocation factories.
+type RestateCrashFixture = (
     tempfile::TempDir,
-    impl Fn(&str) -> Arc<dyn lash_core::RuntimePersistence>,
-    impl Fn(&str) -> lash_conformance::ConformanceInvocation,
-    impl Fn(&str, ExecutionScope) -> lash_conformance::ConformanceInvocation,
-) {
+    Box<dyn Fn(&str) -> Arc<dyn lash_core::RuntimePersistence>>,
+    fn(&str) -> lash_conformance::ConformanceInvocation,
+    fn(&str, ExecutionScope) -> lash_conformance::ConformanceInvocation,
+);
+
+fn restate_turn_crash_fixture() -> RestateCrashFixture {
     let dir = tempfile::tempdir().expect("Restate turn-crash conformance tempdir");
     let root = dir.path().to_path_buf();
     (
         dir,
-        move |scenario: &str| {
+        Box::new(move |scenario: &str| {
             let path = root.join(format!("restate-turn-crash-{scenario}.db"));
             sync_await(async move {
                 Arc::new(
@@ -412,7 +414,7 @@ fn restate_turn_crash_fixture() -> (
                         .expect("open Restate turn-crash SQLite state carrier"),
                 ) as Arc<dyn lash_core::RuntimePersistence>
             })
-        },
+        }),
         crash_redrive_conformance_invocation,
         // The Restate recording controller has no SQLite/Postgres effect
         // journal: only the tool-attempt error-return placement runs here.
