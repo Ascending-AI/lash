@@ -125,9 +125,9 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         interrupted_turn_input_cancellation: _, // refused present by validation
         interrupted_turn_cancel_intent: _, // transient CAS predicate
         turn_cancel_closure_settlement: _, // transient fenced obligation
-        adopted_intent_rows: _,         // refused non-zero by validation
-        queued_run: _,                  // refused by semantic-boundary validation
-        committed_attachment_ids: _,    // refused non-empty by validation
+        adopted_intent_rows: _,           // refused non-zero by validation
+        queued_run: _,                    // refused by semantic-boundary validation
+        committed_attachment_ids: _,      // refused non-empty by validation
     } = commit;
     let operation_key = turn_commit.operation.storage_key()?;
     let projection = SemanticBoundaryRequestIntent {

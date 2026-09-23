@@ -727,14 +727,21 @@ IDENTIFIER_RENAME_BASELINES = {
     # retain the same record-config hash at identity_encoding_version 3.
     # Supersedes the FIG-3230 ignored graph_base_leaf_node_id baseline:
     # sha256:093813b12037a2397006fc10b1936714a47f94a87b778e304c490cde50ea3ad2.
+    # FIG-3531 (updated in place; a duplicate key would keep only the last):
+    # the destructure also adds the ignored `undelivered_turn_input_claims`,
+    # the withheld checkpoint claims a cancelled turn's commit releases for
+    # the undelivered disposition, refused non-empty on a boundary commit.
+    # The encoded fields, serde attributes and constants are unchanged, so
+    # 3/3/5 stay. Superseded state:
+    # sha256:48d26fb4f576abf84a952620b6431359e2e7210597e8763655dedab9dd66676d.
     "crates/lash-core-store/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
-        "sha256:48d26fb4f576abf84a952620b6431359e2e7210597e8763655dedab9dd66676d"
+        "sha256:674711b54ee29d1eb2192e996a1f2ba5104043b37eaa7af2b8918e01d8014cd2"
     ),
     "crates/lash-core-store/src/store/semantic_boundary.rs:CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION": (
-        "sha256:48d26fb4f576abf84a952620b6431359e2e7210597e8763655dedab9dd66676d"
+        "sha256:674711b54ee29d1eb2192e996a1f2ba5104043b37eaa7af2b8918e01d8014cd2"
     ),
     "crates/lash-core-store/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
-        "sha256:48d26fb4f576abf84a952620b6431359e2e7210597e8763655dedab9dd66676d"
+        "sha256:674711b54ee29d1eb2192e996a1f2ba5104043b37eaa7af2b8918e01d8014cd2"
     ),
     # Comment-only sweep: the guarded-shape texts moved solely by deleting or
     # slimming comments; no schema statement, struct, field, serde attribute,
