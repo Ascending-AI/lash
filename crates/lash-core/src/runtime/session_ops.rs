@@ -180,15 +180,17 @@ impl LashRuntime {
         }
         self.stamp_live_plugin_state();
         if let Some(store) = history_store {
-            return match self
-                .commit_appended_nodes(
-                    store,
-                    &state_before_append,
-                    node_ids,
-                    operation,
-                    append_stamp,
-                )
-                .await
+            // Boxed at this seam: the append commit future carries a whole
+            // runtime commit and would push this future past the
+            // large-future bound.
+            return match Box::pin(self.commit_appended_nodes(
+                store,
+                &state_before_append,
+                node_ids,
+                operation,
+                append_stamp,
+            ))
+            .await
             {
                 Ok(outcome) => Ok(outcome),
                 // The commit found the required ancestor inactive: after the
