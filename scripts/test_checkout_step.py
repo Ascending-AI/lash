@@ -3,8 +3,11 @@
 
 A GitHub-hosted job starts with an empty working directory, so the checkout
 cannot be a local composite action: `uses: ./.github/actions/...` needs the
-repository to already be present. The step is therefore inlined into every
-job, and this test is what keeps the copies from drifting. These steps are
+repository to already be present. The step is therefore written out once per
+workflow file as a YAML anchor (`- &checkout`, or `- &checkout-with-tags`) and
+every other job reuses it by alias (`- *checkout`). A job whose checkout
+carries an `if:` keeps a literal copy, because GitHub resolves aliases but not
+merge keys. This test is what keeps the anchors and the copies from drifting. These steps are
 deliberately different and listed here: the Lint job fetches every branch and
 tag unshallowed, the hygiene job deepens both sides of the scanned range
 (scripts/test_ci_plan_hygiene.py executes that text), and release.yml persists
@@ -57,6 +60,25 @@ class CheckoutStepContract(unittest.TestCase):
                     self.assertEqual("--tags", env["CHECKOUT_TAGS"])
             seen += 1
         self.assertGreater(seen, 30, "the sweep found almost nothing; is the step renamed?")
+
+    def test_each_workflow_writes_the_step_out_once_per_variant(self) -> None:
+        body = "".join(
+            f"          {line}\n" if line else "\n"
+            for line in CANONICAL.read_text(encoding="utf-8").rstrip("\n").split("\n")
+        )
+        by_workflow: dict[str, list[dict]] = {}
+        for workflow, _, step in checkout_steps():
+            by_workflow.setdefault(workflow, []).append(step)
+        for workflow, steps in by_workflow.items():
+            with self.subTest(workflow=workflow):
+                conditional = sum(1 for step in steps if "if" in step)
+                variants = {
+                    tuple(sorted(step.get("env", {}).items()))
+                    for step in steps
+                    if "if" not in step
+                }
+                text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+                self.assertEqual(conditional + len(variants), text.count(body))
 
     def test_exempt_jobs_still_exist(self) -> None:
         jobs = yaml.safe_load((WORKFLOWS / "ci.yml").read_text(encoding="utf-8"))["jobs"]
