@@ -443,6 +443,17 @@ CREATE TABLE IF NOT EXISTS attachment_condemnations (
     CONSTRAINT ck_attachment_condemnations_write_token_phase CHECK (write_token IS NULL OR phase = 'condemned')
 );
 
+-- Attachment bytes when the session catalog is the deployment's attachment
+-- backend (`SqliteAttachmentStore`), keyed by content id. Separate from `blobs`:
+-- the attachment GC deletes every listed blob the manifest does not root, and
+-- `blobs` holds checkpoint and artifact bytes rooted elsewhere. `stored_at_ms`
+-- is the freshness a repeated put restamps and the GC's write grace reads.
+CREATE TABLE IF NOT EXISTS attachment_blobs (
+    attachment_id TEXT PRIMARY KEY,
+    content       BLOB NOT NULL,
+    stored_at_ms  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS artifact_refs (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
@@ -772,7 +783,12 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// mutable current ingress. The digest is computed in Rust from the submitted
 /// payload, so no DDL can backfill it; a pre-77 database is rejected at open
 /// and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 77;
+/// Bumped to 78 for FIG-3578: the catalog gains `attachment_blobs`, the bytes
+/// of `SqliteAttachmentStore`, so a SQLite deployment supplies its attachment
+/// port from the same database as the manifest that roots them. A pre-78
+/// database has no such table and, under the reject-and-recreate policy, is
+/// refused at open rather than midwifed one.
+pub(crate) const SCHEMA_VERSION: i32 = 78;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

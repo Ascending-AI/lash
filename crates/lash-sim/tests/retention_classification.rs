@@ -349,6 +349,14 @@ const CENSUS: &[(&str, RetentionClass)] = &[
     ),
 ];
 
+/// Tables only the SQLite catalog carries.
+const SQLITE_ONLY: &[(&str, RetentionClass)] = &[(
+    "attachment_blobs",
+    Bounded {
+        lever: "attachment GC (reclaim_unreferenced_attachments): a blob no manifest row roots is condemned and deleted",
+    },
+)];
+
 const POSTGRES_ONLY: &[(&str, RetentionClass)] = &[
     (
         "lash_schema_versions",
@@ -409,7 +417,7 @@ fn assert_classified(source: &str, postgres: bool) {
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()
-        .chain(if postgres { POSTGRES_ONLY } else { &[] }.iter());
+        .chain(if postgres { POSTGRES_ONLY } else { SQLITE_ONLY }.iter());
     for (table, class) in entries {
         let detail = match class {
             Bounded { lever } => lever,

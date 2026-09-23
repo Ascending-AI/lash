@@ -346,13 +346,19 @@ artifact_owners = "crates/lash-store-sql/src/artifact/owners.rs"
 artifact_owner_retirements = "crates/lash-store-sql/src/artifact/owner_retirements.rs"
 
 [families.attachment]
-tables = ["attachment_manifest", "attachment_condemnations"]
-statement_prefixes = ["attachment_manifest", "attachment_condemnation"]
+tables = ["attachment_manifest", "attachment_condemnations", "attachment_blobs"]
+statement_prefixes = ["attachment_manifest", "attachment_condemnation", "attachment_blob"]
 shared = [
     "crates/lash-store-sql/src/attachment/manifest.rs",
     "crates/lash-store-sql/src/attachment/condemnation.rs",
+    "crates/lash-store-sql/src/attachment/blob.rs",
 ]
-sqlite = ["crates/lash-sqlite-store/src/attachments.rs"]
+# Two SQLite owner modules: the manifest and its GC fence, and the attachment
+# bytes `SqliteAttachmentStore` keeps beside them in the session catalog.
+sqlite = [
+    "crates/lash-sqlite-store/src/attachments.rs",
+    "crates/lash-sqlite-store/src/attachment_store.rs",
+]
 postgres = ["crates/lash-postgres-store/src/postgres/attachments.rs"]
 schema = [
     "crates/lash-sqlite-store/src/schema.rs",
@@ -375,6 +381,7 @@ attachment_manifest = ["owner_kind"]
 [families.attachment.table_modules]
 attachment_manifest = "crates/lash-store-sql/src/attachment/manifest.rs"
 attachment_condemnations = "crates/lash-store-sql/src/attachment/condemnation.rs"
+attachment_blobs = "crates/lash-store-sql/src/attachment/blob.rs"
 
 [families.effect]
 tables = [
@@ -793,6 +800,48 @@ SQLite has already proven the absence under the write lock this insert commits
 under, so a conflict there is a defect and the constraint error is kept rather
 than swallowed.
 """
+
+[[dialect_only]]
+statement = "attachment_blob.upsert"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = """
+`attachment_blobs` is where a SQLite deployment keeps attachment bytes, in the
+session catalog beside the manifest that roots them. A PostgreSQL deployment
+takes an external attachment backend (S3 or a file store) at construction
+(ADR 0102) and has no such table, so every statement over it is SQLite-only by
+construction. This one stores a blob and restamps a repeated put.
+"""
+
+[[dialect_only]]
+statement = "attachment_blob.select_content"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = "Same table, same reason. The get path reads the bytes."
+
+[[dialect_only]]
+statement = "attachment_blob.select_ref"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = """
+Same table, same reason. The GC's delete-time freshness re-check reads one
+blob's stamp without its bytes.
+"""
+
+[[dialect_only]]
+statement = "attachment_blob.select_all_refs"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = """
+Same table, same reason. The GC's listing reads every blob's id and stamp
+without their bytes.
+"""
+
+[[dialect_only]]
+statement = "attachment_blob.delete_by_id"
+backends = ["sqlite"]
+kind = "table exists on one backend only"
+reason = "Same table, same reason. The GC's physical delete of one blob."
 
 # ---------------------------------------------------------------------------
 # effect family

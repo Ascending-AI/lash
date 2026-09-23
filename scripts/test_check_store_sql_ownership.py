@@ -406,8 +406,8 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         """
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
-            'tables = ["attachment_manifest", "attachment_condemnations"]',
-            'tables = ["attachment_condemnations"]',
+            'tables = ["attachment_manifest", "attachment_condemnations", "attachment_blobs"]',
+            'tables = ["attachment_condemnations", "attachment_blobs"]',
         )
         stray = (
             'const STRAY: &str = "SELECT 1 FROM lash_attachment_manifest '

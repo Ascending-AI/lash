@@ -13,6 +13,7 @@ use crate::scope_fence::Schema;
 #[test]
 fn every_rendered_statement_set_renders_for_every_layout() {
     let _ = crate::artifact_store::artifact_sql();
+    let _ = crate::attachment_store::attachment_blob_sql();
     let _ = crate::attachments::attachment_sql();
     let _ = crate::session_sql::session_sql();
     let _ = crate::turn_ingress::turn_ingress_sql();
