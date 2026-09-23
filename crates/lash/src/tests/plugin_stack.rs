@@ -269,14 +269,18 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
 #[test]
 fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -> Result<()> {
     run_async_test_on_stack_budget("tool-projection-stack-test", || async {
-        let projection = Arc::new(crate::plugins::ToolOutputBudgetPluginFactory::new(
-            crate::plugins::ToolOutputBudgetConfig {
-                mode: crate::plugins::ToolOutputBudgetMode::Bytes,
-                limit: 12,
-                max_lines: 4,
-                retain_full_output: false,
-            },
-        ));
+        let projection = Arc::new(
+            crate::plugins::ToolOutputBudgetPluginFactory::new(
+                crate::plugins::ToolOutputBudgetConfig {
+                    mode: crate::plugins::ToolOutputBudgetMode::Bytes,
+                    limit: 12,
+                    max_lines: 4,
+                    head_share_percent: 50,
+                    retain_full_output: false,
+                },
+            )
+            .expect("valid tool output budget config"),
+        );
         let observed_tool_results = Arc::new(TokioMutex::new(Vec::<String>::new()));
         let observed_tool_results_provider = Arc::clone(&observed_tool_results);
         let responses = Arc::new(TokioMutex::new(VecDeque::from([

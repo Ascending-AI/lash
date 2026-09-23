@@ -33,6 +33,11 @@ pub struct ToolOutputBudgetConfig {
     pub mode: ToolOutputBudgetMode,
     pub limit: usize,
     pub max_lines: usize,
+    /// Percentage of the retained budget given to the head of a truncated
+    /// output; the tail keeps the remainder. 50 splits evenly, 100 keeps only
+    /// the head, and 0 keeps only the tail. Values above 100 are refused when
+    /// the plugin factory is constructed.
+    pub head_share_percent: u8,
     /// `false` retains nothing beyond the truncated preview (today's default).
     /// When `true`, a truncated output's full text is retained once as a
     /// durable session attachment through the presentation boundary's journaled
@@ -46,15 +51,10 @@ impl Default for ToolOutputBudgetConfig {
             mode: ToolOutputBudgetMode::Bytes,
             limit: DEFAULT_TOOL_OUTPUT_BUDGET_LIMIT_BYTES,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            head_share_percent: 50,
             retain_full_output: false,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TruncationDirection {
-    Head,
-    Tail,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,16 +74,16 @@ impl TruncationUnit {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WindowedTruncation<'a> {
-    /// Maximum number of lines retained in the preview window.
+    /// Maximum number of lines retained across both preview windows.
     pub max_lines: usize,
-    /// Maximum number of bytes retained in the preview window.
+    /// Maximum number of bytes retained across both preview windows.
     pub max_bytes: usize,
-    /// Which end of the output to keep.
-    pub direction: TruncationDirection,
+    /// Percentage of the retained budget given to the head window.
+    pub head_share_percent: u8,
     /// The unit reported in the byte-budget truncation marker.
     pub unit: TruncationUnit,
-    /// Trailing hint text appended to (Head) / prepended to (Tail) the
-    /// preview, explaining the truncation and where the full output is.
+    /// Hint text emitted between the marker and the tail window, explaining
+    /// the truncation and where the full output is.
     pub hint: &'a str,
 }
 
@@ -91,6 +91,7 @@ pub(crate) struct WindowedTruncation<'a> {
 pub(crate) struct Budget {
     pub max_bytes: usize,
     pub max_lines: usize,
+    pub head_share_percent: u8,
     pub unit: TruncationUnit,
 }
 
@@ -106,6 +107,7 @@ impl Budget {
         Self {
             max_bytes,
             max_lines: config.max_lines,
+            head_share_percent: config.head_share_percent.min(100),
             unit,
         }
     }
@@ -123,15 +125,18 @@ impl From<ToolOutputBudgetConfig> for Budget {
     }
 }
 
-/// The canonical head/tail-window + byte-cap truncation core.
+/// The canonical head+tail-window + byte-cap truncation core.
 ///
 /// Returns `text` unchanged when it already fits within `max_lines` and
-/// `max_bytes`. Otherwise keeps a preview window from the configured end
-/// and wraps it with a `...N <unit> truncated...` marker plus the
-/// caller-supplied `hint`.
+/// `max_bytes`. Otherwise keeps a head and a tail preview window — split by
+/// `head_share_percent` — wrapped around a single
+/// `...N <unit> truncated...` marker plus the caller-supplied `hint`.
+/// Keeping both ends matters because failures cluster at the start of build
+/// output and at the end of test runs; no single direction is safe for
+/// every tool.
 ///
-/// A single line that is itself larger than `max_bytes` is truncated at
-/// a UTF-8 char boundary rather than dropped, so over-long lines never
+/// A line that is itself larger than its window's byte budget is truncated
+/// at a UTF-8 char boundary rather than dropped, so over-long lines never
 /// silently disappear and the function never panics on multi-byte text.
 pub(crate) fn truncate_windowed(text: &str, opts: &WindowedTruncation) -> String {
     let lines: Vec<&str> = text.lines().collect();
@@ -140,82 +145,111 @@ pub(crate) fn truncate_windowed(text: &str, opts: &WindowedTruncation) -> String
         return text.to_string();
     }
 
-    let mut preview_lines: Vec<String> = Vec::new();
-    let mut bytes = 0usize;
-    let mut hit_budget = false;
+    let share = usize::from(opts.head_share_percent.min(100));
+    let head_max_bytes = opts.max_bytes.saturating_mul(share) / 100;
+    let head_max_lines = opts.max_lines.saturating_mul(share) / 100;
 
-    let mut push_line = |line: &str, bytes: &mut usize, hit_budget: &mut bool| -> bool {
-        // `separator` accounts for the `\n` re-joined between lines; the
-        // first retained line carries no separator.
-        let separator = usize::from(!preview_lines.is_empty());
-        let remaining = opts.max_bytes.saturating_sub(*bytes + separator);
-        if line.len() + separator <= opts.max_bytes.saturating_sub(*bytes) {
-            preview_lines.push(line.to_string());
-            *bytes += line.len() + separator;
-            true
-        } else if preview_lines.is_empty() && remaining > 0 {
-            // A lone line longer than the whole budget: truncate it at a
-            // char boundary instead of dropping it entirely.
-            let cut = char_floor(line, remaining);
-            if cut == 0 {
-                *hit_budget = true;
-                return false;
-            }
-            preview_lines.push(line[..cut].to_string());
-            *bytes += cut;
-            *hit_budget = true;
-            false
-        } else {
-            *hit_budget = true;
-            false
-        }
-    };
+    let head = collect_window(
+        lines.iter().take(head_max_lines).copied(),
+        head_max_bytes,
+        End::Head,
+    );
+    let tail = collect_window(
+        lines
+            .iter()
+            .rev()
+            .take(opts.max_lines.saturating_sub(head_max_lines))
+            .copied(),
+        opts.max_bytes.saturating_sub(head_max_bytes),
+        End::Tail,
+    );
 
-    match opts.direction {
-        TruncationDirection::Head => {
-            for line in lines.iter().take(opts.max_lines) {
-                if !push_line(line, &mut bytes, &mut hit_budget) {
-                    break;
-                }
-            }
-        }
-        TruncationDirection::Tail => {
-            for line in lines.iter().rev().take(opts.max_lines) {
-                if !push_line(line, &mut bytes, &mut hit_budget) {
-                    break;
-                }
-            }
-            preview_lines.reverse();
-        }
-    }
+    let head_preview = head.lines.join("\n");
+    let tail_line_count = tail.lines.len();
+    let mut tail_lines = tail.lines;
+    tail_lines.reverse();
+    let tail_preview = tail_lines.join("\n");
 
-    let preview = preview_lines.join("\n");
-    let (removed, unit) = if hit_budget {
+    let retained_bytes = head_preview.len().saturating_add(tail_preview.len());
+    let removed_bytes = total_bytes.saturating_sub(retained_bytes);
+    let (removed, unit) = if head.hit_budget || tail.hit_budget {
         let removed = match opts.unit {
-            TruncationUnit::Bytes => {
-                u64::try_from(text.chars().count().saturating_sub(preview.chars().count()))
-                    .unwrap_or(u64::MAX)
-            }
-            TruncationUnit::Tokens => {
-                approx_tokens_from_byte_count(total_bytes.saturating_sub(preview.len()))
-            }
+            TruncationUnit::Bytes => u64::try_from(removed_bytes).unwrap_or(u64::MAX),
+            TruncationUnit::Tokens => approx_tokens_from_byte_count(removed_bytes),
         };
         (removed, opts.unit.label())
     } else {
-        (
-            u64::try_from(lines.len().saturating_sub(preview_lines.len())).unwrap_or(u64::MAX),
-            "lines",
-        )
+        let removed_lines = lines
+            .len()
+            .saturating_sub(head.lines.len())
+            .saturating_sub(tail_line_count);
+        (u64::try_from(removed_lines).unwrap_or(u64::MAX), "lines")
     };
-    let hint = opts.hint;
-    match opts.direction {
-        TruncationDirection::Head => {
-            format!("{preview}\n\n...{removed} {unit} truncated...\n\n{hint}")
-        }
-        TruncationDirection::Tail => {
-            format!("...{removed} {unit} truncated...\n\n{hint}\n\n{preview}")
+
+    let marker = truncation_marker(removed, unit);
+    [head_preview, marker, opts.hint.to_string(), tail_preview]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// One retained window of a truncated output.
+struct Window {
+    /// Retained lines in collection order (reversed for a tail window).
+    lines: Vec<String>,
+    /// Whether the byte budget, rather than the line cap, stopped the window.
+    hit_budget: bool,
+}
+
+/// Which end of the output a window collects from. Over-long lines are cut
+/// at a char boundary on the outer edge: a head window keeps the line's
+/// start, a tail window keeps its end.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum End {
+    Head,
+    Tail,
+}
+
+fn collect_window<'a>(lines: impl Iterator<Item = &'a str>, max_bytes: usize, end: End) -> Window {
+    let mut kept: Vec<String> = Vec::new();
+    let mut bytes = 0usize;
+    let mut hit_budget = false;
+    for line in lines {
+        // `separator` accounts for the `\n` re-joined between lines; the
+        // first retained line carries no separator.
+        let separator = usize::from(!kept.is_empty());
+        let remaining = max_bytes.saturating_sub(bytes + separator);
+        if line.len() + separator <= max_bytes.saturating_sub(bytes) {
+            kept.push(line.to_string());
+            bytes += line.len() + separator;
+        } else if kept.is_empty() && remaining > 0 {
+            // A lone line longer than the whole window budget: truncate it
+            // at a char boundary instead of dropping it entirely.
+            let kept_text = match end {
+                End::Head => &line[..char_floor(line, remaining)],
+                End::Tail => &line[char_ceil(line, line.len().saturating_sub(remaining))..],
+            };
+            if kept_text.is_empty() {
+                hit_budget = true;
+                break;
+            }
+            kept.push(kept_text.to_string());
+            hit_budget = true;
+            break;
+        } else {
+            hit_budget = true;
+            break;
         }
     }
+    Window {
+        lines: kept,
+        hit_budget,
+    }
+}
+
+fn truncation_marker(removed: u64, unit: &str) -> String {
+    format!("...{removed} {unit} truncated...")
 }
 
 /// Largest byte offset `<= max` that lands on a UTF-8 char boundary.
@@ -230,24 +264,44 @@ fn char_floor(text: &str, max: usize) -> usize {
     cut
 }
 
+/// Smallest byte offset `>= min` that lands on a UTF-8 char boundary.
+fn char_ceil(text: &str, min: usize) -> usize {
+    let mut cut = min;
+    while cut < text.len() && !text.is_char_boundary(cut) {
+        cut += 1;
+    }
+    cut
+}
+
 pub struct ToolOutputBudgetPluginFactory {
     budget: Budget,
     retain_full_output: bool,
 }
 
 impl ToolOutputBudgetPluginFactory {
-    pub fn new(config: ToolOutputBudgetConfig) -> Self {
+    pub fn new(config: ToolOutputBudgetConfig) -> Result<Self, PluginError> {
+        if config.head_share_percent > 100 {
+            return Err(PluginError::Registration(format!(
+                "tool_output_budget head_share_percent must be within 0..=100, got {}",
+                config.head_share_percent
+            )));
+        }
         let budget = Budget::from(&config);
-        Self {
+        Ok(Self {
             budget,
             retain_full_output: config.retain_full_output,
-        }
+        })
     }
 }
 
 impl Default for ToolOutputBudgetPluginFactory {
     fn default() -> Self {
-        Self::new(ToolOutputBudgetConfig::default())
+        // The built-in config is always valid, so construction cannot fail.
+        let config = ToolOutputBudgetConfig::default();
+        Self {
+            budget: Budget::from(&config),
+            retain_full_output: config.retain_full_output,
+        }
     }
 }
 
@@ -477,24 +531,14 @@ async fn project_text(
         return text.to_string();
     }
     let hint = truncation_hint(ctx, text, retain_full_output).await;
-    truncate_text_with_hint(
-        text,
-        budget,
-        tool_projection_direction(&ctx.tool_name),
-        hint,
-    )
+    truncate_text_with_hint(text, budget, hint)
 }
 
 fn needs_truncation(text: &str, budget: &Budget) -> bool {
     text.lines().count() > budget.max_lines || text.len() > budget.max_bytes
 }
 
-fn truncate_text_with_hint(
-    text: &str,
-    budget: &Budget,
-    direction: TruncationDirection,
-    hint: String,
-) -> String {
+fn truncate_text_with_hint(text: &str, budget: &Budget, hint: String) -> String {
     if text.is_empty() {
         return String::new();
     }
@@ -506,7 +550,7 @@ fn truncate_text_with_hint(
         &WindowedTruncation {
             max_lines: budget.max_lines,
             max_bytes: budget.max_bytes,
-            direction,
+            head_share_percent: budget.head_share_percent,
             unit: budget.unit,
             hint: &hint,
         },
@@ -515,26 +559,16 @@ fn truncate_text_with_hint(
 
 fn format_zero_budget_marker(unit: TruncationUnit, text: &str) -> String {
     let removed = match unit {
-        TruncationUnit::Bytes => u64::try_from(text.chars().count()).unwrap_or(u64::MAX),
+        TruncationUnit::Bytes => u64::try_from(text.len()).unwrap_or(u64::MAX),
         TruncationUnit::Tokens => approx_tokens_from_byte_count(text.len()),
     };
-    match unit {
-        TruncationUnit::Bytes => format!("…{removed} chars truncated…"),
-        TruncationUnit::Tokens => format!("…{removed} tokens truncated…"),
-    }
+    truncation_marker(removed, unit.label())
 }
 
 fn approx_tokens_from_byte_count(bytes: usize) -> u64 {
     let bytes = bytes as u64;
     bytes.saturating_add((APPROX_BYTES_PER_TOKEN as u64).saturating_sub(1))
         / (APPROX_BYTES_PER_TOKEN as u64)
-}
-
-fn tool_projection_direction(tool_name: &str) -> TruncationDirection {
-    match tool_name {
-        "exec_command" | "write_stdin" => TruncationDirection::Tail,
-        _ => TruncationDirection::Head,
-    }
 }
 
 /// The truncation hint: a tool-supplied `full_output_path` wins; with
@@ -808,45 +842,131 @@ mod tests {
     #[test]
     fn windowed_truncation_truncates_over_long_single_line_instead_of_dropping_it() {
         // A single line longer than the whole byte budget must be cut at a
-        // char boundary, not dropped (which would leave an empty preview).
+        // char boundary on both ends, not dropped.
         let line = "x".repeat(1000);
         let got = truncate_windowed(
             &line,
             &WindowedTruncation {
                 max_lines: 400,
                 max_bytes: 64,
-                direction: TruncationDirection::Head,
+                head_share_percent: 50,
                 unit: TruncationUnit::Bytes,
                 hint: "hint",
             },
         );
-        let preview = got.split("\n\n...").next().expect("preview");
-        assert!(!preview.is_empty(), "preview must not be empty: {got:?}");
-        assert!(preview.len() <= 64);
-        assert!(preview.chars().all(|c| c == 'x'));
+        let head = got.split("\n\n...").next().expect("head preview");
+        let tail = got.rsplit("\n\n").next().expect("tail preview");
+        assert_eq!(head.len(), 32, "head gets half the budget: {got:?}");
+        assert_eq!(tail.len(), 32, "tail gets the other half: {got:?}");
         assert!(got.contains("bytes truncated"));
     }
 
     #[test]
     fn windowed_truncation_never_splits_a_multibyte_char() {
-        // Budget lands mid-way through a 3-byte char; must back off to a
-        // boundary rather than panic or emit invalid UTF-8.
+        // Both budgets land mid-way through a 3-byte char; each window must
+        // back off to a boundary rather than panic or emit invalid UTF-8.
         let line = "★".repeat(100); // each '★' is 3 bytes
         let got = truncate_windowed(
             &line,
             &WindowedTruncation {
                 max_lines: 400,
-                max_bytes: 10, // not a multiple of 3
-                direction: TruncationDirection::Head,
+                max_bytes: 10, // 5 bytes per window, not a multiple of 3
+                head_share_percent: 50,
                 unit: TruncationUnit::Bytes,
                 hint: "hint",
             },
         );
-        let preview = got.split("\n\n...").next().expect("preview");
-        assert!(!preview.is_empty());
-        assert!(preview.chars().all(|c| c == '★'));
-        assert_eq!(preview.len() % 3, 0, "must cut on a char boundary");
-        assert!(preview.len() <= 10);
+        let head = got.split("\n\n...").next().expect("head preview");
+        let tail = got.rsplit("\n\n").next().expect("tail preview");
+        for (name, window) in [("head", head), ("tail", tail)] {
+            assert!(!window.is_empty(), "{name} must not be empty: {got:?}");
+            assert!(
+                window.chars().all(|c| c == '★'),
+                "{name} keeps only whole chars: {got:?}"
+            );
+            assert_eq!(
+                window.len() % 3,
+                0,
+                "{name} must cut on a char boundary: {got:?}"
+            );
+            assert!(window.len() <= 5);
+        }
+    }
+
+    #[test]
+    fn windowed_truncation_keeps_both_ends_around_one_marker() {
+        // Failures cluster at the start of builds and at the end of test
+        // runs; either error line must survive regardless of tool name.
+        let text = "error: first failure is at the top\n".to_string()
+            + &"ok\n".repeat(50)
+            + "test result: FAILED";
+        let got = truncate_windowed(
+            &text,
+            &WindowedTruncation {
+                max_lines: 4,
+                max_bytes: 80,
+                head_share_percent: 50,
+                unit: TruncationUnit::Bytes,
+                hint: "hint",
+            },
+        );
+        assert_eq!(
+            got.matches("truncated").count(),
+            1,
+            "exactly one marker: {got}"
+        );
+        assert!(got.contains("error: first failure is at the top"), "{got}");
+        assert!(got.contains("test result: FAILED"), "{got}");
+    }
+
+    #[test]
+    fn windowed_truncation_marker_counts_the_real_omitted_amount() {
+        let text = "a".repeat(100);
+        let got = truncate_windowed(
+            &text,
+            &WindowedTruncation {
+                max_lines: 400,
+                max_bytes: 40,
+                head_share_percent: 50,
+                unit: TruncationUnit::Bytes,
+                hint: "hint",
+            },
+        );
+        assert!(got.contains("...60 bytes truncated..."), "{got}");
+    }
+
+    #[test]
+    fn windowed_truncation_head_share_zero_keeps_tail_only() {
+        let text = "start\n".to_string() + &"filler\n".repeat(20) + "end";
+        let got = truncate_windowed(
+            &text,
+            &WindowedTruncation {
+                max_lines: 2,
+                max_bytes: 1024,
+                head_share_percent: 0,
+                unit: TruncationUnit::Bytes,
+                hint: "hint",
+            },
+        );
+        assert!(got.ends_with("end"), "{got}");
+        assert!(!got.contains("start"), "{got}");
+    }
+
+    #[test]
+    fn windowed_truncation_head_share_hundred_keeps_head_only() {
+        let text = "start\n".to_string() + &"filler\n".repeat(20) + "end";
+        let got = truncate_windowed(
+            &text,
+            &WindowedTruncation {
+                max_lines: 2,
+                max_bytes: 1024,
+                head_share_percent: 100,
+                unit: TruncationUnit::Bytes,
+                hint: "hint",
+            },
+        );
+        assert!(got.starts_with("start"), "{got}");
+        assert!(!got.contains("\nend"), "{got}");
     }
 
     #[test]
@@ -857,7 +977,7 @@ mod tests {
             &WindowedTruncation {
                 max_lines: 400,
                 max_bytes: 1024,
-                direction: TruncationDirection::Head,
+                head_share_percent: 50,
                 unit: TruncationUnit::Bytes,
                 hint: "hint",
             },
@@ -871,6 +991,7 @@ mod tests {
             mode: ToolOutputBudgetMode::Tokens,
             limit: 5,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            head_share_percent: 50,
             retain_full_output: false,
         };
         let got = project_text(
@@ -919,6 +1040,7 @@ mod tests {
             mode: ToolOutputBudgetMode::Bytes,
             limit: 4,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            head_share_percent: 50,
             retain_full_output: true,
         };
 
@@ -947,6 +1069,7 @@ mod tests {
         );
         let config = ToolOutputBudgetConfig {
             limit: 512,
+            head_share_percent: 50,
             retain_full_output: true,
             ..ToolOutputBudgetConfig::default()
         };
@@ -978,6 +1101,7 @@ mod tests {
             mode: ToolOutputBudgetMode::Bytes,
             limit: 40,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            head_share_percent: 50,
             retain_full_output: false,
         };
         let projected = present_tool_result(
@@ -1093,23 +1217,25 @@ mod tests {
             mode: ToolOutputBudgetMode::Bytes,
             limit: 0,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            head_share_percent: 50,
             retain_full_output: false,
         };
         let token_config = ToolOutputBudgetConfig {
             mode: ToolOutputBudgetMode::Tokens,
             limit: 0,
             max_lines: DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            head_share_percent: 50,
             retain_full_output: false,
         };
         let ctx = test_context("read_file", json!({}), json!("unused"));
 
         let byte_result =
             project_text("hello world", &Budget::from(&byte_config), &ctx, false).await;
-        assert_eq!(byte_result, "…11 chars truncated…");
+        assert_eq!(byte_result, "...11 bytes truncated...");
 
         let token_result =
             project_text("hello world", &Budget::from(&token_config), &ctx, false).await;
-        assert_eq!(token_result, "…3 tokens truncated…");
+        assert_eq!(token_result, "...3 tokens truncated...");
     }
 
     #[tokio::test]
@@ -1119,12 +1245,14 @@ mod tests {
             mode: ToolOutputBudgetMode::Tokens,
             limit: 10,
             max_lines: 100,
+            head_share_percent: 50,
             retain_full_output: false,
         };
         let byte_config = ToolOutputBudgetConfig {
             mode: ToolOutputBudgetMode::Bytes,
             limit: 40,
             max_lines: 100,
+            head_share_percent: 50,
             retain_full_output: false,
         };
 
@@ -1168,18 +1296,79 @@ mod tests {
         assert_ne!(byte_boundary_projected, boundary_text);
         assert_ne!(token_boundary_projected, boundary_text);
 
-        // Text exceeding budget (100 bytes): preview portion must be identical
+        // Text exceeding budget (100 bytes): preview portions must be identical
         let long_text = "a".repeat(100);
         let byte_projected = project_text(&long_text, &byte_budget, &ctx, false).await;
         let token_projected = project_text(&long_text, &token_budget, &ctx, false).await;
 
-        let byte_preview = byte_projected.split("\n\n...").next().expect("preview");
-        let token_preview = token_projected.split("\n\n...").next().expect("preview");
-        assert_eq!(byte_preview, token_preview);
-        assert_eq!(byte_preview.len(), 40);
+        let byte_head = byte_projected.split("\n\n...").next().expect("head");
+        let token_head = token_projected.split("\n\n...").next().expect("head");
+        assert_eq!(byte_head, token_head);
+        assert_eq!(byte_head.len(), 20);
+        let byte_tail = byte_projected.rsplit("\n\n").next().expect("tail");
+        let token_tail = token_projected.rsplit("\n\n").next().expect("tail");
+        assert_eq!(byte_tail, token_tail);
+        assert_eq!(byte_tail.len(), 20);
 
         assert!(byte_projected.contains("...60 bytes truncated..."));
         // 60 bytes / 4 = 15 tokens
         assert!(token_projected.contains("...15 tokens truncated..."));
+    }
+
+    #[test]
+    fn factory_refuses_a_head_share_above_100_percent() {
+        let config = ToolOutputBudgetConfig {
+            head_share_percent: 101,
+            ..ToolOutputBudgetConfig::default()
+        };
+        let error = ToolOutputBudgetPluginFactory::new(config)
+            .err()
+            .expect("head_share_percent above 100 must be refused");
+        assert!(error.to_string().contains("head_share_percent"), "{error}");
+
+        for share in [0u8, 50, 100] {
+            assert!(
+                ToolOutputBudgetPluginFactory::new(ToolOutputBudgetConfig {
+                    head_share_percent: share,
+                    ..ToolOutputBudgetConfig::default()
+                })
+                .is_ok(),
+                "share {share} must be accepted"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn truncated_output_keeps_failure_lines_at_both_ends() {
+        // A failure at the end of a long run must survive the same way a
+        // failure at the start does, for any tool name.
+        let tail_failure = "Compiling crate v1\n".to_string()
+            + &"Checking dep\n".repeat(60)
+            + "error[E0308]: mismatched types";
+        let head_failure = "error: cannot find -lssl\n".to_string() + &"ok\n".repeat(60);
+        let budget = Budget::from(&ToolOutputBudgetConfig {
+            mode: ToolOutputBudgetMode::Bytes,
+            limit: 120,
+            max_lines: 6,
+            head_share_percent: 50,
+            retain_full_output: false,
+        });
+        let ctx = test_context("run", json!({}), json!("unused"));
+
+        let tail_projected = project_text(&tail_failure, &budget, &ctx, false).await;
+        assert!(
+            tail_projected.contains("error[E0308]: mismatched types"),
+            "{tail_projected}"
+        );
+        assert!(
+            tail_projected.contains("Compiling crate v1"),
+            "{tail_projected}"
+        );
+
+        let head_projected = project_text(&head_failure, &budget, &ctx, false).await;
+        assert!(
+            head_projected.contains("error: cannot find -lssl"),
+            "{head_projected}"
+        );
     }
 }
