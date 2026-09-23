@@ -120,6 +120,8 @@ def select(paths: list[str], gates: dict[str, list[list[str]]]) -> tuple[list[st
         "scripts/dev-test.py": "scripts/test_dev_test.py",
         "scripts/gate_scope.py": "scripts/test_gate_scope.py",
         "tools/bazel/test_batch_runner.sh": "scripts/test_test_batch_runner.py",
+        "tools/bazel/junit_xml.py": "scripts/test_test_xml.py",
+        "tools/bazel/test_xml_runner.sh": "scripts/test_test_xml.py",
     }
     for name in paths:
         path = Path(name)

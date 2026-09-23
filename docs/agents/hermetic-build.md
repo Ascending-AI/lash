@@ -64,6 +64,14 @@ Batch labels forward libtest arguments to every member. Explicit arguments print
 member output, including `--list`; a filter matching no tests across the batch
 fails explicitly. Use a direct member label to avoid starting unrelated binaries.
 
+Every test action writes its own JUnit report to `$XML_OUTPUT_FILE`: `.bazelrc`
+runs each test under `//tools/bazel:test_xml_runner`, which records the test's
+output and writes one case per libtest `test ... ok|FAILED|ignored` line, and a
+batch writes one suite per member. A test that leaves the file unwritten costs
+a second TestRunner spawn (`generate-xml.sh`) carrying the test's whole run
+request, so passing your own `--run_under` (a debugger, say) brings that spawn
+back for that run.
+
 The lower-level entry script remains available for graph analysis, sync, local
 executor reproduction, and focused Bazel labels.
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 
 RUNNER = Path(__file__).resolve().parents[1] / "tools/bazel/test_batch_runner.sh"
@@ -37,12 +38,15 @@ class BatchRunnerTests(unittest.TestCase):
                 member.chmod(0o755)
             manifest = root / "manifest"
             manifest.write_text("_main/first\n_main/second\n")
+            xml = root / "test.xml"
             result = subprocess.run(
                 ["bash", str(RUNNER), *args], text=True, capture_output=True, timeout=10,
                 env=dict(os.environ, TEST_SRCDIR=tmp, TEST_WORKSPACE="_main",
                          TEST_TMPDIR=str(logs), LASH_BATCH_MANIFEST=str(manifest),
+                         XML_OUTPUT_FILE=str(xml),
                          **({"LASH_BATCH_JOBS": jobs} if jobs is not None else {})),
             )
+            self.report = ET.parse(xml).getroot() if xml.exists() else None
             if result.returncode != 0 and not (logs / "first.args").exists():
                 return result, None
             observed = [json.loads((logs / (name + ".args")).read_text()) for name in ("first", "second")]
@@ -79,6 +83,18 @@ class BatchRunnerTests(unittest.TestCase):
         self.assertNotEqual(failed.returncode, 0)
         self.assertIn("member-output second", failed.stderr)
 
+    def test_report_has_one_suite_per_member_with_its_outcome(self):
+        self.invoke(failing=True)
+        suites = {suite.get("name"): suite for suite in self.report}
+        self.assertEqual(list(suites), ["first", "second"])
+        self.assertEqual(suites["first"].get("errors"), "0")
+        self.assertEqual(suites["second"].get("errors"), "1")
+        self.assertEqual(
+            suites["second"].find("testcase/error").get("message"),
+            "exited with error code 7",
+        )
+        self.assertIn("member-output second", suites["second"].find("system-out").text)
+
     def test_concurrency_comes_from_the_rule_not_the_host(self):
         for jobs in (None, "0", "two"):
             with self.subTest(jobs=jobs):
@@ -109,7 +125,7 @@ class BatchRunnerTests(unittest.TestCase):
                 ["bash", str(RUNNER)], text=True, capture_output=True, timeout=20,
                 env=dict(os.environ, TEST_SRCDIR=tmp, TEST_WORKSPACE="_main",
                          TEST_TMPDIR=str(logs), LASH_BATCH_MANIFEST=str(manifest),
-                         LASH_BATCH_JOBS="2"),
+                         LASH_BATCH_JOBS="2", XML_OUTPUT_FILE=str(root / "test.xml")),
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             running = peak = 0

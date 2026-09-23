@@ -91,6 +91,15 @@ test:shared --remote_download_outputs=toplevel
 test:shared --test_output=errors
 test --cache_test_results=yes
 
+# Every test action writes its own JUnit report. A test that leaves
+# $XML_OUTPUT_FILE unwritten costs a second TestRunner spawn (`generate-xml.sh`)
+# that carries the test's whole run request for 0.1 s of work and queues for a
+# pool slot again: 3,679 of them in 16 h on one dev box, up to 106 s at p90 per
+# CI leg. `tools/bazel/test_xml.bzl` explains the prefix. A `--run_under` given
+# on the command line (a debugger, say) replaces it, and Bazel then writes the
+# report in that extra spawn as before.
+test --run_under=//tools/bazel:test_xml_runner
+
 # Local execution remains available for CI, bootstrap, and reproduction.
 build:local --spawn_strategy=local
 test:local --test_output=errors

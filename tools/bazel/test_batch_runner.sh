@@ -2,7 +2,8 @@
 # Batch runner for lash_batch_test (FIG-3365). The manifest lists one
 # runfiles-relative path per member test binary; at most LASH_BATCH_JOBS run
 # at once, each with its output captured to its own log, and the action fails
-# iff any member fails, printing every failing log in full.
+# iff any member fails, printing every failing log in full. The batch writes
+# its own JUnit report, one suite per member (`junit_xml.py`).
 #
 # Bazel test actions execute with the runfiles root as cwd, which is the cwd
 # each member rust_test would have had alone. INSTA_WORKSPACE_ROOT matches the
@@ -10,6 +11,8 @@
 set -uo pipefail
 
 export INSTA_WORKSPACE_ROOT=.
+junit_xml="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/junit_xml.py"
+xml=${XML_OUTPUT_FILE:?the Bazel test runner sets XML_OUTPUT_FILE}
 cd "${TEST_SRCDIR:?}/${TEST_WORKSPACE:?}"
 
 logs="${TEST_TMPDIR:-$(mktemp -d)}/batch-logs"
@@ -34,10 +37,14 @@ done
 declare -a pids=()
 declare -a names=()
 run_member() {
-    local rloc="$1" name
+    local rloc="$1" name started code elapsed
     name="$(basename "$rloc")"
+    started=${EPOCHREALTIME/./}
     "$TEST_SRCDIR/$rloc" "${args[@]}" >"$logs/$name.log" 2>&1
-    echo "$? $rloc" >> "$logs/status"
+    code=$?
+    elapsed=$((${EPOCHREALTIME/./} - started))
+    printf '%d %d.%03d %s\n' "$code" $((elapsed / 1000000)) \
+        $((elapsed % 1000000 / 1000)) "$rloc" >> "$logs/status"
 }
 
 while IFS= read -r rloc; do
@@ -55,10 +62,24 @@ wait
 total=${#names[@]}
 failures=()
 if [ -f "$logs/status" ]; then
-    while IFS=' ' read -r code rloc; do
+    while IFS=' ' read -r code _ rloc; do
         [ "$code" = "0" ] || failures+=("$rloc")
     done < "$logs/status"
 fi
+
+# One suite per member, in manifest order. A member with no status line never
+# reported an exit code.
+report=()
+for rloc in "${names[@]}"; do
+    code="?" seconds=0
+    if [ -f "$logs/status" ]; then
+        while IFS=' ' read -r c s r; do
+            [ "$r" = "$rloc" ] && code=$c seconds=$s
+        done < "$logs/status"
+    fi
+    report+=("${rloc#_main/}" "$code" "$seconds" "$logs/$(basename "$rloc").log")
+done
+python3 "$junit_xml" "$xml" "${report[@]}"
 
 # A member that never wrote a status line died before its exit was recorded
 # (kill -9, harness abort). Count it as failed.
