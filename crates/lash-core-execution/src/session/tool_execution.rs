@@ -586,6 +586,10 @@ mod group;
 #[path = "tool_execution/turn_cancel_gate_tests.rs"]
 mod turn_cancel_gate_tests;
 
+#[cfg(test)]
+#[path = "tool_execution/scalar_presentation_tests.rs"]
+mod scalar_presentation_tests;
+
 impl RuntimeExecutionContext<'_> {
     async fn emit_tool_call_started(
         &self,
