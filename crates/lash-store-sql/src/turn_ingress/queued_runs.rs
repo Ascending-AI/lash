@@ -33,7 +33,11 @@ crate::statements! {
             SET state = ?3, claim_id = NULL, claim_owner_id = NULL,
                 claim_owner_incarnation_id = NULL, claim_token = NULL, claim_session_lease_generation = 0
             WHERE session_id = ?1 AND {{nonterminal_turn_input_state(state)}}
-              AND input_id IN (SELECT member_id FROM queued_run_members WHERE session_id = ?1 AND scope_id = ?2 AND member_kind = 'input')";
+              AND input_id IN (SELECT member_id FROM queued_run_members WHERE session_id = ?1 AND scope_id = ?2 AND member_kind = 'input')
+              AND NOT ({{deferred_next_turn_turn_input_state(state)}} AND input_id IN (
+                  SELECT member_id FROM queued_run_members
+                  WHERE session_id = ?1 AND scope_id = ?2 AND member_kind = 'input' AND collection_kind = 'assigned'
+              ))";
         delete_items = "DELETE FROM queued_work_items WHERE batch_id IN
             (SELECT member_id FROM queued_run_members WHERE session_id = ?1 AND scope_id = ?2 AND member_kind = 'batch')";
         delete_batches = "DELETE FROM queued_work_batches WHERE session_id = ?1 AND

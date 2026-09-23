@@ -151,6 +151,8 @@ macro_rules! runtime_persistence_tests {
             (queued_run_advance_rejects_unassigned_members_but_keeps_checkpoint_claims, "queued-run-provenance"),
             (queued_run_active_turn_member_reclaims_after_lane_rotation, "queued-run-active-reclaim"),
             (queued_run_repaired_checkpoint_input_remains_deferred_after_settle, "queued-run-repaired-input"),
+            (queued_run_advance_repair_survives_later_terminal_settlement, "queued-run-advance-repair-runtime"),
+            (queued_run_advance_repair_survives_host_terminal_settlement, "queued-run-advance-repair-host"),
             (queued_run_continuation_commits_outbox_and_retains_receipts, "queued-run-continuation"),
             (queued_run_exact_selection_never_commits_a_partial_claim, "queued-run-exact"),
             (queued_run_terminal_disposition_preserves_unassigned_work, "queued-run-disposition"),
@@ -1247,7 +1249,6 @@ macro_rules! effect_controller_replay_tests {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
                 let (_fixture_guard, make) = $fixture;
-                let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }

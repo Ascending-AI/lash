@@ -573,7 +573,12 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
                     && members.contains(&&QueuedRunMember::Input(entry.input.input_id.clone()))
             })
         {
-            if !entry.input.state.is_terminal() {
+            if !entry.input.state.is_terminal()
+                && !(entry.input.state == crate::TurnInputState::DeferredNextTurn
+                    && run
+                        .assigned_members
+                        .contains(&QueuedRunMember::Input(entry.input.input_id.clone())))
+            {
                 entry.input.state = crate::TurnInputState::Cancelled(entry.input.state.ingress());
                 entry.claim.release();
             }
