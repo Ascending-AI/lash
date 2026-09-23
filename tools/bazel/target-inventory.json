@@ -19814,12 +19814,11 @@
         },
         {
           "cargo": "integration",
-          "cargo_only": "the no-abort stress binary runs 43 s; too slow for the developer loop, still in the PR Bazel partition",
+          "cargo_only": "the no-abort stress binary runs 43 s; too slow for the developer loop; the merge group runs it in the Bazel tail",
           "kind": "test",
           "label": "//crates/lash-typescript:integration__test",
           "tags": [
-            "dev-deferred",
-            "no-remote-exec"
+            "dev-deferred"
           ]
         }
       ],

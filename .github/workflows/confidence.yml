@@ -40,7 +40,8 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.lane != 'full' }}
 
     steps:
-      - name: Check out repository
+      - &checkout
+        name: Check out repository
         env:
           CHECKOUT_TOKEN: ${{ github.token }}
         run: |
@@ -98,30 +99,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -167,30 +145,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -239,30 +194,7 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -308,30 +240,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -376,30 +285,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -444,30 +330,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -512,30 +375,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 100
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -586,30 +426,7 @@ jobs:
     # and a mutant set that shifts toward timeouts costs more, so 30% margin.
     timeout-minutes: 160
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -658,30 +475,7 @@ jobs:
     # restoring the shared build.
     timeout-minutes: 160
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -791,30 +585,7 @@ jobs:
             shard: 4
             shards: 4
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -874,30 +645,7 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
@@ -941,30 +689,7 @@ jobs:
     timeout-minutes: 5
     needs: [confidence, confidence-build, confidence-harnesses, confidence-generated, confidence-minimizer, confidence-backends, confidence-coverage, confidence-mutation-core, confidence-mutation-sim, confidence-mutation-authority, confidence-mutation-packages, sim-search]
     steps:
-      - name: Check out repository
-        env:
-          CHECKOUT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git config gc.auto 0
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
-          export GIT_CONFIG_COUNT=1
-          export GIT_CONFIG_KEY_0=http.extraheader
-          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
-          # Bounded and retried: a fetch that hangs used to hold the runner until the
-          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
-          for attempt in 1 2 3; do
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
-              break
-            fi
-            [ "${attempt}" -lt 3 ] || exit 1
-            echo "::warning::git fetch attempt ${attempt} failed; retrying"
-            sleep $((attempt * 5))
-          done
-          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
-          git checkout --detach --force FETCH_HEAD
+      - *checkout
 
       - name: Validate every confidence producer and consumer
         env:

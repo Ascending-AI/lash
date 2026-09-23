@@ -46,6 +46,11 @@ TEST_RUN_SIZES = {
     "agent-workbench/agent_workbench": {"cpu_count": 8, "memory_kb": TEST_MEMORY_FLOOR_KB},
     "lash-internal-core/lash_core": {"cpu_count": 8, "memory_kb": 6815744},
     "lash-internal-restate/lash_restate": {"cpu_count": 8, "memory_kb": TEST_MEMORY_FLOOR_KB},
+    # The no-abort stress binary forks a dozen children that each parse
+    # deliberately deep sources up to the stack bound. Measured 2026-09-23 as
+    # one cgroup at four test threads: 7612 MiB peak, 2.6 cores over 37 s.
+    # Sized by the compile table's rule, peak x 1.5 rounded up to 512 MiB.
+    "lash-internal-typescript/integration": {"cpu_count": TEST_CPU_FLOOR, "memory_kb": 12058624},
     "lash-runtime/lash": {"cpu_count": 8, "memory_kb": TEST_MEMORY_FLOOR_KB},
 }
 # `//crates/lash-sim:lash-sim__unit_test` packs the whole simulation suite into
@@ -368,18 +373,17 @@ def cargo_test_policy(
             " Bazel partition"
         )
     if package_name == "lash-internal-typescript" and kind == "test":
-        # Partition-owned, but not remotely executable: the no-abort guarantee
-        # forks a dozen children that each parse deliberately deep sources
-        # right up to the stack bound, and their combined footprint exceeds any
-        # single-action memory budget the pool grants -- re-measured against
-        # the raised floor, `the_abort_corpus_survives_without_the_preflight`
-        # and `fuzzed_sources_survive_without_the_preflight` still die of
-        # `signal: 9 (SIGKILL)`. The same label passes locally in 43 s. Pin the
-        # placement rather than soften what the test proves.
-        tags.extend(["no-remote-exec", "dev-deferred"])
+        # The no-abort guarantee forks a dozen children that each parse
+        # deliberately deep sources right up to the stack bound. At the 4 GiB
+        # test floor `the_abort_corpus_survives_without_the_preflight` and
+        # `fuzzed_sources_survive_without_the_preflight` died of SIGKILL, so the
+        # label used to be pinned to the runner with `no-remote-exec`, where it
+        # ran on every CI leg (about 70 s of the tail's local time). The run is
+        # sized in TEST_RUN_SIZES now and executes on the pool like any other.
+        tags.append("dev-deferred")
         reasons.append(
             "the no-abort stress binary runs 43 s; too slow for the developer"
-            " loop, still in the PR Bazel partition"
+            " loop; the merge group runs it in the Bazel tail"
         )
     if package_name == "lash-regress" and target_name == "unicodesets":
         tags.append("pr-deferred")

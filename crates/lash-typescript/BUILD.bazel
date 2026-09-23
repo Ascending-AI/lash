@@ -64,7 +64,7 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "12058624"},
     extra_compile_data = [
         "//examples:codemode_parity_cells",
         "//:workflow_graph_schema",
@@ -76,7 +76,6 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [
         "dev-deferred",
-        "no-remote-exec",
     ],
     version = "0.0.0-dev",
 )
