@@ -34,7 +34,7 @@ true + true
 [] + {}
 1 + []
 1 + {}
-{}
+`${{}}`
 [1,2] + 3
 'a' + undefined
 'a' + null

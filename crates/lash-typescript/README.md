@@ -404,13 +404,6 @@ language semantics:
   appended during a callback are visited, while entries deleted before their
   turn are skipped. Deleting and reinserting a Map key or Set value schedules
   it at the tail; URLSearchParams retains its WHATWG list-index behavior.
-- A block-scoped binding whose name shadows one already in scope is lowered to
-  a generated slot, so that the inner binding cannot overwrite the outer one.
-  At root that slot is a runtime global, which makes it the one place a
-  `__typescript_` name appears in persisted session state. It is dead by any
-  turn boundary and the dialect filters the reserved prefix out of the
-  bound-variables prompt, so it is never shown; a block binding that shadows
-  nothing keeps the name its author wrote.
 - URL parsing is backed by exactly `url` 2.5.8. Unicode IDNA hosts are accepted
   only where that parser matches the pinned Node/WPT oracle, including ordinary
   Unicode-to-punycode conversion. Four known backing-version gaps fail closed
@@ -426,8 +419,67 @@ language semantics:
   string. Invalid relative/absolute input rejects as `TS_URL_PARSE_ERROR` and
   directs the author to add an absolute URL or a valid base.
 
+The session deviations below are where a *sequence* of cells departs from
+successive classic Scripts in one realm, the reference the Node session oracle
+runs (`tests/differential/sessions/`). Each is named by the slug the session
+corpus cites:
+
+- `closure-boundary`: a binding whose value reaches a function — a function
+  declaration, an arrow, an array or object holding one — does not survive
+  its cell ([ADR 0076](../../docs/adr/0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
+  a function's index is only meaningful inside the program that compiled it,
+  so a later cell finds the name unbound, where Node still holds the function.
+  A closure used within its own cell, capturing earlier cells' globals, is
+  exact.
+- `cross-cell-redeclaration`: a cell's top-level declaration may rebind a name
+  an earlier cell declared, whatever either declaration's kind. ECMA-262's
+  GlobalDeclarationInstantiation throws a `SyntaxError` for `let`/`const` over
+  any earlier binding and for `var` over an earlier lexical one; the dialect
+  follows the REPL rule instead (V8's REPL mode, which a model's prior of a
+  console session expects), because a cell re-running `const result = ...` is
+  the ordinary shape of iterating on a session.
+- `global-object-aliases-lexical-bindings`: the session has one namespace.
+  `globalThis.name` reads and writes the session slot of a top-level `let` or
+  `const` of that name, where ECMA-262 keeps a global lexical binding apart
+  from a global object property, so `globalThis.x = 2` beside `let x = 1`
+  leaves `x` reading `1` in Node and `2` here. `var` and function declarations
+  alias the global object in both.
+- `runtime-fault-brand`: a fault the VM raises — reading a member of `null`,
+  calling a non-function — is an `Error` branded `RuntimeError`, with its
+  typed code on `cause` ([ADR 0062](../../docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md)),
+  not the ECMA class (`TypeError`) Node throws. `instanceof Error` holds;
+  `instanceof TypeError` does not. An error the program or a builtin throws
+  keeps its own class.
+- `process-literal-is-a-process-value`: a top-level `const`-bound uncalled
+  `async` arrow is a `Process` value
+  ([ADR 0095](../../docs/adr/0095-processes-are-values-and-process-controls-are-tools.md)):
+  `typeof` answers `"object"`, not `"function"`, and the value is the
+  process's durable reference, which survives its cell.
+
 No other semantic deviation is intentionally accepted for an operation in the
 surface below.
+
+## Open conformance defects
+
+The Node oracles found these divergences (FIG-3599). They are defects, not
+rulings: each corpus row that shows one states the current wrong answer, and
+the row fails once the defect is fixed, until it is promoted to an ordinary
+row. They are listed here so no divergence is silent while its fix is owed.
+
+- `mutable-capture-read`: a closure captures a `let` by value, so a closure
+  created before the binding is reassigned reads the old value; Node reads the
+  current one. Register entry 5 of ADR 0062 promises a rejection on the read
+  path as well as the write path; only the write path is refused.
+- `exotic-session-globals`: a top-level binding holding a `Map`, `Set`,
+  `Date`, `RegExp`, `URL` or `URLSearchParams` is live in the session's
+  runtime roots but absent from its host view, and a later cell links against
+  the view, so the name is refused as unknown (`TS_UNKNOWN_BINDING`); the RLM
+  snapshot also persists only the view, so such a binding would not survive a
+  reload even if it linked.
+- `durable-key-order`: the durable snapshot encodes records with sorted keys,
+  so after a reload an object's property order is alphabetical rather than
+  its insertion order, and `JSON.stringify`, `Object.keys` and `for...in`
+  answer differently than before the reload.
 
 ## Syntax, iteration, and Node traps
 
@@ -656,10 +708,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 546 rows, of which 473 are distinct
+The Node differential table carries 561 rows, of which 488 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of those 473 unique expressions rather than of all 546 rows. Every count in
+that of those 488 unique expressions rather than of all 561 rows. Every count in
 this paragraph is pinned against the table by
 `committed_row_counts_match_the_register`, and the generator pins each lane's
 own row count, so neither this paragraph nor a lane can drift from the corpus in

@@ -1,0 +1,61 @@
+# The Node differential oracle's dispositions: every expression the dialect
+# rejects statically (`reject`) or at run time (`runtime-reject`), with the
+# diagnostic it must name. Every other expression is `accept`. `generate.mjs`
+# reads this file, and `differential_oracle.rs` holds the table to it, so a
+# disposition cannot change in the table without changing here, where the
+# regeneration reads it.
+# expression (JSON)	disposition	diagnostic
+"'ab'.map((x) => x)"	reject	TS_METHOD_UNSUPPORTED
+"(1, 2)"	reject	TS_SEQUENCE_UNSUPPORTED
+"null ?? 1 || 2"	reject	TS_SYNTAX_ERROR
+"'\\uD800'"	reject	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
+"/a/d"	reject	TS_REGEX_INDICES_FLAG_UNSUPPORTED
+"/a/v"	reject	TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED
+"new RegExp(/a/g)"	reject	TS_NEW_UNSUPPORTED
+# Splitting an astral character into units would manufacture a lone
+# surrogate, which the UTF-8 value model cannot represent. This is the
+# existing shape-dependent runtime rejection, not a withdrawn method.
+"'\\uD83D\\uDE00'.split('')"	runtime-reject	TS_LONE_SURROGATE_UNSUPPORTED
+"(() => { const a = [1]; a[3] = 9; return `${a.length}|${a[1]}|${a[2]}|${a[3]}`; })()"	runtime-reject	TS_SPARSE_ARRAY_UNSUPPORTED
+"(() => { const a = [1,2]; a[-1] = 9; return a[-1]; })()"	runtime-reject	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
+"'\\uD83D\\uDE00'[0]"	runtime-reject	TS_LONE_SURROGATE_UNSUPPORTED
+"(() => /./.exec('😀')[0])()"	runtime-reject	TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED
+# Node's `JSON.parse` creates `__proto__` as an ordinary own data property.
+# This value model has no prototype chain, so every read of that name already
+# refused; the key is now refused where the value enters instead, so a parsed
+# object can never hold a key that `Object.keys` lists and nothing can read
+# back. A registered over-rejection, not a conformance claim.
+"JSON.stringify(JSON.parse('{\"__proto__\":1,\"a\":2}'))"	runtime-reject	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+"Object.keys(JSON.parse('{\"a\":1,\"__proto__\":2}')).join(',')"	runtime-reject	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+# FIG-3166: string coercion of a plain object refuses rather than answering
+# ECMA's bare type tag.
+"({}) + 1"	runtime-reject	TS_OBJECT_STRING_COERCION
+"1 + ({})"	runtime-reject	TS_OBJECT_STRING_COERCION
+"`${({})}`"	runtime-reject	TS_OBJECT_STRING_COERCION
+"[] + {}"	runtime-reject	TS_OBJECT_STRING_COERCION
+"1 + {}"	runtime-reject	TS_OBJECT_STRING_COERCION
+"`${{}}`"	runtime-reject	TS_OBJECT_STRING_COERCION
+"`${{a:1}}`"	runtime-reject	TS_OBJECT_STRING_COERCION
+# `var`, parameter and catch bindings are not assignable after their
+# declaration in v1; the refusal is by name (the code says const, which
+# over-states it) and keeps them out of the unimplemented capture-read check
+# below.
+"(() => { var v = 1; v = 2; return v; })()"	reject	TS_ASSIGN_CONST
+"(() => { function h(p) { p = p + 1; return p; } return h(1); })()"	reject	TS_ASSIGN_CONST
+"(() => { try { throw 1; } catch (e) { e = 2; return e; } })()"	reject	TS_ASSIGN_CONST
+# Open defects the oracles found (FIG-3599), pending their tickets: the row
+# pins the current wrong answer's divergence, so a fix fails it until it is
+# promoted to `accept`. The third column names the defect in the README's
+# open-defect list.
+"(() => { let x = 1; const f = () => x; x = 2; return f(); })()"	open-defect	mutable-capture-read
+# The linker infers an object literal's type and refuses a read or write of
+# a field the type lacks, as TypeScript's checker does. These rows still run
+# Node-exact through the VM (a value whose type is not a literal's — parsed
+# JSON, a tool result — reaches the same paths), and a cell refuses them at
+# link by name.
+"({a:1}).b"	accept-unlinked	TS_LINK_ERROR
+"({a:1}).missing"	accept-unlinked	TS_LINK_ERROR
+"(() => { const k='x'; const n=2; const o={n,[k]:1,f(){return this;}}; return `${o.n}|${o.x}`; })()"	accept-unlinked	TS_LINK_ERROR
+"(() => { const a={x:1}; const b=Object.assign(a,{y:2},{x:3}); return `${a.x}|${a.y}|${a===b}`; })()"	accept-unlinked	TS_LINK_ERROR
+"(() => { try { const a={}; a.self=a; JSON.stringify(a); } catch(e) { return `${e.name}: ${e.message}`; } })()"	accept-unlinked	TS_LINK_ERROR
+"(() => { const o={}; o['\\0lash.regexp.match']=true; o.length=1e100; return `${Array.isArray(o)}|${Object.keys(o).includes('\\0lash.regexp.match')}`; })()"	accept-unlinked	TS_LINK_ERROR

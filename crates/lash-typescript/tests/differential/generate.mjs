@@ -14,48 +14,23 @@ const directory = dirname(fileURLToPath(import.meta.url));
 const lanes = [
   ['opus', 'opus-expressions.txt', 163],
   ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 259],
+  ['findings', 'findings-expressions.txt', 274],
 ];
 
-const rejected = new Map([
-  ["'ab'.map((x) => x)", 'TS_METHOD_UNSUPPORTED'],
-  ['(1, 2)', 'TS_SEQUENCE_UNSUPPORTED'],
-  ['null ?? 1 || 2', 'TS_SYNTAX_ERROR'],
-  ["'\\uD800'", 'TS_LONE_SURROGATE_LITERAL_UNSUPPORTED'],
-  ["/a/d", 'TS_REGEX_INDICES_FLAG_UNSUPPORTED'],
-  ["/a/v", 'TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED'],
-  ['new RegExp(/a/g)', 'TS_NEW_UNSUPPORTED'],
-]);
-
-const runtimeRejected = new Map([
-  // Splitting an astral character into units would manufacture a lone
-  // surrogate, which the UTF-8 value model cannot represent. This is the
-  // existing shape-dependent runtime rejection, not a withdrawn method.
-  ["'\\uD83D\\uDE00'.split('')", 'TS_LONE_SURROGATE_UNSUPPORTED'],
-  [
-    '(() => { const a = [1]; a[3] = 9; return `${a.length}|${a[1]}|${a[2]}|${a[3]}`; })()',
-    'TS_SPARSE_ARRAY_UNSUPPORTED',
-  ],
-  [
-    '(() => { const a = [1,2]; a[-1] = 9; return a[-1]; })()',
-    'TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED',
-  ],
-  ["'\\uD83D\\uDE00'[0]", 'TS_LONE_SURROGATE_UNSUPPORTED'],
-  ["(() => /./.exec('😀')[0])()", 'TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED'],
-  // Node's `JSON.parse` creates `__proto__` as an ordinary own data property.
-  // This value model has no prototype chain, so every read of that name already
-  // refused; the key is now refused where the value enters instead, so a parsed
-  // object can never hold a key that `Object.keys` lists and nothing can read
-  // back. A registered over-rejection, not a conformance claim.
-  [
-    'JSON.stringify(JSON.parse(\'{"__proto__":1,"a":2}\'))',
-    'TS_PROTOTYPE_MUTATION_UNSUPPORTED',
-  ],
-  [
-    'Object.keys(JSON.parse(\'{"a":1,"__proto__":2}\')).join(\',\')',
-    'TS_PROTOTYPE_MUTATION_UNSUPPORTED',
-  ],
-]);
+// Every non-accepted expression and the diagnostic it must name, from
+// `dispositions.tsv`, which the oracle test also reads.
+const dispositions = new Map(
+  readFileSync(join(directory, 'dispositions.tsv'), 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .map((line) => {
+      const [expression, disposition, diagnostic] = line.split('\t');
+      if (!['reject', 'runtime-reject', 'open-defect', 'accept-unlinked'].includes(disposition) || !diagnostic) {
+        throw new Error(`malformed disposition row: ${line}`);
+      }
+      return [JSON.parse(expression), { disposition, diagnostic }];
+    }),
+);
 
 function expressions(file, expectedCount) {
   const values = readFileSync(join(directory, file), 'utf8')
@@ -120,12 +95,10 @@ function typescriptNodeString(expression) {
 const rows = [['lane', 'index', 'disposition', 'expression', `node_${NODE_VERSION}`, 'diagnostic']];
 for (const [lane, file, expectedCount] of lanes) {
   for (const [offset, expression] of expressions(file, expectedCount).entries()) {
-    const diagnostic = rejected.get(expression) ?? runtimeRejected.get(expression) ?? '-';
-    const disposition = rejected.has(expression)
-      ? 'reject'
-      : runtimeRejected.has(expression)
-        ? 'runtime-reject'
-        : 'accept';
+    const { disposition, diagnostic } = dispositions.get(expression) ?? {
+      disposition: 'accept',
+      diagnostic: '-',
+    };
     rows.push([
       lane,
       String(offset + 1),
