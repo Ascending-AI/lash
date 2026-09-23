@@ -538,7 +538,7 @@ pub async fn effect_lease_renew_transient_error_keeps_tool_running(
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
                     let _ = entered_tx.send(());
                     owner_release.notified().await;
-                    Ok(replay_conformance_exec_outcome("survived-renew-fault"))
+                    Ok(replay_conformance_value_outcome("survived-renew-fault"))
                 }),
             )
             .await
@@ -572,7 +572,7 @@ pub async fn effect_lease_renew_transient_error_keeps_tool_running(
         .await
         .expect("owner task joins")
         .expect("the tool outlives a transient renewal failure and finalizes");
-    assert_replay_conformance_exec_marker(outcome, "survived-renew-fault");
+    assert_replay_conformance_value_marker(outcome, "survived-renew-fault");
 
     // The row finalized `completed` with the tool's outcome: a replay reads it
     // back without executing.
@@ -585,7 +585,7 @@ pub async fn effect_lease_renew_transient_error_keeps_tool_running(
         )
         .await
         .expect("replayed completed outcome");
-    assert_replay_conformance_exec_marker(replayed, "survived-renew-fault");
+    assert_replay_conformance_value_marker(replayed, "survived-renew-fault");
 }
 
 /// Signals when the executing effect future is dropped.
@@ -639,7 +639,7 @@ pub async fn effect_lease_renew_errors_past_budget_leave_row_reclaimable(
                     let _dropped = DroppedSignal(Some(dropped_tx));
                     let _ = entered_tx.send(());
                     owner_release.notified().await;
-                    Ok(replay_conformance_exec_outcome("should-not-finalize"))
+                    Ok(replay_conformance_value_outcome("should-not-finalize"))
                 }),
             )
             .await
@@ -668,14 +668,14 @@ pub async fn effect_lease_renew_errors_past_budget_leave_row_reclaimable(
         successor.controller.execute_effect(
             envelope,
             RuntimeEffectLocalExecutor::testing(move |_| async move {
-                Ok(replay_conformance_exec_outcome("reclaimed-owner"))
+                Ok(replay_conformance_value_outcome("reclaimed-owner"))
             }),
         ),
     )
     .await
     .expect("a later claim must reclaim the abandoned row once its lease expires")
     .expect("the reclaimed effect re-executes instead of replaying a sealed error");
-    assert_replay_conformance_exec_marker(reclaimed, "reclaimed-owner");
+    assert_replay_conformance_value_marker(reclaimed, "reclaimed-owner");
     let _keep_notify_alive = never_release;
 }
 
@@ -715,7 +715,7 @@ pub async fn effect_lease_renew_stall_is_abandoned_at_the_deadline(
                     let _dropped = DroppedSignal(Some(dropped_tx));
                     let _ = entered_tx.send(());
                     owner_release.notified().await;
-                    Ok(replay_conformance_exec_outcome("should-not-finalize"))
+                    Ok(replay_conformance_value_outcome("should-not-finalize"))
                 }),
             )
             .await
@@ -747,13 +747,13 @@ pub async fn effect_lease_renew_stall_is_abandoned_at_the_deadline(
         successor.controller.execute_effect(
             envelope,
             RuntimeEffectLocalExecutor::testing(move |_| async move {
-                Ok(replay_conformance_exec_outcome("reclaimed-owner"))
+                Ok(replay_conformance_value_outcome("reclaimed-owner"))
             }),
         ),
     )
     .await
     .expect("a later claim must reclaim the abandoned row once its lease expires")
     .expect("the reclaimed effect re-executes instead of replaying a sealed error");
-    assert_replay_conformance_exec_marker(reclaimed, "reclaimed-owner");
+    assert_replay_conformance_value_marker(reclaimed, "reclaimed-owner");
     let _keep_notify_alive = never_release;
 }
