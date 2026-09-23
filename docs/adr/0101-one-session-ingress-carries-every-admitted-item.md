@@ -110,12 +110,14 @@ becomes `AnyBoundary`, and `NextTurn` / `AfterCurrentTurnCommit` become
 with `ClaimMode::{ Idle, Checkpoint { turn_id, checkpoint }, Exact { item_ids }
 }`.
 It replaces `TurnInputClaimMode` and `QueuedWorkClaimBoundary`.
-`IngressDrive::{ Claimed(IngressClaim), Unclaimed(item) }` replaces the two drive
-families, and `WithheldTerminalWork` becomes one list of drives.
+An ingress drive is always a claimed drive: FIG-3532 removed the runtime
+unclaimed drive, so there is no `Unclaimed` variant. `WithheldTerminalWork`
+becomes one list of claims.
 
-**One settlement/disposition planner** with the settlement regimes of ADR 0069
-§5 (`Claimed | Unclaimed`) and one disposition vocabulary
-`Complete | Drop | Defer`. The per-kind terminal side-write (the wake floor, §9)
+**One settlement/disposition planner** with one settlement regime, the claimed
+one, and one disposition vocabulary `Complete | Drop | Defer`. Store-level
+settlement of unclaimed rows (ADR 0069 §5) has no producer after FIG-3532 and
+is deleted in the cutover (§14). The per-kind terminal side-write (the wake floor, §9)
 is a property of the kind. `RuntimeCommit` carries one `completed_claims` list
 and one `undelivered_claims` list (FIG-3531's field, generalized).
 
@@ -189,12 +191,13 @@ PendingFollowOn {
   typed non-error `Blocked(FollowOnPending { follow_on_turn_id, attempts })`,
   except a `Checkpoint` claim whose `turn_id == follow_on_turn_id`. Drains see
   "blocked", never an error that a `?` would turn into a failed follow-on.
-* **No overtaking by an unclaimed turn** (derived from F: host input that
-  arrives before the follow-on runs is claimed after it commits). A lane-less
-  direct turn under ADR 0069 §5 does not claim, so the rule is enforced at the
-  head write: while the fact is set, a turn commit other than the follow-on's own
-  is refused with `FollowOnPending`, and the lane-less driver cedes exactly as
-  ADR 0069 §5(d) prescribes.
+* **No other turn commits** (derived from F: host input that arrives before the
+  follow-on runs is claimed after it commits). While the fact is set, a turn
+  commit other than the follow-on's own is refused with `FollowOnPending`. Every
+  direct turn claims its row since FIG-3532, so its initial claim meets the
+  refusal above: its row stays queued in order and the drain answers it after
+  the follow-on commits. The head-write refusal is the backstop for any commit
+  that reaches the store anyway.
 * **Head invariant.** Every head write checks
   `pending_follow_on.frame_id ∈ { None, current_frame_node_id }`. A commit that
   would move the frame while a follow-on is pending is refused, and
@@ -353,6 +356,11 @@ durability object (`QueuedWorkBatchingConfig`), each cap host-configurable. The
 turn-input cap defaults to 64 (FIG-3532). A backlog beyond a cap stays queued in
 order, and its submitter sees the typed `Queued` outcome; nothing is dropped.
 The literal `64` at the checkpoint claim is deleted.
+
+**A queued direct turn succeeds.** A direct turn whose accepted row is queued
+behind the claim bound returns the typed success outcome `Queued { ahead }`, not
+an error (FIG-3532). The row stays admitted at its position, and the drain
+answers it in arrival order, exactly once. Replay reports the same position.
 
 A checkpoint's addressed items and its prefix are one claim and settle together.
 
@@ -543,6 +551,12 @@ and rides the §15 cutover.
   store, the inline exact-claim block for the handoff, and the claimless
   in-memory follow-on branch.
 * The literal `64` checkpoint bound.
+* Store-level settlement of unclaimed rows on all three stores, dead since
+  FIG-3532 removed the runtime unclaimed drive: `TurnInputCompletion.claim:
+  None`, `StoreError::UnclaimedTurnInputSettlementSuperseded` and its
+  `turn_input_settlement_superseded` code, and the
+  `unclaimed_turn_input_settlement_is_a_conditional_write` law. ADR 0069 §5
+  carries the matching note.
 * The re-defer rewrite of `Turn{t}` items to `NextTurn`, performed today by every
   final commit (`defer_to_next_turn`) and by orphan repair. Delivery is
   immutable, and an ended turn's items are `NextTurn` by rule (§5.1).

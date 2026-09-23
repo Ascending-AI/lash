@@ -13,10 +13,9 @@ and command admissions share one table, sequence and lifecycle (commands in a
 class-level lane applied at turn boundaries), and no commit writes ingress rows
 (the frame follow-on is a session-head fact). A row's delivery is immutable
 intent: final commits no longer re-defer addressed input, and an ended turn's
-items are next-turn items by rule. Sections 5 and 6 stand. Section 5(b)'s
-exemption does not let a lane-less turn commit ahead of a pending follow-on;
-such a turn backs off per section 5(d) (ADR 0101 §3). References below to ADR
-0010 read as ADR 0101.
+items are next-turn items by rule. Section 6 stands; section 5's unclaimed
+regime is deleted (see the note there). References below to ADR 0010 read as
+ADR 0101.
 
 ## Context
 
@@ -171,6 +170,12 @@ today gets it the way it always has: by using `enqueue(..).id(..)` with a
 `source_key` it chose.
 
 ### 5. A turn may settle the acceptance it drove, with or without a claim
+
+> Amended 2026-09-23 (FIG-3540): every direct turn claims its row since FIG-3532,
+> or returns the success outcome `Queued { ahead }` when queued behind the claim
+> bound. Store-level unclaimed settlement is dead and is deleted on all three
+> stores in the [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
+> cutover; the claimed regime below remains the only one.
 
 Section 3 says the caller's future is the first driver with no special status.
 That is a statement about *recovery*, and it was read once as a statement about
