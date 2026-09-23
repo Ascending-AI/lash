@@ -287,6 +287,10 @@ impl RuntimeHostConfig {
             ))
         {
             tool_children.with_clock(Arc::clone(&self.clock));
+            // Get-or-init, as in `new`: a host that already routes tool
+            // children keeps its resolver, whose env store must become the
+            // one this runtime's executions publish to.
+            tool_children.with_process_env_store(Arc::clone(&self.durability.process_env_store));
             self.control.tool_children = Some(tool_children);
         }
         self.control.effect_host = effect_host;

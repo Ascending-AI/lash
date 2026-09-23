@@ -68,6 +68,27 @@ pub struct DrainEndWorld {
     pub group_host: Option<Arc<dyn EffectHost>>,
 }
 
+/// Wires a drain-end world's host: the product tool-child resolver, so the
+/// drain's tool calls form real effect groups, with the laws' settling
+/// resolver behind it for the synthetic groups the closing laws open. One
+/// controller carries one resolver, so the synthetic one sits behind the
+/// product one rather than beside it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: a fresh host has no resolver yet"
+)]
+pub fn install_drain_end_executors(host: Arc<dyn EffectHost>) -> Arc<dyn EffectHost> {
+    host.install_tool_child_host(crate::facade_support::ToolChildHost::new(
+        &host,
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+    ))
+    .expect("a fresh host takes the tool-child resolver")
+    .with_law_fallback(
+        super::effect_group_drain::RecordingExecutors::settling() as Arc<dyn crate::GroupExecutors>
+    );
+    host
+}
+
 /// Callable per law: each law gets a fresh world over the tier's durable
 /// substrate, the same way [`super::effect_group_drain::DrainWorldFactory`]
 /// hands each group law its own hosts.
@@ -223,9 +244,11 @@ async fn drain_runtime_with_budget(
     lease_owner: LeaseOwnerIdentity,
     commit_budget: crate::CommitBudget,
 ) -> LashRuntime {
+    // `with_effect_host`, not a field overwrite: it installs the tool-child
+    // resolver on the drain's host, where the drain's tool groups open.
     let mut host =
-        crate::RuntimeHostConfig::in_memory(commit_budget, crate::QueuedWorkBatchingConfig::new(1));
-    host.control.effect_host = Arc::clone(&world.effect_host);
+        crate::RuntimeHostConfig::in_memory(commit_budget, crate::QueuedWorkBatchingConfig::new(1))
+            .with_effect_host(Arc::clone(&world.effect_host));
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(SessionId::from(SESSION_ID));
@@ -283,11 +306,11 @@ async fn drive_drain(
 )]
 fn drain_sweep(world: &DrainEndWorld) -> lash_core_worker::DurableProcessWorker {
     let watched = crate::facade_support::watch_process_registry(Arc::clone(&world.registry));
-    let mut host = crate::RuntimeHostConfig::in_memory(
+    let host = crate::RuntimeHostConfig::in_memory(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-    );
-    host.control.effect_host = Arc::clone(&world.effect_host);
+    )
+    .with_effect_host(Arc::clone(&world.effect_host));
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(SessionId::from(SESSION_ID));
     lash_core_worker::DurableProcessWorker::new(

@@ -112,6 +112,13 @@ pub struct ToolChildHost {
     /// clock is known (`RuntimeHostConfig::with_clock` follows `new`), and a
     /// second install cannot replace it.
     clock: Arc<std::sync::Mutex<Arc<dyn crate::Clock>>>,
+    /// Testing only: the resolver a law installs *behind* this host, asked
+    /// for a command no group child can be (a law's synthetic children). A
+    /// conformance world whose laws open synthetic groups and whose runtime
+    /// also forms product tool groups needs both answers on one controller,
+    /// and a controller has one registered resolver.
+    #[cfg(any(test, feature = "testing"))]
+    law_fallback: Arc<std::sync::OnceLock<Arc<dyn super::group_drain::GroupExecutors>>>,
 }
 
 impl ToolChildHost {
@@ -136,6 +143,8 @@ impl ToolChildHost {
             host: Arc::downgrade(host),
             process_env_store: Arc::new(std::sync::Mutex::new(process_env_store)),
             clock: Arc::new(std::sync::Mutex::new(Arc::new(crate::SystemClock))),
+            #[cfg(any(test, feature = "testing"))]
+            law_fallback: Arc::new(std::sync::OnceLock::new()),
         })
     }
 
@@ -322,12 +331,31 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
                 )
                 .with_turn_cancel_observation(false),
             ),
+            #[cfg(any(test, feature = "testing"))]
+            _ => self
+                .law_fallback
+                .get()
+                .and_then(|fallback| fallback.executor_for(envelope)),
+            #[cfg(not(any(test, feature = "testing")))]
             _ => None,
         }
     }
 
     fn live_generation(&self, opener: &crate::EffectOpener) -> Option<u64> {
         self.openers.generation_of(opener)
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl ToolChildHost {
+    /// Installs `fallback` behind this host: asked only for a command no
+    /// group child can be. Set once; a second call keeps the first.
+    pub fn with_law_fallback(
+        self: &Arc<Self>,
+        fallback: Arc<dyn super::group_drain::GroupExecutors>,
+    ) -> Arc<Self> {
+        let _ = self.law_fallback.set(fallback);
+        Arc::clone(self)
     }
 }
 
