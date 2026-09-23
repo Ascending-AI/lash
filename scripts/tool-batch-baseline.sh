@@ -18,9 +18,10 @@
 #   * `restate`  — starts `restatedev/restate` in a throwaway container on
 #                  ephemeral loopback ports, serves the probe endpoint from
 #                  the bin, registers the deployment, and counts the
-#                  invocation's `sys_journal` rows. Restate is serial today —
-#                  `supports_concurrent_effects()` is hardcoded false — so the
-#                  leg records a serial baseline, not a defect.
+#                  invocation's `sys_journal` rows. Before FIG-3397 Restate
+#                  ran a batch serially (the since-deleted
+#                  `supports_concurrent_effects()` was hardcoded false), so a
+#                  pre-cutover leg records a serial baseline, not a defect.
 #
 # Evidence goes under `<archive-root>/<short-sha>/`: one JSONL per backend, a
 # `MANIFEST.md` naming the commit, tree state, quiet-box verdict and exact
@@ -277,7 +278,7 @@ PY
   echo "- Pre-run uptime: \`$before_uptime\`"
   echo "- Post-run uptime: \`$after_uptime\`"
   echo "- Measurement wall time: ${measure_seconds} s"
-  echo "- Restate leg: serial today (\`supports_concurrent_effects()\` hardcoded false); the restate numbers are a serial baseline, not a defect"
+  echo "- Restate leg: a batch is a durable effect group from FIG-3397 on; a pre-cutover commit ran it serially, so its restate numbers are a serial baseline, not a defect"
   echo
   echo "## Commands"
   echo

@@ -43,13 +43,10 @@
 //!
 //! # What the driver does not do
 //!
-//! It does not take an [`IntentDrainGuard`](crate::tool_dispatch::IntentDrainGuard).
-//! §5 replaces the in-process source-order gate with a durable per-group
-//! final-commit order and is explicit that the gate's `Drop` discharge is
-//! "wrong if copied into durable recovery". The child therefore passes
-//! `None`: §4 commits its final at the attempt boundary and §5 admits its
-//! drain by the recorded `commit_seq`, which orders it against every sibling
-//! without an in-process slot.
+//! It holds no in-process drain slot. §5 orders sibling drains by a durable
+//! per-group final-commit order: §4 commits the child's final at the attempt
+//! boundary and §5 admits its drain by the recorded `commit_seq`, which orders
+//! it against every sibling without a process-local gate.
 //!
 //! It projects the child's result exactly once, at its own presentation
 //! boundary: the session's ordered presentation steps run once through the
@@ -921,8 +918,6 @@ async fn drive(
         }),
         request.attempt_identity.clone(),
         &turn_cancel_wait,
-        // §5: no cross-child gate here. See `run_tool_child`.
-        None,
         None::<ToolChildExecutionTraceHook>,
         move |completion_key| {
             RuntimeEffectLocalExecutor::prepared_tool_attempt(
@@ -1140,7 +1135,6 @@ fn journaled_await_invocation(
         dispatch.effect_controller.scoped().execution_scope(),
         parent,
         format!("{parent_effect_id}:{suffix}"),
-        crate::RuntimeEffectKind::AwaitEvent,
         suffix,
     )
 }

@@ -1,11 +1,9 @@
 use crate::ProcessId;
 use crate::{
-    PreparedToolCall, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeInvocation, ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome,
-    ToolRetryPolicy,
+    PreparedToolCall, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeInvocation,
+    ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass, ToolOutcome, ToolRetryPolicy,
 };
 use lash_sansio::core_support::*;
-use lash_sansio::sync::MutexExt;
 
 use super::{
     PendingToolDispatchOutcome, ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome,
@@ -73,7 +71,6 @@ impl ToolAttemptEffectIdentity {
                 context.effect_controller.scoped().execution_scope(),
                 parent,
                 format!("{parent_effect_id}:{suffix}"),
-                RuntimeEffectKind::ToolAttempt,
                 suffix,
             );
         }
@@ -111,7 +108,6 @@ impl ToolAttemptEffectIdentity {
                 context.effect_controller.scoped().execution_scope(),
                 parent,
                 format!("{parent_effect_id}:{suffix}"),
-                RuntimeEffectKind::Sleep,
                 suffix,
             );
         }
@@ -194,149 +190,6 @@ pub struct CoordinatedToolInvocation {
     pub launch: ToolCallLaunch,
 }
 
-/// Sequences the per-child final intent drains of one tool batch in source
-/// order.
-///
-/// `next` names the slot whose drain may run. A slot publishes its own
-/// completion into `discharged`; `next` then walks forward over the consecutive
-/// discharged prefix. Publishing is therefore order-free and idempotent, and it
-/// needs neither the gate's lock to be held across an await nor a caller that
-/// remembered to take its turn first. That is what lets [`IntentDrainGuard`]
-/// discharge from `Drop`: a synchronous, infallible operation no exit path can
-/// skip. Ordering is a property of how `next` advances rather than of an
-/// assertion that only holds in debug builds.
-#[derive(Default)]
-pub struct BatchIntentDrainGate {
-    state: std::sync::Mutex<BatchIntentDrainState>,
-    changed: tokio::sync::Notify,
-}
-
-#[derive(Default)]
-struct BatchIntentDrainState {
-    next: usize,
-    discharged: std::collections::BTreeSet<usize>,
-}
-
-impl BatchIntentDrainGate {
-    async fn wait_for(&self, index: usize) {
-        loop {
-            let changed = self.changed.notified();
-            tokio::pin!(changed);
-            // Register before re-reading `next`: a discharge runs synchronously
-            // from `Drop`, and `notify_waiters` only wakes waiters that were
-            // already registered when it ran.
-            changed.as_mut().enable();
-            if self.state.lock_recover().next == index {
-                return;
-            }
-            changed.await;
-        }
-    }
-
-    fn discharge(&self, index: usize) {
-        let mut state = self.state.lock_recover();
-        // The prefix walk below removes indices as it consumes them, so a
-        // re-discharge of an already-consumed slot would look new to `insert`
-        // and settle inertly into the set rather than being caught. The guard's
-        // type makes that unreachable; say so where it would break.
-        debug_assert!(
-            index >= state.next,
-            "a discharged drain slot cannot discharge again"
-        );
-        if !state.discharged.insert(index) {
-            return;
-        }
-        let mut next = state.next;
-        while state.discharged.remove(&next) {
-            next = next.saturating_add(1);
-        }
-        if next == state.next {
-            return;
-        }
-        state.next = next;
-        drop(state);
-        self.changed.notify_waiters();
-    }
-}
-
-/// One child's exactly-once claim on its slot in a [`BatchIntentDrainGate`].
-///
-/// Holding the guard is the claim; dropping it discharges the slot. Every exit
-/// path drops it — an early return, a future cancelled mid-await, or an unwind
-/// — so discharge is a property of the guard's lifetime rather than of twelve
-/// hand-written calls, and no exit path can pin the gate's next index.
-pub struct IntentDrainGuard {
-    gate: std::sync::Arc<BatchIntentDrainGate>,
-    index: usize,
-    final_result_committed: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
-}
-
-impl IntentDrainGuard {
-    pub(crate) fn new(
-        gate: std::sync::Arc<BatchIntentDrainGate>,
-        index: usize,
-    ) -> (Self, IntentDrainCommitSignal) {
-        let (sender, receiver) = tokio::sync::watch::channel(false);
-        let sender = std::sync::Arc::new(sender);
-        (
-            Self {
-                gate,
-                index,
-                final_result_committed: std::sync::Arc::clone(&sender),
-            },
-            IntentDrainCommitSignal {
-                _sender: sender,
-                receiver,
-            },
-        )
-    }
-
-    /// The matching discharge is the guard's drop, so a body that exits between the two — by
-    /// error return, cancellation or unwind — still releases the next slot.
-    pub(crate) async fn begin_final_drain(&self) {
-        self.final_result_committed.send_replace(true);
-        self.gate.wait_for(self.index).await;
-    }
-}
-
-impl Drop for IntentDrainGuard {
-    fn drop(&mut self) {
-        self.gate.discharge(self.index);
-    }
-}
-
-/// The batch-side view of whether a child committed its final result.
-pub(crate) struct IntentDrainCommitSignal {
-    // Retaining a sender keeps the channel open for this handle's whole life,
-    // so `committed` never resolves merely because the child's guard was
-    // dropped. Only a real commit resolves it; the caller's grace timer decides
-    // every other case, exactly as it did when the batch held a second slot
-    // handle for this purpose.
-    _sender: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
-    receiver: tokio::sync::watch::Receiver<bool>,
-}
-
-impl IntentDrainCommitSignal {
-    pub(crate) fn is_committed(&self) -> bool {
-        *self.receiver.borrow()
-    }
-
-    /// Resolves once the child has committed its final result, and otherwise
-    /// stays pending.
-    pub(crate) async fn committed(&mut self) {
-        let closed = self
-            .receiver
-            .wait_for(|committed| *committed)
-            .await
-            .is_err();
-        if closed {
-            // Unreachable while `_sender` is held; never report a closed
-            // channel as a commit.
-            std::future::pending::<()>().await;
-        }
-    }
-}
-
 /// What a tool child of an effect group carries into coordination and a live
 /// caller cannot: the completion routing it was admitted under (ADR 0099 §3)
 /// and the address of its own replay row — the §4 linearization point (ADR
@@ -394,10 +247,6 @@ pub async fn coordinate_tool_invocation<'run>(
     group_child: Option<GroupChildCoordination>,
     identity: ToolAttemptEffectIdentity,
     turn_cancel_wait: &crate::runtime::TurnCancelWait,
-    // Owned for the whole coordination: the guard discharges its drain slot on
-    // drop, so every return below — terminal, pending or failed — releases the
-    // next slot without a hand-written call.
-    mut intent_drain_slot: Option<IntentDrainGuard>,
     child_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     mut local_executor: impl FnMut(Option<crate::AwaitEventKey>) -> RuntimeEffectLocalExecutor<'run>,
 ) -> CoordinatedToolInvocation {
@@ -567,7 +416,6 @@ pub async fn coordinate_tool_invocation<'run>(
                             context,
                             TerminalAttemptSettlement {
                                 minting_emission: &invocation,
-                                intent_drain_slot: intent_drain_slot.take(),
                                 child_trace_hook: child_trace_hook.as_ref(),
                                 recorded_call_id: recorded_call_id.as_deref(),
                                 group_child,
@@ -600,7 +448,6 @@ pub async fn coordinate_tool_invocation<'run>(
                             context,
                             TerminalAttemptSettlement {
                                 minting_emission: &invocation,
-                                intent_drain_slot: intent_drain_slot.take(),
                                 child_trace_hook: child_trace_hook.as_ref(),
                                 recorded_call_id: recorded_call_id.as_deref(),
                                 group_child,
@@ -682,18 +529,15 @@ fn abandon_to_open_buffers(
     }
 }
 
-/// Settles one terminal tool attempt: drain the declared intents in this
-/// batch's source order, project their outcomes onto the record, and report
-/// them.
+/// Settles one terminal tool attempt: commit a group child's final record,
+/// drain the declared intents in final-commit order (ADR 0099 §5), project
+/// their outcomes onto the record, and report them.
 ///
 /// Both terminal callers — a first attempt with no retry left to schedule, and
 /// a retry-exhausted attempt — reach the same terminal state and run this one
-/// body. Taking the drain guard by value makes the settlement window the
-/// guard's lifetime: the slot is claimed for the whole drain and discharged
-/// when this body ends, on every path out of it.
+/// body.
 struct TerminalAttemptSettlement<'settlement> {
     minting_emission: &'settlement RuntimeEffectInvocation,
-    intent_drain_slot: Option<IntentDrainGuard>,
     child_trace_hook: Option<&'settlement crate::ToolChildExecutionTraceHook>,
     recorded_call_id: Option<&'settlement str>,
     group_child: Option<GroupChildCoordination>,
@@ -734,7 +578,6 @@ async fn settle_terminal_attempt(
 ) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
     let TerminalAttemptSettlement {
         minting_emission,
-        intent_drain_slot,
         child_trace_hook,
         recorded_call_id,
         group_child,
@@ -845,9 +688,6 @@ async fn settle_terminal_attempt(
             context.clock.sleep(GROUP_DRAIN_BARRIER_POLL).await;
         }
     }
-    if let Some(slot) = &intent_drain_slot {
-        slot.begin_final_drain().await;
-    }
     let mut intent_context = context.clone();
     intent_context.parent_invocation = Some(minting_emission.clone().into_runtime_invocation());
     let intent_outcomes = super::execute_final_tool_intents(
@@ -858,10 +698,6 @@ async fn settle_terminal_attempt(
     )
     .await?;
     project_recorded_intent_outcomes(&mut record.output, &intent_outcomes);
-    // Discharges the drain slot, where both former bodies called
-    // `complete_final_drain`. Written out so the release point stays explicit
-    // even though the guard would do it at the end of this scope anyway.
-    drop(intent_drain_slot);
     Ok(ToolDispatchOutcome {
         record: *record,
         attempts,

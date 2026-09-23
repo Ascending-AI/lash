@@ -619,7 +619,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
         .collect::<Vec<_>>();
     let expected = lash_core::session::deterministic_tool_invocation_batch_id(
         &calls,
-        lash_core::session::ToolBatchOccurrence::Opener(1),
+        lash_core::session::ToolGroupOccurrence::Opener(1),
     );
     assert_eq!(
         waits[0].2.as_str(),

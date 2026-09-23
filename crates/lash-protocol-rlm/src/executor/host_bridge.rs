@@ -825,7 +825,7 @@ impl HostBridge<'_> {
         if let Some(trace) = &self.lashlang_execution_trace {
             let batch_id = lash_core::session::deterministic_tool_invocation_batch_id(
                 &invocations,
-                lash_core::session::ToolBatchOccurrence::Opener(occurrence),
+                lash_core::session::ToolGroupOccurrence::Opener(occurrence),
             );
             if call_sites.len() > 1 {
                 for (position, call_site) in call_sites.iter().enumerate() {
@@ -844,7 +844,7 @@ impl HostBridge<'_> {
             .ctx
             .call_tool_batch(
                 invocations,
-                lash_core::session::ToolBatchOccurrence::Opener(occurrence),
+                lash_core::session::ToolGroupOccurrence::Opener(occurrence),
             )
             .await;
         for ((((source_index, source_operation), execution_index), replay_key), reply) in positions

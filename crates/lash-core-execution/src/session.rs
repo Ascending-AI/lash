@@ -27,7 +27,7 @@ pub use settlement_incorporation::{
 };
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{
-    ToolBatchOccurrence, ToolBatchReplies, ToolInvocation, ToolInvocationReply,
+    ToolBatchReplies, ToolGroupOccurrence, ToolInvocation, ToolInvocationReply,
     deterministic_tool_invocation_batch_id,
 };
 

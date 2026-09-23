@@ -135,7 +135,6 @@ async fn retry_sleep_shape(
         identity,
         &turn_cancel_wait,
         None,
-        None,
         |completion_key| {
             crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
                 Arc::clone(&dispatch),

@@ -16,8 +16,8 @@
 //! * the **store-backed driver** — this module. It absorbs *all* of the
 //!   semantics: leases, claim arbitration, replay decisions, journal payload
 //!   encoding, group membership, and the loser drain. Backends plug into it
-//!   through [`EffectReplayRowStore`], which is dumb row storage plus the two
-//!   fixed facts in [`EffectReplayCapabilities`], and nothing more; PostgreSQL
+//!   through [`EffectReplayRowStore`], which is dumb row storage plus the
+//!   fixed fact in [`EffectReplayCapabilities`], and nothing more; PostgreSQL
 //!   and SQLite are two sets of rows under one state machine. The
 //!   [`EffectHost`](super::executor::EffectHost) and
 //!   [`RuntimeEffectController`](super::executor::RuntimeEffectController)
@@ -141,22 +141,20 @@ enum EffectReplayBackend {
     Postgres,
 }
 
-/// The two facts about a backend that the shared [`EffectHost`] /
+/// The fact about a backend that the shared [`EffectHost`] /
 /// [`RuntimeEffectController`] adapter (see [`StoreReplayAdapter`]) needs and
 /// cannot derive from the row operations.
 ///
 /// Before the adapter was shared, each store carried its own copy of the
-/// adapter to encode exactly these two answers; now a backend states them
-/// once, here, and the one adapter reads them. Both are fixed at construction:
-/// neither can change while a driver is alive.
+/// adapter to encode its answers; now a backend states them once, here, and
+/// the one adapter reads them. They are fixed at construction: none can change
+/// while a driver is alive.
 ///
 /// [`EffectHost`]: super::executor::EffectHost
 /// [`RuntimeEffectController`]: super::executor::RuntimeEffectController
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectReplayCapabilities {
     pub completion_keys: CompletionKeys,
-    /// How a `ToolBatch` envelope reaches this backend's journal on a redrive.
-    pub tool_batch_redrive: ToolBatchRedrive,
 }
 
 /// Whether a backend's await-event rows can back a completion key handed out
@@ -172,27 +170,6 @@ pub enum CompletionKeys {
     /// backing), so no key is handed out: the preparation is
     /// [`Unsupported`](super::executor::CompletionKeyPreparation::Unsupported).
     Unsupported,
-}
-
-/// Where a `ToolBatch` envelope's children run relative to the aggregate's
-/// journal row.
-///
-/// Every child crosses its own key-addressed journal row either way; the
-/// question is whether the aggregate is claimed *around* that drain or *after*
-/// it. The two backends shipped with different answers, and this enum is that
-/// difference made explicit rather than a second copy of the adapter.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolBatchRedrive {
-    /// Re-enter the coordinator first so each child command is reconstructed
-    /// and crosses its own journal row; only once the child drain settles does
-    /// the driver record (or validate) the aggregate outcome. A crash in the
-    /// middle of the batch therefore never leaves the aggregate under a live
-    /// lease that a redrive on another connection must wait out — the
-    /// PostgreSQL contract pinned by its attempt-atomicity suite.
-    ChildrenFirst,
-    /// Claim the aggregate row up front and run the children inside that
-    /// claim, the ordinary single-effect path. SQLite's shipped behavior.
-    AggregateClaim,
 }
 
 /// What a caller of the shared claim loop wants a live competing claim to mean.

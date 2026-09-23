@@ -80,11 +80,11 @@ const TURN_BUDGET: Duration = Duration::from_secs(60);
 pub struct ToolBatchLeaf {
     /// The tool name the producer must call.
     pub tool: String,
-    /// The route this leaf takes inside `execute_prepared_tool_batch_child`.
+    /// The route this leaf takes inside its group child's invocation driver.
     pub route: ToolBatchRoute,
 }
 
-/// The dispatch route a leaf takes inside the batch child.
+/// The dispatch route a leaf takes inside its group child.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolBatchRoute {
     /// A catalogue-authorised leaf provider call.
@@ -757,7 +757,7 @@ fn orchestrating_leaf_definition(name: &str) -> crate::ToolDefinition {
 }
 
 /// An orchestrating body that rendezvouses like a leaf, so the orchestration
-/// lane inside `execute_prepared_tool_batch_child` is covered by the same law.
+/// lane inside a group child's invocation driver is covered by the same law.
 struct OrchestratingRendezvousLeaf {
     name: String,
     state: Arc<ScenarioState>,

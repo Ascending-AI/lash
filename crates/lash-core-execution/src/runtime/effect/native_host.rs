@@ -640,10 +640,6 @@ impl RuntimeEffectController for FencedNativeController {
         self.host.wants_segment_boundary(progress)
     }
 
-    fn supports_concurrent_effects(&self) -> bool {
-        self.host.supports_concurrent_effects()
-    }
-
     fn effect_journaling(&self) -> EffectJournaling {
         self.host.effect_journaling()
     }
@@ -743,10 +739,6 @@ impl RuntimeEffectController for NativeEffectHost {
 
     fn wants_segment_boundary(&self, progress: &SegmentProgress) -> Option<BoundaryReason> {
         self.controller.wants_segment_boundary(progress)
-    }
-
-    fn supports_concurrent_effects(&self) -> bool {
-        self.controller.supports_concurrent_effects()
     }
 
     fn effect_journaling(&self) -> EffectJournaling {

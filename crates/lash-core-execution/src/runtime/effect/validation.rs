@@ -97,6 +97,12 @@ impl CanonicalRuntimeEffectEnvelope {
                 "pre-effect-19 trigger-list envelope uses the retired filter.session_id encoding; recreate the effect journal instead of replaying it across the cutover",
             ));
         }
+        if value.pointer("/command/type").and_then(Value::as_str) == Some("tool_batch") {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion,
+                "journaled tool-batch envelope predates effect groups (FIG-3397): a batch is a durable effect group of tool-invocation children and the batch command no longer exists; recreate the effect journal instead of replaying it across the cutover",
+            ));
+        }
         Ok(())
     }
 
@@ -451,6 +457,37 @@ mod tests {
                 }),
             },
         )
+    }
+
+    /// Captured from origin/main a285f5f391e28ead3d1b13629757a8825d35dfe7
+    /// (FIG-3397 PR A, the last build with the batch command) by a throwaway
+    /// test that printed `RuntimeEffectEnvelope::canonical_form()` of a
+    /// one-call `ToolBatch` envelope.
+    const PREDECESSOR_TOOL_BATCH_ENVELOPE: &str = r#"{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session-blue\",\"turn_id\":\"turn-blue\"},\"replay_key\":\"turn-blue:tool-batch:batch-blue\"},\"effect_id\":\"tool-batch:batch-blue\",\"attribution\":{\"session_id\":\"session-blue\"}},\"command\":{\"type\":\"tool_batch\",\"batch\":{\"batch_id\":\"batch-blue\",\"calls\":[{\"call\":{\"call_id\":\"call-blue\",\"tool_id\":\"tool:blue\",\"tool_name\":\"blue\",\"args\":{\"q\":1}},\"replay_suffix\":\"child:0:call-blue\"}]}}}","hash":"36052881d682e556eb511c93336435ca2192d8e1a1020ef6032eeca81ae1f0ab"}"#;
+
+    #[test]
+    fn predecessor_tool_batch_envelope_is_typed_version_refusal() {
+        let outer: Value =
+            serde_json::from_str(PREDECESSOR_TOOL_BATCH_ENVELOPE).expect("predecessor fixture");
+        let inner: Value = serde_json::from_str(
+            outer["json"]
+                .as_str()
+                .expect("predecessor canonical envelope json"),
+        )
+        .expect("predecessor runtime envelope");
+        assert_eq!(
+            inner.pointer("/command/type"),
+            Some(&Value::String("tool_batch".to_string())),
+            "fixture must prove it carries the retired batch command"
+        );
+
+        let error = CanonicalRuntimeEffectEnvelope::decode(PREDECESSOR_TOOL_BATCH_ENVELOPE)
+            .expect_err("a journaled tool batch must be refused before replay comparison");
+        assert_eq!(
+            error.code,
+            crate::RuntimeErrorCode::RuntimeEffectEnvelopeVersion
+        );
+        assert!(!error.code.is_replay_mismatch());
     }
 
     /// Captured from origin/main 93aea8f3d6367e3b1a958df0f05caf2a835f20b7

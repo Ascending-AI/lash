@@ -261,8 +261,7 @@ impl LiveOpenerRegistry {
     /// and a token cancelled the moment this entry stops being the live one.
     ///
     /// The guard is the deregistration, so an opener cannot be left registered
-    /// by an early return, a cancelled future or an unwind — the same reason
-    /// `IntentDrainGuard` discharges from `Drop`. Note that this is a
+    /// by an early return, a cancelled future or an unwind. Note that this is a
     /// process-local lifetime and nothing durable: dropping the guard says
     /// "this worker is no longer running that opener", never "that opener is
     /// closed", which is a durable fact §7 owns.

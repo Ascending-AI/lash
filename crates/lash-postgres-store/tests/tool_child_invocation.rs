@@ -95,7 +95,7 @@ lash_conformance::tool_child_invocation_tests!({
     )
 });
 
-// The batch-group differential answers on the same substrate (FIG-3397).
+// The batch-group law answers on the same substrate (FIG-3397).
 lash_conformance::tool_batch_group_tests!({
     let Some(url) = database_url() else {
         eprintln!(

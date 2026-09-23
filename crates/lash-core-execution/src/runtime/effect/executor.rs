@@ -269,10 +269,11 @@ pub(super) struct LocalDirectEffectRunner {
     attachment_store: Arc<crate::SessionAttachmentStore>,
 }
 
-struct LocalToolBatchEffectRunner<'run> {
+/// Runs one tool attempt against a live execution context: the recorded body
+/// of a scalar call's attempt.
+struct LocalToolAttemptEffectRunner<'run> {
     context: crate::RuntimeExecutionContext<'run>,
     child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
-    issuing_node_ids: Arc<HashMap<String, String>>,
     completion_key: Option<crate::AwaitEventKey>,
 }
 
@@ -779,21 +780,18 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    pub(crate) fn tool_batch(
+    pub(crate) fn tool_attempt(
         context: crate::RuntimeExecutionContext<'run>,
         child_trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook>,
-        issuing_node_ids: HashMap<String, String>,
         completion_key: Option<crate::AwaitEventKey>,
     ) -> Self {
         let replay_trace = context.replay_validation_trace();
-        let issuing_node_ids = Arc::new(issuing_node_ids);
         if let Some(context) = context.to_static() {
             return Self {
                 state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
-                    LocalToolBatchEffectRunner {
+                    LocalToolAttemptEffectRunner {
                         context,
                         child_trace_hooks,
-                        issuing_node_ids,
                         completion_key,
                     },
                 ))),
@@ -801,12 +799,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             };
         }
         Self {
-            state: RuntimeEffectLocalExecutorState::Runner(Box::new(LocalToolBatchEffectRunner {
-                context,
-                child_trace_hooks,
-                issuing_node_ids,
-                completion_key,
-            })),
+            state: RuntimeEffectLocalExecutorState::Runner(Box::new(
+                LocalToolAttemptEffectRunner {
+                    context,
+                    child_trace_hooks,
+                    completion_key,
+                },
+            )),
             replay_trace,
         }
     }
@@ -1212,12 +1211,9 @@ impl RuntimeEffectLocalRunner for TestingRuntimeEffectLocalRunner<'_> {
 }
 
 #[async_trait::async_trait]
-impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
+impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
     fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {
-        matches!(
-            command,
-            RuntimeEffectCommand::ToolBatch { .. } | RuntimeEffectCommand::ToolAttempt { .. }
-        )
+        matches!(command, RuntimeEffectCommand::ToolAttempt { .. })
     }
 
     async fn execute(
@@ -1225,20 +1221,6 @@ impl RuntimeEffectLocalRunner for LocalToolBatchEffectRunner<'_> {
         envelope: RuntimeEffectEnvelope,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         match envelope.command {
-            RuntimeEffectCommand::ToolBatch { batch } => {
-                let outcome = Box::pin(self.context.execute_prepared_tool_batch_launches(
-                    batch,
-                    envelope.invocation.into_runtime_invocation(),
-                    self.child_trace_hooks,
-                    Arc::clone(&self.issuing_node_ids),
-                ))
-                .await?;
-                Ok(RuntimeEffectOutcome::ToolBatch {
-                    launches: outcome.launches,
-                    triggers: outcome.triggers,
-                    settlement_order: outcome.settlement_order,
-                })
-            }
             RuntimeEffectCommand::ToolAttempt {
                 call,
                 execution_grant,

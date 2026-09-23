@@ -20,7 +20,6 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     fn capabilities(&self) -> EffectReplayCapabilities {
         EffectReplayCapabilities {
             completion_keys: self.completion_keys,
-            tool_batch_redrive: ToolBatchRedrive::AggregateClaim,
         }
     }
 

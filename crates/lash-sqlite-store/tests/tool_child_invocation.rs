@@ -87,5 +87,5 @@ fn fixture() -> (tempfile::TempDir, &'static str, ToolChildLawFixture) {
 // (FIG-2266).
 lash_conformance::tool_child_invocation_tests!({ fixture() });
 
-// The batch-group differential answers on the same substrate (FIG-3397).
+// The batch-group law answers on the same substrate (FIG-3397).
 lash_conformance::tool_batch_group_tests!({ fixture() });

@@ -38,7 +38,7 @@ pub struct EffectGroupMembership {
     ///
     /// The occurrence ordinal is load-bearing and rides inside `batch_id`:
     /// the batch id is a content hash of the calls *and* their
-    /// `ToolBatchOccurrence` under `TOOL_BATCH_FAMILY_VERSION` 2 (FIG-3394),
+    /// `ToolGroupOccurrence` under `TOOL_BATCH_FAMILY_VERSION` 2 (FIG-3394),
     /// so two textually identical `race` calls in one protocol iteration mint
     /// different batch ids and would otherwise share a group.
     pub group_key: String,
@@ -91,12 +91,10 @@ pub struct GroupChildBinding {
 /// the *composition above* attempts, not the attempts.
 ///
 /// **A tool child is the exception, and it is a named one** (ADR 0099 §2, §3;
-/// FIG-3408). A tool group child is a replayable invocation driver, and neither
-/// existing tool command is that:
-/// [`ToolAttempt`](super::envelope::RuntimeEffectCommand::ToolAttempt) is the
-/// atomic body of one attempt, so it cannot carry retry, and
-/// [`ToolBatch`](super::envelope::RuntimeEffectCommand::ToolBatch) is the whole
-/// batch a group replaces. It is named by
+/// FIG-3408). A tool group child is a replayable invocation driver, which
+/// [`ToolAttempt`](super::envelope::RuntimeEffectCommand::ToolAttempt) is not:
+/// that is the atomic body of one attempt, so it cannot carry retry. It is
+/// named by
 /// [`ToolInvocation`](super::envelope::RuntimeEffectCommand::ToolInvocation),
 /// whose payload is the retained request that reconstructs the child from the
 /// journal alone.

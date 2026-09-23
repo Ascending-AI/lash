@@ -134,20 +134,6 @@ impl RuntimeEffectController for SeamEffectController {
                 },
                 true,
             )),
-            crate::RuntimeEffectCommand::ToolBatch { batch } => batch.calls.first().map(|call| {
-                (
-                    if envelope.group.is_some() {
-                        EffectOperation::GroupChild {
-                            name: call.call.tool_name.clone(),
-                        }
-                    } else {
-                        EffectOperation::ToolBatch {
-                            name: call.call.tool_name.clone(),
-                        }
-                    },
-                    false,
-                )
-            }),
             _ => None,
         };
         let Some((operation, counts_external_execution)) = operation else {

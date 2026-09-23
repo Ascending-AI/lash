@@ -487,34 +487,6 @@ fn drain_area_witnesses() {
             lash::runtime::RuntimeErrorCode::RuntimeEffectToolAttemptIndex
         )
     });
-    // W0122: lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchCallId [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchCallId
-        )
-    });
-    // W0123: lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchCallReplay [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchCallReplay
-        )
-    });
-    // W0124: lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchEmpty [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchEmpty
-        )
-    });
-    // W0125: lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchId [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::RuntimeEffectToolBatchId
-        )
-    });
     // W0126: lash::runtime::RuntimeErrorCode::RuntimeEffectWrongOutcome [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
@@ -576,20 +548,6 @@ fn drain_area_witnesses() {
         matches!(
             value,
             lash::runtime::RuntimeErrorCode::SqliteEffectReplayStore
-        )
-    });
-    // W0135: lash::runtime::RuntimeErrorCode::ToolBatchMissingResult [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::ToolBatchMissingResult
-        )
-    });
-    // W0136: lash::runtime::RuntimeErrorCode::ToolBatchResultCountMismatch [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::ToolBatchResultCountMismatch
         )
     });
     // W0137: lash::runtime::RuntimeErrorCode::ToolCatalogResolutionFailed [variant]

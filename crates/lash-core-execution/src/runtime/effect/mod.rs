@@ -42,7 +42,7 @@ pub use envelope::{
     ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome,
     RuntimeInvocation, RuntimeLlmCallOutcome, SleepSpec, ToolAttemptEffectOutcome,
-    ToolAttemptLaunch, ToolBatchEffectOutcome, ToolCallLaunch, ToolInvocationEffectOutcome,
+    ToolAttemptLaunch, ToolInvocationEffectOutcome,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
@@ -469,8 +469,10 @@ mod tests {
         }
     }
 
+    /// A group child's attempt envelopes hash from its replay suffix, so the
+    /// suffix a prepared batch derives is identity material (ADR 0099 §3).
     #[test]
-    fn tool_batch_effect_envelope_round_trips_and_hashes_stably() {
+    fn prepared_tool_batch_derives_positional_child_replay_suffixes() {
         let batch = crate::PreparedToolBatch::new(
             "batch-123",
             vec![
@@ -478,68 +480,12 @@ mod tests {
                 prepared_tool_call("call-2", "lookup"),
             ],
         );
-        let invocation = RuntimeEffectInvocation::new(
-            EffectAddress::new(
-                ExecutionScope::turn("session", "turn"),
-                "session:turn:tool-batch:batch-123",
-            )
-            .expect("valid tool batch address"),
-            RuntimeAttribution::for_turn("session", "turn", 0, 0),
-            "tool-batch:batch-123",
-        );
-        let envelope = RuntimeEffectEnvelope::new(
-            invocation,
-            RuntimeEffectCommand::ToolBatch {
-                batch: batch.clone(),
-            },
-        );
-
-        let hash = envelope.stable_hash().expect("hash");
-        let decoded: RuntimeEffectEnvelope =
-            serde_json::from_str(&serde_json::to_string(&envelope).expect("serialize"))
-                .expect("decode");
-
-        assert_eq!(decoded.command.kind(), RuntimeEffectKind::ToolBatch);
-        assert_eq!(decoded.stable_hash().expect("decoded hash"), hash);
-        let RuntimeEffectCommand::ToolBatch {
-            batch: decoded_batch,
-        } = decoded.command
-        else {
-            panic!("wrong command");
-        };
-        assert_eq!(decoded_batch.batch_id, batch.batch_id);
-        assert_eq!(decoded_batch.calls.len(), 2);
-        assert_eq!(decoded_batch.calls[0].call.call_id, "call-1");
-        assert_eq!(decoded_batch.calls[0].replay_suffix, "child:0:call-1");
-        assert_eq!(decoded_batch.calls[1].call.call_id, "call-2");
-        assert_eq!(decoded_batch.calls[1].replay_suffix, "child:1:call-2");
-    }
-
-    #[test]
-    fn tool_batch_outcome_rejects_wrong_effect_kind() {
-        let error = RuntimeEffectOutcome::ToolAttempt {
-            launch: Box::new(ToolAttemptLaunch::Done {
-                record: Box::new(crate::ToolCallRecord {
-                    call_id: Some("call-1".to_string()),
-                    tool: "echo".to_string(),
-                    args: serde_json::json!({"value": "call-1"}),
-                    output: crate::ToolCallOutput::success(serde_json::json!({"done": "call-1"})),
-                    duration_ms: 7,
-                }),
-                intents: crate::ToolIntents::default(),
-            }),
-            triggers: Vec::new(),
-            capture: None,
-        }
-        .into_tool_batch_effect()
-        .expect_err("tool attempt is not a tool batch outcome");
-
-        assert_eq!(
-            error.code,
-            crate::RuntimeErrorCode::RuntimeEffectWrongOutcome
-        );
-        assert!(error.message.contains("expected tool_batch outcome"));
-        assert!(error.message.contains("got tool_attempt"));
+        assert_eq!(batch.batch_id, "batch-123");
+        assert_eq!(batch.calls.len(), 2);
+        assert_eq!(batch.calls[0].call.call_id, "call-1");
+        assert_eq!(batch.calls[0].replay_suffix, "child:0:call-1");
+        assert_eq!(batch.calls[1].call.call_id, "call-2");
+        assert_eq!(batch.calls[1].replay_suffix, "child:1:call-2");
     }
 
     #[tokio::test]

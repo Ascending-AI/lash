@@ -1,22 +1,19 @@
-//! One cross-tier differential law: an `All` group of tool children yields
-//! the batch replies the pre-group `ToolBatch` effect produced (FIG-3397,
-//! ADR 0099 §5).
+//! One cross-tier law: an `All` group of tool children answers every admission
+//! shape a batch carries with its own reply, keyed by input index (FIG-3397,
+//! ADR 0099 §5, §10).
 //!
-//! The predecessor path — `call_tool_batch_via_batch_effect`, one recorded
-//! `ToolBatch` effect whose local executor ran the leaves — and the group
-//! path — one effect group of `ToolInvocation` children consumed to
-//! exhaustion — must answer the same replies for the same calls. What is
-//! allowed to differ is the dispatch order the group commits in (§5 commit
-//! order): `settlement_order` is asserted as a set, not a sequence.
+//! A batch is one effect group of `ToolInvocation` children consumed to
+//! exhaustion. What the group decides is the dispatch order it commits in (§5
+//! commit order), so `settlement_order` is asserted as a permutation whose
+//! preparation-settled positions lead (§10 L5), not as a sequence.
 
 use super::*;
 
 /// A tool id nothing resolves: the call settles during preparation (ADR 0099
-/// §10 L5) and leads the settlement order on both paths.
+/// §10 L5) and leads the settlement order.
 const LEAF_ABSENT: &str = "tool:law_absent";
 
-/// Runs one batch under one fresh session through whichever `call_tool_batch`
-/// entry point the caller names.
+/// Runs one batch under one fresh session through `call_tool_batch`.
 ///
 /// The context is built against the tier's own host — `.effect_host` installs
 /// the tool-child host and opener registration on it — so the group path
@@ -25,27 +22,16 @@ const LEAF_ABSENT: &str = "tool:law_absent";
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn run_batch<F>(
+async fn run_batch(
     fixture: &ToolChildLawFixture,
     host: &Arc<dyn crate::EffectHost>,
     prefix: &str,
-    session_suffix: &str,
     calls: impl FnOnce(&crate::SessionId) -> Vec<crate::ToolInvocation>,
-    run: F,
-) -> (crate::SessionId, crate::session::ToolBatchReplies)
-where
-    F: for<'a> FnOnce(
-        &'a crate::RuntimeExecutionContext<'static>,
-        Vec<crate::ToolInvocation>,
-    ) -> std::pin::Pin<
-        Box<dyn Future<Output = crate::session::ToolBatchReplies> + Send + 'a>,
-    >,
-{
-    let session_id = crate::SessionId::from(format!("{prefix}-batch-group-{session_suffix}"));
-    // Call ids carry the half's session id: an orchestrating leaf derives the
-    // process it starts from its call id, and a durable registry shared by
-    // both halves would otherwise refuse the second start as a conflicting
-    // registration. The session id is normalized out of every compared value.
+) -> (crate::SessionId, crate::session::ToolBatchReplies) {
+    let session_id = crate::SessionId::from(format!("{prefix}-batch-group"));
+    // Call ids carry the session id: an orchestrating leaf derives the process
+    // it starts from its call id, so a durable registry shared across runs
+    // never sees two starts under one name.
     let calls = calls(&session_id);
     let scenario = scenario(
         fixture,
@@ -104,52 +90,20 @@ where
         .borrowed_effect_controller(controller)
         .build()
         .into_runtime();
-    let replies = run(&context, calls).await;
+    let replies = context
+        .call_tool_batch(calls, crate::session::ToolGroupOccurrence::Opener(1))
+        .await;
     (session_id, replies)
 }
 
-/// Replaces every embedded mention of `session_id` in a projected output —
-/// scope ids and derived names carry it — so the two halves of the
-/// differential, which run on deliberately distinct sessions, compare like
-/// for like. Digits are scrubbed too: scope ids embed registry sequence
-/// numbers, which legitimately differ because each half stands up its own
-/// scenario.
-fn normalize_session(value: &mut serde_json::Value, session_id: &crate::SessionId) {
-    let session = session_id.to_string();
-    match value {
-        serde_json::Value::String(text) => {
-            if text.contains(session.as_str()) {
-                *text = text.replace(session.as_str(), "<session>");
-            }
-            if text.chars().any(|ch| ch.is_ascii_digit()) {
-                *text = text
-                    .chars()
-                    .map(|ch| if ch.is_ascii_digit() { '#' } else { ch })
-                    .collect();
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                normalize_session(item, session_id);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for item in map.values_mut() {
-                normalize_session(item, session_id);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// One batch through both `call_tool_batch` paths yields the same replies.
+/// One batch of every admission shape yields one reply per input.
 ///
 /// The calls cover every admission shape a batch carries — a catalog leaf, a
 /// granted leaf, an orchestrating leaf, a leaf whose tool fails, and a leaf
-/// whose tool id resolves to nothing — so the differential proves the group
-/// consumer preserves preparation-prefix settlement (ADR 0099 §10 L5),
-/// per-leaf replies keyed by input index, and the settlement-order contract:
-/// a permutation of `0..n` whose preparation-settled positions lead.
+/// whose tool id resolves to nothing — so the law proves the group consumer
+/// keeps preparation-prefix settlement (ADR 0099 §10 L5), per-leaf replies
+/// keyed by input index, and the settlement-order contract: a permutation of
+/// `0..n` whose preparation-settled positions lead.
 pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
     fixture: &ToolChildLawFixture,
     prefix: &str,
@@ -191,114 +145,62 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
         ]
     };
 
-    let (predecessor_session, predecessor) = run_batch(
-        fixture,
-        &host,
-        prefix,
-        "predecessor",
-        calls,
-        |ctx, calls| {
-            Box::pin(async move {
-                ctx.call_tool_batch_via_batch_effect(
-                    calls,
-                    crate::session::ToolBatchOccurrence::Opener(1),
-                )
-                .await
-            })
-        },
-    )
-    .await;
-    let (grouped_session, grouped) =
-        run_batch(fixture, &host, prefix, "grouped", calls, |ctx, calls| {
-            Box::pin(async move {
-                ctx.call_tool_batch(calls, crate::session::ToolBatchOccurrence::Opener(1))
-                    .await
-            })
-        })
-        .await;
+    let (session, grouped) = run_batch(fixture, &host, prefix, calls).await;
 
-    assert_eq!(
-        predecessor.replies.len(),
-        grouped.replies.len(),
-        "both paths answer every input"
-    );
-    let projected = |reply: &crate::ToolInvocationReply,
-                     session: &crate::SessionId|
-     -> (serde_json::Value, serde_json::Value) {
-        let mut reply_projection = reply.output.value_for_projection();
-        normalize_session(&mut reply_projection, session);
-        let mut record_projection = reply
-            .record
-            .as_ref()
-            .map(|record| {
-                let mut value = record.output.value_for_projection();
-                normalize_session(&mut value, session);
-                value
-            })
-            .unwrap_or_default();
-        normalize_session(&mut record_projection, session);
-        (reply_projection, record_projection)
-    };
-    for (index, (before, after)) in predecessor
-        .replies
-        .iter()
+    assert_eq!(grouped.replies.len(), 5, "the group answers every input");
+    for (index, (suffix, reply)) in ["plain", "granted", "orchestrating", "fail", "absent"]
+        .into_iter()
         .zip(grouped.replies.iter())
         .enumerate()
     {
+        let record = reply
+            .record
+            .as_ref()
+            .unwrap_or_else(|| panic!("reply {index} carries its call record"));
         assert_eq!(
-            projected(before, &predecessor_session),
-            projected(after, &grouped_session),
-            "reply {index} output agrees across paths"
+            record.call_id.as_deref(),
+            Some(format!("{session}-{suffix}").as_str()),
+            "reply {index} is the reply to input {index}"
         );
-        match (&before.record, &after.record) {
-            (Some(before), Some(after)) => {
-                // Call ids carry each half's session id (see `run_batch`).
-                let call_id = |record: &crate::ToolCallRecord, session: &crate::SessionId| {
-                    record
-                        .call_id
-                        .as_deref()
-                        .map(|id| id.replace(session.as_str(), "<session>"))
-                };
-                assert_eq!(
-                    call_id(before, &predecessor_session),
-                    call_id(after, &grouped_session),
-                    "reply {index} call id"
-                );
-                assert_eq!(before.tool, after.tool, "reply {index} tool");
-                assert_eq!(before.args, after.args, "reply {index} args");
-            }
-            (None, None) => {}
-            _ => panic!("reply {index} record presence differs across paths"),
-        }
     }
-
-    // §5: the group's durable final-commit order may differ from the
-    // predecessor's source order, so the order is asserted as a set. The
-    // preparation-settled unavailable leaf leads in both (§10 L5).
-    let n = predecessor.replies.len();
-    let mut predecessor_order = predecessor.settlement_order.clone();
-    let mut grouped_order = grouped.settlement_order.clone();
-    predecessor_order.sort_unstable();
-    grouped_order.sort_unstable();
     assert_eq!(
-        predecessor_order,
-        (0..n).collect::<Vec<_>>(),
-        "the predecessor reports every position settled"
+        grouped.replies[0].output.value_for_projection(),
+        serde_json::json!({ "leaf": "plain" }),
+        "the catalog leaf answers its own output"
     );
+    assert_eq!(
+        grouped.replies[1].output.value_for_projection(),
+        serde_json::json!({ "leaf": "granted" }),
+        "the granted leaf answers its own output"
+    );
+    assert!(
+        grouped.replies[2].output.is_success(),
+        "the orchestrating leaf settles through its lane: {:?}",
+        grouped.replies[2].output
+    );
+    assert!(
+        !grouped.replies[3].output.is_success(),
+        "the failing leaf's rejection is its reply, not an infrastructure failure"
+    );
+    let absent = grouped.replies[4].output.value_for_projection();
+    assert!(
+        !grouped.replies[4].output.is_success() && absent.to_string().contains("unavailable"),
+        "the unresolved leaf settles during preparation as unavailable: {absent}"
+    );
+
+    // §5: the group's durable final-commit order decides the sequence; §10 L5:
+    // the preparation-settled unavailable leaf leads it.
+    let n = grouped.replies.len();
+    let mut grouped_order = grouped.settlement_order.clone();
+    grouped_order.sort_unstable();
     assert_eq!(
         grouped_order,
         (0..n).collect::<Vec<_>>(),
-        "the group reports every position settled"
-    );
-    let absent_index = n - 1;
-    assert_eq!(
-        predecessor.settlement_order.first(),
-        Some(&absent_index),
-        "the preparation-settled leaf leads the predecessor's order"
+        "the group reports every position settled exactly once"
     );
     assert_eq!(
         grouped.settlement_order.first(),
-        Some(&absent_index),
+        Some(&(n - 1)),
         "the preparation-settled leaf leads the group's order"
     );
 }

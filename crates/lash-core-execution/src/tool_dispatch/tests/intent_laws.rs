@@ -524,121 +524,6 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
 }
 
 #[tokio::test]
-async fn concurrent_batch_drains_intents_in_call_order_then_intent_index() {
-    let event_types = [
-        "batch-first-call.intent.0",
-        "batch-first-call.intent.1",
-        "batch-second-call.intent.0",
-        "batch-second-call.intent.1",
-    ];
-    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-    register_intent_law_target(&registry, &event_types).await;
-    let provider: Arc<dyn ToolProvider> = Arc::new(OrderedBatchIntentTools {
-        definitions: vec![
-            named_beta_tool("intent_batch_first"),
-            named_beta_tool("intent_batch_second"),
-        ],
-        second_attempt_finished: Arc::new(tokio::sync::Notify::new()),
-    });
-    let mut context = exact_dispatch_context(provider);
-    context.processes = crate::testing::effect_backed_process_service(registry.clone());
-    let execution =
-        runtime_execution_for_intent_law(context, tokio_util::sync::CancellationToken::new());
-    let batch = crate::PreparedToolBatch::new(
-        "intent-order-batch",
-        vec![
-            crate::PreparedToolCall::from_parts(
-                "batch-first-call",
-                "tool:intent_batch_first",
-                "intent_batch_first",
-                json!({"value": "first"}),
-                None,
-                serde_json::Value::Null,
-            ),
-            crate::PreparedToolCall::from_parts(
-                "batch-second-call",
-                "tool:intent_batch_second",
-                "intent_batch_second",
-                json!({"value": "second"}),
-                None,
-                serde_json::Value::Null,
-            ),
-        ],
-    );
-
-    let outcome = Box::pin(execution.execute_prepared_tool_batch_launches(
-        batch,
-        intent_law_batch_parent("intent-order-parent"),
-        std::collections::HashMap::new(),
-        Arc::new(std::collections::HashMap::new()),
-    ))
-    .await
-    .expect("execute ordered intent batch");
-    assert_eq!(outcome.launches.len(), 2);
-    assert!(outcome.launches.iter().all(|launch| matches!(
-        launch,
-        crate::runtime::ToolCallLaunch::Done { result }
-            if result.intent_outcomes.len() == 2
-    )));
-    let events = registry
-        .full_event_window(&ProcessId::from("intent-law-target"), 0)
-        .await
-        .expect("read ordered intent events");
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| event.event_type.contains(".intent."))
-            .map(|event| event.event_type.as_str())
-            .collect::<Vec<_>>(),
-        event_types,
-        "completion-race order cannot reorder call-order then intent-index drain"
-    );
-}
-
-#[tokio::test]
-async fn controller_abort_during_intent_drain_aborts_the_turn_batch() {
-    let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-    let calls = Arc::new(AtomicUsize::new(0));
-    let controller = Arc::new(IntentReplayController::new(None).with_process_abort(
-        crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::WorkerReplacementAbort,
-            "replacement invalidated the process-command journal",
-        ),
-    ));
-    let context = fixed_intent_dispatch_context(
-        controller,
-        registry,
-        recorded_event_intents(&["replacement.abort"]),
-        Arc::clone(&calls),
-    );
-    let execution =
-        runtime_execution_for_intent_law(context, tokio_util::sync::CancellationToken::new());
-    let batch = crate::PreparedToolBatch::new(
-        "replacement-abort-batch",
-        vec![crate::PreparedToolCall::from_parts(
-            "fixed-intent-call",
-            "tool:fixed_intent_law",
-            "fixed_intent_law",
-            json!({"value": "drive"}),
-            None,
-            serde_json::Value::Null,
-        )],
-    );
-
-    let error = Box::pin(execution.execute_prepared_tool_batch_launches(
-        batch,
-        intent_law_batch_parent("replacement-abort-parent"),
-        std::collections::HashMap::new(),
-        Arc::new(std::collections::HashMap::new()),
-    ))
-    .await
-    .expect_err("controller abort must escape the intent drain and abort the turn batch");
-
-    assert_eq!(error.code, crate::RuntimeErrorCode::WorkerReplacementAbort);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
 async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect_abort() {
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
     let calls = Arc::new(AtomicUsize::new(0));
@@ -703,52 +588,6 @@ async fn ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code() {
 }
 
 #[tokio::test]
-async fn cancellation_before_result_commit_executes_no_intents() {
-    let definition = named_beta_tool("blocking_intent_attempt");
-    let entered = Arc::new(tokio::sync::Notify::new());
-    let provider: Arc<dyn ToolProvider> = Arc::new(BlockingAttemptIntentTools {
-        definition,
-        entered: Arc::clone(&entered),
-    });
-    let context = exact_dispatch_context(provider);
-    let cancellation = tokio_util::sync::CancellationToken::new();
-    let execution = runtime_execution_for_intent_law(context, cancellation.clone());
-    let batch = crate::PreparedToolBatch::new(
-        "pre-result-cancel-batch",
-        vec![crate::PreparedToolCall::from_parts(
-            "pre-result-cancel-call",
-            "tool:blocking_intent_attempt",
-            "blocking_intent_attempt",
-            json!({"value": "block"}),
-            None,
-            serde_json::Value::Null,
-        )],
-    );
-    let run = crate::task::spawn(async move {
-        Box::pin(execution.execute_prepared_tool_batch_launches(
-            batch,
-            intent_law_batch_parent("pre-result-cancel-parent"),
-            std::collections::HashMap::new(),
-            Arc::new(std::collections::HashMap::new()),
-        ))
-        .await
-    });
-    entered.notified().await;
-    cancellation.cancel();
-    let outcome = timeout(Duration::from_secs(2), run)
-        .await
-        .expect("pre-result cancellation must not hang")
-        .expect("batch task joins")
-        .expect("batch cancellation is a typed launch");
-    assert!(matches!(
-        outcome.launches.as_slice(),
-        [crate::runtime::ToolCallLaunch::Done { result }]
-            if matches!(result.output.outcome, crate::ToolCallOutcome::Cancelled(_))
-                && result.intent_outcomes.is_empty()
-    ));
-}
-
-#[tokio::test]
 async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
     let event_types = ["post.cancel.intent.0", "post.cancel.intent.1"];
     let registry = Arc::new(crate::TestLocalProcessRegistry::default());
@@ -765,44 +604,28 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
     );
     let cancellation = tokio_util::sync::CancellationToken::new();
     let execution = runtime_execution_for_intent_law(context, cancellation.clone());
-    let batch = crate::PreparedToolBatch::new(
-        "post-result-cancel-batch",
-        vec![crate::PreparedToolCall::from_parts(
-            "fixed-intent-call",
-            "tool:fixed_intent_law",
-            "fixed_intent_law",
-            json!({"value": "drive"}),
-            None,
-            serde_json::Value::Null,
-        )],
-    );
     let run = crate::task::spawn(async move {
-        Box::pin(execution.execute_prepared_tool_batch_launches(
-            batch,
-            intent_law_batch_parent("post-result-cancel-parent"),
-            std::collections::HashMap::new(),
-            Arc::new(std::collections::HashMap::new()),
+        Box::pin(execution.call_tool_by_id(
+            "fixed-intent-call".to_string(),
+            crate::ToolId::from("tool:fixed_intent_law"),
+            json!({"value": "drive"}),
+            0,
         ))
         .await
     });
     controller.wait_until_paused().await;
     cancellation.cancel();
     controller.release();
-    let outcome = timeout(Duration::from_secs(2), run)
+    let reply = timeout(Duration::from_secs(2), run)
         .await
         .expect("post-result drain must not hang")
-        .expect("batch task joins")
-        .expect("post-result drain succeeds");
+        .expect("call task joins");
+    assert!(
+        reply.output.is_success(),
+        "the committed result stands after a post-commit cancel: {:?}",
+        reply.output
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert!(matches!(
-        outcome.launches.as_slice(),
-        [crate::runtime::ToolCallLaunch::Done { result }]
-            if result.intent_outcomes.len() == 2
-                && result.intent_outcomes.iter().all(|outcome| matches!(
-                    outcome,
-                    crate::ToolIntentExecutionOutcome::Executed { .. }
-                ))
-    ));
     let events = registry
         .full_event_window(&ProcessId::from("intent-law-target"), 0)
         .await

@@ -74,12 +74,6 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             "journaled_run",
         ),
         (
-            RuntimeEffectCommand::ToolBatch {
-                batch: lash_core::PreparedToolBatch::new("batch", vec![prepared_tool_call()]),
-            },
-            "durable_tool_batch",
-        ),
-        (
             RuntimeEffectCommand::ExecCode {
                 language: "code".to_string(),
                 code: "1 + 1".to_string(),
@@ -168,7 +162,6 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             RestateEffectExecution::DirectProcess { .. } => "direct_process",
             RestateEffectExecution::DurableProcessCommand { .. } => "durable_process_command",
             RestateEffectExecution::DirectLocal { .. } => "direct_local",
-            RestateEffectExecution::DurableToolBatch { .. } => "durable_tool_batch",
             RestateEffectExecution::Timer { .. } => "timer",
             RestateEffectExecution::AwaitEvent { .. } => "await_event",
             RestateEffectExecution::PeekAwaitEvent { .. } => "peek_await_event",

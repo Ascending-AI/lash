@@ -203,10 +203,6 @@ where
         self.inner.owns_commit_backpressure()
     }
 
-    fn supports_concurrent_effects(&self) -> bool {
-        self.inner.supports_concurrent_effects()
-    }
-
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,

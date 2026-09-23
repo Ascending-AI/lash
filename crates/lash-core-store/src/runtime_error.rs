@@ -291,10 +291,6 @@ pub enum RuntimeErrorCode {
     RuntimeEffectToolAttemptCallId,
     RuntimeEffectToolAttemptCaptureVersion,
     RuntimeEffectToolAttemptIndex,
-    RuntimeEffectToolBatchCallId,
-    RuntimeEffectToolBatchCallReplay,
-    RuntimeEffectToolBatchEmpty,
-    RuntimeEffectToolBatchId,
     RuntimeEffectToolChildCancellationAuthority,
     RuntimeEffectToolChildCompletionRouting,
     RuntimeEffectToolChildRequestAdmission,
@@ -333,8 +329,6 @@ pub enum RuntimeErrorCode {
     SqliteEffectReplayLeaseLost,
     SqliteEffectReplayMissing,
     SqliteEffectReplayStore,
-    ToolBatchMissingResult,
-    ToolBatchResultCountMismatch,
     ToolCatalogResolutionFailed,
     ToolCompletionKeyMissingCallId,
     ToolCompletionKeyProcessLifetime,
@@ -616,10 +610,6 @@ impl RuntimeErrorCode {
                 "runtime_effect_tool_attempt_capture_version"
             }
             Self::RuntimeEffectToolAttemptIndex => "runtime_effect_tool_attempt_index",
-            Self::RuntimeEffectToolBatchCallId => "runtime_effect_tool_batch_call_id",
-            Self::RuntimeEffectToolBatchCallReplay => "runtime_effect_tool_batch_call_replay",
-            Self::RuntimeEffectToolBatchEmpty => "runtime_effect_tool_batch_empty",
-            Self::RuntimeEffectToolBatchId => "runtime_effect_tool_batch_id",
             Self::RuntimeEffectToolChildCancellationAuthority => {
                 "runtime_effect_tool_child_cancellation_authority"
             }
@@ -664,8 +654,6 @@ impl RuntimeErrorCode {
             Self::SqliteEffectReplayLeaseLost => "sqlite_effect_replay_lease_lost",
             Self::SqliteEffectReplayMissing => "sqlite_effect_replay_missing",
             Self::SqliteEffectReplayStore => "sqlite_effect_replay_store",
-            Self::ToolBatchMissingResult => "tool_batch_missing_result",
-            Self::ToolBatchResultCountMismatch => "tool_batch_result_count_mismatch",
             Self::ToolCatalogResolutionFailed => "tool_catalog_resolution_failed",
             Self::ToolCompletionKeyMissingCallId => "tool_completion_key_missing_call_id",
             Self::ToolCompletionKeyProcessLifetime => "tool_completion_key_process_lifetime",
@@ -849,10 +837,6 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectToolAttemptCallId
             | Self::RuntimeEffectToolAttemptCaptureVersion
             | Self::RuntimeEffectToolAttemptIndex
-            | Self::RuntimeEffectToolBatchCallId
-            | Self::RuntimeEffectToolBatchCallReplay
-            | Self::RuntimeEffectToolBatchEmpty
-            | Self::RuntimeEffectToolBatchId
             | Self::RuntimeEffectToolChildCancellationAuthority
             | Self::RuntimeEffectToolChildCompletionRouting
             | Self::RuntimeEffectToolChildRequestAdmission
@@ -877,8 +861,6 @@ impl RuntimeErrorCode {
             | Self::SqliteEffectReplayLeaseLost
             | Self::SqliteEffectReplayMissing
             | Self::SqliteEffectReplayStore
-            | Self::ToolBatchMissingResult
-            | Self::ToolBatchResultCountMismatch
             | Self::ToolCatalogResolutionFailed
             | Self::ToolCompletionKeyMissingCallId
             | Self::ToolCompletionKeyProcessLifetime
@@ -1078,10 +1060,6 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectToolAttemptCallId,
         Self::RuntimeEffectToolAttemptCaptureVersion,
         Self::RuntimeEffectToolAttemptIndex,
-        Self::RuntimeEffectToolBatchCallId,
-        Self::RuntimeEffectToolBatchCallReplay,
-        Self::RuntimeEffectToolBatchEmpty,
-        Self::RuntimeEffectToolBatchId,
         Self::RuntimeEffectToolSettlementVersion,
         Self::RuntimeEffectWrongOutcome,
         Self::RuntimeEffectControllerTaskClosed,
@@ -1110,8 +1088,6 @@ impl RuntimeErrorCode {
         Self::SqliteEffectReplayLeaseLost,
         Self::SqliteEffectReplayMissing,
         Self::SqliteEffectReplayStore,
-        Self::ToolBatchMissingResult,
-        Self::ToolBatchResultCountMismatch,
         Self::ToolCatalogResolutionFailed,
         Self::ToolCompletionKeyMissingCallId,
         Self::ToolCompletionKeyProcessLifetime,
@@ -1304,10 +1280,6 @@ impl RuntimeErrorCode {
                 Self::RuntimeEffectToolAttemptCaptureVersion
             }
             "runtime_effect_tool_attempt_index" => Self::RuntimeEffectToolAttemptIndex,
-            "runtime_effect_tool_batch_call_id" => Self::RuntimeEffectToolBatchCallId,
-            "runtime_effect_tool_batch_call_replay" => Self::RuntimeEffectToolBatchCallReplay,
-            "runtime_effect_tool_batch_empty" => Self::RuntimeEffectToolBatchEmpty,
-            "runtime_effect_tool_batch_id" => Self::RuntimeEffectToolBatchId,
             "runtime_effect_tool_child_cancellation_authority" => {
                 Self::RuntimeEffectToolChildCancellationAuthority
             }
@@ -1352,8 +1324,6 @@ impl RuntimeErrorCode {
             "sqlite_effect_replay_lease_lost" => Self::SqliteEffectReplayLeaseLost,
             "sqlite_effect_replay_missing" => Self::SqliteEffectReplayMissing,
             "sqlite_effect_replay_store" => Self::SqliteEffectReplayStore,
-            "tool_batch_missing_result" => Self::ToolBatchMissingResult,
-            "tool_batch_result_count_mismatch" => Self::ToolBatchResultCountMismatch,
             "tool_catalog_resolution_failed" => Self::ToolCatalogResolutionFailed,
             "tool_completion_key_missing_call_id" => Self::ToolCompletionKeyMissingCallId,
             "tool_completion_key_process_lifetime" => Self::ToolCompletionKeyProcessLifetime,

@@ -213,20 +213,20 @@ macro_rules! __tool_child_invocation_register {
     };
 }
 
-/// Register the tool-batch group differential law (FIG-3397, ADR 0099 §5):
-/// the effect-group `call_tool_batch` path answers the same replies the
-/// pre-group `ToolBatch` effect produced.
+/// Register the tool-batch group law (FIG-3397, ADR 0099 §5, §10): an `All`
+/// group of tool children answers every admission shape with its own reply,
+/// keyed by input index, and a settlement order its preparation prefix leads.
 ///
 /// The fixture hands back a guard, a session prefix and a
 /// [`ToolChildLawFixture`], the same shape `tool_child_invocation_tests!`
 /// takes — the law needs a world factory over the tier's substrate and a
 /// process-registry factory, nothing more. Restate is deliberately absent:
 /// its deployment host executes no effects, so there is no batch consumer to
-/// differentiate.
+/// run.
 #[macro_export]
 macro_rules! tool_batch_group_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
-            (an_all_group_of_tool_children_yields_the_batch_replies, "tool-batch-group-differential"));
+            (an_all_group_of_tool_children_yields_the_batch_replies, "tool-batch-group-replies"));
     };
 }

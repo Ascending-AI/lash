@@ -52,13 +52,15 @@ mod effect_group_contract_tests {
     ///
     /// The corpus deliberately spans every command *shape* the encoding could
     /// perturb — unit-ish payloads, string payloads, keyed payloads, and the
-    /// nested `ToolAttempt`/`ToolBatch` payloads — because the field being
-    /// guarded sits on the envelope rather than inside any one command.
+    /// nested `ToolAttempt` payload — because the field being guarded sits on
+    /// the envelope rather than inside any one command.
     ///
-    /// Nine of the fourteen `RuntimeEffectCommand` variants are covered. The
-    /// five omissions are named rather than implied: `LlmCall`, `Direct` and
-    /// `AssistantResponseHooks` need a full `LlmRequestSpec`/`LlmResponse`,
-    /// `Trigger` a `TriggerCommand`, and `Process` a `ProcessCommand` — payloads
+    /// Eight command variants are covered. The omissions are named rather than
+    /// implied: `LlmCall`, `Direct` and `AssistantResponseHooks` need a full
+    /// `LlmRequestSpec`/`LlmResponse`, `Trigger` a `TriggerCommand`, `Process` a
+    /// `ProcessCommand`, and the group and acceptance commands (`ToolInvocation`,
+    /// `IncorporateGroupSettlements`, `PresentToolResult`, `AcceptTurnInput`)
+    /// their own retained records — payloads
     /// whose construction cost buys nothing here, because the field under guard
     /// sits on the *envelope*, so its omission is variant-independent and one
     /// covered variant already proves the encoding. The corpus width is a
@@ -106,17 +108,10 @@ mod effect_group_contract_tests {
                 "tool_attempt",
                 RuntimeEffectKind::ToolAttempt,
                 RuntimeEffectCommand::ToolAttempt {
-                    call: prepared.clone(),
+                    call: prepared,
                     execution_grant: None,
                     attempt: 1,
                     max_attempts: 1,
-                },
-            ),
-            (
-                "tool_batch",
-                RuntimeEffectKind::ToolBatch,
-                RuntimeEffectCommand::ToolBatch {
-                    batch: lash_core_execution::PreparedToolBatch::new("batch", vec![prepared]),
                 },
             ),
             (
@@ -182,10 +177,6 @@ mod effect_group_contract_tests {
             (
                 "tool_attempt",
                 "14fe59d38589fe58cd66f4328251d301a8a556f886371c8544dcafe8b4cf867d",
-            ),
-            (
-                "tool_batch",
-                "27e239383a54b3fb07f5bf97b56c097ce44bcf277feaa94c89551affa2756d6d",
             ),
             (
                 "checkpoint",

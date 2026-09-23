@@ -37,7 +37,6 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
             command,
             RuntimeEffectCommand::LlmCall { .. }
                 | RuntimeEffectCommand::AssistantResponseHooks { .. }
-                | RuntimeEffectCommand::ToolBatch { .. }
                 | RuntimeEffectCommand::ExecCode { .. }
         )
     }
@@ -75,18 +74,6 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         events,
                     },
                 ),
-            RuntimeEffectCommand::ToolBatch { batch } => Box::pin(runner.driver.run_tool_batch(
-                batch,
-                envelope.invocation.into_runtime_invocation(),
-                &runner.event_tx,
-                &runner.cancellation,
-            ))
-            .await
-            .map(|outcome| RuntimeEffectOutcome::ToolBatch {
-                launches: outcome.launches,
-                triggers: outcome.triggers,
-                settlement_order: outcome.settlement_order,
-            }),
             RuntimeEffectCommand::ExecCode { language, code } => {
                 let result = runner
                     .driver

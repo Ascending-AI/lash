@@ -325,7 +325,6 @@ pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
         },
         turn_cancel_wait.as_ref(),
         None,
-        None,
         |completion_key| {
             crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
                 Arc::clone(&dispatch),

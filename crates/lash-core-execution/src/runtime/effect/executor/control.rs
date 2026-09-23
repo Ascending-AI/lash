@@ -417,16 +417,6 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         None
     }
 
-    /// Local and store-backed controllers can usually fan out independent
-    /// effects. Some workflow substrates expose a single ordered journal
-    /// context where native operations must be awaited immediately before the
-    /// next context call is issued. Those controllers should return `false` so
-    /// coordinators serialize child effects while still replaying each child by
-    /// its own stable key.
-    fn supports_concurrent_effects(&self) -> bool {
-        true
-    }
-
     /// Testing hook: a controller double that forwards effect-group operations
     /// to an inner substrate exposes an `EffectHost` over that same substrate
     /// here, so test builders can wire tool-child routing and bound-child

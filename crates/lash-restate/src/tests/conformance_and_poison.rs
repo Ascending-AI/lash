@@ -206,11 +206,6 @@ lash_conformance::effect_controller_replay_tests!(
                 assert!(runs.iter().any(|name| name.ends_with(":effect-slow")));
                 assert!(runs.iter().any(|name| name.ends_with(":effect-fast")));
             }
-            "effect-controller-tool-attempt-fanout" => {
-                assert_eq!(runs.len(), 4);
-                assert!(runs.iter().any(|name| name.ends_with(":tool-attempt-slow")));
-                assert!(runs.iter().any(|name| name.ends_with(":tool-attempt-fast")));
-            }
             "effect-controller-journaled-replay" => {}
             unknown => panic!("unexpected Restate replay conformance law: {unknown}"),
         }
@@ -791,54 +786,6 @@ pub(super) async fn fig1464_over_budget_envelope_gives_up_with_a_fixed_size_pois
     );
 }
 
-/// FIG-1464: the tool-batch and durable-process-command sites run their effect
-/// outside the run closure, so the budget give-up has to be their pre-flight
-/// gate. A give-up decided after the batch ran would discard a settled batch
-/// with no journal entry, and the next redrive would execute every child again.
-#[tokio::test]
-pub(super) async fn fig1464_over_budget_tool_batch_gives_up_before_running_the_batch() {
-    let context = Arc::new(RecordingContext::default());
-    let controller = RestateRuntimeEffectController::with_options_for_test(
-        Arc::clone(&context),
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
-    );
-    let executed = Arc::new(AtomicBool::new(false));
-    let ran = Arc::clone(&executed);
-
-    let error = controller
-        .execute_effect(
-            RuntimeEffectEnvelope::new(
-                runtime_invocation(RuntimeEffectKind::ToolBatch, "fig1464-over-budget-batch"),
-                RuntimeEffectCommand::ToolBatch {
-                    batch: lash_core::PreparedToolBatch::new("batch", vec![prepared_tool_call()]),
-                },
-            ),
-            RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-                ran.store(true, Ordering::SeqCst);
-                Err(lash_core::RuntimeEffectControllerError::new(
-                    lash_core::RuntimeErrorCode::RestateEffectController,
-                    "an over-budget tool batch must never run",
-                ))
-            }),
-        )
-        .await
-        .expect_err("an unjournalable envelope must not be recorded as a result");
-
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
-    );
-    assert!(
-        !executed.load(Ordering::SeqCst),
-        "the give-up must be decided before the batch runs"
-    );
-    assert_eq!(
-        context.runs.lock_recover().len(),
-        1,
-        "the give-up must occupy its journal slot exactly once"
-    );
-}
-
 /// FIG-1464 deciding risk: the give-up verdict reads a process-configured
 /// budget, so a budget change between attempts must not flip the *shape* of the
 /// journal. The give-up occupies its slot with a fixed-size poison entry, so a
@@ -892,71 +839,9 @@ pub(super) async fn fig1464_over_budget_give_up_replays_identically_under_a_larg
     );
 }
 
-/// FIG-1464 round 3, residual B: at the tool-batch and process-command sites the
-/// effect runs outside the run closure, so nothing but this seam's own journal
-/// slot can stop a replay from running it again. Re-deciding the give-up from
-/// live config was not enough: a redrive configured with a larger budget cleared
-/// the envelope, ran the batch, and only then replayed the poison entry and threw
-/// the settled batch away - an at-least-once execution of every child. The
-/// verdict is journaled ahead of the batch, so the journaled verdict is what
-/// decides on replay and the batch never runs.
-#[tokio::test]
-pub(super) async fn fig1464_over_budget_tool_batch_replay_under_a_larger_budget_never_runs_the_batch()
- {
-    let context = Arc::new(ReplayableRecordingContext::default());
-    let batch_envelope = || {
-        RuntimeEffectEnvelope::new(
-            runtime_invocation(RuntimeEffectKind::ToolBatch, "fig1464-budget-flip-batch"),
-            RuntimeEffectCommand::ToolBatch {
-                batch: lash_core::PreparedToolBatch::new("batch", vec![prepared_tool_call()]),
-            },
-        )
-    };
-    let never_runs = || {
-        RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-            panic!("a batch whose give-up is already journaled must never run");
-        })
-    };
-
-    let recorded = RestateRuntimeEffectController::with_options_for_test(
-        Arc::clone(&context),
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
-    )
-    .execute_effect(batch_envelope(), never_runs())
-    .await
-    .expect_err("the over-budget batch must give up before running");
-
-    context.replaying.store(true, Ordering::SeqCst);
-    let replayed = RestateRuntimeEffectController::with_options_for_test(
-        Arc::clone(&context),
-        // Big enough that a give-up re-decided from live config would proceed,
-        // run the batch, and only then meet the journaled give-up.
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
-    )
-    .execute_effect(batch_envelope(), never_runs())
-    .await
-    .expect_err("the journaled verdict must still give up");
-
-    assert_eq!(
-        replayed.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
-    );
-    assert_eq!(
-        replayed.message, recorded.message,
-        "the replayed give-up must render the journaled verdict, not the new budget"
-    );
-    assert_eq!(
-        context.runs.lock_recover().as_slice(),
-        [
-            "lash:session:turn:1:0:tool_batch:fig1464-budget-flip-batch.journal-budget",
-            "lash:session:turn:1:0:tool_batch:fig1464-budget-flip-batch.journal-budget"
-        ],
-        "the redrive must consume the same verdict slot and add none"
-    );
-}
-
-/// FIG-1767: both eager effect arms (durable process command and durable tool batch)
-/// emit byte-identical journal records before and after collapsing into the shared helper.
+/// FIG-1767: the eager effect arm (the durable process command) emits
+/// byte-identical journal records before and after collapsing into the shared
+/// helper.
 #[tokio::test]
 pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     let context = Arc::new(ReplayableRecordingContext::default());
@@ -1064,71 +949,18 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
     }
 
-    // Arm 2: Durable Tool Batch
-    let batch_invocation = turn_effect_invocation(
-        "fig1767-session",
-        "fig1767-turn",
-        1,
-        0,
-        "fig1767-tool-batch",
-        "fig1767-tool-batch",
-    );
-    let batch_envelope = RuntimeEffectEnvelope::new(
-        batch_invocation,
-        RuntimeEffectCommand::ToolBatch {
-            batch: lash_core::PreparedToolBatch::new("fig1767-batch", vec![prepared_tool_call()]),
-        },
-    );
-    controller
-        .execute_effect(
-            batch_envelope.clone(),
-            RuntimeEffectLocalExecutor::testing(|_| async {
-                Ok(RuntimeEffectOutcome::ToolBatch {
-                    launches: vec![],
-                    triggers: vec![],
-                    settlement_order: vec![],
-                })
-            }),
-        )
-        .await
-        .expect("tool batch effect execution");
-
-    // Retrieve records produced for DurableToolBatch
-    let batch_verdict_key = "lash:fig1767-tool-batch.journal-budget";
-    let batch_record_key = "lash:fig1767-tool-batch";
-
-    let records = context.records.lock_recover();
-    let batch_verdict_bytes = records
-        .get(batch_verdict_key)
-        .expect("batch budget verdict journal entry");
-    let batch_record_bytes = records
-        .get(batch_record_key)
-        .expect("batch effect record journal entry");
-
-    assert_eq!(
-        batch_verdict_bytes.as_slice(),
-        b"\"Proceed\"",
-        "tool batch budget verdict byte sequence mismatch"
-    );
-    assert_eq!(
-        batch_record_bytes,
-        br##"{"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-tool-batch\"},\"effect_id\":\"fig1767-tool-batch\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"tool_batch\",\"batch\":{\"batch_id\":\"fig1767-batch\",\"calls\":[{\"call\":{\"call_id\":\"call-1\",\"tool_id\":\"tool:tool\",\"tool_name\":\"tool\",\"args\":{}},\"replay_suffix\":\"child:0:call-1\"}]}}}","hash":"7303b5b54d2d530f219457ea07eeaea45e798d3d71c38df1356b428b0a4ba623"},"outcome":{"Ok":{"type":"tool_batch","launches":[],"settlement_order":[]}}}"##,
-        "tool batch recorded effect golden bytes changed"
-    );
     assert_eq!(
         context.runs.lock_recover().as_slice(),
         [
             "lash:fig1767-process-cmd.journal-budget",
-            "lash:fig1767-process-cmd",
-            "lash:fig1767-tool-batch.journal-budget",
-            "lash:fig1767-tool-batch"
+            "lash:fig1767-process-cmd"
         ],
-        "each eager effect must journal its decisions after its budget verdict and before its recorded effect"
+        "the eager effect must journal its decisions after its budget verdict and before its recorded effect"
     );
 }
 
-/// FIG-1767: redriving an eager effect (both durable process command and durable tool batch)
-/// whose journaled budget verdict is a give-up executes nothing — the run future reaches
+/// FIG-1767: redriving the eager effect (the durable process command) whose
+/// journaled budget verdict is a give-up executes nothing — the run future reaches
 /// the helper unpolled and is never executed.
 #[tokio::test]
 pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
@@ -1235,77 +1067,13 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         "redriving a process command give-up verdict must execute nothing"
     );
 
-    // 2. Durable Tool Batch over budget
-    context.replaying.store(false, Ordering::SeqCst);
-    let batch_invocation = turn_effect_invocation(
-        "fig1767-session",
-        "fig1767-turn",
-        1,
-        0,
-        "fig1767-over-budget-batch",
-        "fig1767-over-budget-batch",
-    );
-    let batch_envelope = RuntimeEffectEnvelope::new(
-        batch_invocation,
-        RuntimeEffectCommand::ToolBatch {
-            batch: lash_core::PreparedToolBatch::new("fig1767-batch", vec![prepared_tool_call()]),
-        },
-    );
-
-    let recorded_batch_err = RestateRuntimeEffectController::with_options_for_test(
-        Arc::clone(&context),
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
-    )
-    .execute_effect(
-        batch_envelope.clone(),
-        RuntimeEffectLocalExecutor::testing(|_| async {
-            panic!("tool batch initial attempt must give up before running work");
-        }),
-    )
-    .await
-    .expect_err("tool batch over budget must give up");
-
-    assert_eq!(
-        recorded_batch_err.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
-    );
-
-    // Redrive tool batch under a larger budget — must read journaled verdict and execute nothing
-    context.replaying.store(true, Ordering::SeqCst);
-    let batch_executed = Arc::new(AtomicBool::new(false));
-    let ran_batch = Arc::clone(&batch_executed);
-
-    let replayed_batch_err = RestateRuntimeEffectController::with_options_for_test(
-        Arc::clone(&context),
-        RestateEffectControllerOptions::default().journaled_effect_byte_budget(4_096),
-    )
-    .execute_effect(
-        batch_envelope,
-        RuntimeEffectLocalExecutor::testing(move |_| async move {
-            ran_batch.store(true, Ordering::SeqCst);
-            panic!("tool batch work closure must never be executed on give-up redrive");
-        }),
-    )
-    .await
-    .expect_err("replayed give-up verdict must return poisoned error");
-
-    assert_eq!(
-        replayed_batch_err.code,
-        lash_core::RuntimeErrorCode::RestateJournaledEffectPoisoned
-    );
-    assert!(
-        !batch_executed.load(Ordering::SeqCst),
-        "redriving a tool batch give-up verdict must execute nothing"
-    );
     assert_eq!(
         context.runs.lock_recover().as_slice(),
         [
             "lash:fig1767-over-budget-proc.journal-budget",
-            "lash:fig1767-over-budget-proc.journal-budget",
-            "lash:fig1767-over-budget-batch.journal-budget",
-            "lash:fig1767-over-budget-batch.journal-budget"
+            "lash:fig1767-over-budget-proc.journal-budget"
         ],
-        "a give-up redrive must consume only the verdict slot before the next effect"
+        "a give-up redrive must consume only the verdict slot"
     );
 }
 
@@ -1393,17 +1161,6 @@ pub(super) async fn journaled_cancel_peeks_replay_while_live_watcher_observes_la
         .await
         .expect("live watcher observes durable cancellation");
     assert_eq!(live, cancellation);
-}
-
-#[test]
-pub(super) fn restate_handler_controller_disallows_concurrent_effect_calls() {
-    let controller =
-        RestateRuntimeEffectController::new_for_test(Arc::new(RecordingContext::default()));
-
-    assert!(
-        !controller.supports_concurrent_effects(),
-        "Restate handler context calls such as ctx.run must be awaited before the next effect call"
-    );
 }
 
 #[test]

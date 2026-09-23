@@ -321,33 +321,24 @@ async fn run_fig1293_turn_with_controller(
         .expect("run FIG-1293 tier turn")
 }
 
-fn fig1293_cancelling_scope(
-    effect_host: &dyn EffectHost,
-    cancellation: tokio_util::sync::CancellationToken,
-    interrupt_after_batch_failure: bool,
-    fired: Arc<std::sync::atomic::AtomicBool>,
-) -> lash_core::ScopedEffectController<'static> {
-    let scope = lash_core::AdmittedScope::turn(
-        "fig1293-restate-migrated-tools",
-        "fig1293-restate-migrated-turn",
-    );
-    let inner = effect_host
-        .scoped_static(scope.clone())
-        .expect("scope cancelling host")
-        .expect("cancelling host exposes static scopes");
-    lash_core::ScopedEffectController::shared(
-        Arc::new(CrossingController {
-            inner: Arc::new(ScopedControllerAdapter(inner)),
-            signal_frames: Arc::new(Mutex::new(Vec::new())),
-            crash_after: None,
-            cancel_after_batch_failure: Some(cancellation),
-            interrupt_after_batch_failure,
-            force_serial: true,
-            fired,
-        }),
-        scope,
-    )
-    .expect("scope FIG-1293 cancelling PostgreSQL controller")
+/// Clears every row a FIG-1293 turn leaves, the retained effect groups
+/// included: each law's turn opens its tool calls as a group keyed by the same
+/// session and turn, so a sibling law's retained group would otherwise be
+/// reopened under a different shape.
+async fn reset_fig1293_rows(storage: &PostgresStorage) {
+    for statement in [
+        "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
+        "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
+        "DELETE FROM lash_runtime_effect_group_child WHERE group_key IN (
+             SELECT group_key FROM lash_runtime_effect_group WHERE scope_id LIKE '%fig1293%')",
+        "DELETE FROM lash_runtime_effect_group WHERE scope_id LIKE '%fig1293%'",
+        "DELETE FROM lash_processes WHERE process_id LIKE '%fig1293%' OR record_json LIKE '%fig1293%'",
+    ] {
+        sqlx::query(statement)
+            .execute(storage.pool())
+            .await
+            .expect("reset FIG-1293 PostgreSQL rows");
+    }
 }
 
 fn fig1293_literal_outputs(
@@ -398,16 +389,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect FIG-1293 PostgreSQL host");
-    for statement in [
-        "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
-        "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
-        "DELETE FROM lash_processes WHERE process_id LIKE '%fig1293%' OR record_json LIKE '%fig1293%'",
-    ] {
-        sqlx::query(statement)
-            .execute(storage.pool())
-            .await
-            .expect("reset FIG-1293 PostgreSQL rows");
-    }
+    reset_fig1293_rows(&storage).await;
 
     let inline_registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(lash_core::TestLocalProcessRegistry::default());
@@ -531,6 +513,40 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
 
 // Call only after aborting and joining the interrupted host: no live executor
 // may still renew these rows. Completed child terminals remain untouched.
+/// Waits until the session's in-progress journal rows stop changing: the
+/// first host's unparked children have settled and only the parked work —
+/// which never progresses — still holds rows.
+async fn wait_for_fig1293_quiescent_journal(storage: &PostgresStorage) {
+    let snapshot = || async {
+        let mut rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT replay_key FROM lash_runtime_effect_replay
+             WHERE session_id = $1 AND status = 'in_progress'",
+        )
+        .bind("fig1293-restate-migrated-tools")
+        .fetch_all(storage.pool())
+        .await
+        .expect("read FIG-1293 in-progress rows");
+        rows.sort();
+        rows
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let mut previous = snapshot().await;
+        let mut stable_polls = 0;
+        while stable_polls < 10 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let current = snapshot().await;
+            if current == previous {
+                stable_polls += 1;
+            } else {
+                stable_polls = 0;
+                previous = current;
+            }
+        }
+    })
+    .await
+    .expect("the first host's unparked children settle");
+}
+
 async fn expire_fig1293_abandoned_effect_rows(storage: &PostgresStorage) {
     sqlx::query(
         "UPDATE lash_runtime_effect_replay
@@ -543,35 +559,111 @@ async fn expire_fig1293_abandoned_effect_rows(storage: &PostgresStorage) {
     .expect("expire only the interrupted host's abandoned replay rows");
 }
 
-async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_serial: bool) {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping FIG-1293 PostgreSQL crash law: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
+/// One journal row of the FIG-1293 session, classified by its command: the
+/// kind, and the identity it is keyed on inside that kind. Hash-bearing replay
+/// keys are deliberately not the label, so the classification is a literal.
+fn fig1293_row_identity(envelope: &RuntimeEffectEnvelope) -> (String, String) {
+    let kind = envelope.command.kind().as_str().to_string();
+    let label = match &envelope.command {
+        RuntimeEffectCommand::ToolAttempt { call, attempt, .. } => format!(
+            "{}:{}#{attempt}",
+            call.tool_name,
+            call.args
+                .get("value")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("-")
+        ),
+        RuntimeEffectCommand::ToolInvocation { request } => format!(
+            "{}:{}",
+            request.call.tool_name,
+            request
+                .call
+                .args
+                .get("value")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("-")
+        ),
+        RuntimeEffectCommand::PresentToolResult { call_id, .. } => call_id.clone(),
+        RuntimeEffectCommand::Process { command } => match command.as_ref() {
+            lash_core::ProcessCommand::Start { registration, .. } => {
+                format!("start:{}", registration.id)
+            }
+            _ => envelope.invocation.effect_id().to_string(),
+        },
+        _ => envelope.invocation.effect_id().to_string(),
     };
-    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
+    (kind, label)
+}
+
+/// Every FIG-1293 journal row of the session, classified and sorted
+/// (FIG-3550). A redrive that duplicated an identity
+/// would show here as a repeated `(kind, label)` pair, which a bare row count
+/// cannot tell from a new recorded step such as the presentation boundary.
+async fn fig1293_session_rows(storage: &PostgresStorage) -> Vec<(String, String)> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT envelope_json FROM lash_runtime_effect_replay WHERE session_id = $1",
+    )
+    .bind("fig1293-restate-migrated-tools")
+    .fetch_all(storage.pool())
+    .await
+    .expect("read FIG-1293 durable child rows");
+    let mut identities = rows
+        .into_iter()
+        .map(|(envelope_json,)| {
+            let canonical: serde_json::Value =
+                serde_json::from_str(&envelope_json).expect("decode FIG-1293 canonical envelope");
+            let envelope = serde_json::from_str::<RuntimeEffectEnvelope>(
+                canonical
+                    .get("json")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("FIG-1293 canonical envelope json"),
+            )
+            .expect("decode FIG-1293 envelope");
+            fig1293_row_identity(&envelope)
+        })
+        .collect::<Vec<_>>();
+    identities.sort();
+    let mut distinct = identities.clone();
+    distinct.dedup();
+    assert_eq!(
+        distinct, identities,
+        "a redrive re-keys nothing: every journaled identity appears exactly once"
+    );
+    identities
+}
+
+fn fig1293_identities(rows: &[(&str, &str)]) -> Vec<(String, String)> {
+    let mut identities = rows
+        .iter()
+        .map(|(kind, label)| ((*kind).to_string(), (*label).to_string()))
+        .collect::<Vec<_>>();
+    identities.sort();
+    identities
+}
+
+/// Runs one FIG-1293 turn on PostgreSQL, parks the host after the commit
+/// `crash_after` names, aborts it, and redrives the turn on a second host over
+/// the same journal. The children the first host never settled re-drive from
+/// the group's retained membership; the ones it did replay their records.
+async fn fig1293_crash_and_redrive(
+    database_url: &str,
+    crash_after: CrashAfter,
+    model: lash_core::facade_support::ProviderHandle,
+    // What else must have happened on the first host before it is aborted.
+    first_host_ready: fn() -> bool,
+) -> (PostgresStorage, lash_core::facade_support::AssembledTurn) {
+    let storage = PostgresStorage::connect(database_url)
         .await
         .expect("connect FIG-1293 PostgreSQL crash host");
-    for statement in [
-        "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
-        "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
-        "DELETE FROM lash_processes WHERE process_id LIKE '%fig1293%' OR record_json LIKE '%fig1293%'",
-    ] {
-        sqlx::query(statement)
-            .execute(storage.pool())
-            .await
-            .expect("reset FIG-1293 PostgreSQL crash rows");
-    }
+    reset_fig1293_rows(&storage).await;
 
     let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
     fig1293_seed_control_target(&registry).await;
-    let (model, model_calls) = fig1293_model();
     let base_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
     let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let effect_host: Arc<dyn EffectHost> = Arc::new(CrossingEffectHost {
         inner: base_effect_host,
         crash_after: Some(crash_after),
-        force_serial,
         fired: Arc::clone(&fired),
         signal_frames: Arc::new(Mutex::new(Vec::new())),
     });
@@ -592,7 +684,7 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
         tokio::spawn(async move { run_fig1293_turn(&mut first, effect_host.as_ref()).await });
     // CI run 33656939416 attempt 1 exhausted the former 10s boundary wait under load.
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        while !fired.load(Ordering::SeqCst) {
+        while !fired.load(Ordering::SeqCst) || !first_host_ready() {
             tokio::task::yield_now().await;
         }
     })
@@ -601,6 +693,11 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     first_run.abort();
     let interrupted = first_run.await.expect_err("aborted host task");
     assert!(interrupted.is_cancelled());
+    // A group's children run on host-owned tasks, not on the aborted turn
+    // task, so the first host's siblings of the parked child are still live
+    // executors. Expiring a lease one of them still holds would hand its row
+    // to the redrive mid-attempt; wait until only the parked work is left.
+    wait_for_fig1293_quiescent_journal(&storage).await;
     expire_fig1293_abandoned_effect_rows(&storage).await;
 
     let replay_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
@@ -614,196 +711,119 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     )
     .await;
     let redriven = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(30),
         run_fig1293_turn(&mut replay, replay_effect_host.as_ref()),
     )
     .await
     .expect("FIG-1293 child-boundary redrive timed out");
+    (storage, redriven)
+}
+
+/// Every journal row a migrated-tools crash law leaves once the redrive
+/// settles, whichever boundary the first host died at (FIG-3550). Classified
+/// by command rather than counted by a `LIKE` match over envelope text, so a
+/// recorded step — each call's presentation boundary (FIG-3420), the group's
+/// incorporated prefix — reads as what it is, and a duplicated identity cannot
+/// hide in a total: the three group children (`cancel_process`, `spawn_agent`
+/// and the orchestrating `batch`), the spawn boundary's start and await, the
+/// batch body's two echo attempts, and the turn's own steps, each exactly once.
+const FIG1293_MIGRATED_SESSION_ROWS: &[(&str, &str)] = &[
+    ("accept_turn_input", "fig1293-restate-migrated-turn.accept"),
+    ("checkpoint", "4"),
+    ("checkpoint", "7"),
+    (
+        "incorporate_group_settlements",
+        "effect-group-incorporate:fig1293-restate-migrated-turn:group:fig1293-restate-migrated-tools:fig1293-restate-migrated-turn:1:0:tool_batch:3:1-3",
+    ),
+    ("llm_call", "2"),
+    ("llm_call", "6"),
+    ("peek_await_event", "turn_cancel.after_llm.0"),
+    ("peek_await_event", "turn_cancel.after_llm.1"),
+    ("peek_await_event", "turn_cancel.after_step.0"),
+    ("peek_await_event", "turn_cancel.start_gate"),
+    ("present_tool_result", "fig1293-batch"),
+    ("present_tool_result", "fig1293-process-cancel"),
+    ("present_tool_result", "fig1293-spawn-agent"),
+    (
+        "process",
+        "process:await:process:subagent:fig1293-spawn-agent",
+    ),
+    ("process", "process:cancel:fig1293-control-target"),
+    ("process", "start:process:subagent:fig1293-spawn-agent"),
+    ("sync_execution_environment", "1"),
+    ("sync_execution_environment", "5"),
+    ("tool_attempt", "cancel_process:-#1"),
+    ("tool_attempt", "fig1293_echo:alpha#1"),
+    ("tool_attempt", "fig1293_echo:beta#1"),
+    ("tool_invocation", "batch:-"),
+    ("tool_invocation", "cancel_process:-"),
+    ("tool_invocation", "spawn_agent:-"),
+];
+
+async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter) {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping FIG-1293 PostgreSQL crash law: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
+    let (model, model_calls) = fig1293_model();
+    let (storage, redriven) =
+        fig1293_crash_and_redrive(&database_url, crash_after, model, || true).await;
     assert_fig1293_literal_outputs(&redriven).await;
     assert_eq!(
         model_calls.load(Ordering::SeqCst),
         3,
         "redrive must replay the recorded provider calls"
     );
-
-    let child_rows: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM lash_runtime_effect_replay
-         WHERE session_id = $1
-           AND (envelope_json LIKE '%process:subagent:fig1293-spawn-agent%'
-                OR envelope_json LIKE '%fig1293_echo%')",
-    )
-    .bind("fig1293-restate-migrated-tools")
-    .fetch_one(storage.pool())
-    .await
-    .expect("count FIG-1293 durable child rows");
     assert_eq!(
-        child_rows, 8,
-        "the interrupted spawn boundary and nested batch children retain stable durable identities"
+        fig1293_session_rows(&storage).await,
+        fig1293_identities(FIG1293_MIGRATED_SESSION_ROWS),
+        "the interrupted boundary and the group's children retain stable durable identities"
     );
 }
 
 /// PostgreSQL redrive law for the exact process-replay boundary between a
 /// durable `spawn_agent` child start and its following await.
-#[ignore = "parked: rewritten in PR B (serial batch path deleted) (FIG-3397)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn fig1293_spawn_agent_redrives_after_child_start_before_await_on_postgres() {
-    assert_fig1293_postgres_crash_boundary(CrashAfter::SpawnAgentStart, false).await;
+    assert_fig1293_postgres_crash_boundary(CrashAfter::SpawnAgentStart).await;
 }
 
-/// PostgreSQL redrive law for a protocol batch after its first child commits
-/// but before the next serial child begins. Serial scheduling is the binding
-/// substrate geometry used by ordinal journals and remains valid on the
-/// key-addressed PostgreSQL controller.
-#[ignore = "parked: rewritten in PR B (serial batch path deleted) (FIG-3397)"]
+/// PostgreSQL redrive law for a crash between a protocol batch's children:
+/// the first child's attempt has committed and the host dies before the group
+/// settles. The batch is a durable effect group (ADR 0099 §3), so the redrive
+/// re-drives the group from its retained membership — the committed child
+/// replays its record and the rest run — instead of re-entering a serial
+/// batch body.
 #[tokio::test(flavor = "multi_thread")]
 async fn fig1293_protocol_batch_redrives_between_children_on_postgres() {
-    assert_fig1293_postgres_crash_boundary(CrashAfter::FirstProtocolBatchChild, true).await;
+    assert_fig1293_postgres_crash_boundary(CrashAfter::FirstProtocolBatchChild).await;
 }
 
-/// PostgreSQL redrive law for a serial protocol batch interrupted after one
-/// committed success and one committed failure request cancellation, before
-/// the third child starts. Redrive must recover the two recorded children and
-/// record a literal cancelled terminal for the third without entering it.
-#[ignore = "parked: rewritten in PR B (serial batch path deleted) (FIG-3397)"]
+/// PostgreSQL redrive law for a group interrupted after one committed success
+/// and one committed failure, while its third child is still running. The
+/// redrive re-drives the group from its retained membership: the success and
+/// the failure replay their recorded attempts byte for byte and never run
+/// again, and the child that never settled runs to its own terminal.
 #[tokio::test(flavor = "multi_thread")]
-async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_postgres() {
+async fn fig1293_protocol_batch_partial_failure_redrives_from_retained_membership_on_postgres() {
     let Some(database_url) = database_url() else {
         eprintln!(
-            "skipping FIG-1293 PostgreSQL batch-cancel law: LASH_POSTGRES_DATABASE_URL is not set"
+            "skipping FIG-1293 PostgreSQL batch-failure law: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
     let _database_lock = SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
-        .await
-        .expect("connect FIG-1293 PostgreSQL batch-cancel host");
-    for statement in [
-        "DELETE FROM lash_await_event_waits WHERE session_id LIKE '%fig1293%'",
-        "DELETE FROM lash_runtime_effect_replay WHERE envelope_json LIKE '%fig1293%' OR session_id LIKE '%fig1293%'",
-        "DELETE FROM lash_processes WHERE process_id LIKE '%fig1293%' OR record_json LIKE '%fig1293%'",
-    ] {
-        sqlx::query(statement)
-            .execute(storage.pool())
-            .await
-            .expect("reset FIG-1293 PostgreSQL batch-cancel rows");
-    }
-
-    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
     FIG1293_BLOCKING_CHILD_RUNS.store(0, Ordering::SeqCst);
-    let model = fig1293_fault_batch_model();
-    let first_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
-    let policy = fig1293_policy();
-    let state = fig1293_state(&policy);
-    let store: Arc<dyn lash_core::RuntimePersistence> =
-        Arc::new(lash_core::facade_support::InMemorySessionStore::new());
-    let mut first = fig1293_runtime(
-        Arc::clone(&first_effect_host),
-        Arc::clone(&registry),
-        model.clone(),
-        Arc::clone(&store),
-        policy.clone(),
-        state.clone(),
+    let (storage, redriven) = fig1293_crash_and_redrive(
+        &database_url,
+        CrashAfter::FailingProtocolBatchChild,
+        fig1293_fault_batch_model(),
+        // The third child is parked inside its first run when the host dies,
+        // so the redrive is what settles it.
+        || FIG1293_BLOCKING_CHILD_RUNS.load(Ordering::SeqCst) == 1,
     )
     .await;
-    let first_cancellation = tokio_util::sync::CancellationToken::new();
-    let interrupted = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let first_controller = fig1293_cancelling_scope(
-        first_effect_host.as_ref(),
-        first_cancellation.clone(),
-        true,
-        Arc::clone(&interrupted),
-    );
-    let first_run = tokio::spawn(async move {
-        first
-            .stream_turn(
-                fig1293_input(),
-                lash_core::facade_support::TurnOptions::new(first_cancellation, first_controller),
-            )
-            .await
-    });
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        while !interrupted.load(Ordering::SeqCst) {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("failure must commit and request cancellation before interruption");
-    first_run.abort();
-    let interrupted_run = first_run.await.expect_err("aborted batch host task");
-    assert!(interrupted_run.is_cancelled());
-
-    let before_redrive_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT envelope_json, status FROM lash_runtime_effect_replay
-         WHERE session_id = $1 AND envelope_json LIKE '%fig1293_echo%'",
-    )
-    .bind("fig1293-restate-migrated-tools")
-    .fetch_all(storage.pool())
-    .await
-    .expect("read interrupted FIG-1293 child rows");
-    let mut before_redrive_children = before_redrive_rows
-        .into_iter()
-        .filter_map(|(envelope_json, status)| {
-            let canonical: serde_json::Value = serde_json::from_str(&envelope_json).ok()?;
-            let envelope =
-                serde_json::from_str::<RuntimeEffectEnvelope>(canonical.get("json")?.as_str()?)
-                    .ok()?;
-            let RuntimeEffectCommand::ToolAttempt { call, .. } = envelope.command else {
-                return None;
-            };
-            (call.tool_name == "fig1293_echo").then(|| {
-                (
-                    call.args["value"]
-                        .as_str()
-                        .unwrap_or("<non-string>")
-                        .to_string(),
-                    status,
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    before_redrive_children.sort();
-    assert_eq!(
-        before_redrive_children,
-        vec![
-            ("alpha".to_string(), "completed".to_string()),
-            ("fail".to_string(), "completed".to_string()),
-        ],
-        "the host is interrupted after success and failure commit but before child 3 starts",
-    );
-    assert_eq!(FIG1293_BLOCKING_CHILD_RUNS.load(Ordering::SeqCst), 0);
-    expire_fig1293_abandoned_effect_rows(&storage).await;
-
-    let replay_storage = PostgresStorage::connect(&database_url)
-        .await
-        .expect("connect redriving batch-cancel host");
-    let replay_host = PostgresEffectHost::new(&replay_storage);
-    let replay_effect_host: Arc<dyn EffectHost> = Arc::new(replay_host);
-    let mut replay = fig1293_runtime(
-        Arc::clone(&replay_effect_host),
-        registry,
-        model,
-        store,
-        policy,
-        state,
-    )
-    .await;
-    let replay_cancellation = tokio_util::sync::CancellationToken::new();
-    let replay_controller = fig1293_cancelling_scope(
-        replay_effect_host.as_ref(),
-        replay_cancellation.clone(),
-        false,
-        Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    );
-    let redriven = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        replay.stream_turn(
-            fig1293_input(),
-            lash_core::facade_support::TurnOptions::new(replay_cancellation, replay_controller),
-        ),
-    )
-    .await
-    .expect("FIG-1293 cancelling batch redrive timed out")
-    .expect("FIG-1293 cancelling batch redrive completes as turn data");
     assert_eq!(
         fig1293_literal_outputs(&redriven),
         vec![(
@@ -833,12 +853,9 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
                     },
                     {
                         "duration_ms": 0,
-                        "error": {
-                            "message": "tool call cancelled",
-                            "source": "cancellation",
-                        },
                         "index": 2,
-                        "success": false,
+                        "result": {"echo": "block"},
+                        "success": true,
                         "tool": "fig1293_echo",
                     },
                 ],
@@ -846,187 +863,71 @@ async fn fig1293_protocol_batch_partial_failure_and_mid_batch_cancel_redrive_on_
         )],
         "the enclosing model-facing batch projects the literal three-child terminal oracle",
     );
-    assert_eq!(FIG1293_BLOCKING_CHILD_RUNS.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        FIG1293_BLOCKING_CHILD_RUNS.load(Ordering::SeqCst),
+        2,
+        "the unsettled child re-drives once from retained membership"
+    );
 
-    let recorded_rows: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
-        "SELECT replay_key, envelope_hash, envelope_json, outcome_json
-         FROM lash_runtime_effect_replay WHERE session_id = $1",
+    // The committed attempts are the durable fact: a strict replay of each
+    // recorded echo attempt answers its record and never runs a body.
+    let recorded_rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT envelope_json, outcome_json FROM lash_runtime_effect_replay
+         WHERE session_id = $1 AND envelope_json LIKE '%fig1293_echo%'",
     )
     .bind("fig1293-restate-migrated-tools")
     .fetch_all(storage.pool())
     .await
-    .expect("read FIG-1293 batch-cancel rows");
-    let (batch_replay_key, stored_hash, batch_outcome, batch_envelope) = recorded_rows
-        .iter()
-        .find_map(|(replay_key, envelope_hash, envelope_json, outcome_json)| {
-            let canonical: serde_json::Value = serde_json::from_str(envelope_json).ok()?;
+    .expect("read FIG-1293 batch-failure rows");
+    let mut attempts = recorded_rows
+        .into_iter()
+        .filter_map(|(envelope_json, outcome_json)| {
+            let canonical: serde_json::Value = serde_json::from_str(&envelope_json).ok()?;
             let envelope =
                 serde_json::from_str::<RuntimeEffectEnvelope>(canonical.get("json")?.as_str()?)
                     .ok()?;
-            let is_fault_batch = matches!(
-                &envelope.command,
-                RuntimeEffectCommand::ToolBatch { batch }
-                    if batch.calls.len() == 3
-                        && batch.calls.iter().all(|child| child.call.tool_name == "fig1293_echo")
-            );
-            is_fault_batch.then_some((
-                replay_key.clone(),
-                envelope_hash.clone(),
-                outcome_json.clone(),
-                envelope,
-            ))
-        })
-        .expect("recorded FIG-1293 nested fault ToolBatch");
-    let recorded_outcome_json = batch_outcome.expect("nested fault batch is terminal");
-    assert_eq!(batch_envelope.invocation.replay_key(), batch_replay_key);
-    assert_eq!(
-        batch_envelope
-            .stable_hash()
-            .expect("nested batch stable hash"),
-        stored_hash
-    );
-    let RuntimeEffectCommand::ToolBatch { batch } = &batch_envelope.command else {
-        unreachable!("selected nested ToolBatch")
-    };
-    assert_eq!(
-        batch
-            .calls
-            .iter()
-            .map(|child| (
-                child.call.call_id.as_str(),
-                child.call.tool_id.as_str(),
-                child.call.args.clone(),
-            ))
-            .collect::<Vec<_>>(),
-        vec![
-            (
-                "fig1293-fault-batch:00",
-                "tool:fig1293_echo",
-                serde_json::json!({"value": "alpha"}),
-            ),
-            (
-                "fig1293-fault-batch:01",
-                "tool:fig1293_echo",
-                serde_json::json!({"value": "fail"}),
-            ),
-            (
-                "fig1293-fault-batch:02",
-                "tool:fig1293_echo",
-                serde_json::json!({"value": "block"}),
-            ),
-        ],
-        "the nested durable frame pins all three child identities and arguments",
-    );
-
-    let recorded_outcome: RuntimeEffectOutcome =
-        serde_json::from_str(&recorded_outcome_json).expect("decode recorded nested fault batch");
-    let RuntimeEffectOutcome::ToolBatch {
-        launches,
-        triggers,
-        settlement_order,
-    } = &recorded_outcome
-    else {
-        panic!("nested fault frame must record a ToolBatch outcome")
-    };
-    assert!(triggers.is_empty());
-    let mut settled = settlement_order.clone();
-    settled.sort_unstable();
-    assert_eq!(
-        settled,
-        (0..launches.len()).collect::<Vec<_>>(),
-        "the recorded batch settles every child exactly once"
-    );
-    let terminal_oracle = launches
-        .iter()
-        .map(|launch| {
-            let lash_core::runtime::ToolCallLaunch::Done { result } = launch else {
-                panic!("all three nested children must be terminal")
+            let RuntimeEffectCommand::ToolAttempt { call, .. } = &envelope.command else {
+                return None;
             };
-            let status = match result.output.outcome {
-                lash_core::ToolCallOutcome::Success(_) => "success",
-                lash_core::ToolCallOutcome::Failure(_) => "failure",
-                lash_core::ToolCallOutcome::Cancelled(_) => "cancelled",
-            };
-            serde_json::json!({
-                "call_id": result.call_id,
-                "tool": result.tool_name,
-                "status": status,
-                "value": result.output.value_for_projection(),
-            })
+            let value = call.args["value"].as_str()?.to_string();
+            Some((value, envelope, outcome_json?))
         })
         .collect::<Vec<_>>();
+    attempts.sort_by(|left, right| left.0.cmp(&right.0));
     assert_eq!(
-        terminal_oracle,
-        vec![
-            serde_json::json!({
-                "call_id": "fig1293-fault-batch:00",
-                "tool": "fig1293_echo",
-                "status": "success",
-                "value": {"echo": "alpha"},
-            }),
-            serde_json::json!({
-                "call_id": "fig1293-fault-batch:01",
-                "tool": "fig1293_echo",
-                "status": "failure",
-                "value": {
-                    "class": "execution",
-                    "code": "tool_error",
-                    "message": "fig1293 injected batch failure",
-                    "source": "tool",
-                    "retry": {"type": "never"},
-                    "raw": "fig1293 injected batch failure",
-                },
-            }),
-            serde_json::json!({
-                "call_id": "fig1293-fault-batch:02",
-                "tool": "fig1293_echo",
-                "status": "cancelled",
-                "value": {
-                    "message": "tool call cancelled",
-                    "source": "cancellation",
-                },
-            }),
-        ],
-        "redrive must record the hard-coded success/failure/cancelled oracle",
+        attempts
+            .iter()
+            .map(|(value, _, _)| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "block", "fail"],
+        "each child committed exactly one attempt",
     );
-
-    let echo_attempt_rows = recorded_rows
-        .iter()
-        .filter(|(_, _, envelope_json, _)| envelope_json.contains("fig1293_echo"))
-        .filter(|(_, _, envelope_json, _)| envelope_json.contains("tool_attempt"))
-        .count();
-    assert_eq!(
-        echo_attempt_rows, 2,
-        "child 3 is cancelled by the serial scheduler before a ToolAttempt frame exists",
-    );
-
     let strict_storage = PostgresStorage::connect(&database_url)
         .await
-        .expect("connect strict cancelled-batch replay host");
+        .expect("connect strict FIG-1293 replay host");
     let strict_host = strict_storage.effect_host();
     strict_host.start_replay();
-    let strict_controller = strict_host
-        .scoped(lash_core::AdmittedScope::turn(
-            "fig1293-restate-migrated-tools",
-            "fig1293-restate-migrated-turn",
-        ))
-        .expect("scope strict cancelled batch replay");
-    let replayed = strict_controller
-        .controller()
-        .execute_effect(
-            batch_envelope,
-            RuntimeEffectLocalExecutor::testing(|_| async move {
-                Ok(RuntimeEffectOutcome::ToolBatch {
-                    launches: Vec::new(),
-                    triggers: Vec::new(),
-                    settlement_order: Vec::new(),
-                })
-            }),
-        )
-        .await
-        .expect("strictly replay recorded cancelled FIG-1293 ToolBatch");
-    assert_eq!(
-        serde_json::to_string(&replayed).expect("encode strictly replayed nested batch"),
-        recorded_outcome_json,
-    );
+    for (value, envelope, recorded_outcome_json) in attempts {
+        let strict_controller = strict_host
+            .scoped(lash_core::AdmittedScope::turn(
+                "fig1293-restate-migrated-tools",
+                "fig1293-restate-migrated-turn",
+            ))
+            .expect("scope strict FIG-1293 replay");
+        let replayed = strict_controller
+            .controller()
+            .execute_effect(
+                envelope,
+                RuntimeEffectLocalExecutor::testing(|_| async move {
+                    panic!("a recorded FIG-1293 attempt must replay without running its body")
+                }),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("strictly replay the {value} attempt: {error}"));
+        assert_eq!(
+            serde_json::to_string(&replayed).expect("encode strictly replayed attempt"),
+            recorded_outcome_json,
+            "the {value} attempt replays its record byte for byte",
+        );
+    }
 }

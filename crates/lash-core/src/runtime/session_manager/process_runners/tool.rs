@@ -143,7 +143,6 @@ impl RuntimeSessionServices {
             },
             &turn_cancel_wait,
             None,
-            None,
             |completion_key| {
                 crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
                     Arc::clone(&dispatch),
@@ -197,7 +196,6 @@ impl RuntimeSessionServices {
                         "process:{}:tool:{}:await",
                         registration.id, pending.tool_name
                     ),
-                    crate::RuntimeEffectKind::AwaitEvent,
                     format!(
                         "process:{}:tool:{}:await",
                         registration.id, pending.tool_name

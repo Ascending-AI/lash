@@ -277,10 +277,6 @@ pub async fn effect_controller_segmentation_vector(
                 .then_some(crate::BoundaryReason::JournalBudget)
         }
 
-        fn supports_concurrent_effects(&self) -> bool {
-            self.inner.supports_concurrent_effects()
-        }
-
         async fn execute_effect(
             &self,
             envelope: RuntimeEffectEnvelope,
@@ -1956,126 +1952,6 @@ where
     assert!(
         replay_local_calls.lock_recover().is_empty(),
         "replay must return recorded outcomes without invoking local executors"
-    );
-    invocation.end();
-}
-
-/// Run the tool-attempt replay conformance case for a handler-scoped durable
-/// controller.
-///
-/// Store-backed controllers that support overlapping effect calls record two
-/// child attempts concurrently and replay them in reverse order. Ordered
-/// workflow-context controllers record them sequentially, then still replay in
-/// reverse order. In both modes, outcomes must resolve by stable `replay.key`
-/// rather than request position, completion order, or source order.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn effect_controller_tool_attempt_fanout_replay_deterministic<F>(make: F)
-where
-    F: FnOnce() -> ConformanceInvocation,
-{
-    let invocation = make();
-    let execution_scope = invocation.execution_scope().clone();
-    let controller = invocation.controller();
-    let slow = replay_conformance_tool_attempt_envelope(
-        &execution_scope,
-        "tool-attempt-slow",
-        "call-slow",
-        "slow_tool",
-    );
-    let fast = replay_conformance_tool_attempt_envelope(
-        &execution_scope,
-        "tool-attempt-fast",
-        "call-fast",
-        "fast_tool",
-    );
-
-    let first_pass = if controller.supports_concurrent_effects() {
-        replay_conformance_concurrent_first_pass(
-            controller,
-            slow.clone(),
-            ReplayConformanceToolAttempt::new("tool-attempt-slow", "call-slow", "slow_tool"),
-            fast.clone(),
-            ReplayConformanceToolAttempt::new("tool-attempt-fast", "call-fast", "fast_tool"),
-        )
-        .await
-    } else {
-        let slow_first = controller
-            .execute_effect(
-                slow.clone(),
-                replay_conformance_tool_attempt_recording_executor(
-                    ReplayConformanceToolAttempt::new(
-                        "tool-attempt-slow",
-                        "call-slow",
-                        "slow_tool",
-                    ),
-                    None,
-                ),
-            )
-            .await;
-        let fast_first = controller
-            .execute_effect(
-                fast.clone(),
-                replay_conformance_tool_attempt_recording_executor(
-                    ReplayConformanceToolAttempt::new(
-                        "tool-attempt-fast",
-                        "call-fast",
-                        "fast_tool",
-                    ),
-                    None,
-                ),
-            )
-            .await;
-        (slow_first, fast_first)
-    };
-
-    let slow_first = first_pass.0.expect("slow tool-attempt first pass");
-    let fast_first = first_pass.1.expect("fast tool-attempt first pass");
-    assert_replay_conformance_tool_attempt_marker(slow_first, "call-slow", "slow_tool");
-    assert_replay_conformance_tool_attempt_marker(fast_first, "call-fast", "fast_tool");
-
-    let invocation = invocation.redrive();
-    let controller = invocation.controller();
-    let replay_local_calls = Arc::new(Mutex::new(Vec::new()));
-    let replay_pass = if controller.supports_concurrent_effects() {
-        tokio::time::timeout(REPLAY_CONFORMANCE_DEADLOCK_TIMEOUT, async {
-            tokio::join!(
-                controller.execute_effect(
-                    fast,
-                    replay_conformance_failing_executor(Arc::clone(&replay_local_calls)),
-                ),
-                controller.execute_effect(
-                    slow,
-                    replay_conformance_failing_executor(Arc::clone(&replay_local_calls)),
-                ),
-            )
-        })
-        .await
-        .expect("concurrent tool-attempt replay must resolve from host history")
-    } else {
-        let fast_replay = controller
-            .execute_effect(
-                fast,
-                replay_conformance_failing_executor(Arc::clone(&replay_local_calls)),
-            )
-            .await;
-        let slow_replay = controller
-            .execute_effect(
-                slow,
-                replay_conformance_failing_executor(Arc::clone(&replay_local_calls)),
-            )
-            .await;
-        (fast_replay, slow_replay)
-    };
-    let fast_replay = replay_pass.0.expect("fast tool-attempt replay");
-    let slow_replay = replay_pass.1.expect("slow tool-attempt replay");
-    assert_replay_conformance_tool_attempt_marker(fast_replay, "call-fast", "fast_tool");
-    assert_replay_conformance_tool_attempt_marker(slow_replay, "call-slow", "slow_tool");
-    assert!(
-        replay_local_calls.lock_recover().is_empty(),
-        "tool-attempt replay must return recorded outcomes without invoking local executors"
     );
     invocation.end();
 }
