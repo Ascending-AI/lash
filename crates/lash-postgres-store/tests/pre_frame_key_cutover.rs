@@ -172,12 +172,13 @@ async fn postgres_refuses_completed_pre_frame_key_continue_as_at_open_when_confi
         Ok(_) => panic!("pre-frame-key journal must be refused at open"),
         Err(error) => error.to_string(),
     };
+    // Since the queued-run cutover (#1973) the current component has no
+    // executable migration arm at all, so the refusal names none.
     let expected = PostgresStorage::schema_version();
-    let source = expected - 1;
     assert_eq!(
         message,
         format!(
-            "store backend error: Postgres schema component `lash-postgres-store` has version 43, expected {expected}. That database was provisioned by an older build: component 43 predates this build's component {expected} and has no applicable migration. The component schema is normally a reject-and-recreate boundary. This build declares a forward migration into component {expected} only from component {source}, so component 43 has no upgrade path. Drain the affected sessions and recreate the whole Lash trust domain with this build: provision the database from the DDL artifact this build ships (`PostgresStorage::schema_ddl()`, committed as crates/lash-postgres-store/schema.sql), then reset the session tombstones, the await-event revocation ledger, the effect journal, and the Restate state together — any one of them left behind still refers to sessions the recreated database does not have. docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md records why this boundary refuses instead of migrating. This gate is unconditional; SchemaCheck::WarnOnly does not relax it."
+            "store backend error: Postgres schema component `lash-postgres-store` has version 43, expected {expected}. That database was provisioned by an older build: component 43 predates this build's component {expected} and has no applicable migration. The component schema is normally a reject-and-recreate boundary. This build declares no forward migration into component {expected}, so no recorded version upgrades into it. Drain the affected sessions and recreate the whole Lash trust domain with this build: provision the database from the DDL artifact this build ships (`PostgresStorage::schema_ddl()`, committed as crates/lash-postgres-store/schema.sql), then reset the session tombstones, the await-event revocation ledger, the effect journal, and the Restate state together — any one of them left behind still refers to sessions the recreated database does not have. docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md records why this boundary refuses instead of migrating. This gate is unconditional; SchemaCheck::WarnOnly does not relax it."
         )
     );
 }
