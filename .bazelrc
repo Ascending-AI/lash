@@ -14,10 +14,14 @@
 try-import %workspace%/.kiln.bazelrc
 
 startup --host_jvm_args=-Xmx4g
+# An idle server returns its heap: G1 runs a periodic collection once a minute
+# and uncommits what it frees, instead of holding its peak until it exits.
+startup --host_jvm_args=-XX:G1PeriodicGCInterval=60000
 # Each fork is its own output base and therefore its own Bazel server; 22
 # idle servers held ~51 GiB on this box. The default idle timeout is 10800;
-# a restart after eviction costs seconds, so half an hour is plenty.
-startup --max_idle_secs=1800
+# a restart after eviction costs seconds, so ten minutes is enough to keep an
+# edit-build loop warm without parking a server per forgotten fork.
+startup --max_idle_secs=600
 common --enable_platform_specific_config
 common --lockfile_mode=error
 
@@ -75,19 +79,32 @@ common --experimental_repository_downloader_retries=5
 build --remote_default_exec_properties=cpu_count=1
 build --remote_default_exec_properties=memory_kb=2097152
 build:shared --remote_local_fallback=false
+# Remote-connection flags. They reach CI too, which composes its own flag list
+# but inherits `build` lines (see the pipelining note below).
+#
+# A keepalive ping every 30 s keeps the pool's long-lived gRPC channels from
+# being dropped silently while a client waits on queued actions: six CI legs
+# died of `UNAVAILABLE: Keepalive failed` between 22:11 and 23:25 on
+# 2026-09-22, each after a long idle wait.
+build --grpc_keepalive_time=30s
+# Bazel's 60 s default is too short for a large blob transfer to the pool
+# under load. CI has run at 600 s since its first pool build; forks now use
+# the same value from this one line.
+build --remote_timeout=600
 # Only pool workers publish action results. A spawn that still runs locally
 # (no-remote-exec targets, service gates) is never uploaded, and the pool's
 # client listener refuses the write anyway, so a local machine cannot seed a
 # result that CI would trust.
 build:shared --remote_upload_local_results=false
 # A compile or clippy verdict needs no rlib on this disk, and a test verdict
-# needs only its own outputs: CI already runs `minimal` in
-# `.github/workflows/ci.yml` and `toplevel` in
-# `.github/actions/bazel-shared-cache`. `minimal` keeps every fork from
-# downloading hundreds of megabytes of dependency artifacts it never opens;
-# tests stay `toplevel` so logs and xml materialise next to the run.
+# needs only its logs: CI already runs `minimal` in `.github/workflows/ci.yml`.
+# `minimal` keeps every fork from downloading hundreds of megabytes of
+# dependency artifacts it never opens. A test downloads its `test.log`,
+# `test.xml` and undeclared outputs (the law-execution receipts) and nothing
+# else -- not the test binary `toplevel` used to fetch for every label. `run`
+# and `doc` ask for their top-level outputs in `scripts/hermetic-build.sh`.
 build:shared --remote_download_outputs=minimal
-test:shared --remote_download_outputs=toplevel
+test:shared --remote_download_regex=.*/testlogs/.*/(test[.]log|test[.]xml|test[.]outputs/.*)$
 test:shared --test_output=errors
 test --cache_test_results=yes
 

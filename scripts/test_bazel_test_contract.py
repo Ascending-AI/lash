@@ -605,6 +605,47 @@ class BazelTestContractTests(unittest.TestCase):
                 self.assertEqual(f"${{{{ steps.cache.outputs.{key} }}}}", save["with"]["key"])
                 self.assertEqual(f"steps.cache.outputs.{hit} != 'true'", save["if"])
 
+    def test_client_flags_have_one_home_and_ci_keeps_execution_logs(self) -> None:
+        """Remote-connection flags live in `.bazelrc`, which CI inherits.
+
+        `build` lines reach CI's own flag list, so a keepalive or timeout set
+        there needs no second copy in the shared action. Test runs download
+        their logs, not their binaries, and every CI Bazel leg uploads a
+        compact execution log for cache-miss forensics.
+        """
+        bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
+        for line in (
+            "build --grpc_keepalive_time=30s",
+            "build --remote_timeout=600",
+            "startup --max_idle_secs=600",
+            "startup --host_jvm_args=-XX:G1PeriodicGCInterval=60000",
+            "build:shared --remote_download_outputs=minimal",
+            "test:shared --remote_download_regex=.*/testlogs/.*/"
+            "(test[.]log|test[.]xml|test[.]outputs/.*)$",
+        ):
+            self.assertIn(line + "\n", bazelrc)
+        self.assertNotIn("test:shared --remote_download_outputs", bazelrc)
+        flags = job_step(shared_cache_action(), "Export shared cache flags")["run"]
+        self.assertNotIn("--remote_timeout", flags)
+        self.assertNotIn("--grpc_keepalive_time", flags)
+
+        jobs = workflow()["jobs"]
+        for job_id, step_name in (
+            ("bazel-tests", "Test the workspace core suite with shared cache"),
+            ("bazel-tests-tail", "Test the workspace tail suite with shared cache"),
+            ("lint", "Clippy (workspace, all targets, shared cache)"),
+        ):
+            with self.subTest(job=job_id):
+                run = job_step(jobs[job_id], step_name)["run"]
+                self.assertIn(
+                    '--execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst"',
+                    run,
+                )
+                upload = job_step(jobs[job_id], "Upload Bazel execution log")
+                self.assertEqual(
+                    "${{ runner.temp }}/bazel-exec-log.binpb.zst", upload["with"]["path"]
+                )
+
     def test_the_shared_cache_action_fails_closed_on_a_bad_secret(self) -> None:
         """A misconfigured environment must name what is wrong, not build wrong.
 
