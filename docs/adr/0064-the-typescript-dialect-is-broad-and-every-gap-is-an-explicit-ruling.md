@@ -8,6 +8,18 @@ Amended 2026-09-13 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialec
 dialect. A gap ruling here no longer has a second surface to be weighed against;
 it is the whole authoring contract. References to "Lashlang" name the IR and VM.
 
+Amended 2026-09-23 (FIG-3599): "every gap is an explicit ruling" now covers
+sequences of cells and the lens, not only single expressions. The Node
+session oracle compares multi-cell sessions with successive classic Scripts in
+one realm under the mapping [ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md#beyond-one-script-fig-3599)
+records; its divergences are register entries 17–21 there, and the ones found
+but not yet fixed are the crate README's open conformance defects. A
+print/reparse/admit round-trip law and artifact invariants run over every
+corpus, and the test262 slice gains block-scope, per-iteration binding and TDZ
+probes. The session corpus and the round-trip allowlist are ratchets like the
+census: a row that stops diverging, or an allowlist entry that stops being
+needed, fails CI.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves

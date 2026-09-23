@@ -28,6 +28,13 @@ function returns. Neither is a deviation-register entry. See
 Decided, not yet implemented; the full contract is
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
+Amended 2026-09-23 (FIG-3599): conformance reaches beyond one script. A
+**Node session oracle** runs multi-cell sessions against the pinned Node, a
+**print → reparse → admit round-trip law** and **structural artifact
+invariants** run over every corpus, and the corpus rule extends to all three.
+The cell-to-Script mapping, register entries 17–21 and retired entry 14 are
+recorded below, in ["Beyond one script"](#beyond-one-script-fig-3599).
+
 ## Context
 
 Lash accepts model-authored code, and a model's prior on TypeScript is far
@@ -429,6 +436,67 @@ never admitted by weakening the dialect.** If its dependencies fall outside the
 accepted set, it becomes a named rejection test or waits until the feature is
 implemented exactly.
 
+### Beyond one script (FIG-3599)
+
+The two mechanisms above check one script, run once. Four FIG-3571 defects
+passed them for that reason — block and generated bindings leaking into the
+next cell, printer faults, a lifted literal declared twice, a draft carrying
+an artifact's identity — so three more mechanisms join them. All three run in
+the cacheable Bazel test partition, with no network.
+
+**The Node session oracle** (`crates/lash-typescript/tests/differential/sessions/`)
+holds sessions: ordered cells. Its reference answer is the pinned Node v25.2.1
+running each cell as a successive classic Script in one realm
+(`vm.createContext` plus `vm.Script`), so top-level `let`/`const`/`class` live
+in the realm's global lexical environment and `var` and functions on its global
+object, as ECMA-262's GlobalDeclarationInstantiation specifies. Regeneration is
+the same deliberate, byte-identical step as the expression table's. The lash
+side runs each session through the production RLM executor twice: with one
+live state, and restarting through the durable snapshot path between every
+pair of cells. The mapping from a cell to its Script is stated here once:
+
+- A cell's observation is its printed lines, how it ended, and one
+  binding-visibility probe per binder name of its session, each run after the
+  cell as its own Script: `console.log(typeof NAME, JSON.stringify(NAME))`.
+- `console.*` is the host printer of register entry 13. `finish(value)` ends
+  the cell with that value; a cell never catches it. An uncaught error is
+  observed by its class; a VM fault's class is its `RuntimeError` brand
+  (entry 20). A Script's completion value is not observed, since a cell
+  surfaces none.
+- A `ReferenceError` from a probe answers `unbound` (`tdz` when the binding is
+  uninitialized); the dialect's static `TS_UNKNOWN_BINDING` is its exact
+  counterpart. A cell the dialect rejects statically never enters the realm.
+- Top-level `await` has no classic-Script meaning (ECMA-262 admits it only in
+  a Module, whose declarations are not global), so the session corpus holds no
+  await cell.
+- A divergence is never a special case: a cell names its register entry and
+  states the lash answer, which must differ from Node's and which ends its
+  session; a session-wide probe rule (entry 17) names its entry too. A defect
+  the oracle found but the change could not fix is a *defect* cell naming the
+  crate README's open-defect list, ratcheted the same way.
+
+**The round-trip law** holds every program of every corpus — the expression
+table, the test262 slice, every session cell and the workflow-graph goldens —
+to: lower, admit, project, print through the lens, reparse and admit again,
+reaching the same `module_ref` and `source_identity`. A program the printer
+cannot spell is refused with a typed `TypeScriptSourceError`, and every
+refusal is a row of an explicit allowlist with its reason
+(`tests/corpus_laws/round_trip_refusals.tsv`); a row whose program now
+round-trips fails until it is deleted.
+
+**The artifact invariants** hold every admitted artifact of every corpus to:
+unique declarations, each lifted literal declared once; every compiled
+execution site in the trace map with the same kind, owner path and branch
+memberships, and nothing else in the map; only session-visible bindings
+exported, no generated slot among them; each `ProcessOrigin` derived from the
+literal at its site; no identity on a draft, and the admitted identity and
+structure on a host's view; and a stored artifact that reloads, alone, to the
+same module.
+
+The corpus rule extends to all three: every fixed session, round-trip or
+invariant case lands in its corpus, and each harness fails when a row goes red
+or an allowlist entry, deviation answer or defect answer becomes unnecessary.
+
 ## Deviation register
 
 These are the only deliberate departures from ECMA-262 for an operation that is
@@ -527,12 +595,11 @@ that each entry is a limit taken knowingly.
     property-key coercion (`obj[{a: 1}]` still reads the `"[object Object]"`
     slot), `map.toString()`, `Number({})`, loose equality, and the `console.log`
     rendering above.
-14. **Shadowing residual.** A block-scoped binding that shadows a name already
-    in scope lowers to a generated slot so the inner binding cannot overwrite
-    the outer one. At root that slot is a runtime global, which is the one place
-    a `__typescript_` name appears in persisted session state. It is dead by any
-    turn boundary and filtered out of the bound-variables prompt, so it is never
-    shown; a binding that shadows nothing keeps the name its author wrote.
+14. **Shadowing residual** — *retired by FIG-3571.* A block binding that
+    shadows a name in scope still lowers to a generated slot, but a generated
+    slot is private: the VM neither imports nor exports it, so none reaches
+    session state. The session oracle pins that no generated slot is a session
+    global (FIG-3599). The number stays reserved.
 15. **Aggregate rejection timing** — *retired by FIG-3397.* A rejected
     `Promise.all` used to wait for every leaf to settle before it reported. It
     now answers at its first consumed rejection, and the leaves still in
@@ -545,6 +612,26 @@ that each entry is a limit taken knowingly.
     unaffected, because the restriction is about reaching the snapshotted
     source, not about calling. A classic-loop `continue` that crosses a
     `finally` rejects rather than running the loop epilogue early.
+
+17. **Closure boundary** (`closure-boundary`). A binding whose value reaches a
+    function does not survive its cell
+    ([ADR 0076](0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
+    a function's index means something only inside the program that compiled
+    it. A later cell finds the name unbound where Node still holds it.
+18. **Cross-cell redeclaration** (`cross-cell-redeclaration`). A cell's
+    top-level declaration may rebind a name an earlier cell declared, where
+    GlobalDeclarationInstantiation throws a `SyntaxError`; the dialect follows
+    the REPL rule a console session expects.
+19. **One session namespace** (`global-object-aliases-lexical-bindings`).
+    `globalThis.name` reads and writes the session slot of a top-level
+    `let`/`const`, which ECMA-262 keeps apart from the global object.
+20. **Runtime fault brand** (`runtime-fault-brand`). A fault the VM raises is
+    an `Error` branded `RuntimeError`, not the ECMA class (`TypeError`) Node
+    throws; see "Errors" above.
+21. **Process literal as a value** (`process-literal-is-a-process-value`). A
+    top-level `const`-bound uncalled `async` arrow is a `Process` value
+    ([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)),
+    so `typeof` answers `"object"`.
 
 ## Consequences
 
