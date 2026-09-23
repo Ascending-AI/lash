@@ -641,10 +641,12 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             mut staged_pending_turn_inputs,
             staged_turn_cancel_requests,
             turn_cancel_input_outcome,
+            deferred_repaired_inputs,
         ) = {
             let mut pending = self.pending_turn_inputs.lock_recover().clone();
             let mut requests = self.turn_cancel_requests.lock_recover().clone();
             let mut outcome = crate::TurnCancelInputOutcome::default();
+            let mut deferred_repaired_inputs = Vec::new();
             for (completed, settlement_plan) in commit
                 .completed_turn_input_claims
                 .iter()
@@ -705,6 +707,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         match disposition {
                             crate::TurnCancelDisposition::Defer => {
                                 entry.input.state = crate::TurnInputState::DeferredNextTurn;
+                                deferred_repaired_inputs.push(entry.input.input_id.clone());
                             }
                             crate::TurnCancelDisposition::Drop => {
                                 entry.input.state =
@@ -728,7 +731,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     }
                 }
             }
-            (pending, requests, outcome)
+            (pending, requests, outcome, deferred_repaired_inputs)
         };
 
         let staged_run = match (pending_run, commit.queued_run.as_ref()) {
@@ -758,6 +761,9 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                     && members.contains(&&QueuedRunMember::Input(entry.input.input_id.clone()))
             }) {
                 if !entry.input.state.is_terminal() {
+                    if deferred_repaired_inputs.contains(&entry.input.input_id) {
+                        continue;
+                    }
                     entry.input.state =
                         crate::TurnInputState::Cancelled(entry.input.state.ingress());
                     entry.claim.release();

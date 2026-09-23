@@ -126,6 +126,11 @@ impl InMemorySessionStore {
                         fence.fencing_token,
                         write.next_claim_fencing_token,
                     );
+                    if write.state_after_claim == crate::TurnInputStateKind::Accepted
+                        && let Some(accepted) = rows[index].input.state.accepted()
+                    {
+                        rows[index].input.state = accepted;
+                    }
                 }
                 claim
             };

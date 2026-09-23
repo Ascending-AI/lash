@@ -783,6 +783,7 @@ impl SessionCommitStore for PostgresSessionStore {
         complete_queued_work_claims_tx(&mut tx, &queued_work_plans).await?;
         complete_turn_input_claims_tx(&mut tx, &turn_input_plans).await?;
         let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
+        let mut deferred_repaired_inputs = Vec::new();
         if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
             let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
             let disposition = cancellation
@@ -838,6 +839,9 @@ impl SessionCommitStore for PostgresSessionStore {
             let deferred_ingress =
                 encode_json(&lash_core::TurnInputState::DeferredNextTurn.ingress())?;
             for (input_id, payload) in inputs {
+                if disposition == lash_core::TurnCancelDisposition::Defer {
+                    deferred_repaired_inputs.push(input_id.clone());
+                }
                 // Two dispositions, two named statements: deferring rewrites
                 // the ingress so the row stops naming a turn that is over,
                 // dropping is the cancel this table already has.
@@ -914,6 +918,26 @@ impl SessionCommitStore for PostgresSessionStore {
                         session_id: commit.session_id.clone(),
                     })?;
                 settle_run_members_tx(&mut tx, fence, &progress.scope).await?;
+                // The turn repair wins for inputs it explicitly deferred,
+                // including an abandoned checkpoint assignment retained in
+                // the run's receipt. The transaction publishes both writes.
+                let deferred = lash_core::TurnInputState::DeferredNextTurn;
+                let ingress = encode_json(&deferred.ingress())?;
+                for input_id in &deferred_repaired_inputs {
+                    sqlx::query(
+                        crate::turn_ingress::turn_ingress_sql()
+                            .pending_inputs
+                            .defer_to_next_turn
+                            .sql(),
+                    )
+                    .bind(commit.session_id.as_str())
+                    .bind(input_id.as_str())
+                    .bind(deferred.as_str())
+                    .bind(&ingress)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
+                }
             }
             write_run_tx(
                 &mut tx,

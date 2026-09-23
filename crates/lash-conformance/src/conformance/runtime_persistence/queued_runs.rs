@@ -1,6 +1,247 @@
 use super::*;
 use lash_core::store::{BeginQueuedRun, QueuedRunRequest};
 
+/// A continuation owns its active-turn member across lease generations.
+#[expect(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "conformance fixture fails at the violated durable claim invariant"
+)]
+pub async fn queued_run_active_turn_member_reclaims_after_lane_rotation(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    use lash_core::store::{QueuedRunCommit, QueuedRunMember, QueuedRunProgress};
+
+    let session_id = SessionId::from("queued-run-active-reclaim");
+    let state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let lease = claim_session_execution_lease_for_test(&store, &session_id, "first").await;
+    let admission = store
+        .begin_or_resume_queued_run(
+            &lease.authority(),
+            BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: None,
+                request: QueuedRunRequest::Automatic,
+                configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
+                expected_head_revision: 0,
+                initial_turn_index: 1,
+            },
+        )
+        .await
+        .unwrap();
+    let selected = store
+        .select_queued_run(
+            &lease.authority(),
+            &admission.scope,
+            &lease.owner,
+            1,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .unwrap();
+    let input = store
+        .enqueue_pending_turn_input(checkpoint_claims::pending_active_turn_input_draft(
+            &session_id,
+            &selected.admission.position.turn_id,
+            crate::TurnInputCheckpointBoundary::BeforeCompletion,
+            "active member",
+        ))
+        .await
+        .unwrap();
+    let claim = store
+        .claim_active_turn_inputs(
+            &session_id,
+            &lease.authority(),
+            &lease.owner,
+            &selected.admission.position.turn_id,
+            crate::CheckpointKind::BeforeCompletion,
+            1,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.inputs[0].input_id, input.input_id);
+    let mut advance = RuntimeCommit::persisted_state_with_operation_for_testing(
+        &state,
+        &[],
+        crate::OperationId::new(admission.scope.clone(), "physical-0"),
+    );
+    advance.session_execution_lease_fence = Some(lease.authority());
+    advance.queued_run = Some(Box::new(QueuedRunCommit {
+        scope: admission.scope.clone(),
+        expected_revision: selected.admission.revision,
+        progress: QueuedRunProgress::Advance {
+            position: selected.admission.position.next(&admission.scope).unwrap(),
+            members: vec![QueuedRunMember::Input(input.input_id.clone())],
+            withheld_members: Vec::new(),
+            include_outbox: false,
+        },
+    }));
+    store.commit_runtime_state(advance).await.unwrap();
+    store
+        .release_session_execution_lease(&lease.authority())
+        .await
+        .unwrap();
+    let successor = claim_session_execution_lease_for_test(&store, &session_id, "successor").await;
+    let replay = store
+        .select_queued_run(
+            &successor.authority(),
+            &admission.scope,
+            &successor.owner,
+            1,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .expect("an active-turn member must remain reclaimable after lane rotation");
+    assert_eq!(replay.inputs[0].inputs[0].input_id, input.input_id);
+}
+
+/// End-of-turn repair must keep a checkpoint input deferred when its claim was
+/// abandoned before the input was delivered to the model.
+#[expect(
+    clippy::unwrap_used,
+    reason = "conformance fixture fails at the violated repair disposition"
+)]
+pub async fn queued_run_repaired_checkpoint_input_remains_deferred_after_settle(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    use lash_core::store::{QueuedRunCommit, QueuedRunProgress, QueuedRunTerminal};
+
+    let session_id = SessionId::from("queued-run-repaired-input");
+    let state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let lease = claim_session_execution_lease_for_test(&store, &session_id, "repair").await;
+    let admission = store
+        .begin_or_resume_queued_run(
+            &lease.authority(),
+            BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: None,
+                request: QueuedRunRequest::Automatic,
+                configuration: RuntimeCommit::persisted_state_for_test(&state, &[]).config,
+                expected_head_revision: 0,
+                initial_turn_index: 1,
+            },
+        )
+        .await
+        .unwrap();
+    let selected = store
+        .select_queued_run(
+            &lease.authority(),
+            &admission.scope,
+            &lease.owner,
+            1,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(1),
+        )
+        .await
+        .unwrap();
+    let input = store
+        .enqueue_pending_turn_input(checkpoint_claims::pending_active_turn_input_draft(
+            &session_id,
+            &selected.admission.position.turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "undelivered checkpoint input",
+        ))
+        .await
+        .unwrap();
+    let claim = store
+        .claim_active_turn_inputs(
+            &session_id,
+            &lease.authority(),
+            &lease.owner,
+            &selected.admission.position.turn_id,
+            crate::CheckpointKind::AfterWork,
+            1,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    store.abandon_turn_input_claim(&claim).await.unwrap();
+    let assigned = store
+        .pending_queued_run(&session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        assigned
+            .assigned_members
+            .contains(&lash_core::store::QueuedRunMember::Input(
+                input.input_id.clone()
+            ))
+    );
+    let turn_id = selected.admission.position.turn_id.clone();
+    let address = crate::TurnAddress::new(&session_id, &turn_id);
+    let scope = address.execution_scope();
+    let binding_base = "queued-run-repair-cancellation";
+    store
+        .validate_turn_cancellation_binding(&session_id, &lease.authority(), binding_base, &scope)
+        .await
+        .unwrap();
+    let closure_key = |wait, suffix: &str| crate::AwaitEventKey {
+        scope: scope.clone(),
+        wait,
+        key_id: format!("{turn_id}:{suffix}"),
+        signature: format!("conformance:{suffix}"),
+    };
+    let closure = crate::TurnCancelClosureAuthorization::new(
+        address,
+        crate::turn_control_binding_id_for_scope(binding_base, &scope).unwrap(),
+        scope.clone(),
+        closure_key(crate::AwaitEventWaitIdentity::TurnCancelGate, "cancel"),
+        closure_key(
+            crate::AwaitEventWaitIdentity::TurnCancelEscalation,
+            "escalation",
+        ),
+        closure_key(crate::AwaitEventWaitIdentity::TurnTerminal, "terminal"),
+        crate::TurnCancelClosureProposal::CompletionSealed,
+        crate::TurnCancelIntentSnapshot::Absent,
+        &lease.authority(),
+    )
+    .unwrap();
+    store
+        .authorize_turn_cancel_closure(&lease.authority(), &closure)
+        .await
+        .unwrap();
+    let mut commit = RuntimeCommit::persisted_state_with_operation_for_testing(
+        &state,
+        &[],
+        crate::OperationId::turn(&session_id, &turn_id, "final"),
+    );
+    commit.session_execution_lease_fence = Some(lease.authority());
+    commit.interrupted_turn_input_turn_id = Some(turn_id.clone());
+    commit.interrupted_turn_cancel_intent = Some(crate::TurnCancelIntentSnapshot::Absent);
+    commit.turn_cancel_closure_settlement =
+        Some(crate::TurnCancelClosureSettlement::new(closure, None, None));
+    commit.queued_run = Some(Box::new(QueuedRunCommit {
+        scope: admission.scope.clone(),
+        expected_revision: selected.admission.revision,
+        progress: QueuedRunProgress::Settle {
+            terminal: QueuedRunTerminal::Completed {
+                turn_id,
+                outcome: crate::TurnOutcome::Stopped(crate::TurnStop::ToolFailure),
+            },
+        },
+    }));
+    store.commit_runtime_state(commit).await.unwrap();
+    let pending = store.list_pending_turn_inputs(&session_id).await.unwrap();
+    assert_eq!(pending.len(), 1, "the repaired input must remain pending");
+    assert_eq!(pending[0].input.input_id, input.input_id);
+    let next = store
+        .claim_next_turn_inputs(&session_id, &lease.authority(), &lease.owner, 1)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.inputs[0].input_id, input.input_id);
+}
+
 /// A refused automatic selection has no claimed members, but it must freeze
 /// an empty admission so the runtime can settle it without stranding the lane.
 #[expect(

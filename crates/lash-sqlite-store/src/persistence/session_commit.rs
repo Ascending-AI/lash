@@ -856,6 +856,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         }
                     }
                     let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
+                    let mut deferred_repaired_inputs = Vec::new();
                     if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
                         let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
                         let disposition = cancellation.map_or(
@@ -916,6 +917,9 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         let pending_inputs =
                             &crate::turn_ingress::turn_ingress_sql().pending_inputs;
                         for (input_id, payload) in input_ids {
+                            if disposition == lash_core::TurnCancelDisposition::Defer {
+                                deferred_repaired_inputs.push(input_id.clone());
+                            }
                             // Two dispositions, two named statements: deferring
                             // rewrites the ingress so the row stops naming a
                             // turn that is over, dropping is the cancel this
@@ -984,6 +988,17 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         if matches!(progress.progress, lash_core::store::QueuedRunProgress::Settle { .. }) {
                     let fence = commit.session_execution_lease_fence.as_ref().ok_or_else(|| StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() })?;
                     settle_run_members_conn(tx, fence, &progress.scope)?;
+                    // The end-of-turn repair owns its exact DeferredNextTurn
+                    // disposition even when a prior checkpoint assigned the
+                    // input to this run. Both writes are in this transaction.
+                    let deferred = lash_core::TurnInputState::DeferredNextTurn;
+                    let ingress = encode_json(&deferred.ingress())?;
+                    for input_id in &deferred_repaired_inputs {
+                        tx.execute(
+                            crate::turn_ingress::turn_ingress_sql().pending_inputs.defer_to_next_turn.sql(),
+                            params![commit.session_id.as_str(), input_id, deferred.as_str(), ingress.as_str()],
+                        ).map_err(sqlite_error)?;
+                    }
                 }
                 write_run_conn(tx, &admission.advance(progress, &enqueued_queue_batches)?, false)?;
                     }

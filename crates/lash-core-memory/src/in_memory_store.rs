@@ -854,7 +854,6 @@ impl InMemorySessionStore {
             | crate::store::claim_plan::ClaimPlanDecision::Defer => return Ok(None),
             crate::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
         };
-        let state_after_claim = plan.state_after_claim();
         for (&index, write) in selected_indices.iter().zip(plan.writes()) {
             let entry = &mut pending[index];
             entry.claim.acquire(
@@ -866,7 +865,7 @@ impl InMemorySessionStore {
             );
             // The durable row transitions with the claim; the plan's claim
             // record already carries the transitioned inputs (FIG-1065).
-            if state_after_claim == crate::TurnInputStateKind::Accepted
+            if write.state_after_claim == crate::TurnInputStateKind::Accepted
                 && let Some(accepted) = entry.input.state.accepted()
             {
                 entry.input.state = accepted;

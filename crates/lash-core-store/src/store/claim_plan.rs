@@ -201,6 +201,8 @@ pub struct TurnInputClaimWrite {
     pub input_id: crate::InputId,
     /// The fencing token the write installs: the observed token's successor.
     pub next_claim_fencing_token: u64,
+    /// The state this row's ingress permits after acquiring the claim.
+    pub state_after_claim: crate::TurnInputStateKind,
 }
 
 /// The ordered plan a `Complete` claim decision carries for pending turn
@@ -212,7 +214,6 @@ pub struct TurnInputClaimPlan {
     owner: LeaseOwnerIdentity,
     lease: WorkClaimLease,
     mode: crate::TurnInputClaimMode,
-    state_after_claim: crate::TurnInputStateKind,
     writes: Vec<TurnInputClaimWrite>,
     inputs: Vec<crate::PendingTurnInput>,
 }
@@ -239,11 +240,6 @@ impl TurnInputClaimPlan {
     /// The session-execution-lease generation every write pins.
     pub fn session_lease_generation(&self) -> u64 {
         self.lease.session_lease_generation
-    }
-
-    /// The durable `state` every claimed row transitions to.
-    pub fn state_after_claim(&self) -> crate::TurnInputStateKind {
-        self.state_after_claim
     }
 
     /// The ordered claim writes, one per selected row.
@@ -377,7 +373,7 @@ pub fn plan_turn_input_claim(
         now_epoch_ms,
         claiming_generation,
     )?;
-    let state_after_claim = turn_input_state_after_claim(&mode);
+    let mode_state_after_claim = turn_input_state_after_claim(&mode);
     let writes = rows
         .iter()
         .map(|row| {
@@ -387,11 +383,21 @@ pub fn plan_turn_input_claim(
                     "turn_input_claim_fencing_token",
                     row.claim_fencing_token,
                 )?,
+                // A frozen queued-run member keeps its active-turn ingress
+                // across lease generations. NextTurn describes the selection
+                // boundary, not a rewrite of that member's admission scope.
+                state_after_claim: if matches!(&mode, crate::TurnInputClaimMode::NextTurn)
+                    && row.input.state.active_turn_id().is_some()
+                {
+                    crate::TurnInputStateKind::Accepted
+                } else {
+                    mode_state_after_claim
+                },
             })
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
     let mut inputs = Vec::with_capacity(rows.len());
-    for row in rows {
+    for (row, write) in rows.into_iter().zip(&writes) {
         // Same contract as the queued-work claim: the row was read under the
         // backend's claim authority, the shared verdict decides, and the
         // generation predicate stays on the claim statement as its backstop.
@@ -399,7 +405,7 @@ pub fn plan_turn_input_claim(
             return Ok(ClaimPlanDecision::Defer);
         }
         let mut input = row.input;
-        if state_after_claim == crate::TurnInputStateKind::Accepted
+        if write.state_after_claim == crate::TurnInputStateKind::Accepted
             && let Some(accepted) = input.state.accepted()
         {
             input.state = accepted;
@@ -411,7 +417,6 @@ pub fn plan_turn_input_claim(
         owner: owner.clone(),
         lease,
         mode,
-        state_after_claim,
         writes,
         inputs,
     }))

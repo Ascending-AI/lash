@@ -822,7 +822,7 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
         )
         .bind(plan.session_id().as_str())
         .bind(write.input_id.as_str())
-        .bind(plan.state_after_claim().as_str())
+        .bind(write.state_after_claim.as_str())
         .bind(plan.claim_id())
         .bind(&owner.owner_id)
         .bind(&owner.incarnation_id)

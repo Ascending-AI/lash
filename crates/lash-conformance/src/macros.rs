@@ -149,6 +149,8 @@ macro_rules! runtime_persistence_tests {
             (commit_increments_head_and_round_trips_agent_frames, "root"),
             (concurrent_head_revision_cas_applies_exactly_once, "concurrent-head-cas"),
             (queued_run_advance_rejects_unassigned_members_but_keeps_checkpoint_claims, "queued-run-provenance"),
+            (queued_run_active_turn_member_reclaims_after_lane_rotation, "queued-run-active-reclaim"),
+            (queued_run_repaired_checkpoint_input_remains_deferred_after_settle, "queued-run-repaired-input"),
             (queued_run_continuation_commits_outbox_and_retains_receipts, "queued-run-continuation"),
             (queued_run_exact_selection_never_commits_a_partial_claim, "queued-run-exact"),
             (queued_run_terminal_disposition_preserves_unassigned_work, "queued-run-disposition"),

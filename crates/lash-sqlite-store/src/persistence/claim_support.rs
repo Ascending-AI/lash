@@ -497,7 +497,7 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
                 params![
                     plan.session_id().as_str(),
                     write.input_id.as_str(),
-                    plan.state_after_claim().as_str(),
+                    write.state_after_claim.as_str(),
                     plan.claim_id(),
                     owner.owner_id.as_str(),
                     owner.incarnation_id.as_str(),
