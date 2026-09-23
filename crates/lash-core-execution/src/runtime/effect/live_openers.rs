@@ -298,6 +298,22 @@ impl LiveOpenerRegistry {
             .map(|entry| entry.context.clone())
     }
 
+    /// The generation of `opener`'s live registration, or `None` when the
+    /// opener is not live here.
+    ///
+    /// A re-registration of the same opener value is a new generation, so a
+    /// caller holding a generation from an earlier resolution can tell "the
+    /// registration that produced this is still the live one" from "a redrive
+    /// re-registered it since" — the distinction a reopened group needs to
+    /// know whether its recorded state still belongs to the live incarnation.
+    #[must_use]
+    pub fn generation_of(&self, opener: &EffectOpener) -> Option<u64> {
+        self.openers
+            .lock_recover()
+            .get(opener)
+            .map(|entry| entry.generation)
+    }
+
     /// Whether `opener` is live in this host.
     #[must_use]
     pub fn is_live(&self, opener: &EffectOpener) -> bool {

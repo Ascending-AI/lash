@@ -133,6 +133,21 @@ pub trait GroupExecutors: Send + Sync {
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>>;
+
+    /// The generation of `opener`'s live registration, when this host tracks
+    /// opener registrations at all.
+    ///
+    /// A controller that reopens a group compares the generation the group
+    /// was opened under against the live one: a same-value re-registration is
+    /// a new incarnation, and serving the reopened caller the superseded
+    /// registration's recorded state would stamp a dead context's answers
+    /// under the new incarnation's name. `None` means either the opener is
+    /// not live here or the resolver keeps no registry — an unversioned
+    /// answer the controller must read as "the recorded state stands".
+    fn live_generation(&self, opener: &crate::EffectOpener) -> Option<u64> {
+        let _ = opener;
+        None
+    }
 }
 
 /// The host-owned driver that runs a closed group's remaining children to
