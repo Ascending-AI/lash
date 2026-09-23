@@ -1060,7 +1060,7 @@ pub(super) struct CountingProcessTool {
 }
 
 impl CountingProcessTool {
-    fn definition() -> lash_core::ToolDefinition {
+    pub(super) fn definition() -> lash_core::ToolDefinition {
         lash_core::ToolDefinition::raw(
             "tool:recovery_count",
             "recovery_count",

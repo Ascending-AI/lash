@@ -20,6 +20,10 @@ pub fn is_typescript_runtime_receiver(receiver: &lashlang::Value) -> bool {
     )
 }
 
+/// The host operation a TypeScript runtime call's replay key names, and the
+/// one its durable effect-summary record carries.
+pub(crate) const TYPESCRIPT_RUNTIME_HOST_OPERATION: &str = "typescript.runtime";
+
 pub async fn journaled_typescript_runtime_value(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     effect_id: String,
@@ -27,35 +31,28 @@ pub async fn journaled_typescript_runtime_value(
     operation: &str,
     args: &[lashlang::Value],
 ) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
-    journaled_typescript_runtime_value_inner(ctx, effect_id, receiver, operation, args, None).await
-}
-
-pub(crate) async fn journaled_process_typescript_runtime_value(
-    ctx: &lash_core::RuntimeExecutionContext<'_>,
-    effect_id: String,
-    receiver: &lashlang::Value,
-    operation: &str,
-    args: &[lashlang::Value],
-    call_site: &lashlang::LashlangExecutionCallSite,
-) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
-    journaled_typescript_runtime_value_inner(
+    let mut journaled = false;
+    journaled_typescript_runtime_value_recording(
         ctx,
         effect_id,
         receiver,
         operation,
         args,
-        Some(call_site),
+        &mut journaled,
     )
     .await
 }
 
-async fn journaled_typescript_runtime_value_inner(
+/// As [`journaled_typescript_runtime_value`], also reporting through
+/// `journaled` whether the effect produced a journaled value — the outcome a
+/// process incorporates into its effect summary.
+pub(crate) async fn journaled_typescript_runtime_value_recording(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     effect_id: String,
     receiver: &lashlang::Value,
     operation: &str,
     args: &[lashlang::Value],
-    call_site: Option<&lashlang::LashlangExecutionCallSite>,
+    journaled: &mut bool,
 ) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
     let lashlang::Value::Resource(handle) = receiver else {
         return None;
@@ -79,26 +76,9 @@ async fn journaled_typescript_runtime_value_inner(
         ))));
     }
     let value = ctx
-        .journaled_language_runtime_value(effect_id.clone(), operation.to_string())
+        .journaled_language_runtime_value(effect_id, operation.to_string())
         .await;
-    if value.is_ok()
-        && let Some(call_site) = call_site
-        && let Err(error) = ctx
-            .append_process_event(
-                lash_core::ProcessEffectSummaryOccurrence::new(
-                    call_site.site.node_id.clone(),
-                    call_site.occurrence,
-                    operation,
-                    lash_core::ProcessEffectOutcomeClass::Success,
-                    None,
-                    effect_id,
-                )
-                .append_request(),
-            )
-            .await
-    {
-        return Some(Err(lashlang::ExecutionHostError::new(error.to_string())));
-    }
+    *journaled = value.is_ok();
     Some(
         value
             .map_err(|error| lashlang::ExecutionHostError::new(error.to_string()))

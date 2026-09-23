@@ -234,9 +234,13 @@ pub(super) async fn compare_bounded_process_event_pages(
             .expect("open SQLite effect replay host");
     let postgres_effect = postgres.effect_host();
     let effect_scope = lash_core::ExecutionScope::process(effect_id.as_str());
+    // Ten occurrences of one node: the writer records the first
+    // `PROCESS_EFFECT_OCCURRENCE_CAP` one by one and counts the rest, by
+    // class, in one omission record.
+    let mut omitted = lash_core::ProcessEffectOmittedCounts::default();
     for occurrence in 1..=10 {
         let replay_key = format!("fixture-effect:{occurrence}");
-        let is_failure = occurrence == 7;
+        let is_failure = occurrence == 7 || occurrence == 9;
         let outcome = lash_core::ProcessEffectSummaryOccurrence::new(
             "repeated-node",
             occurrence,
@@ -250,7 +254,12 @@ pub(super) async fn compare_bounded_process_event_pages(
             } else {
                 lash_core::ProcessEffectOutcomeClass::Success
             },
-            is_failure.then(|| lash_sansio::FailureCode::from_foreign_wire("trigger:invalid")),
+            is_failure.then(|| {
+                lash_core::TriggerOperationError::Invalid {
+                    message: "fixture refusal".to_string(),
+                }
+                .failure_code()
+            }),
             replay_key.clone(),
         );
         let envelope = lash_core::RuntimeEffectEnvelope::new(
@@ -326,23 +335,25 @@ pub(super) async fn compare_bounded_process_event_pages(
                     "an effect replay row alone must not invent a process-summary event"
                 );
             }
-            let inserted = registry
-                .append_event_with_authority(
-                    &effect_id,
-                    outcome.append_request(),
-                    &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
-                )
-                .await
-                .expect("append journaled outcome under execution authority");
-            let replayed = registry
-                .append_event_with_authority(
-                    &effect_id,
-                    outcome.append_request(),
-                    &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
-                )
-                .await
-                .expect("recover lost append acknowledgement");
-            assert_eq!(inserted.event.sequence, replayed.event.sequence);
+            if lash_core::ProcessEffectSummaryOccurrence::is_within_cap(occurrence) {
+                let inserted = registry
+                    .append_event_with_authority(
+                        &effect_id,
+                        outcome.append_request(),
+                        &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
+                    )
+                    .await
+                    .expect("append journaled outcome under execution authority");
+                let replayed = registry
+                    .append_event_with_authority(
+                        &effect_id,
+                        outcome.append_request(),
+                        &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
+                    )
+                    .await
+                    .expect("recover lost append acknowledgement");
+                assert_eq!(inserted.event.sequence, replayed.event.sequence);
+            }
             let replay = controller
                 .controller()
                 .execute_effect(
@@ -358,6 +369,35 @@ pub(super) async fn compare_bounded_process_event_pages(
                 serde_json::to_value(recorded).expect("encode recorded effect")
             );
         }
+        if !lash_core::ProcessEffectSummaryOccurrence::is_within_cap(occurrence) {
+            omitted.record(if is_failure {
+                lash_core::ProcessEffectOutcomeClass::Failure
+            } else {
+                lash_core::ProcessEffectOutcomeClass::Success
+            });
+        }
+    }
+    let omissions = lash_core::ProcessEffectOmissions::new(std::collections::BTreeMap::from([(
+        "repeated-node".to_string(),
+        omitted,
+    )]));
+    for (registry, lease) in [
+        (&sqlite as &dyn lash_core::ProcessRegistry, &sqlite_lease),
+        (
+            &postgres_registry as &dyn lash_core::ProcessRegistry,
+            &postgres_lease,
+        ),
+    ] {
+        for _ in 0..2 {
+            registry
+                .append_event_with_authority(
+                    &effect_id,
+                    omissions.append_request("fixture-effect:omissions"),
+                    &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),
+                )
+                .await
+                .expect("append the omission record, then recover it");
+        }
     }
     let mut summaries = Vec::new();
     for registry in [
@@ -371,7 +411,7 @@ pub(super) async fn compare_bounded_process_event_pages(
             .expect("read effect events")
         {
             summary
-                .fold_event(&event, lash_core::ProcessEffectSummaryConfig::default())
+                .fold_event(&event.event_type, &event.payload)
                 .expect("fold effect event");
         }
         summaries.push(summary);
@@ -379,7 +419,11 @@ pub(super) async fn compare_bounded_process_event_pages(
     assert_eq!(summaries[0], summaries[1], "effect projections diverged");
     let node = summaries[0].node("repeated-node").expect("effect node");
     assert_eq!(node.occurrences.len(), 8);
-    assert_eq!(node.omitted, 2);
+    assert_eq!(
+        node.omitted.failure, 1,
+        "the omitted failure keeps its class"
+    );
+    assert_eq!(node.omitted.success, 1);
     assert_eq!(
         node.occurrences[6].outcome_class,
         lash_core::ProcessEffectOutcomeClass::Failure

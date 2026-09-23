@@ -5,225 +5,10 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::effect_summary::{
+    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+};
 use super::model::{ProcessId, ProcessObserverBy, RecoveryContract};
-
-/// Version of the runtime-owned durable process-event vocabulary.
-pub const PROCESS_EVENT_VOCABULARY_VERSION: u32 = 1;
-
-/// Runtime-owned event containing one replay-stable Lashlang effect outcome.
-pub const PROCESS_EFFECT_OUTCOME_EVENT_TYPE: &str = "process.effect_outcome";
-
-/// Default number of occurrences retained for each node by
-/// [`ProcessEffectSummary`].
-pub const DEFAULT_PROCESS_EFFECT_OCCURRENCE_CAP: usize = 8;
-
-/// Terminal class of a recorded effect occurrence.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessEffectOutcomeClass {
-    Success,
-    Failure,
-    Cancelled,
-}
-
-/// Strict durable payload for one effect occurrence.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProcessEffectSummaryOccurrence {
-    pub vocabulary_version: u32,
-    pub node_id: String,
-    pub occurrence: u64,
-    pub operation: String,
-    pub outcome_class: ProcessEffectOutcomeClass,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub code: Option<lash_sansio::FailureCode>,
-    pub replay_key: String,
-}
-
-impl ProcessEffectSummaryOccurrence {
-    pub fn new(
-        node_id: impl Into<String>,
-        occurrence: u64,
-        operation: impl Into<String>,
-        outcome_class: ProcessEffectOutcomeClass,
-        code: Option<lash_sansio::FailureCode>,
-        replay_key: impl Into<String>,
-    ) -> Self {
-        Self {
-            vocabulary_version: PROCESS_EVENT_VOCABULARY_VERSION,
-            node_id: node_id.into(),
-            occurrence,
-            operation: operation.into(),
-            outcome_class,
-            code,
-            replay_key: replay_key.into(),
-        }
-    }
-
-    pub fn decode(payload: serde_json::Value) -> Result<Self, ProcessEffectSummaryError> {
-        let version = payload
-            .as_object()
-            .and_then(|object| object.get("vocabulary_version"))
-            .and_then(serde_json::Value::as_u64)
-            .ok_or(ProcessEffectSummaryError::MissingVocabularyVersion)?;
-        if version != u64::from(PROCESS_EVENT_VOCABULARY_VERSION) {
-            return Err(ProcessEffectSummaryError::UnsupportedVocabularyVersion {
-                expected: PROCESS_EVENT_VOCABULARY_VERSION,
-                actual: version,
-            });
-        }
-        serde_json::from_value(payload).map_err(ProcessEffectSummaryError::InvalidPayload)
-    }
-
-    pub fn append_request(&self) -> ProcessEventAppendRequest {
-        let mut payload = serde_json::Map::new();
-        payload.insert(
-            "vocabulary_version".to_string(),
-            serde_json::Value::from(self.vocabulary_version),
-        );
-        payload.insert("node_id".to_string(), self.node_id.clone().into());
-        payload.insert("occurrence".to_string(), self.occurrence.into());
-        payload.insert("operation".to_string(), self.operation.clone().into());
-        payload.insert(
-            "outcome_class".to_string(),
-            match self.outcome_class {
-                ProcessEffectOutcomeClass::Success => "success",
-                ProcessEffectOutcomeClass::Failure => "failure",
-                ProcessEffectOutcomeClass::Cancelled => "cancelled",
-            }
-            .into(),
-        );
-        if let Some(code) = &self.code {
-            payload.insert("code".to_string(), code.namespaced().into());
-        }
-        payload.insert("replay_key".to_string(), self.replay_key.clone().into());
-        ProcessEventAppendRequest::new(
-            PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-            serde_json::Value::Object(payload),
-        )
-        .with_replay_key(self.replay_key.clone())
-    }
-}
-
-/// Configures the bounded durable effect projection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ProcessEffectSummaryConfig {
-    per_node_occurrence_cap: std::num::NonZeroUsize,
-}
-
-impl ProcessEffectSummaryConfig {
-    pub const fn new(per_node_occurrence_cap: std::num::NonZeroUsize) -> Self {
-        Self {
-            per_node_occurrence_cap,
-        }
-    }
-
-    pub const fn per_node_occurrence_cap(self) -> std::num::NonZeroUsize {
-        self.per_node_occurrence_cap
-    }
-}
-
-impl Default for ProcessEffectSummaryConfig {
-    fn default() -> Self {
-        const CAP: std::num::NonZeroUsize =
-            match std::num::NonZeroUsize::new(DEFAULT_PROCESS_EFFECT_OCCURRENCE_CAP) {
-                Some(cap) => cap,
-                None => panic!("the default process effect occurrence cap is non-zero"),
-            };
-        Self::new(CAP)
-    }
-}
-
-/// Bounded retained occurrences for one runtime node.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessEffectNodeSummary {
-    pub node_id: String,
-    pub occurrences: Vec<ProcessEffectSummaryOccurrence>,
-    pub omitted: u64,
-}
-
-/// Pure, deterministic bounded fold of runtime-owned effect-outcome events.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ProcessEffectSummary {
-    nodes: BTreeMap<String, ProcessEffectNodeSummary>,
-}
-
-impl ProcessEffectSummary {
-    pub fn nodes(&self) -> impl ExactSizeIterator<Item = &ProcessEffectNodeSummary> {
-        self.nodes.values()
-    }
-
-    pub fn node(&self, node_id: &str) -> Option<&ProcessEffectNodeSummary> {
-        self.nodes.get(node_id)
-    }
-
-    pub fn fold_event(
-        &mut self,
-        event: &ProcessEvent,
-        config: ProcessEffectSummaryConfig,
-    ) -> Result<(), ProcessEffectSummaryError> {
-        if event.event_type != PROCESS_EFFECT_OUTCOME_EVENT_TYPE {
-            return Ok(());
-        }
-        self.fold_outcome(
-            ProcessEffectSummaryOccurrence::decode(event.payload.clone())?,
-            config,
-        )
-    }
-
-    /// Retention is canonical by `(occurrence, replay_key)`, so page or
-    /// arrival order cannot change which occurrences survive the cap.
-    pub fn fold_outcome(
-        &mut self,
-        outcome: ProcessEffectSummaryOccurrence,
-        config: ProcessEffectSummaryConfig,
-    ) -> Result<(), ProcessEffectSummaryError> {
-        let node = self
-            .nodes
-            .entry(outcome.node_id.clone())
-            .or_insert_with(|| ProcessEffectNodeSummary {
-                node_id: outcome.node_id.clone(),
-                occurrences: Vec::new(),
-                omitted: 0,
-            });
-        if let Some(existing) = node
-            .occurrences
-            .iter()
-            .find(|existing| existing.replay_key == outcome.replay_key)
-        {
-            return if existing == &outcome {
-                Ok(())
-            } else {
-                Err(ProcessEffectSummaryError::ConflictingReplayKey(
-                    outcome.replay_key,
-                ))
-            };
-        }
-        node.occurrences.push(outcome);
-        node.occurrences.sort_by(|left, right| {
-            (left.occurrence, left.replay_key.as_str())
-                .cmp(&(right.occurrence, right.replay_key.as_str()))
-        });
-        let cap = config.per_node_occurrence_cap.get();
-        if node.occurrences.len() > cap {
-            node.occurrences.pop();
-            node.omitted = node.omitted.saturating_add(1);
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ProcessEffectSummaryError {
-    #[error("effect outcome payload is missing its vocabulary_version")]
-    MissingVocabularyVersion,
-    #[error("effect outcome vocabulary version {actual} is unsupported; expected {expected}")]
-    UnsupportedVocabularyVersion { expected: u32, actual: u64 },
-    #[error("invalid effect outcome payload: {0}")]
-    InvalidPayload(serde_json::Error),
-    #[error("effect outcome replay key `{0}` has conflicting payloads")]
-    ConflictingReplayKey(String),
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessEventType {
@@ -1368,6 +1153,7 @@ pub use lash_core_store::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProcessEventKind {
     EffectOutcome,
+    EffectOmissions,
     FirstStarted,
     Waiting,
     Resumed,
@@ -1386,6 +1172,7 @@ impl ProcessEventKind {
     pub(super) fn from_event_type(name: &str) -> Self {
         match name {
             PROCESS_EFFECT_OUTCOME_EVENT_TYPE => Self::EffectOutcome,
+            PROCESS_EFFECT_OMISSIONS_EVENT_TYPE => Self::EffectOmissions,
             "process.first_started" => Self::FirstStarted,
             "process.waiting" => Self::Waiting,
             "process.resumed" => Self::Resumed,
@@ -1407,7 +1194,12 @@ pub(super) fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventTyp
         ProcessEventKind::Custom | ProcessEventKind::UnknownRuntime => None,
         ProcessEventKind::EffectOutcome => Some(ProcessEventType {
             name: name.to_string(),
-            payload_schema: effect_outcome_payload_schema(),
+            payload_schema: super::effect_summary::effect_outcome_payload_schema(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        }),
+        ProcessEventKind::EffectOmissions => Some(ProcessEventType {
+            name: name.to_string(),
+            payload_schema: super::effect_summary::effect_omissions_payload_schema(),
             semantics: ProcessEventSemanticsSpec::default(),
         }),
         ProcessEventKind::FirstStarted
@@ -1434,6 +1226,7 @@ pub(super) fn is_runtime_lifecycle_event_type(name: &str) -> bool {
 pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
     let mut event_types: Vec<_> = [
         PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+        PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
         "process.cancel_requested",
         "process.first_started",
         "process.waiting",
@@ -1455,29 +1248,6 @@ pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
         terminal_event_type("process.abandoned", ProcessStatus::Abandoned),
     ]);
     event_types
-}
-
-fn effect_outcome_payload_schema() -> crate::LashSchema {
-    crate::LashSchema::new(serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-            "vocabulary_version", "node_id", "occurrence", "operation",
-            "outcome_class", "replay_key"
-        ],
-        "properties": {
-            "vocabulary_version": { "const": PROCESS_EVENT_VOCABULARY_VERSION },
-            "node_id": { "type": "string", "minLength": 1 },
-            "occurrence": { "type": "integer", "minimum": 1 },
-            "operation": { "type": "string", "minLength": 1 },
-            "outcome_class": {
-                "type": "string",
-                "enum": ["success", "failure", "cancelled"]
-            },
-            "code": { "type": "string", "minLength": 1 },
-            "replay_key": { "type": "string", "minLength": 1 }
-        }
-    }))
 }
 
 fn terminal_event_type(name: &str, status: ProcessStatus) -> ProcessEventType {
@@ -1622,69 +1392,6 @@ mod cancellation_identity_tests {
                 "a malformed reserved tool-value tag must be rejected"
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod effect_summary_tests {
-    use super::*;
-
-    fn occurrence(node: &str, occurrence: u64) -> ProcessEffectSummaryOccurrence {
-        ProcessEffectSummaryOccurrence::new(
-            node,
-            occurrence,
-            "fixture.operation",
-            ProcessEffectOutcomeClass::Success,
-            None,
-            format!("effect:{node}:{occurrence}"),
-        )
-    }
-
-    #[test]
-    fn bounded_effect_summary_is_permutation_invariant_and_marks_omissions() {
-        let config = ProcessEffectSummaryConfig::new(std::num::NonZeroUsize::new(2).unwrap());
-        let inputs = [
-            occurrence("node-b", 1),
-            occurrence("node-a", 3),
-            occurrence("node-a", 1),
-            occurrence("node-a", 2),
-        ];
-        let mut forward = ProcessEffectSummary::default();
-        for input in inputs.clone() {
-            forward.fold_outcome(input, config).unwrap();
-        }
-        let mut reverse = ProcessEffectSummary::default();
-        for input in inputs.into_iter().rev() {
-            reverse.fold_outcome(input, config).unwrap();
-        }
-
-        assert_eq!(forward, reverse);
-        let node = forward.node("node-a").unwrap();
-        assert_eq!(node.omitted, 1);
-        assert_eq!(
-            node.occurrences
-                .iter()
-                .map(|outcome| outcome.occurrence)
-                .collect::<Vec<_>>(),
-            vec![1, 2]
-        );
-    }
-
-    #[test]
-    fn identical_retained_duplicate_is_a_noop_and_changed_duplicate_conflicts() {
-        let config = ProcessEffectSummaryConfig::default();
-        let outcome = occurrence("node", 1);
-        let mut summary = ProcessEffectSummary::default();
-        summary.fold_outcome(outcome.clone(), config).unwrap();
-        summary.fold_outcome(outcome.clone(), config).unwrap();
-        assert_eq!(summary.node("node").unwrap().occurrences.len(), 1);
-
-        let mut changed = outcome;
-        changed.outcome_class = ProcessEffectOutcomeClass::Failure;
-        assert!(matches!(
-            summary.fold_outcome(changed, config),
-            Err(ProcessEffectSummaryError::ConflictingReplayKey(_))
-        ));
     }
 }
 

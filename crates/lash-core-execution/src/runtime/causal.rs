@@ -217,6 +217,10 @@ pub fn tool_retry_sleep_invocation(
     )
 }
 
+/// The operation a process sleep's replay key names, and the one its durable
+/// effect-summary record carries.
+pub const PROCESS_SLEEP_OPERATION: &str = "sleep";
+
 #[expect(
     clippy::expect_used,
     reason = "the caller's live effect controller admitted this scope"
@@ -228,7 +232,7 @@ pub(crate) fn process_sleep_invocation(
     scope: &str,
     sequence: u64,
 ) -> RuntimeEffectInvocation {
-    let suffix = format!("process:{scope}:sleep:{sequence}");
+    let suffix = format!("process:{scope}:{PROCESS_SLEEP_OPERATION}:{sequence}");
     if let Some(parent) = parent {
         let parent_effect_id = parent.effect_id().unwrap_or("effect");
         return child_effect_invocation(

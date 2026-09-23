@@ -508,6 +508,7 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        effect_omissions: std::collections::BTreeMap::new(),
     };
     let input = bytecode_v17_loop_input();
     let mut fixture = serde_json::json!({
@@ -556,6 +557,7 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        effect_omissions: std::collections::BTreeMap::new(),
     };
     let mut wire = serde_json::to_value(segment_state).expect("serialize segment-state writer");
     wire["vm"]["execution_nonce"] = serde_json::json!(16294208416658607535_u64);
@@ -695,9 +697,11 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
     ));
 
     // Keep the predecessor capture intact. Only re-envelope its parked VM at
-    // the current continuation version to reach the bytecode identity fence.
+    // the current continuation version, with the envelope fields later
+    // versions added, to reach the bytecode identity fence.
     fixture["segment_state"]["vm"]["format_version"] =
         serde_json::json!(lashlang::VM_CONTINUATION_FORMAT_VERSION);
+    fixture["segment_state"]["effect_omissions"] = serde_json::json!({});
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
         .expect("the fixture carries a structurally valid current-envelope continuation");
     assert_eq!(
@@ -729,6 +733,7 @@ fn the_current_envelope_carries_no_dead_send_ordinal() {
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        effect_omissions: std::collections::BTreeMap::new(),
     };
     let wire = serde_json::to_value(&segment_state).expect("serialize current segment state");
     assert_eq!(wire["version"], LASHLANG_SEGMENT_STATE_VERSION);
@@ -812,6 +817,7 @@ fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_chan
         started_process_ids: Vec::new(),
         child_max_attempts: recorded,
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        effect_omissions: std::collections::BTreeMap::new(),
     };
     let encoded = serde_json::to_vec(&segment_state).expect("encode segment handover");
     let decoded = decode_lashlang_segment_state(&encoded).expect("decode segment handover");

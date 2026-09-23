@@ -1,6 +1,7 @@
 mod admission;
 mod awaiter;
 mod definition_ref;
+mod effect_summary;
 mod engine;
 mod events;
 pub(crate) mod identity_projection;
@@ -38,6 +39,13 @@ pub use definition_ref::{
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
     ProcessDefinitionValue, ProcessEngineKind, ProcessSignature,
 };
+pub use effect_summary::{
+    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectNodeSummary,
+    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
+    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence,
+    tool_failure_code,
+};
 pub use engine::{
     AdmittedProcessIdentity, PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission,
     ProcessEngineProcessContext, ProcessEngineRegistration, ProcessEngineRegistry,
@@ -45,12 +53,8 @@ pub use engine::{
     ProcessRunOutcome, SegmentHandover, settle_started_process_engine_artifacts,
 };
 pub use events::{
-    AbandonEvidence, AbandonWriter, DEFAULT_PROCESS_EFFECT_OCCURRENCE_CAP,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput, ProcessCompletionAuthority,
-    ProcessEffectNodeSummary, ProcessEffectOutcomeClass, ProcessEffectSummary,
-    ProcessEffectSummaryConfig, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
+    ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
     ProcessEventPageMore, ProcessEventPageToken, ProcessEventPageTokenStoreExt,
     ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemantics,

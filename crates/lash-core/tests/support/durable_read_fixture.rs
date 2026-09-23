@@ -303,11 +303,29 @@ fn fixture_effect_outcome() -> lash_core::ProcessEffectSummaryOccurrence {
     lash_core::ProcessEffectSummaryOccurrence::new(
         "durable-read-tool-node",
         1,
-        "fixture.tool",
-        lash_core::ProcessEffectOutcomeClass::Success,
-        None,
+        "tool:fixture",
+        lash_core::ProcessEffectOutcomeClass::Failure,
+        Some(
+            lash_core::TriggerOperationError::Invalid {
+                message: "fixture".to_string(),
+            }
+            .failure_code(),
+        ),
         "durable-read-tool-effect:1",
     )
+}
+
+const FIXTURE_EFFECT_OMISSIONS_KEY: &str = "durable-read-effect-omissions";
+
+fn fixture_effect_omissions() -> lash_core::ProcessEffectOmissions {
+    lash_core::ProcessEffectOmissions::new(std::collections::BTreeMap::from([(
+        "durable-read-tool-node".to_string(),
+        lash_core::ProcessEffectOmittedCounts {
+            success: 3,
+            failure: 1,
+            cancelled: 0,
+        },
+    )]))
 }
 
 #[allow(dead_code)]
@@ -809,10 +827,19 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .append_event_with_authority(
             &ProcessId::from(PROCESS_ID),
             fixture_effect_outcome().append_request(),
-            &ProcessExecutionWriteAuthority::lease(lease),
+            &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
         .await
         .expect("persist fixture effect outcome");
+    handles
+        .processes
+        .append_event_with_authority(
+            &ProcessId::from(PROCESS_ID),
+            fixture_effect_omissions().append_request(FIXTURE_EFFECT_OMISSIONS_KEY),
+            &ProcessExecutionWriteAuthority::lease(lease),
+        )
+        .await
+        .expect("persist fixture effect omissions");
     handles
         .continuations
         .put_segment_handover(&ProcessId::from(PROCESS_ID), fixture_handover())
@@ -1414,7 +1441,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .full_event_window(&ProcessId::from(PROCESS_ID), 0)
         .await
         .expect("durable fixture drift: waiting-process event read failed");
-    assert_eq!(process_events.len(), 3);
+    assert_eq!(process_events.len(), 4);
     assert_eq!(process_events[0].sequence, 1);
     assert_eq!(process_events[0].event_type, "process.observer_added");
     assert_eq!(
@@ -1440,6 +1467,15 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         lash_core::ProcessEffectSummaryOccurrence::decode(process_events[2].payload.clone())
             .expect("decode durable fixture effect outcome"),
         fixture_effect_outcome()
+    );
+    assert_eq!(
+        process_events[3].event_type,
+        lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE
+    );
+    assert_eq!(
+        lash_core::ProcessEffectOmissions::decode(process_events[3].payload.clone())
+            .expect("decode durable fixture effect omissions"),
+        fixture_effect_omissions()
     );
     assert_eq!(
         handles

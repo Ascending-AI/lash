@@ -37,6 +37,7 @@ use super::validation::{
 };
 
 mod continuation;
+mod effect_summary_faults;
 mod event_log;
 #[cfg(test)]
 mod identity;
@@ -53,6 +54,7 @@ mod retention;
 mod support;
 mod types;
 mod worklist;
+pub use effect_summary_faults::EffectSummaryAppendFaults;
 use local_helpers::{insert_process, next_change_seq, process_miss};
 pub use parent_end_fault::fail_parent_end_once;
 pub use registration_refusals::{

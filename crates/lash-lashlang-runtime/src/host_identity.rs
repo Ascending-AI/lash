@@ -102,6 +102,11 @@ impl LashlangHostIdentities {
         )
     }
 
+    /// The replay key of the run's one durable effect-omission record.
+    pub fn effect_omissions(&self) -> String {
+        format!("lashlang:{}:effect_omissions", self.scope())
+    }
+
     /// The identity of one leaf of an aggregate, at `leaf_index` of the batch
     /// the program wrote.
     ///

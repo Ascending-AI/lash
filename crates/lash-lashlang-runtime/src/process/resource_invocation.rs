@@ -6,6 +6,7 @@ pub(super) enum PreparedResourceInvocation {
         operation: lashlang::TriggerHostOperation,
         payload: serde_json::Value,
         effect_id: String,
+        host_operation: String,
         call_site: lashlang::LashlangExecutionCallSite,
     },
     Tool {
@@ -47,6 +48,7 @@ impl LashlangProcessHost<'_> {
                 operation,
                 payload,
                 effect_id: call_id,
+                host_operation,
                 call_site,
             });
         }

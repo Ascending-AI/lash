@@ -6,7 +6,9 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use crate::runtime::process::{
-    PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectOutcomeClass, ProcessEffectSummaryOccurrence,
+    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectOmissions,
+    ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectSummaryOccurrence,
+    validate_generic_process_event_append,
 };
 use crate::{
     AbandonRequest, ProcessEventAppendRequest, ProcessExternalRef, ProcessIncarnation,
@@ -427,7 +429,7 @@ fn effect_summary_refuses_predecessor_vocabulary() {
     assert!(
         error
             .to_string()
-            .contains("effect outcome vocabulary version 0 is unsupported; expected 1"),
+            .contains("effect summary vocabulary version 0 is unsupported; expected 1"),
         "{error}"
     );
 }
@@ -535,6 +537,62 @@ fn effect_summary_replay_is_a_noop_and_changed_payload_conflicts() {
         error
             .to_string()
             .contains("conflicts with an existing event")
+    );
+}
+
+#[test]
+fn the_generic_append_refuses_runtime_owned_effect_summary_kinds() {
+    let mut counts = ProcessEffectOmittedCounts::default();
+    counts.record(ProcessEffectOutcomeClass::Success);
+    for request in [
+        effect_summary_request(),
+        ProcessEffectOmissions::new(std::collections::BTreeMap::from([(
+            "node".to_string(),
+            counts,
+        )]))
+        .append_request("omissions"),
+    ] {
+        let event_type = request.event_type.clone();
+        assert!(
+            matches!(
+                validate_generic_process_event_append(&request),
+                Err(crate::PluginError::ReservedProcessEvent { event_type: refused })
+                    if refused == event_type
+            ),
+            "a host append of `{event_type}` must be refused"
+        );
+    }
+}
+
+#[test]
+fn effect_summary_refuses_occurrences_beyond_the_cap_and_malformed_omissions() {
+    let record = ProcessRecord::from_registration(
+        fixture_registration("effect-summary-cap"),
+        ProcessIncarnation::from_registration_sequence(1),
+    );
+    let beyond = ProcessEffectSummaryOccurrence::new(
+        "node",
+        PROCESS_EFFECT_OCCURRENCE_CAP + 1,
+        "fixture.operation",
+        ProcessEffectOutcomeClass::Success,
+        None,
+        "effect:beyond",
+    )
+    .append_request();
+    let error = prepare_process_event_append(&record, beyond, 1, None, None, 42, None)
+        .expect_err("the writer never records an occurrence past the cap");
+    assert!(
+        error.to_string().contains("outside the recorded cap"),
+        "{error}"
+    );
+
+    let empty =
+        ProcessEffectOmissions::new(std::collections::BTreeMap::new()).append_request("omissions");
+    let error = prepare_process_event_append(&record, empty, 1, None, None, 42, None)
+        .expect_err("an omission record must name an omission");
+    assert!(
+        error.to_string().contains("no omitted occurrence"),
+        "{error}"
     );
 }
 

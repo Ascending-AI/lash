@@ -1633,17 +1633,47 @@ must_cover = ["SegmentHandover", "PersistedSegmentHandover"]
 
 [[surface]]
 constant = "PROCESS_EVENT_VOCABULARY_VERSION"
-constant_path = "crates/lash-core-execution/src/runtime/process/events.rs"
-description = "runtime-owned durable process-event kind and strict payload vocabulary"
+constant_path = "crates/lash-core-execution/src/runtime/process/effect_summary.rs"
+description = "runtime-owned durable effect-summary kinds: event types, strict serde payloads, occurrence cap and failure-code mappings"
 
+# The effect-summary module is the wire surface: both event-type constants,
+# the payload types and their only encoder (`append_request`, serde) and
+# decoder (`decode`), the per-node cap, the payload schemas and the tool
+# failure-code mapping. Methods share names across the two payload types, so
+# the file is pinned whole.
+[[surface.guard]]
+kind = "file"
+paths = ["crates/lash-core-execution/src/runtime/process/effect_summary.rs"]
+must_cover = [
+  "PROCESS_EFFECT_OUTCOME_EVENT_TYPE",
+  "PROCESS_EFFECT_OMISSIONS_EVENT_TYPE",
+  "PROCESS_EFFECT_OCCURRENCE_CAP",
+  "struct ProcessEffectSummaryOccurrence",
+  "struct ProcessEffectOmissions",
+  "fn append_request",
+  "fn decode",
+  "fn tool_failure_code",
+  "fn effect_outcome_payload_schema",
+  "fn effect_omissions_payload_schema",
+]
+
+# The kind classification (and the `process.effect_*` reservation) and the
+# generic-append refusal that keeps the kinds runtime-owned.
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-core-execution/src/runtime/process/events.rs"]
-symbols = [
-  "ProcessEventKind",
-  "ProcessEffectOutcomeClass",
-  "ProcessEffectSummaryOccurrence",
-]
+symbols = ["ProcessEventKind", "from_event_type"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/process/validation.rs"]
+symbols = ["validate_generic_process_event_append"]
+
+# The Lash-vocabulary code a recorded trigger failure carries.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/triggers.rs"]
+symbols = ["failure_code"]
 
 [[surface]]
 constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
