@@ -338,7 +338,9 @@ lash_rust_binary(
 
 filegroup(
     name = "old_module_fixture",
-    srcs = ["tests/fixtures/module-artifact-old.json"],
+    srcs = [
+        "tests/fixtures/module-artifact-old.json",
+    ],
 )
 
 load("//tools/bazel:test_batch.bzl", "lash_batch_test")

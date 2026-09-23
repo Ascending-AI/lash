@@ -377,7 +377,7 @@ class TestRunRequestTest(unittest.TestCase):
         )
 
     def test_timing_sensitive_suites_keep_four_cores(self) -> None:
-        self.assertEqual(generator.CONTENTION_FLOOR_PACKAGES, {"lash-perf", "lash-sim"})
+        self.assertEqual(set(generator.CONTENTION_FLOOR["packages"]), {"lash-perf", "lash-sim"})
         label = "//crates/lash-perf:lash-perf__unit_test"
         self.assertLess(generator.TEST_RUN_SIZES[label]["cpu_count"], 4)
         self.assertEqual(
@@ -412,7 +412,7 @@ class TestRunRequestTest(unittest.TestCase):
                 else:
                     self.assertGreaterEqual(cpu, generator.UNMEASURED_TEST_RUN["cpu_count"])
                 if package in ("crates/lash-perf", "crates/lash-sim"):
-                    self.assertGreaterEqual(cpu, generator.CONTENTION_CPU_FLOOR)
+                    self.assertGreaterEqual(cpu, generator.CONTENTION_FLOOR["cpu_count"])
         self.assertGreater(seen, 0)
 
     def test_no_other_target_states_a_run(self) -> None:
@@ -428,7 +428,7 @@ class BatchBudgetTest(unittest.TestCase):
     """A batch reserves what it runs, and runs no more than it reserves."""
 
     def test_the_large_suites_never_join_a_batch(self) -> None:
-        for key in generator.UNMEASURED_LARGE_TEST_RUNS:
+        for key in generator.LARGE_TEST_RUNS:
             with self.subTest(key=key):
                 self.assertFalse(generator.batchable_run(*key.split("/")))
         self.assertTrue(generator.batchable_run("no-such-package", "no_such_crate"))
@@ -489,10 +489,10 @@ class TableValidationTest(unittest.TestCase):
             ],
         }
         saved = dict(generator.ACTION_SIZES)
-        saved_large = dict(generator.UNMEASURED_LARGE_TEST_RUNS)
+        saved_large = dict(generator.LARGE_TEST_RUNS)
         try:
             generator.ACTION_SIZES.clear()
-            generator.UNMEASURED_LARGE_TEST_RUNS.clear()
+            generator.LARGE_TEST_RUNS.clear()
             generator.ACTION_SIZES["lash-sim/lash_sim"] = {"cpu_count": 2}
             generator.validate_action_sizes(metadata)
             generator.ACTION_SIZES["gone/gone"] = {"cpu_count": 2}
@@ -501,8 +501,8 @@ class TableValidationTest(unittest.TestCase):
         finally:
             generator.ACTION_SIZES.clear()
             generator.ACTION_SIZES.update(saved)
-            generator.UNMEASURED_LARGE_TEST_RUNS.clear()
-            generator.UNMEASURED_LARGE_TEST_RUNS.update(saved_large)
+            generator.LARGE_TEST_RUNS.clear()
+            generator.LARGE_TEST_RUNS.update(saved_large)
 
     def test_a_measured_run_no_test_is_generated_for_fails_generation(self) -> None:
         saved = set(generator.EMITTED_TEST_LABELS)

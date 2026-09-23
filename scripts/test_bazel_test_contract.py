@@ -1336,5 +1336,57 @@ class OptLevelMirrorTests(unittest.TestCase):
                 self.assertIn(f'crate = "{name}",\n    rustc_flags = ["-Copt-level={level}"]', module)
 
 
+class PackagePolicyTests(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "tools/bazel"))
+        import generate_build_files as generator
+
+        self.generator = generator
+        self.metadata = {
+            "workspace_members": ["sim"],
+            "packages": [{
+                "id": "sim",
+                "name": "lash-sim",
+                "targets": [
+                    {"name": "cross_backend_a", "kind": ["test"]},
+                    {"name": "helper", "kind": ["bin"]},
+                ],
+            }],
+        }
+
+    def check(self, rule):
+        from unittest.mock import patch
+
+        with patch.object(self.generator, "PACKAGE_POLICY", {"rule": [rule]}):
+            self.generator.validate_package_policy(self.metadata)
+
+    def test_rules_that_name_nothing_are_refused(self):
+        for rule in (
+            {"packages": ["lash-missing"]},
+            {"packages": ["lash-sim"], "kinds": ["binary"]},
+            {"packages": ["lash-sim"], "targets": ["cross_frontend*"]},
+            {"packages": ["lash-sim"], "bin_env": {"HELPER": "absent"}},
+            {"packages": ["lash-sim"], "colour": "red"},
+        ):
+            with self.subTest(rule=rule), self.assertRaises(ValueError):
+                self.check(rule)
+        self.check({"packages": ["lash-sim"], "kinds": ["test"], "targets": ["cross_backend*"],
+                    "bin_env": {"HELPER": "helper"}})
+
+    def test_rules_fold_in_file_order(self):
+        from unittest.mock import patch
+
+        rules = [
+            {"packages": ["lash-sim"], "kinds": ["test"], "compile_data": ["//:a"], "tags": ["manual"]},
+            {"packages": ["lash-sim"], "targets": ["cross_*"], "compile_data": ["//:b"], "serial": True},
+            {"packages": ["lash-sim"], "kinds": ["unit-test"], "compile_data": ["//:c"]},
+        ]
+        with patch.object(self.generator, "PACKAGE_POLICY", {"rule": rules}):
+            policy = self.generator.target_policy("lash-sim", "test", "cross_backend_a")
+        self.assertEqual(policy.compile_data, ["//:a", "//:b"])
+        self.assertEqual(policy.env, {"RUST_TEST_THREADS": "1"})
+        self.assertEqual(policy.tags, ["manual"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import pathlib
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass, field
 
 import feature_variants
 
@@ -39,36 +41,16 @@ TEST_RUN_SIZES_PATH = ROOT / "tools/bazel/test-run-sizes.json"
 # before measurement existed. A new test starts here and comes down once the
 # pool has seen it.
 UNMEASURED_TEST_RUN = {"cpu_count": 4, "memory_kb": 4194304}
-# Unmeasured runs of these crates keep the larger request they have always had.
-# The same crates are also the suites that never join a `:test_batch`.
-UNMEASURED_LARGE_TEST_RUNS = {
-    "agent-workbench/agent_workbench": {"cpu_count": 8, "memory_kb": 4194304},
-    "lash-internal-core/lash_core": {"cpu_count": 8, "memory_kb": 6815744},
-    "lash-internal-restate/lash_restate": {"cpu_count": 8, "memory_kb": 4194304},
-    # The no-abort stress binary forks a dozen children that each parse
-    # deliberately deep sources up to the stack bound. Measured 2026-09-23 as
-    # one cgroup at four test threads: 7612 MiB peak, 2.6 cores over 37 s.
-    "lash-internal-typescript/integration": {"cpu_count": 4, "memory_kb": 12058624},
-    "lash-runtime/lash": {"cpu_count": 8, "memory_kb": 4194304},
-}
-# Timing-sensitive suites keep four cores whatever they measure. Below that the
-# harness's and the runtime's own threads contend and time-sensitive cases
-# fail instead of running slowly: CI run 34950810111 lost
-# `//crates/lash-perf:lash-perf__unit_test` on a phase assertion and timed out
-# `//crates/lash-sim:stack_policy__test` at one core. A measured p95 of 1.3
-# cores for lash-perf is exactly what such a suite shows while it is healthy.
-CONTENTION_CPU_FLOOR = 4
-CONTENTION_FLOOR_PACKAGES = {"lash-perf", "lash-sim"}
+# Per-package test-run policy (`[test_runs]` in tools/bazel/package-policy.toml):
+# the large suites' unmeasured requests, which also keep them out of every
+# `:test_batch`, and the contention core floor of the timing-sensitive suites.
+PACKAGE_POLICY = tomllib.loads((ROOT / "tools/bazel/package-policy.toml").read_text())
+LARGE_TEST_RUNS = PACKAGE_POLICY["test_runs"]["large_suites"]
+CONTENTION_FLOOR = PACKAGE_POLICY["test_runs"]["contention_floor"]
 # Members a `:test_batch` runs at once. The batch reserves the sum of its
 # largest BATCH_JOBS members' requests and the runner reads the same number
 # from `LASH_BATCH_JOBS`, never from `nproc`.
 BATCH_JOBS = 2
-# `//crates/lash-sim:lash-sim__unit_test` packs the whole simulation suite into
-# one libtest binary, and a libtest binary is a single Bazel test action. On CI
-# run 34791314196 it ran 313 s and was the last action of a 926 s job: from
-# 11:15 to 16:26 it was the only thing running while every other executor slot
-# sat idle. Eight shards were measured at 97/16/249/27/18/7/178/41 s.
-LASH_SIM_UNIT_TEST_SHARDS = 8
 LOAD = """load(
     "//tools/bazel:lash_rust.bzl",
     "lash_rust_binary",
@@ -113,10 +95,10 @@ def test_run_request(package_name: str, crate_name: str, label: str) -> dict[str
         request = {"cpu_count": measured["cpu_count"], "memory_kb": measured["memory_kb"]}
     else:
         request = dict(
-            UNMEASURED_LARGE_TEST_RUNS.get(f"{package_name}/{crate_name}", UNMEASURED_TEST_RUN)
+            LARGE_TEST_RUNS.get(f"{package_name}/{crate_name}", UNMEASURED_TEST_RUN)
         )
-    if package_name in CONTENTION_FLOOR_PACKAGES:
-        request["cpu_count"] = max(request["cpu_count"], CONTENTION_CPU_FLOOR)
+    if package_name in CONTENTION_FLOOR["packages"]:
+        request["cpu_count"] = max(request["cpu_count"], CONTENTION_FLOOR["cpu_count"])
     return request
 
 
@@ -156,7 +138,7 @@ def batchable_run(package_name: str, crate_name: str) -> bool:
     measurement: a plain test joins its package's batch unless its crate is
     one of the large suites.
     """
-    return f"{package_name}/{crate_name}" not in UNMEASURED_LARGE_TEST_RUNS
+    return f"{package_name}/{crate_name}" not in LARGE_TEST_RUNS
 
 
 def batch_budget(label: str, requests: list[dict[str, int]]) -> dict[str, int]:
@@ -205,7 +187,7 @@ def validate_action_sizes(metadata: dict) -> None:
         for target in package["targets"]
         if "custom-build" not in target["kind"]
     }
-    stale = sorted((set(ACTION_SIZES) | set(UNMEASURED_LARGE_TEST_RUNS)) - crates)
+    stale = sorted((set(ACTION_SIZES) | set(LARGE_TEST_RUNS)) - crates)
     if stale:
         raise SystemExit(
             "generate_build_files: sizes name no first-party crate: "
@@ -425,10 +407,113 @@ def cargo_bin_env(source: pathlib.Path, labels: dict[str, str]) -> tuple[dict[st
     return env, deps
 
 
-# The workbench unit test shells out to Node for its browser-projection case.
-# Its interpreter is a pinned Bazel input, including on feature-lane variants.
-WORKBENCH_NODE = "@workbench_node_linux_x64//:bin/node"
-WORKBENCH_NODE_ENV = {"LASH_WORKBENCH_TEST_NODE": f"$(rootpath {WORKBENCH_NODE})"}
+POLICY_KINDS = {"lib", "unit-test", "bin", "bin-unit-test", "test", "example", "bench"}
+POLICY_RULE_KEYS = {
+    "packages", "kinds", "targets", "tags", "reason", "compile_data", "data",
+    "env", "serial", "args", "bin_env", "shards", "timeout",
+}
+
+
+@dataclass
+class TargetPolicy:
+    """Everything `tools/bazel/package-policy.toml` says about one label."""
+
+    tags: list[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    compile_data: list[str] = field(default_factory=list)
+    data: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+    args: list[str] = field(default_factory=list)
+    shards: int = 0
+    timeout: str | None = None
+
+
+def policy_rule_selects(rule: dict, package_name: str, kind: str, target_name: str) -> bool:
+    return (
+        package_name in rule["packages"]
+        and ("kinds" not in rule or kind in rule["kinds"])
+        and (
+            "targets" not in rule
+            or any(fnmatch.fnmatchcase(target_name, pattern) for pattern in rule["targets"])
+        )
+    )
+
+
+def target_policy(
+    package_name: str, kind: str, target_name: str, targets: list[dict] | None = None
+) -> TargetPolicy:
+    """Fold every policy rule that selects one label, in file order.
+
+    `targets` resolves `bin_env` to the named binary's label; a caller that
+    reads no `bin_env` may omit it.
+    """
+    policy = TargetPolicy()
+    for rule in PACKAGE_POLICY.get("rule", []):
+        if not policy_rule_selects(rule, package_name, kind, target_name):
+            continue
+        policy.tags.extend(rule.get("tags", []))
+        if "reason" in rule:
+            policy.reasons.append(rule["reason"])
+        policy.compile_data.extend(rule.get("compile_data", []))
+        policy.data.extend(rule.get("data", []))
+        policy.env.update(rule.get("env", {}))
+        if rule.get("serial"):
+            policy.env["RUST_TEST_THREADS"] = "1"
+        policy.args.extend(rule.get("args", []))
+        for variable, binary in rule.get("bin_env", {}).items():
+            if targets is None:
+                continue
+            helper = next(candidate for candidate in targets if candidate["name"] == binary)
+            label = f":{label_name(helper, False)}"
+            policy.env[variable] = f"$(rootpath {label})"
+            policy.data.append(label)
+        policy.shards = rule.get("shards", policy.shards)
+        policy.timeout = rule.get("timeout", policy.timeout)
+    return policy
+
+
+def validate_package_policy(metadata: dict) -> None:
+    """Refuse a policy rule that names nothing, so a rename cannot orphan it."""
+    members = {
+        package["name"]: package
+        for package in metadata["packages"]
+        if package["id"] in set(metadata["workspace_members"])
+    }
+    for index, rule in enumerate(PACKAGE_POLICY.get("rule", [])):
+        where = f"package-policy.toml rule {index + 1}"
+        if rule.keys() - POLICY_RULE_KEYS:
+            raise ValueError(f"{where}: unknown keys {sorted(rule.keys() - POLICY_RULE_KEYS)}")
+        unknown = [name for name in rule.get("packages", []) if name not in members]
+        if not rule.get("packages") or unknown:
+            raise ValueError(f"{where}: unknown or missing packages {unknown}")
+        if set(rule.get("kinds", [])) - POLICY_KINDS:
+            raise ValueError(f"{where}: unknown kinds {sorted(set(rule['kinds']) - POLICY_KINDS)}")
+        names = {
+            target["name"]
+            for name in rule["packages"]
+            for target in members[name]["targets"]
+        }
+        for pattern in rule.get("targets", []):
+            if not fnmatch.filter(sorted(names), pattern):
+                raise ValueError(f"{where}: target pattern {pattern!r} matches nothing")
+        for binary in rule.get("bin_env", {}).values():
+            if binary not in names:
+                raise ValueError(f"{where}: bin_env names unknown binary {binary!r}")
+    test_runs = PACKAGE_POLICY.get("test_runs", {})
+    unknown_floor = [
+        name
+        for name in test_runs.get("contention_floor", {}).get("packages", [])
+        if name not in members
+    ]
+    if unknown_floor:
+        raise ValueError(f"package-policy.toml [test_runs.contention_floor] names {unknown_floor}")
+    for service, names in PACKAGE_POLICY.get("service_packages", {}).items():
+        if not names or any(name not in members for name in names):
+            raise ValueError(f"package-policy.toml [service_packages] {service} names {names}")
+    for section in ("feature_compile_data", "filegroups", "ui_fixtures"):
+        for name in PACKAGE_POLICY.get(section, {}):
+            if name not in members:
+                raise ValueError(f"package-policy.toml [{section}] names unknown package {name}")
 
 
 def cargo_test_policy(
@@ -444,54 +529,9 @@ def cargo_test_policy(
     them with `--nocache_test_results` so a cached result can never stand in for
     a run against a real service, and so an unconfigured service is never proof.
     """
-    tags = []
-    reasons = []
-    if package_name in ("lash-internal-postgres-store", "lash-internal-s3-store"):
-        tags.extend(["manual", "cargo-service-gate"])
-        reasons.append(
-            "proves nothing without a live PostgreSQL or MinIO; the service jobs"
-            " execute this label uncached against a real service"
-        )
-    if package_name == "lash-runtime" and target_name == "ui":
-        tags.extend(["manual", "cargo-trybuild"])
-        reasons.append("uses trybuild and its Cargo-managed compiler fixture cache")
-    if package_name == "workflow-graph-roundtrip" and kind == "test":
-        tags.extend(["manual", "cargo-frontend-assets"])
-        reasons.append("uses the Cargo-owned generated frontend asset workflow")
-    if package_name == "lash-sim" and target_name.startswith("cross_backend"):
-        tags.extend(["manual", "cargo-service-gate"])
-        reasons.append(
-            "proves nothing without a live PostgreSQL or MinIO; the service jobs"
-            " execute this label uncached against a real service"
-        )
-    if package_name == "lash-sim" and kind == "unit-test":
-        tags.append("dev-deferred")
-        reasons.append(
-            "the generated-profile, minimizer and replay-artifact cases run"
-            " 109--213 s; too slow for the developer loop, still in the PR"
-            " Bazel partition"
-        )
-    if package_name == "lash-internal-typescript" and kind == "test":
-        # The no-abort guarantee forks a dozen children that each parse
-        # deliberately deep sources right up to the stack bound. At the 4 GiB
-        # test floor `the_abort_corpus_survives_without_the_preflight` and
-        # `fuzzed_sources_survive_without_the_preflight` died of SIGKILL, so the
-        # label used to be pinned to the runner with `no-remote-exec`, where it
-        # ran on every CI leg (about 70 s of the tail's local time). The run is
-        # sized from its measured runs now and executes on the pool like any other.
-        tags.append("dev-deferred")
-        reasons.append(
-            "the no-abort stress binary runs 43 s; too slow for the developer"
-            " loop; the merge group runs it in the Bazel tail"
-        )
-    if package_name == "lash-regress" and target_name == "unicodesets":
-        tags.append("pr-deferred")
-        reasons.append(
-            "RGI Unicode suites are too slow for the PR Bazel partition; they"
-            " run on lash-regress diffs and on trunk"
-        )
-    reason = "; ".join(reasons) if reasons else None
-    return sorted(set(tags)), reason
+    policy = target_policy(package_name, kind, target_name)
+    reason = "; ".join(policy.reasons) if policy.reasons else None
+    return sorted(set(policy.tags)), reason
 
 
 def bazel_test_shard_count(package_name: str, kind: str, target_name: str) -> int:
@@ -506,9 +546,7 @@ def bazel_test_shard_count(package_name: str, kind: str, target_name: str) -> in
     execution and runfiles tree, so only a binary whose wall time dominates the
     job earns one.
     """
-    if package_name == "lash-sim" and kind == "unit-test":
-        return LASH_SIM_UNIT_TEST_SHARDS
-    return 0
+    return target_policy(package_name, kind, target_name).shards
 
 
 def nextest_filter_term(package_name: str, target: dict) -> str:
@@ -525,36 +563,14 @@ def nextest_filter_term(package_name: str, target: dict) -> str:
     return f"(package({package_name}) & {target_filter})"
 
 
-def library_compile_data(package_name: str) -> list[str]:
+def library_compile_data(package_name: str, library_name: str) -> list[str]:
     """Sandbox inputs the library compile of one package needs."""
-    data = []
-    if package_name == "slack-clone":
-        data.append("//examples:shared_rust_sources")
-    if package_name == "lash-perf":
-        data.append("//:perf_guard_budgets")
-        data.append("//:perf_duration_level_shifts")
-    return data
+    return target_policy(package_name, "lib", library_name).compile_data
 
 
-def unit_test_compile_data(package_name: str) -> list[str]:
+def unit_test_compile_data(package_name: str, library_name: str) -> list[str]:
     """Sandbox inputs the unit-test compile of one package needs."""
-    data = []
-    if package_name == "slack-clone":
-        data.append("//examples:shared_rust_sources")
-    if package_name == "lash-internal-sansio":
-        data.append("//:workspace_rust_sources")
-    if package_name == "slack-clone":
-        data.append("//:workspace_test_scripts")
-    if package_name == "lash-perf":
-        data.append("//:perf_guard_budgets")
-        data.append("//:perf_duration_level_shifts")
-    if package_name in ("lash-runtime", "lash-internal-sqlite-store"):
-        data.append("//crates/lashlang:old_module_fixture")
-    if package_name == "lash-internal-remote-protocol":
-        # The process-observation wire contracts validate real items against
-        # the published observation-item schema compiled into the test.
-        data.append("//:host_schemas")
-    return data
+    return target_policy(package_name, "unit-test", library_name).compile_data
 
 
 def target_support(
@@ -565,175 +581,32 @@ def target_support(
 ) -> tuple[list[str], list[str], dict[str, str], list[str]]:
     """The per-target sandbox inputs, runtime inputs, test env and skips.
 
-    Extracted verbatim from the ordinary target loop so the feature-lane
-    variants of the same Cargo target carry exactly the same support data;
+    The ordinary target loop and the feature-lane variants of the same Cargo
+    target both read it, so a variant carries exactly the same support data;
     a variant that dropped one of these would pass by seeing nothing.
     """
-    test_env: dict[str, str] = {}
-    extra_data = []
-    if (
-        package["name"] == "lash-internal-core"
-        and target["name"] == "integration_boundary"
-    ):
-        # The checked-in workspace fact that replaces a nested
-        # `cargo metadata` call in the dependency-direction test.
-        extra_data.append("//tools/bazel:target_inventory")
-    if package["name"] == "lash-internal-core" and target["name"] in (
-        "runtime_turns",
-        "runtime_observability",
-    ):
-        # These carry the relocated suites that assert over captured
-        # `tracing` events. Capture installs a scoped default subscriber,
-        # so other cases in the same libtest process must not emit
-        # concurrently; Cargo nextest isolates by process, Bazel does not.
-        test_env["RUST_TEST_THREADS"] = "1"
-    if package["name"] == "lash-internal-sqlite-store" and target["name"] == "integration":
-        # The warning-capture contract installs a scoped tracing subscriber.
-        # Other tests in this libtest process must not emit concurrently.
-        test_env["RUST_TEST_THREADS"] = "1"
-    if package["name"] == "lash-internal-lashlang" and target["name"] in (
-        "append_cost",
-        "dialect_cost",
-    ):
-        # These cost laws read a process-global counting allocator. Cargo
-        # nextest isolates cases by process; serialize libtest so Bazel
-        # observes the same one-at-a-time measurement contract.
-        test_env["RUST_TEST_THREADS"] = "1"
-    extra_compile_data = []
-    if package["name"] in (
-        "agent-service",
-        "agent-workbench",
-        "slack-clone",
-        "toolbench",
-    ):
-        extra_compile_data.append("//examples:shared_rust_sources")
-    if (
-        package["name"] == "lash-internal-typescript"
-        and target["name"] == "integration"
-    ):
-        # The codemode parity module links the checked-in
-        # `examples/codemode-parity/*.ts` cells with `include_str!`, so the
-        # cells are compile inputs of this test and of no other.
-        extra_compile_data.append("//examples:codemode_parity_cells")
-        # The schema agreement test compiles the published graph schema into
-        # the test and validates real serialized graph documents against it.
-        extra_compile_data.append("//:workflow_graph_schema")
-    if package["name"] == "lash-internal-trace" and target["name"] == "schema":
-        # The schema agreement tests compile the published trace record and
-        # graph snapshot schemas into the test and validate real serialized
-        # records and snapshots against them.
-        extra_compile_data.append("//:host_schemas")
-    if package["name"] == "lash-internal-lashlang" and target["name"] == "dialect_cost":
-        # It holds the dialect to the corpus's own checked-in budget by
-        # reading the budget file with `include_str!`, the way lash-perf
-        # does, so the file is a compile input of this test.
-        extra_compile_data.append("//:perf_guard_budgets")
-    if package["name"] in (
-        "lash-internal-postgres-store",
-        "lash-internal-sqlite-store",
-    ):
-        if target["name"] == "conformance":
-            helper_name = (
-                "postgres-await-event-helper"
-                if package["name"] == "lash-internal-postgres-store"
-                else "sqlite-await-event-helper"
-            )
-            helper_target = next(
-                candidate for candidate in targets if candidate["name"] == helper_name
-            )
-            helper_label = f":{label_name(helper_target, False)}"
-            test_env["LASH_CONFORMANCE_HELPER_EXE"] = (
-                f"$(rootpath {helper_label})"
-            )
-            extra_data.append(helper_label)
-        if target["name"] in (
-            "postgres-await-event-helper",
-            "sqlite-await-event-helper",
-        ):
-            extra_compile_data.append("//crates/lash-core:cold_process_drivers")
-        if target["name"] == "conformance":
-            extra_compile_data.extend([
-                "//crates/lash-core:queued_claim_atomicity",
-            ])
-        if target["name"] == "durable_read_fixture":
-            extra_compile_data.append("//crates/lash-core:durable_read_fixture_source")
-            extra_data.append("//crates/lash-core:durable_read_predecessor_fixtures")
-    if (
-        package["name"] == "lash-internal-postgres-store"
-        and target["name"] == "preflight_durable_walk"
-    ):
-        extra_compile_data.append("//crates/lashlang:old_module_fixture")
-    if package["name"] in (
-        "lash-internal-postgres-store",
-        "lash-internal-sqlite-store",
-    ) and target["name"] == "durable_read_fixture":
-        extra_compile_data.append("//:durable_fixtures")
-    # Architecture lints that read sibling crates' sources at run time. A
-    # library's runfiles carry only its non-Rust package files (a `.rs` is a
-    # compile input, not a runtime one), so a test that scans another crate's
-    # sources names that crate's `rust_sources` filegroup here; every other
-    # test stops re-running when an unrelated crate's test file changes.
-    if package["name"] == "lash-internal-core" and target["name"] in (
-        "runtime_effect",
-        "runtime_scenarios",
-    ):
-        extra_data.append("//crates/lash-core-execution:rust_sources")
-    if package["name"] == "lash-runtime" and target["name"] == "integration":
-        extra_data.extend([
-            "//crates/lash-remote-protocol:rust_sources",
-            "//crates/lash-sansio:rust_sources",
-            "//crates/lash-tool-support:rust_sources",
-            "//crates/lash-trace:rust_sources",
-        ])
-    target_args = []
-    if (
-        package["name"] == "lash-internal-core"
-        and target["name"] == "runtime_scenarios"
-    ):
-        # The fault-matrix routing probes execute the real
-        # scripts/confidence-gate.sh against a recording `cargo`.
-        extra_data.append("//:confidence_gate_scripts")
-        # The five `..._real_cargo_filters_chunk_*` cases each fork a real
-        # `cargo test ... -- --list` against the workspace to prove the
-        # gate's name filters still select tests. That is a claim about
-        # Cargo's own selection, so it cannot be proved inside a hermetic
-        # action without Cargo; the trunk-only `Test heavy suites` job
-        # (profile.ci-heavy) owns them and is the only place they run.
-        # Excluded by name here so the label is honest about what it
-        # executed.
-        target_args.append(
-            "--skip=runtime::tests::runtime_scenarios::fault_matrix"
-            "::durable_fault_matrix_real_cargo_filters_chunk_"
+    # A binary's unit test compiles the binary's sources, so it takes the
+    # binary's support; its own run data is the `bin-unit-test` policy.
+    kind = "bin" if kind == "bin-unit-test" else kind
+    policy = target_policy(package["name"], kind, target["name"], targets)
+    return policy.compile_data, policy.data, policy.env, policy.args
+
+
+def filegroups(package_name: str) -> str:
+    """Package files other packages' targets name as inputs."""
+    chunks = []
+    for name, spec in PACKAGE_POLICY.get("filegroups", {}).get(package_name, {}).items():
+        if "glob" in spec:
+            srcs = f"glob({string_list(spec['glob'], indent=8)})"
+        else:
+            srcs = string_list(spec["srcs"])
+        chunks.append(
+            "filegroup(\n"
+            f"    name = {quote(name)},\n"
+            f"    srcs = {srcs},\n"
+            ")\n\n"
         )
-    if package["name"] == "lash-sim" and kind == "test":
-        extra_compile_data.extend([
-            "//crates/lash-postgres-store:package_files",
-            "//crates/lash-sqlite-store:package_files",
-        ])
-        if target["name"] == "cross_backend_store_differential":
-            # Its completeness gates read the real store trait definitions
-            # with `include_str!`, so the lash-core-store sources are
-            # compile inputs of this test and of no other lash-sim test.
-            extra_compile_data.append(
-                "//crates/lash-core-store:package_files"
-            )
-    if (
-        package["name"] == "lash-sim"
-        and target["name"] == "signal_replay_key_constructor"
-    ):
-        # The gate scans every first-party Rust source, runbooks and
-        # examples included, so under Bazel it needs them all in the sandbox
-        # or it would pass by seeing nothing.
-        extra_compile_data.append("//:workspace_rust_sources")
-    if (
-        package["name"] == "lash-sim"
-        and target["name"] == "process_lifecycle_vocabulary"
-    ):
-        # The gate scans lash-core's sources as well as the two store
-        # packages' — a library's runfiles no longer carry another crate's
-        # `.rs` files, so the scanned root names the filegroup directly.
-        extra_compile_data.append("//crates/lash-core:rust_sources")
-    return extra_compile_data, extra_data, test_env, target_args
+    return "".join(chunks)
 
 
 def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
@@ -802,7 +675,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         })
 
     if library:
-        extra_compile_data = library_compile_data(package["name"])
+        extra_compile_data = library_compile_data(package["name"], library["name"])
         chunks.append(
             "lash_rust_library(\n"
             f"    name = {quote(primary_target)},\n"
@@ -832,31 +705,16 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
         doc_label = f"//{package_dir}:{primary_target}__doc"
         inventory_targets.append({"kind": "lib", "cargo": library["name"], "label": f"//{package_dir}:{primary_target}"})
         if library.get("test", False):
-            unit_compile_data = unit_test_compile_data(package["name"])
+            unit_policy = target_policy(package["name"], "unit-test", library["name"])
+            unit_compile_data = unit_policy.compile_data
             unit_tags, unit_cargo_reason = cargo_test_policy(
                 package["name"], "unit-test", library["name"]
             )
-            unit_extra_data = []
-            unit_args = []
-            unit_timeout = None
-            if package["name"] == "lash-sim":
-                # The Postgres effect-history consistency case reads the gate
-                # script and the repository-root documents it must agree with.
-                unit_extra_data.append("//:confidence_gate_corpus")
-                # This binary carries the generated-simulation and minimizer
-                # fixture replays (measured 182-418 s each under Cargo). The
-                # whole binary ran 227-300 s on the pool, which straddles
-                # Bazel's default `medium` 300 s bound; `long` is 900 s.
-                unit_timeout = "long"
-            unit_shards = bazel_test_shard_count(
-                package["name"], "unit-test", library["name"]
-            )
-            unit_test_env = {}
-            if package["name"] == "lash-perf":
-                # This instrumentation binary shares process-global counters.
-                # Cargo nextest isolates cases by process; serialize libtest so
-                # Bazel observes the same one-at-a-time measurement contract.
-                unit_test_env["RUST_TEST_THREADS"] = "1"
+            unit_extra_data = unit_policy.data
+            unit_args = unit_policy.args
+            unit_timeout = unit_policy.timeout
+            unit_shards = unit_policy.shards
+            unit_test_env = unit_policy.env
             chunks.append(
                 "lash_rust_unit_test(\n"
                 f"    name = {quote(primary_target + '__unit_test')},\n"
@@ -1021,30 +879,11 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             f"    version = {quote(version)},",
         ])
         chunks.append(macro + "(\n" + "\n".join(args) + "\n)\n\n")
-        if package["name"] == "lash-runtime" and name == "ui__test":
-            # FIG-3364: the trusted seal lane compiles every tests/ui/*.stderr
-            # fixture with the toolchain rustc directly (ui_fixtures_test)
-            # instead of trybuild's nested `cargo check`. The rule reads this
-            # harness's CrateInfo/DepInfo, so fixtures see the identical
-            # `--extern` set and feature resolution; the `.stderr` pins stay
-            # shared with the untrusted `cargo test --test ui` path.
-            #
-            # The fixture set mirrors the registration gates in tests/ui.rs:
-            # rlm-gated fixtures exist only when `rlm` resolves, and the two
-            # store-seam pins are written for the isolated rlm-without-testing
-            # graph (the `testing` feature changes the rendered qualified Pin
-            # path), so they stay excluded under the canonical resolution.
-            ui_rlm_gated = {
-                "rlm_turn_options_cannot_name_a_dialect",
-                "rlm_memory_limit_cannot_take_an_instruction_budget",
-                "rlm_execution_bounds_are_not_swappable",
-                "rlm_config_builder_requires_every_bound",
-                "rlm_config_builder_requires_channel",
-            }
-            ui_store_seam = {
-                "attachment_store_head_has_no_default",
-                "session_store_factory_requires_deletion_answer",
-            }
+        ui_policy = PACKAGE_POLICY.get("ui_fixtures", {}).get(package["name"])
+        if ui_policy and name == f"{ui_policy['harness']}__test":
+            # See `[ui_fixtures]` in tools/bazel/package-policy.toml.
+            ui_rlm_gated = set(ui_policy["rlm_gated"])
+            ui_store_seam = set(ui_policy["store_seam"])
             ui_dir = ROOT / package_dir / "tests" / "ui"
             fixtures = sorted(p.stem for p in ui_dir.glob("*.stderr"))
             if "rlm" not in target_features:
@@ -1055,8 +894,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 'load("//tools/bazel:ui_fixtures.bzl", "ui_fixtures_test")\n\n'
                 "ui_fixtures_test(\n"
                 "    name = \"ui_fixtures\",\n"
-                "    harness = \":ui__test\",\n"
-                "    package = \"crates/lash\",\n"
+                f"    harness = {quote(':' + name)},\n"
+                f"    package = {quote(package_dir)},\n"
                 f"    fixtures = {string_list([f'tests/ui/{f}.rs' for f in fixtures])},\n"
                 f"    expected = {string_list([f'tests/ui/{f}.stderr' for f in fixtures])},\n"
                 '    tags = ["manual"],\n'
@@ -1092,7 +931,9 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             bin_unit_tags, bin_unit_cargo_reason = cargo_test_policy(
                 package["name"], "bin-unit-test", target["name"]
             )
-            workbench_node = package["name"] == "agent-workbench"
+            bin_unit_policy = target_policy(
+                package["name"], "bin-unit-test", target["name"]
+            )
             unit_args = [
                 "lash_rust_unit_test(\n",
                 f"    name = {quote(name + '__unit_test')},\n",
@@ -1113,9 +954,10 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 unit_args.append(
                     f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
                 )
-            if workbench_node:
-                unit_args.append(f"    extra_data = {string_list([WORKBENCH_NODE])},\n")
-                unit_args.append(f"    test_env = {json.dumps(WORKBENCH_NODE_ENV, sort_keys=True)},\n")
+            if bin_unit_policy.data:
+                unit_args.append(f"    extra_data = {string_list(bin_unit_policy.data)},\n")
+            if bin_unit_policy.env:
+                unit_args.append(f"    test_env = {json.dumps(bin_unit_policy.env, sort_keys=True)},\n")
             unit_args.extend([
                 f"    library = {quote(library_label) if library_label else 'None'},\n"
                 f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
@@ -1136,7 +978,8 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                 bin_unit_inventory["cargo_only"] = bin_unit_cargo_reason
             inventory_targets.append(bin_unit_inventory)
             if (
-                not workbench_node
+                not bin_unit_policy.data
+                and not bin_unit_policy.env
                 and not bin_unit_tags
                 and batchable_run(package["name"], crate_name)
             ):
@@ -1149,35 +992,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                     )
                 )
 
-    if package["name"] == "lash-internal-core":
-        chunks.append(
-            "filegroup(\n"
-            "    name = \"cold_process_drivers\",\n"
-            "    srcs = [\n"
-            "        \"tests/support/cold_process_effect_driver.rs\",\n"
-            "    ],\n"
-            ")\n\n"
-            "filegroup(\n"
-            "    name = \"durable_read_fixture_source\",\n"
-            "    srcs = [\"tests/support/durable_read_fixture.rs\"],\n"
-            ")\n\n"
-            "filegroup(\n"
-            "    name = \"durable_read_predecessor_fixtures\",\n"
-            "    srcs = glob([\"tests/fixtures/durable-read-predecessors/**\"]),\n"
-            ")\n\n"
-            "filegroup(\n"
-            "    name = \"queued_claim_atomicity\",\n"
-            "    srcs = [\"tests/support/queued_claim_atomicity.rs\"],\n"
-            ")\n\n"
-        )
-
-    if package["name"] == "lash-internal-lashlang":
-        chunks.append(
-            "filegroup(\n"
-            "    name = \"old_module_fixture\",\n"
-            "    srcs = [\"tests/fixtures/module-artifact-old.json\"],\n"
-            ")\n\n"
-        )
+    chunks.append(filegroups(package["name"]))
 
     # One batch is only worth its wrapper action when it replaces at least
     # two per-test runfiles forests.
@@ -1233,6 +1048,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
 
 def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     validate_source_ownership(metadata)
+    validate_package_policy(metadata)
     validate_action_sizes(metadata)
     EMITTED_TEST_LABELS.clear()
     features = package_features(metadata)
@@ -1432,11 +1248,7 @@ def generated(metadata: dict) -> tuple[dict[pathlib.Path, str], list[dict]]:
     # The service jobs build these labels from the shared cache and execute
     # them uncached against the service they stand up. Generated, so a new
     # service-gated binary reaches the service job without a hand edit.
-    service_packages = {
-        "postgres": ("lash-internal-postgres-store",),
-        "minio": ("lash-internal-s3-store",),
-    }
-    for service, package_names in service_packages.items():
+    for service, package_names in PACKAGE_POLICY["service_packages"].items():
         labels = sorted(
             target["label"]
             for package in inventory
@@ -1581,20 +1393,16 @@ FEATURE_LANE_TEST_FLOORS = {
     ("lash-runtime", (), "unit-test"): 130,
 }
 
-# Compile inputs a feature turns on that the ordinary workspace resolution never
-# needs. `agent-workbench`'s `provider-wire-fixtures` pulls a `lash-sim` script
-# in with `include_str!` across the package boundary, so the file is a compile
-# input of the variant and of no ordinary target. Keyed by (package, feature) so
-# a new one is a one-line addition rather than a rule change.
-FEATURE_VARIANT_COMPILE_DATA = {
-    ("agent-workbench", "provider-wire-fixtures"): ["//crates/lash-sim:package_files"],
-}
-
-
 def feature_compile_data(package_name: str, features: list[str]) -> list[str]:
+    """Compile inputs a feature turns on that no ordinary target needs.
+
+    `[feature_compile_data]` in tools/bazel/package-policy.toml, keyed by
+    package and feature.
+    """
+    by_feature = PACKAGE_POLICY.get("feature_compile_data", {}).get(package_name, {})
     extra: list[str] = []
     for feature in features:
-        extra.extend(FEATURE_VARIANT_COMPILE_DATA.get((package_name, feature), []))
+        extra.extend(by_feature.get(feature, []))
     return sorted(set(extra))
 
 
@@ -2013,7 +1821,7 @@ class FeatureLaneGraph:
             + exec_properties_argument(package_name, library["name"], "lib")
             + library_test_sources_argument(directory)
             + compile_data_argument(directory)
-            + f"    extra_compile_data = {string_list(library_compile_data(package_name) + feature_compile_data(package_name, features))},\n"
+            + f"    extra_compile_data = {string_list(library_compile_data(package_name, library['name']) + feature_compile_data(package_name, features))},\n"
             f"    manifest_dir = {quote(directory)},\n"
             f"    package_name = {quote(package_name)},\n"
             f"    tags = {string_list(list(FEATURE_VARIANT_TAGS))},\n"
@@ -2114,13 +1922,12 @@ class FeatureLaneGraph:
             base = self.primary[package_name]
             name = f"{base}__unit_test__fv_{suffix}"
             root = relative(library["src_path"]).replace(directory + "/", "")
-            compile_data = unit_test_compile_data(package_name) + feature_compile_data(
+            unit_policy = target_policy(package_name, "unit-test", library["name"])
+            compile_data = unit_policy.compile_data + feature_compile_data(
                 package_name, features
             )
-            unit_extra_data = (
-                ["//:confidence_gate_corpus"] if package_name == "lash-sim" else []
-            )
-            unit_env = {"RUST_TEST_THREADS": "1"} if package_name == "lash-perf" else {}
+            unit_extra_data = unit_policy.data
+            unit_env = unit_policy.env
             self.add_chunk(
                 package_name,
                 name,
@@ -2161,7 +1968,7 @@ class FeatureLaneGraph:
         if kind == "bin-unit-test":
             base = label_name(target, library is None and len(binaries) == 1)
             name = f"{base}__unit_test__fv_{suffix}"
-            workbench_node = package_name == "agent-workbench"
+            bin_unit_policy = target_policy(package_name, "bin-unit-test", target["name"])
             self.add_chunk(
                 package_name,
                 name,
@@ -2177,7 +1984,7 @@ class FeatureLaneGraph:
                 )
                 + data_exclude_argument(directory, None)
                 + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
-                + (f"    extra_data = {string_list([WORKBENCH_NODE])},\n" if workbench_node else "")
+                + (f"    extra_data = {string_list(bin_unit_policy.data)},\n" if bin_unit_policy.data else "")
                 + f"    library = {quote(library_label) if library_label else 'None'},\n"
                 f"    library_crate_name = {quote(library_crate) if library_crate else 'None'},\n"
                 f"    manifest_dir = {quote(directory)},\n"
@@ -2188,8 +1995,8 @@ class FeatureLaneGraph:
                     else ""
                 )
                 + (
-                    f"    test_env = {json.dumps(rustc_env | (WORKBENCH_NODE_ENV if workbench_node else {}), sort_keys=True)},\n"
-                    if rustc_env or workbench_node
+                    f"    test_env = {json.dumps(rustc_env | bin_unit_policy.env, sort_keys=True)},\n"
+                    if rustc_env or bin_unit_policy.env
                     else ""
                 )
                 + f"    tags = {string_list(tags)},\n"

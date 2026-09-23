@@ -185,8 +185,9 @@ compile inherits the default. A test target's `test.cpu_count` /
 `test.memory_kb` size its TestRunner spawn alone, from the per-label table in
 `tools/bazel/test-run-sizes.json` (`action_sizes_from_log.py --test-runs`, at
 least 3 pool runs per label). An unmeasured run asks for 4 CPU / 4 GiB, or 8 CPU
-for the large suites in `UNMEASURED_LARGE_TEST_RUNS`; lash-perf and lash-sim
-never drop below 4 CPU. A `:test_batch` reserves its two largest members'
+for the large suites in `[test_runs.large_suites]` of
+`tools/bazel/package-policy.toml`; lash-perf and lash-sim never drop below 4 CPU
+(`[test_runs] contention_floor`). A `:test_batch` reserves its two largest members'
 requests side by side, never less than the batch itself measured, and runs at
 most two members at once. Local
 clients submit at most 16 jobs; CI submits 32. These are in-flight action
@@ -401,6 +402,31 @@ ordinary Bazel binaries exactly as they are in Cargo's ordinary workspace run;
 their named `--ignored` or live recipes remain authoritative. The one target
 whose required feature is outside the default graph remains recorded as a
 Cargo feature-gate target without a Bazel label.
+
+## Package policy
+
+The generator reads everything `cargo metadata` cannot tell it from
+`tools/bazel/package-policy.toml`, not from `package == ...` branches:
+- a test label's partition tags and reason;
+- extra compile and runtime inputs;
+- test environment, including the `serial` (`RUST_TEST_THREADS=1`) contract;
+- libtest arguments, helper binaries passed through `bin_env`;
+- shards and timeouts;
+- feature-only compile inputs, shared filegroups, trybuild fixture gates and
+  the service-job package map;
+- the test-run exceptions (`[test_runs]`): the large suites' unmeasured
+  requests, which also keep them out of `:test_batch`, and the timing-sensitive
+  packages' core floor.
+
+A `[[rule]]` selects labels by package, target kind and target-name glob, and
+rules apply in file order. The generator refuses a rule that names an unknown
+package, kind, target or binary, so a rename cannot orphan a policy.
+
+`serial` has no nextest counterpart: nextest runs every case in its own
+process, which already gives the isolation that `RUST_TEST_THREADS=1` buys
+inside one Bazel libtest process. Nextest's own timeouts and test groups in
+`.config/nextest.toml` govern the Cargo-owned paths: the service suites, the
+nested-Cargo fault matrix, and untrusted forks.
 
 ## Doctests
 

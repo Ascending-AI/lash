@@ -1,0 +1,387 @@
+# Per-package Bazel policy: the facts `tools/bazel/generate_build_files.py`
+# cannot read from `cargo metadata`, stated once as data instead of as
+# `package == ...` branches in the generator.
+#
+# A `[[rule]]` selects labels by Cargo package name, target kind and target
+# name, and contributes to every label it selects:
+#
+#   packages      Cargo package names (required).
+#   kinds         Target kinds: lib, unit-test, bin, bin-unit-test, test,
+#                 example, bench. Omitted means every kind. A `bin-unit-test`
+#                 also inherits the compile data of its `bin` target.
+#   targets       Glob patterns over the Cargo target name. A unit test is
+#                 named after its library. Omitted means every target.
+#
+#   tags, reason  Test-policy tags (`manual`, `dev-deferred`, `pr-deferred`,
+#                 `cargo-*`) and the reason recorded in target-inventory.json.
+#   compile_data  Labels the compile needs beyond the package's own sources.
+#   data          Labels the test needs at run time.
+#   env           Test environment.
+#   serial        Run libtest one case at a time (`RUST_TEST_THREADS=1`). Cargo
+#                 nextest isolates every case in its own process, so the
+#                 constraint has no nextest encoding; Bazel runs a binary's
+#                 cases in one process and needs it said.
+#   args          libtest arguments.
+#   bin_env       Env var -> a Cargo binary of the same package, passed as its
+#                 runfiles path and added to the test's data.
+#   shards        Bazel test shards (ordinary label only).
+#   timeout       Bazel test timeout (ordinary label only).
+#
+# Rules apply in file order; list values accumulate in that order.
+
+# --- Test partition policy ---------------------------------------------------
+
+[[rule]]
+packages = ["lash-internal-postgres-store", "lash-internal-s3-store"]
+kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
+tags = ["manual", "cargo-service-gate"]
+reason = "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service"
+
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["test"]
+targets = ["ui"]
+tags = ["manual", "cargo-trybuild"]
+reason = "uses trybuild and its Cargo-managed compiler fixture cache"
+
+[[rule]]
+packages = ["workflow-graph-roundtrip"]
+kinds = ["test"]
+tags = ["manual", "cargo-frontend-assets"]
+reason = "uses the Cargo-owned generated frontend asset workflow"
+
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["test"]
+targets = ["cross_backend*"]
+tags = ["manual", "cargo-service-gate"]
+reason = "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service"
+
+# This binary carries the generated-simulation and minimizer fixture replays
+# (measured 182-418 s each under Cargo). The whole binary ran 227-300 s on the
+# pool, which straddles Bazel's default `medium` 300 s bound; `long` is 900 s.
+# The Postgres effect-history consistency case reads the gate script and the
+# repository-root documents it must agree with.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["unit-test"]
+tags = ["dev-deferred"]
+reason = "the generated-profile, minimizer and replay-artifact cases run 109--213 s; too slow for the developer loop, still in the PR Bazel partition"
+data = ["//:confidence_gate_corpus"]
+shards = 8
+timeout = "long"
+
+# The no-abort guarantee forks a dozen children that each parse deliberately
+# deep sources right up to the stack bound. At the 4 GiB test floor
+# `the_abort_corpus_survives_without_the_preflight` and
+# `fuzzed_sources_survive_without_the_preflight` died of SIGKILL, so the label
+# used to be pinned to the runner with `no-remote-exec`, where it ran on every
+# CI leg (about 70 s of the tail's local time). The run is sized from its
+# measured runs now and executes on the pool like any other.
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["test"]
+tags = ["dev-deferred"]
+reason = "the no-abort stress binary runs 43 s; too slow for the developer loop; the merge group runs it in the Bazel tail"
+
+[[rule]]
+packages = ["lash-regress"]
+kinds = ["test"]
+targets = ["unicodesets"]
+tags = ["pr-deferred"]
+reason = "RGI Unicode suites are too slow for the PR Bazel partition; they run on lash-regress diffs and on trunk"
+
+# --- Library and unit-test compile inputs -----------------------------------
+
+[[rule]]
+packages = ["slack-clone"]
+kinds = ["lib", "unit-test"]
+compile_data = ["//examples:shared_rust_sources"]
+
+[[rule]]
+packages = ["lash-perf"]
+kinds = ["lib"]
+compile_data = ["//:perf_guard_budgets", "//:perf_duration_level_shifts"]
+
+[[rule]]
+packages = ["lash-internal-sansio"]
+kinds = ["unit-test"]
+compile_data = ["//:workspace_rust_sources"]
+
+[[rule]]
+packages = ["slack-clone"]
+kinds = ["unit-test"]
+compile_data = ["//:workspace_test_scripts"]
+
+# This instrumentation binary shares process-global counters.
+[[rule]]
+packages = ["lash-perf"]
+kinds = ["unit-test"]
+compile_data = ["//:perf_guard_budgets", "//:perf_duration_level_shifts"]
+serial = true
+
+[[rule]]
+packages = ["lash-runtime", "lash-internal-sqlite-store"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lashlang:old_module_fixture"]
+
+# The process-observation wire contracts validate real items against the
+# published observation-item schema compiled into the test.
+[[rule]]
+packages = ["lash-internal-remote-protocol"]
+kinds = ["unit-test"]
+compile_data = ["//:host_schemas"]
+
+# --- Binary and integration-test support -------------------------------------
+
+# The checked-in workspace fact that replaces a nested `cargo metadata` call
+# in the dependency-direction test.
+[[rule]]
+packages = ["lash-internal-core"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["integration_boundary"]
+data = ["//tools/bazel:target_inventory"]
+
+# These carry the relocated suites that assert over captured `tracing` events.
+# Capture installs a scoped default subscriber, so other cases in the same
+# libtest process must not emit concurrently.
+[[rule]]
+packages = ["lash-internal-core"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["runtime_turns", "runtime_observability"]
+serial = true
+
+# The warning-capture contract installs a scoped tracing subscriber.
+[[rule]]
+packages = ["lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["integration"]
+serial = true
+
+# These cost laws read a process-global counting allocator.
+[[rule]]
+packages = ["lash-internal-lashlang"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["append_cost", "dialect_cost"]
+serial = true
+
+[[rule]]
+packages = ["agent-service", "agent-workbench", "slack-clone", "toolbench"]
+kinds = ["bin", "test", "example", "bench"]
+compile_data = ["//examples:shared_rust_sources"]
+
+# The codemode parity module links the checked-in `examples/codemode-parity/*.ts`
+# cells with `include_str!`, and the schema agreement test compiles the
+# published graph schema in and validates real serialized graph documents.
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["integration"]
+compile_data = ["//examples:codemode_parity_cells", "//:workflow_graph_schema"]
+
+# The schema agreement tests compile the published trace record and graph
+# snapshot schemas in and validate real serialized records against them.
+[[rule]]
+packages = ["lash-internal-trace"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["schema"]
+compile_data = ["//:host_schemas"]
+
+# It holds the dialect to the corpus's own checked-in budget by reading the
+# budget file with `include_str!`, the way lash-perf does.
+[[rule]]
+packages = ["lash-internal-lashlang"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["dialect_cost"]
+compile_data = ["//:perf_guard_budgets"]
+
+[[rule]]
+packages = ["lash-internal-postgres-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["conformance"]
+bin_env = { LASH_CONFORMANCE_HELPER_EXE = "postgres-await-event-helper" }
+
+[[rule]]
+packages = ["lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["conformance"]
+bin_env = { LASH_CONFORMANCE_HELPER_EXE = "sqlite-await-event-helper" }
+
+[[rule]]
+packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["postgres-await-event-helper", "sqlite-await-event-helper"]
+compile_data = ["//crates/lash-core:cold_process_drivers"]
+
+[[rule]]
+packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["conformance"]
+compile_data = ["//crates/lash-core:queued_claim_atomicity"]
+
+[[rule]]
+packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["durable_read_fixture"]
+compile_data = ["//crates/lash-core:durable_read_fixture_source"]
+data = ["//crates/lash-core:durable_read_predecessor_fixtures"]
+
+[[rule]]
+packages = ["lash-internal-postgres-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["preflight_durable_walk"]
+compile_data = ["//crates/lashlang:old_module_fixture"]
+
+[[rule]]
+packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["durable_read_fixture"]
+compile_data = ["//:durable_fixtures"]
+
+# Architecture lints that read sibling crates' sources at run time. A library's
+# runfiles carry only its declared non-Rust inputs, so a test that scans
+# another crate's sources names that crate's `rust_sources` filegroup.
+[[rule]]
+packages = ["lash-internal-core"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["runtime_effect", "runtime_scenarios"]
+data = ["//crates/lash-core-execution:rust_sources"]
+
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["integration"]
+data = [
+  "//crates/lash-remote-protocol:rust_sources",
+  "//crates/lash-sansio:rust_sources",
+  "//crates/lash-tool-support:rust_sources",
+  "//crates/lash-trace:rust_sources",
+]
+
+# The fault-matrix routing probes execute the real scripts/confidence-gate.sh
+# against a recording `cargo`. The five `..._real_cargo_filters_chunk_*` cases
+# each fork a real `cargo test ... -- --list` against the workspace to prove
+# the gate's name filters still select tests. That is a claim about Cargo's own
+# selection, so it cannot be proved inside a hermetic action; the trunk-only
+# `Test heavy suites` job (nextest `profile.ci-heavy`) owns them. Excluded by
+# name here so the label is honest about what it executed.
+[[rule]]
+packages = ["lash-internal-core"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["runtime_scenarios"]
+data = ["//:confidence_gate_scripts"]
+args = ["--skip=runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_"]
+
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["test"]
+compile_data = [
+  "//crates/lash-postgres-store:package_files",
+  "//crates/lash-sqlite-store:package_files",
+]
+
+# Its completeness gates read the real store trait definitions with
+# `include_str!`.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["cross_backend_store_differential"]
+compile_data = ["//crates/lash-core-store:package_files"]
+
+# The gate scans every first-party Rust source, runbooks and examples included.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["signal_replay_key_constructor"]
+compile_data = ["//:workspace_rust_sources"]
+
+# The gate scans lash-core's sources as well as the two store packages'.
+[[rule]]
+packages = ["lash-sim"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["process_lifecycle_vocabulary"]
+compile_data = ["//crates/lash-core:rust_sources"]
+
+# The workbench unit test shells out to Node for its browser-projection case.
+# Its interpreter is a pinned Bazel input, including on feature-lane variants.
+[[rule]]
+packages = ["agent-workbench"]
+kinds = ["bin-unit-test"]
+data = ["@workbench_node_linux_x64//:bin/node"]
+env = { LASH_WORKBENCH_TEST_NODE = "$(rootpath @workbench_node_linux_x64//:bin/node)" }
+
+# --- Test-run requests --------------------------------------------------------
+
+# A test run's request comes from its measured row in test-run-sizes.json.
+# These are the per-package exceptions, keyed `package/crate` like the rows of
+# action-sizes.json.
+[test_runs]
+# Timing-sensitive suites keep four cores whatever they measure. Below that the
+# harness's and the runtime's own threads contend and time-sensitive cases fail
+# instead of running slowly: CI run 34950810111 lost
+# `//crates/lash-perf:lash-perf__unit_test` on a phase assertion and timed out
+# `//crates/lash-sim:stack_policy__test` at one core. A measured p95 of 1.3
+# cores for lash-perf is exactly what such a suite shows while it is healthy.
+contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
+
+# Unmeasured runs of these crates keep the larger request they have always had.
+# The same crates are the suites that never join a `:test_batch`.
+[test_runs.large_suites]
+"agent-workbench/agent_workbench" = { cpu_count = 8, memory_kb = 4194304 }
+"lash-internal-core/lash_core" = { cpu_count = 8, memory_kb = 6815744 }
+"lash-internal-restate/lash_restate" = { cpu_count = 8, memory_kb = 4194304 }
+# The no-abort stress binary forks a dozen children that each parse
+# deliberately deep sources up to the stack bound. Measured 2026-09-23 as one
+# cgroup at four test threads: 7612 MiB peak, 2.6 cores over 37 s.
+"lash-internal-typescript/integration" = { cpu_count = 4, memory_kb = 12058624 }
+"lash-runtime/lash" = { cpu_count = 8, memory_kb = 4194304 }
+
+# --- Service jobs --------------------------------------------------------------
+
+# The service jobs build these packages' test labels from the shared cache and
+# execute them uncached against the service they stand up
+# (`tools/bazel/<service>_test_labels.txt`).
+[service_packages]
+postgres = ["lash-internal-postgres-store"]
+minio = ["lash-internal-s3-store"]
+
+# --- Feature-lane variants ---------------------------------------------------
+
+# Compile inputs a variant needs only when one of its features is on.
+[feature_compile_data.agent-workbench]
+provider-wire-fixtures = ["//crates/lash-sim:package_files"]
+
+# --- Shared filegroups ---------------------------------------------------------
+
+# Package files other packages' targets name as compile or runtime inputs.
+[filegroups.lash-internal-core]
+cold_process_drivers = { srcs = ["tests/support/cold_process_effect_driver.rs"] }
+durable_read_fixture_source = { srcs = ["tests/support/durable_read_fixture.rs"] }
+durable_read_predecessor_fixtures = { glob = ["tests/fixtures/durable-read-predecessors/**"] }
+queued_claim_atomicity = { srcs = ["tests/support/queued_claim_atomicity.rs"] }
+
+[filegroups.lash-internal-lashlang]
+old_module_fixture = { srcs = ["tests/fixtures/module-artifact-old.json"] }
+
+# --- trybuild fixtures ---------------------------------------------------------
+
+# FIG-3364: the trusted seal lane compiles every tests/ui/*.stderr fixture with
+# the toolchain rustc directly (`ui_fixtures`), reading the harness's own
+# CrateInfo so fixtures see the identical `--extern` set and feature
+# resolution. The fixture set mirrors the registration gates in tests/ui.rs:
+# `rlm_gated` fixtures exist only when `rlm` resolves, and the `store_seam`
+# pins are written for the rlm-without-testing graph, so they stay excluded
+# under the canonical resolution.
+[ui_fixtures.lash-runtime]
+harness = "ui"
+rlm_gated = [
+  "rlm_config_builder_requires_channel",
+  "rlm_config_builder_requires_every_bound",
+  "rlm_execution_bounds_are_not_swappable",
+  "rlm_memory_limit_cannot_take_an_instruction_budget",
+  "rlm_turn_options_cannot_name_a_dialect",
+]
+store_seam = [
+  "attachment_store_head_has_no_default",
+  "session_store_factory_requires_deletion_answer",
+]

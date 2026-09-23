@@ -372,17 +372,23 @@ filegroup(
 
 filegroup(
     name = "durable_read_fixture_source",
-    srcs = ["tests/support/durable_read_fixture.rs"],
+    srcs = [
+        "tests/support/durable_read_fixture.rs",
+    ],
 )
 
 filegroup(
     name = "durable_read_predecessor_fixtures",
-    srcs = glob(["tests/fixtures/durable-read-predecessors/**"]),
+    srcs = glob([
+        "tests/fixtures/durable-read-predecessors/**",
+    ]),
 )
 
 filegroup(
     name = "queued_claim_atomicity",
-    srcs = ["tests/support/queued_claim_atomicity.rs"],
+    srcs = [
+        "tests/support/queued_claim_atomicity.rs",
+    ],
 )
 
 load("//tools/bazel:test_batch.bzl", "lash_batch_test")
