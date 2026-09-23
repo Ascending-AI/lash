@@ -748,7 +748,6 @@ macro_rules! effect_host_tests {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
                 let (_fixture_guard, make) = $fixture;
-                let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
