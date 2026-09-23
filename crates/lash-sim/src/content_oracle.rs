@@ -488,10 +488,18 @@ pub async fn reopen_session(
         };
         for part in parts {
             if part.get("kind").and_then(Value::as_str) == Some("ToolResult") {
+                // A tool result's content is its ordered `blocks`; compare the
+                // text the model reads, rendered the one way the runtime does.
+                let blocks = serde_json::from_value::<Vec<lash_sansio::ModelToolReturnPart>>(
+                    part.get("blocks").cloned().unwrap_or(Value::Null),
+                )
+                .map_err(|err| {
+                    format!("reopened `{session_id}` tool result blocks do not decode: {err}")
+                })?;
                 reopened.tool_results.push(ToolResultContent {
                     call_id: part_str(part, "tool_call_id"),
                     tool_name: part_str(part, "tool_name"),
-                    content: part_str(part, "content"),
+                    content: lash_sansio::tool_result_text(&blocks).into_owned(),
                 });
             }
         }
