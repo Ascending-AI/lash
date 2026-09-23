@@ -1,6 +1,10 @@
 use super::*;
 use lash_core::ProcessEffectOutcomeClass;
 
+const TYPESCRIPT_RUNTIME_MODULE_PATH: &str = "__typescript_runtime";
+const TYPESCRIPT_RUNTIME_RESOURCE_TYPE: &str = "typescript.Runtime";
+const TYPESCRIPT_RUNTIME_NOW_OPERATION: &str = "now";
+
 #[tokio::test]
 async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()> {
     let temp = tempfile::tempdir().expect("effect-summary tempdir");
@@ -19,9 +23,9 @@ async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()
     let mut catalog = programs::process_control_catalog();
     catalog
         .add_module_operation_contract(
-            [lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH],
-            lash_typescript::TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
-            lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+            [TYPESCRIPT_RUNTIME_MODULE_PATH],
+            TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
+            TYPESCRIPT_RUNTIME_NOW_OPERATION,
             "typescript.runtime.now",
             &lashlang::OperationContract::new(
                 serde_json::json!({}),
@@ -42,11 +46,7 @@ async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()
                         b::assign("child", b::start("child", Vec::new())),
                         b::assign(
                             "clock",
-                            b::module_call(
-                                &[lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH],
-                                "now",
-                                Vec::new(),
-                            ),
+                            b::module_call(&[TYPESCRIPT_RUNTIME_MODULE_PATH], "now", Vec::new()),
                         ),
                         b::assign(
                             "listed",
