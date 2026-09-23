@@ -388,7 +388,7 @@ impl LiveConformanceHarness {
     /// Runs a law's turn inside a `ConformanceTurnProbe` handler on this
     /// endpoint.
     pub(super) fn turn_runner(&self) -> Arc<dyn lash_conformance::ConformanceTurnRunner> {
-        super::live_turn_probe::LiveTurnRunner::new(self.ingress_url.clone())
+        super::live_turn_probe::LiveTurnRunner::shared(self.ingress_url.clone())
     }
 
     pub(super) fn effect_host_factory(

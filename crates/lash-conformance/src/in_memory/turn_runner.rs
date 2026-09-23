@@ -32,7 +32,7 @@ fn native_turn_runner_fixture() -> NativeTurnRunnerFixture {
     let process_work: Arc<dyn crate::ProcessWorkSubstrate> = Arc::new(
         crate::NativeProcessWork::for_registry(Arc::clone(&registry)),
     );
-    let runner = crate::HostTurnRunner::new(Arc::clone(&host));
+    let runner = crate::HostTurnRunner::shared(Arc::clone(&host));
     (
         (),
         "native-turn-runner",
