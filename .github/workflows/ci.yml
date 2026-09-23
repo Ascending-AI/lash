@@ -16,9 +16,9 @@ name: CI
 # CI had already seen.
 #
 # Pull requests get fast signal; the merge group gets breadth. A pull request
-# runs the core Bazel suite (`//:workspace_tests` minus its tail), the
-# workspace clippy, the seal lane when the facade moved, one PostgreSQL major
-# (16) and the path-gated script jobs. The merge group runs the same set on
+# runs the core Bazel suite (`//:workspace_tests` minus its tail, plus the
+# API seal `//crates/lash:ui_fixtures`), the workspace clippy, one PostgreSQL
+# major (16) and the path-gated script jobs. The merge group runs the same set on
 # the combined tree plus the test tail, the feature-lane clippy, the
 # `//:runtime_off` graph and, for a schema diff, the PG14/PG18 compatibility
 # legs. Cached Bazel results mean a merge group re-executes only what its
@@ -28,8 +28,8 @@ name: CI
 # Restate workers E2E, Fuzz smoke, Stack budget, deferred Unicode, worker
 # artifacts — are gated to `workflow_dispatch` alone, which is also the
 # profile release.yml certifies against and the sole home of feature lanes,
-# the PG14/PG18 legs on a non-schema diff, deferred Unicode, the seal lane on
-# non-facade diffs, and the lashlang consumer.
+# the PG14/PG18 legs on a non-schema diff, deferred Unicode, and the lashlang
+# consumer.
 
 on:
   # The full profile, and the only home of the heavy families. A manual
@@ -134,7 +134,8 @@ jobs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
-      postgres_matrix: ${{ steps.postgres-matrix.outputs.postgres_matrix }}
+      postgres_primary: ${{ steps.postgres-matrix.outputs.postgres_primary }}
+      postgres_compatibility: ${{ steps.postgres-matrix.outputs.postgres_compatibility }}
       bazel_trusted: >-
         ${{ github.event_name == 'merge_group'
         || github.event_name == 'workflow_dispatch'
@@ -237,21 +238,19 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # The API seal lane alone: the workspace compile proof lives in the Lint
-  # job's `//:workspace_clippy`, which type-checks the full all-targets
-  # workspace shape. Untrusted (fork/dependabot) pull requests lose no
-  # coverage: the full Cargo workspace build inside `workspace-tests` already
-  # compiles every target. The seal lane runs when the facade crate or the
-  # root manifests changed; the release dispatch always runs it.
+  # The API seal lane for untrusted (fork and Dependabot) pull requests. A
+  # trusted event seals the API inside `bazel-tests` (`//crates/lash:ui_fixtures`
+  # rides the core test invocation), so this job exists only for events with
+  # no cache credentials, which keep trybuild's `cargo test --test ui`. It runs
+  # when the facade crate or the root manifests changed.
   check:
     name: Seal-test the API surface
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     needs: plan
     if: >-
-      github.event_name == 'workflow_dispatch'
-      || needs.plan.outputs.facade == 'true'
-    environment: build-cache
+      needs.plan.outputs.bazel_trusted != 'true'
+      && needs.plan.outputs.facade == 'true'
     env:
       # trybuild derives its fixture/output tree from Cargo's target directory.
       # The seal job has no shared writable output with any other CI job.
@@ -313,6 +312,7 @@ jobs:
           cache-bin: false
           shared-key: linux-seal-2
           workspaces: . -> target-seal
+          save-if: false
 
       - name: Install protoc
         uses: ./.github/actions/install-tools
@@ -322,44 +322,13 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      # The whole seal check is served by Bazel's shared remote cache, which
-      # keys on content rather than the merge-group SHA (FIG-3364):
-      # `ui_fixtures` compiles every tests/ui/*.stderr fixture with the
-      # toolchain rustc against the ui__test rlib closure and diffs normalized
-      # output against the pins -- the same .stderr files the untrusted Cargo
-      # path checks through trybuild. `bazel build ui__test` separately proves
-      # the compile-pass module fixtures still compile. Fork and Dependabot
-      # runs have no cache credentials, so they keep the Cargo command.
-      - name: Configure shared build cache
-        if: needs.plan.outputs.bazel_trusted == 'true'
-        uses: ./.github/actions/bazel-shared-cache
-        env:
-          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
-          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
-          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
-          CACHE_CA: ${{ secrets.CACHE_CA }}
-          CACHE_CERT: ${{ secrets.CACHE_CERT }}
-          CACHE_KEY: ${{ secrets.CACHE_KEY }}
-
+      # trybuild checks the same tests/ui/*.stderr pins the trusted
+      # `//crates/lash:ui_fixtures` action diffs, so one set of pins serves
+      # both paths.
       - name: Seal-test the API surface
         run: |
           # shellcheck disable=SC2086
-          if [ "${{ needs.plan.outputs.bazel_trusted }}" = "true" ]; then
-            bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
-              ${BAZEL_SHARED_CACHE_FLAGS} \
-              --remote_download_outputs=toplevel \
-              //crates/lash:ui__test
-            bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
-              ${BAZEL_SHARED_CACHE_FLAGS} \
-              --test_output=errors \
-              //crates/lash:ui_fixtures
-          else
-            cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
-          fi
-
-      - name: Remove client credentials
-        if: always() && needs.plan.outputs.bazel_trusted == 'true'
-        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+          cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui
 
       - name: Report cache disk capacity
         if: always()
@@ -843,6 +812,15 @@ jobs:
           # merge-group-only `bazel-tests-tail` job runs on a parallel runner;
           # a core-touching diff otherwise ends this leg in a ~5.5-minute
           # agent-workbench compile long after every crate test has finished.
+          #
+          # `//crates/lash:ui_fixtures` is the API seal. It checks every
+          # compile-fail pin under tests/ui/ and, through its validation
+          # output, builds the `ui__test` harness whose compile-pass modules
+          # it proves. It rides this invocation rather than a job of its own:
+          # a separate client paid a minute of startup and analysis for what
+          # is, on most diffs, a cache lookup, and it runs on every trusted
+          # event because a dependency's change moves the pinned diagnostics
+          # as surely as a facade change does.
           # shellcheck disable=SC2086
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
@@ -850,7 +828,7 @@ jobs:
             --remote_download_regex='.*test\.outputs.*' \
             --cache_test_results=yes --test_output=errors \
             --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
-            -- //:workspace_tests -//:workspace_tail_tests
+            -- //:workspace_tests -//:workspace_tail_tests //crates/lash:ui_fixtures
 
       # FIG-3429 item 8: conformance laws leave an execution receipt in each
       # target's undeclared outputs; this census fails on any registered law
@@ -1631,14 +1609,15 @@ jobs:
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
   postgres-store:
-    name: Test Postgres store (PG ${{ matrix.postgres }}, ${{ matrix.role }})
+    name: Test Postgres store
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: plan
     # Trusted events build every binary below from the shared cache; the
     # PostgreSQL version and connection settings are execution-only inputs, so
-    # all three matrix legs reuse one set of compiled outputs. Untrusted events
-    # receive no credentials and keep the Cargo compile. See
+    # every major reuses one set of compiled outputs -- and, because every
+    # major runs in this one job, one Bazel client and one analysis. Untrusted
+    # events receive no credentials and keep the Cargo compile. See
     # scripts/ci/store-tests.sh.
     #
     # Each suite runs inside `scripts/ci/with-service.sh pg<major>`, which owns
@@ -1655,6 +1634,7 @@ jobs:
     env:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
       LASH_REQUIRE_POSTGRES: "1"
+      POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}
     # The stores family is path-derived: only diffs touching a store crate, a
     # migrations path, or a `.sql` file pay this leg; every other pull request
     # used to spend 7-18 minutes of runner Cargo on PG16 for evidence nothing
@@ -1674,17 +1654,14 @@ jobs:
     # artifact comparison and a focused version-stamp gate, so they stay off
     # the pull-request path. A merge group whose diff touches a durable schema
     # crate runs them, and so does workflow_dispatch: no schema change reaches
-    # trunk without all three majors.
-    # scripts/ci_plan.py `postgres-matrix` owns the per-event matrix. PG16 is
+    # trunk without all three majors. They run here, after the primary major's
+    # compile, each against its own container: a separate runner per major
+    # re-analysed the graph and re-queued the same build three times.
+    # scripts/ci_plan.py `postgres-matrix` owns the per-event majors. PG16 is
     # the sole primary lane and runs on every event. On PR-class events it runs
     # the proven runtime identity oracle; on full-profile runs it retains the
     # package-wide, pool-wait, runtime, and cross-backend behavior coverage
     # without triplicating it across majors.
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.plan.outputs.postgres_matrix) }}
-
     steps:
       - name: Check out repository
         env:
@@ -1749,12 +1726,7 @@ jobs:
       # `with-service.sh` exports LASH_REQUIRE_POSTGRES=1 alongside the URL, so
       # a database this step could not reach fails the lane instead of silently
       # skipping it.
-      - name: Test PostgreSQL catalog compatibility
-        if: matrix.role == 'compatibility'
-        run: |
-          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
-            bash scripts/ci/store-tests.sh pg-catalog-compatibility
-
+      #
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
       # TriggerStore / LashlangArtifactStore suites against a real Postgres.
@@ -1770,44 +1742,55 @@ jobs:
       # Keep this package-wide: tests/attempt_atomicity.rs is part of this gate;
       # narrowing to --test conformance would silently drop attempt atomicity.
       - name: Test Postgres store (conformance and attempt atomicity)
-        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |
-          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-store
 
       - name: Test runtime pool-wait binding
-        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |
-          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-pool-wait
 
       # Primary PostgreSQL runs cover parent-end recovery and automatic queued
       # retry through the real journal on PRs, merge groups, and releases.
       # The shared service wrapper requires a live database for both scenarios.
       - name: Test runtime Postgres agent scenarios
-        if: matrix.role == 'primary'
         run: |
-          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-agent-scenario
 
       # The simulator's backend-fault scenarios against a real PostgreSQL. They
       # compare fault semantics, not catalog rendering, so they run once on the
       # primary major instead of three times.
       - name: Test simulator backend faults on Postgres
-        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |
-          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-sim-backend-faults
 
       # The full differential compares backend semantics, not catalog rendering,
       # so it runs once on the primary major instead of three times.
       - name: Test cross-backend store differential
-        if: matrix.role == 'primary' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |
-          bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-cross-backend
         env:
           LASH_CROSS_BACKEND_CASES: "4"
+
+      # The compatibility majors run last, so the primary major's verdict
+      # comes first; every major after the first reuses its compile.
+      - name: Test PostgreSQL catalog compatibility
+        if: needs.plan.outputs.postgres_compatibility != ''
+        env:
+          POSTGRES_COMPATIBILITY: ${{ needs.plan.outputs.postgres_compatibility }}
+        run: |
+          for major in ${POSTGRES_COMPATIBILITY}; do
+            bash scripts/ci/with-service.sh "pg${major}" -- \
+              bash scripts/ci/store-tests.sh pg-catalog-compatibility
+          done
 
       - name: Remove client credentials
         if: always() && needs.plan.outputs.bazel_trusted == 'true'

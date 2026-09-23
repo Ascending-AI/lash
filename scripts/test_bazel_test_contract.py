@@ -1027,7 +1027,7 @@ class BazelTestContractTests(unittest.TestCase):
             for step in job["steps"]:
                 run = step.get("run", "")
                 if "scripts/ci/store-tests.sh" in run:
-                    suites.append(run.split()[-1])
+                    suites.append(run.split("scripts/ci/store-tests.sh", 1)[1].split()[0])
                 # Cargo toolchain setup exists only for the untrusted path.
                 if step.get("uses", "").startswith("./.github/actions/rust-toolchain"):
                     self.assertEqual(
@@ -1035,12 +1035,12 @@ class BazelTestContractTests(unittest.TestCase):
                     )
         self.assertEqual(
             [
-                "pg-catalog-compatibility",
                 "pg-store",
                 "pg-pool-wait",
                 "pg-agent-scenario",
                 "pg-sim-backend-faults",
                 "pg-cross-backend",
+                "pg-catalog-compatibility",
                 "s3-store",
                 "s3-attachment-differential",
             ],

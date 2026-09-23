@@ -275,7 +275,10 @@ DISPATCH_ONLY_JOBS = {
 
 DEFERRED_EVENTS = {"pull_request", "merge_group"}
 
-# The PostgreSQL matrix. PG16 is the sole primary lane and the only major a
+# The PostgreSQL majors. One `postgres-store` job builds the store binaries
+# once and runs every selected major against its own container, so a second
+# major costs a container and a test run, not another runner and Bazel client.
+# PG16 is the sole primary lane and the only major a
 # pull request runs: a PR gets fast signal. PG14/PG18 compare catalog shape
 # only; they are merge-group breadth when the diff touches a durable schema
 # crate, and part of the full profile on workflow_dispatch (weekly/release
@@ -540,8 +543,10 @@ def _is_stores_path(path: str) -> bool:
     )
 
 
-# `facade` gates the seal lane: only the facade crate's public API or the root
-# manifests can break the API surface it seals.
+# `facade` gates the untrusted Cargo seal lane: only the facade crate's public
+# API or the root manifests can break the API surface it seals. Trusted events
+# seal on every run inside `bazel-tests`, where an unchanged seal is a cache
+# hit.
 def _is_facade_path(path: str) -> bool:
     return path.startswith("crates/lash/") or path in {"Cargo.toml", "Cargo.lock"}
 
@@ -953,19 +958,15 @@ def evaluate_conclusion(
                 )
             continue
         if job == "check":
-            # The seal lane also runs on every workflow_dispatch, where it is
-            # required regardless of the diff's facade selection.
-            required = (
-                plan_outputs.get("facade") == "true"
-                or event_name == "workflow_dispatch"
-            )
-            if required and result != "success":
+            # A trusted event seals the API inside `bazel-tests`; this Cargo
+            # seal lane is the untrusted path, required when the facade moved.
+            required = not bazel_is_trusted and plan_outputs.get("facade") == "true"
+            wanted = "success" if required else "skipped"
+            if result != wanted:
                 problems.append(
-                    f"{job} ended with {result!r} on a {event_name} event, expected success"
-                )
-            elif not required and result not in {"success", "skipped"}:
-                problems.append(
-                    f"{job} ended with {result!r} although plan.facade allowed only success or skip"
+                    f"{job} ended with {result!r} for a"
+                    f" {'trusted' if bazel_is_trusted else 'untrusted'} event,"
+                    f" expected {wanted}"
                 )
             continue
         if job == "postgres-store" and event_name in DEFERRED_EVENTS:
@@ -1114,11 +1115,15 @@ def main() -> int:
         return 0
 
     if args.command == "postgres-matrix":
+        legs = postgres_matrix(args.event, args.schema == "true")
         _write_outputs(
             {
-                "postgres_matrix": json.dumps(
-                    postgres_matrix(args.event, args.schema == "true")
-                )
+                "postgres_primary": " ".join(
+                    leg["postgres"] for leg in legs if leg["role"] == "primary"
+                ),
+                "postgres_compatibility": " ".join(
+                    leg["postgres"] for leg in legs if leg["role"] == "compatibility"
+                ),
             }
         )
         return 0

@@ -671,7 +671,10 @@ def successful_needs() -> dict[str, dict[str, object]]:
         | ci_plan.BAZEL_TEST_JOBS
     }
     needs["plan"]["outputs"] = plan_outputs
+    # A trusted event runs the Bazel partition, whose invocation carries the
+    # API seal; the Cargo workspace and seal jobs are the untrusted path.
     needs["workspace-tests"]["result"] = "skipped"
+    needs["check"]["result"] = "skipped"
     return needs
 
 
@@ -709,6 +712,7 @@ class ConclusionTests(unittest.TestCase):
         for job in ci_plan.BAZEL_TEST_JOBS:
             untrusted[job]["result"] = "skipped"
         untrusted["workspace-tests"]["result"] = "success"
+        untrusted["check"]["result"] = "success"
         self.assertEqual(
             [], ci_plan.evaluate_conclusion(untrusted, bazel_is_trusted=False)
         )
@@ -918,17 +922,17 @@ POSTGRES_TEST_STEPS = {
 }
 
 
-def selected_postgres_test_steps(event: str, role: str) -> set[str]:
-    """Evaluate the small fixed condition vocabulary used by the PG matrix."""
+def selected_postgres_test_steps(event: str, compatibility: bool) -> set[str]:
+    """Evaluate the small fixed condition vocabulary of the one PostgreSQL job."""
 
     pr_class = event in {"pull_request", "merge_group"}
     selectors = {
-        "matrix.role == 'compatibility'": role == "compatibility",
-        "matrix.role == 'primary'": role == "primary",
+        None: True,
+        "needs.plan.outputs.postgres_compatibility != ''": compatibility,
         (
-            "matrix.role == 'primary' && github.event_name != 'pull_request'"
+            "github.event_name != 'pull_request'"
             " && github.event_name != 'merge_group'"
-        ): role == "primary" and not pr_class,
+        ): not pr_class,
     }
     job = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"][
         "postgres-store"
@@ -955,22 +959,52 @@ class PostgresMatrixTests(unittest.TestCase):
         "Test cross-backend store differential",
     }
 
-    def test_matrix_comes_from_the_plan_and_brackets_the_supported_range(self) -> None:
+    def test_one_job_runs_every_major_the_plan_selects(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        postgres = jobs["postgres-store"]
+        # One runner and one Bazel client for every major: no matrix.
+        self.assertNotIn("strategy", postgres)
         self.assertEqual(
-            "${{ fromJSON(needs.plan.outputs.postgres_matrix) }}",
-            jobs["postgres-store"]["strategy"]["matrix"]["include"],
+            "${{ needs.plan.outputs.postgres_primary }}", postgres["env"]["POSTGRES_PRIMARY"]
         )
-        self.assertEqual(
-            "${{ steps.postgres-matrix.outputs.postgres_matrix }}",
-            jobs["plan"]["outputs"]["postgres_matrix"],
-        )
+        for output in ("postgres_primary", "postgres_compatibility"):
+            self.assertEqual(
+                f"${{{{ steps.postgres-matrix.outputs.{output} }}}}",
+                jobs["plan"]["outputs"][output],
+            )
         step = next(
             candidate
             for candidate in jobs["plan"]["steps"]
             if candidate.get("id") == "postgres-matrix"
         )
         self.assertIn("scripts/ci_plan.py postgres-matrix", step["run"])
+        compatibility = next(
+            candidate for candidate in postgres["steps"]
+            if candidate.get("name") == "Test PostgreSQL catalog compatibility"
+        )
+        self.assertIn('for major in ${POSTGRES_COMPATIBILITY}; do', compatibility["run"])
+        self.assertIn('"pg${major}"', compatibility["run"])
+        for candidate in postgres["steps"]:
+            if candidate.get("name") in POSTGRES_TEST_STEPS - {compatibility["name"]}:
+                self.assertIn('"pg${POSTGRES_PRIMARY}"', candidate["run"])
+
+    def test_the_plan_writes_the_majors_as_outputs(self) -> None:
+        for event, schema, primary, compatibility in (
+            ("pull_request", "true", "16", ""),
+            ("merge_group", "false", "16", ""),
+            ("merge_group", "true", "16", "14 18"),
+            ("workflow_dispatch", "false", "16", "14 18"),
+        ):
+            with self.subTest(event=event, schema=schema):
+                result = subprocess.run(
+                    ["python3", str(ROOT / "scripts/ci_plan.py"), "postgres-matrix",
+                     "--event", event, "--schema", schema],
+                    capture_output=True, text=True, check=True,
+                )
+                self.assertEqual(
+                    [f"postgres_primary={primary}", f"postgres_compatibility={compatibility}"],
+                    result.stdout.splitlines(),
+                )
 
     def test_compatibility_lanes_are_deferred_off_the_pull_request_path(self) -> None:
         """PG16 alone on PRs; PG14/PG18 on schema merge groups or dispatch."""
@@ -1006,24 +1040,23 @@ class PostgresMatrixTests(unittest.TestCase):
 
     def test_event_and_role_selection_runs_the_right_real_tests(self) -> None:
         for event in ("pull_request", "merge_group", "workflow_dispatch"):
-            roles = {leg["role"] for leg in ci_plan.postgres_matrix(event)}
-            with self.subTest(event=event, role="compatibility"):
-                if event == "workflow_dispatch":
-                    self.assertIn("compatibility", roles)
+            for schema in (False, True):
+                roles = {leg["role"] for leg in ci_plan.postgres_matrix(event, schema)}
+                compatibility = "compatibility" in roles
+                with self.subTest(event=event, schema=schema):
+                    self.assertIn("primary", roles)
                     self.assertEqual(
-                        self.COMPATIBILITY,
-                        selected_postgres_test_steps(event, "compatibility"),
+                        compatibility,
+                        event == "workflow_dispatch" or (event == "merge_group" and schema),
                     )
-                else:
-                    self.assertNotIn("compatibility", roles)
-            with self.subTest(event=event, role="primary"):
-                self.assertIn("primary", roles)
-                expected = (
-                    self.PRIMARY_PR
-                    if event in ci_plan.DEFERRED_EVENTS
-                    else self.PRIMARY_TRUNK
-                )
-                self.assertEqual(expected, selected_postgres_test_steps(event, "primary"))
+                    expected = (
+                        self.PRIMARY_PR
+                        if event in ci_plan.DEFERRED_EVENTS
+                        else self.PRIMARY_TRUNK
+                    ) | (self.COMPATIBILITY if compatibility else set())
+                    self.assertEqual(
+                        expected, selected_postgres_test_steps(event, compatibility)
+                    )
 
     def test_commands_pin_live_catalog_version_and_runtime_identity_oracle(self) -> None:
         """The named oracles must survive the Bazel/Cargo dispatch, on both paths.
@@ -1041,7 +1074,7 @@ class PostgresMatrixTests(unittest.TestCase):
         def suite_body(step_name: str) -> tuple[str, str]:
             run = steps[step_name]["run"]
             self.assertIn("scripts/ci/store-tests.sh", run)
-            suite = run.split()[-1]
+            suite = run.split("scripts/ci/store-tests.sh", 1)[1].split()[0]
             if f"\n  {suite})\n" in script:
                 # A shaped suite writes both halves itself.
                 body = script.split(f"\n  {suite})\n", 1)[1].split("\n    ;;", 1)[0]
@@ -1579,19 +1612,52 @@ class FacadeAndToolingGatingTests(unittest.TestCase):
                 f"{job}: {problems}",
             )
 
-    def test_facade_diff_requires_the_seal_lane(self) -> None:
+    def test_an_untrusted_facade_diff_requires_the_cargo_seal_lane(self) -> None:
         needs = self.board(facade="true")
         needs["check"]["result"] = "skipped"
-        problems = ci_plan.evaluate_conclusion(needs, "pull_request")
+        problems = ci_plan.evaluate_conclusion(needs, "pull_request", bazel_is_trusted=False)
         self.assertTrue(any("check" in problem for problem in problems))
         needs["check"]["result"] = "success"
-        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
+        self.assertFalse(any(
+            "check" in problem
+            for problem in ci_plan.evaluate_conclusion(needs, "pull_request", bazel_is_trusted=False)
+        ))
 
-    def test_dispatch_always_requires_the_seal_lane(self) -> None:
-        needs = self.board("workflow_dispatch")
-        needs["check"]["result"] = "skipped"
-        problems = ci_plan.evaluate_conclusion(needs, "workflow_dispatch")
-        self.assertTrue(any("check" in problem for problem in problems))
+    def test_trusted_events_seal_inside_the_bazel_partition(self) -> None:
+        """`//crates/lash:ui_fixtures` rides `bazel-tests`; the job must skip."""
+        for event, families in (
+            ("pull_request", {"facade": "true"}),
+            ("merge_group", {"facade": "true"}),
+            ("workflow_dispatch", {}),
+        ):
+            with self.subTest(event=event):
+                needs = self.board(event, **families)
+                self.assertEqual("skipped", needs["check"]["result"])
+                self.assertEqual([], ci_plan.evaluate_conclusion(needs, event))
+                needs["check"]["result"] = "success"
+                problems = ci_plan.evaluate_conclusion(needs, event)
+                self.assertTrue(any("check" in problem for problem in problems))
+
+    def test_the_bazel_partition_carries_the_seal(self) -> None:
+        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        core = next(
+            step for step in jobs["bazel-tests"]["steps"]
+            if step.get("name") == "Test the workspace core suite with shared cache"
+        )
+        self.assertIn(
+            "-- //:workspace_tests -//:workspace_tail_tests //crates/lash:ui_fixtures",
+            core["run"],
+        )
+        self.assertEqual(
+            "needs.plan.outputs.bazel_trusted != 'true'"
+            " && needs.plan.outputs.facade == 'true'",
+            jobs["check"]["if"].strip(),
+        )
+        self.assertNotIn("environment", jobs["check"])
+        rule = (ROOT / "tools/bazel/ui_fixtures.bzl").read_text(encoding="utf-8")
+        self.assertIn(
+            "OutputGroupInfo(_validation = ctx.attr.harness[DefaultInfo].files)", rule
+        )
 
     def test_tooling_diff_requires_repo_gates(self) -> None:
         needs = self.board(tooling="true")

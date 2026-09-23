@@ -520,9 +520,12 @@ Cargo command it ran before this cutover, including the Rust toolchain, mold,
 nextest and Swatinem cache steps, which are conditioned on the same trust
 decision.
 
-The PostgreSQL matrix itself is per-event, resolved by `scripts/ci_plan.py
-postgres-matrix` and consumed through the `plan` job's `postgres_matrix`
-output:
+The PostgreSQL majors are per-event, resolved by `scripts/ci_plan.py
+postgres-matrix` and consumed through the `plan` job's `postgres_primary` and
+`postgres_compatibility` outputs. One `Test Postgres store` job runs them all:
+it builds the store binaries once, runs the primary major's suites, then runs
+each compatibility major against its own container, so an extra major costs a
+container and a test run rather than a runner and a Bazel client.
 
 | Event | PG 14 (compatibility) | PG 16 (primary) | PG 18 (compatibility) |
 | --- | --- | --- | --- |
@@ -535,23 +538,19 @@ The compatibility lanes only compare the live catalog artifact and a focused
 version-stamp gate. They run on a merge group whose diff touches
 `lash-postgres-store` or `lash-sqlite-store`, and on the full-profile dispatch;
 a pull request runs PG 16 alone. Weekly confidence
-backends remain the compatibility witness for unrelated landings. The lane is
-removed from the matrix rather than kept with its steps skipped -- a leg that
-ran no tests would be a hollow green.
+backends remain the compatibility witness for unrelated landings.
 
 Three jobs stay entirely Cargo-owned, and not for want of trying:
 
 - `Test heavy suites` runs the nested-Cargo fault-matrix chunks, which fork
   real `cargo test` invocations of their own. Bazel cannot own a suite whose
   work is a Cargo build.
-- `Seal-test the API surface` runs the `lash-runtime` trybuild binary. Bazel can
-  build that binary from the shared cache, but the 742 s is not the harness
-  compile: trybuild spawns its own `cargo` against `CARGO_TARGET_DIR` to build
-  each compile-fail fixture, so the runner still needs the full workspace
-  dependency graph materialised in a Cargo target directory. Moving the harness
-  compile to the pool would leave that untouched, and narrowing the command off
-  `--workspace` would change the feature unification the fixtures are sealed
-  against.
+- `Seal-test the API surface` is the untrusted path only: it runs the
+  `lash-runtime` trybuild binary, which spawns its own `cargo` against
+  `CARGO_TARGET_DIR` to build each compile-fail fixture. Trusted events seal
+  through `//crates/lash:ui_fixtures` inside `Test Bazel partition` instead;
+  that test diffs the same `.stderr` pins and, as its validation output, builds
+  the `ui__test` harness.
 - `Build worker release artifacts` compiles `--release` binaries. The generated
   graph is the development compilation graph; the release profile (`thin` LTO
   and stripping) stays a Cargo-owned artifact contract.
