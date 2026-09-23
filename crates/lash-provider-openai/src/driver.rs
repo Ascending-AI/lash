@@ -1,8 +1,6 @@
 use crate::request_work::{body_excerpt, needs_blocking, run, serialize_body};
 use crate::support::*;
 
-const CACHE_SESSION_ID_MAX_CHARS: usize = 256;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompletionEndpoint {
     Responses,
@@ -105,7 +103,7 @@ fn responses_stream_failure(
         .with_partial_response(partial)
 }
 
-fn build_request_body(
+pub(crate) fn build_request_body(
     provider: &OpenAiCompatibleProvider,
     req: &LlmRequest,
     endpoint: CompletionEndpoint,
@@ -126,13 +124,7 @@ fn build_request_body(
         }
     };
     if provider.resolved_compat(endpoint).cache_session_affinity {
-        body["session_id"] = Value::String(
-            req.scope
-                .session_id
-                .chars()
-                .take(CACHE_SESSION_ID_MAX_CHARS)
-                .collect(),
-        );
+        body["session_id"] = Value::String(req.scope.provider_session_affinity_key());
     }
     Ok((body, cache_control_emitted))
 }

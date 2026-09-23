@@ -21,7 +21,7 @@ fn builds_responses_body_with_instructions_and_input() {
     assert_eq!(body["stream"], true);
     assert!(body.get("messages").is_none());
     assert!(body.get("cache_control").is_none());
-    assert_eq!(body["prompt_cache_key"], "session-1::session-1:frame:test");
+    assert_eq!(body["prompt_cache_key"], req.provider_prompt_cache_key());
     assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
     assert_eq!(body["input"][0]["role"], "user");
     assert_eq!(body["input"][0]["content"][0]["type"], "input_text");

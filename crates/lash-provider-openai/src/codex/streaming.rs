@@ -745,7 +745,7 @@ impl Provider for CodexProvider {
                 ("User-Agent".to_string(), Self::codex_user_agent()),
                 (
                     "session-id".to_string(),
-                    req.scope.session_id.clone().to_string(),
+                    req.scope.provider_session_affinity_key(),
                 ),
                 (
                     "x-client-request-id".to_string(),

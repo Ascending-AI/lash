@@ -293,7 +293,7 @@ impl CodexProvider {
         }
         let cache_control_emitted = policy.cache_retention != CacheRetention::None;
         if cache_control_emitted {
-            body["prompt_cache_key"] = json!(req.continuation_key());
+            body["prompt_cache_key"] = json!(req.provider_prompt_cache_key());
         }
         if let Some(output_spec) = &req.output_spec {
             body["text"]["format"] = match output_spec {
