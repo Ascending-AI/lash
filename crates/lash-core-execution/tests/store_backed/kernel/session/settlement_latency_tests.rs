@@ -510,10 +510,9 @@ async fn a_later_leaf_settles_while_an_earlier_leaf_holds_its_drain_slot() {
 /// Ignored on this base, not weakened: on the SQLite memory backend the batch
 /// observes `[0, 1]` in about two runs of three even with the replay driver
 /// parked on change notifications (FIG-3579), so the group consumer can still
-/// yield two committed children in position order. The ticket that tracks it
-/// is being filed from the FIG-3582 fix round.
+/// yield two committed children in position order (FIG-3609).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "SQL group consumer yields committed children in position order; ticket filed from the FIG-3582 fix round"]
+#[ignore = "FIG-3609: the SQL group consumer yields committed children in position order"]
 async fn a_later_leaf_that_settles_first_leads_the_settlement_order() {
     let replies = drain_slot_handshake_batch().await;
     assert_eq!(
