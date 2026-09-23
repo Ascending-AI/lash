@@ -2409,74 +2409,7 @@ lash_conformance::effect_controller_replay_mismatch_tests!({
     )
 });
 
-lash_conformance::effect_controller_lease_fencing_tests!({
-    let dirs = Arc::new(Mutex::new(Vec::new()));
-    let path = fresh_db_path(&dirs, "effect-lease-fencing.db");
-    let make_path = path.clone();
-    let steal_path = path.clone();
-    let expire_path = path.clone();
-    (
-        dirs,
-        lash_conformance::EffectLeaseFencingBackend {
-            make_controller: Box::new(move |ttl, clock| {
-                let path = make_path.clone();
-                Box::pin(async move {
-                    let controller = SqliteRuntimeEffectController::open_with_options_and_clock(
-                        &path,
-                        durable_turn_scope("session", "turn"),
-                        SqliteEffectReplayOptions {
-                            lease_timings:
-                                lash_core_execution::facade_support::LeaseTimings::from_ttl(ttl)
-                                    .expect("conformance lease timings"),
-                            drain_budget: Default::default(),
-                        },
-                        clock,
-                    )
-                    .await
-                    .expect("controller");
-                    let for_replay = controller.clone();
-                    lash_conformance::LeaseFencingController {
-                        controller: Arc::new(controller),
-                        start_replay: Box::new(move || for_replay.start_replay()),
-                    }
-                })
-            }),
-            steal_lease: Box::new(move |replay_key| {
-                let path = steal_path.clone();
-                Box::pin(async move {
-                    let stolen_until = current_epoch_ms_for_test().saturating_add(10_000);
-                    let conn = rusqlite::Connection::open(&path).expect("open sqlite");
-                    let changed = conn
-                        .execute(
-                            "UPDATE runtime_effect_replay
-                             SET lease_owner_id = 'stolen-owner',
-                                 lease_token = 'stolen-token',
-                                 lease_expires_at_ms = ?1
-                             WHERE replay_key = ?2",
-                            rusqlite::params![stolen_until as i64, replay_key],
-                        )
-                        .expect("steal lease row");
-                    assert_eq!(changed, 1);
-                })
-            }),
-            expire_lease: Box::new(move |replay_key| {
-                let path = expire_path.clone();
-                Box::pin(async move {
-                    let conn = rusqlite::Connection::open(&path).expect("open sqlite");
-                    let changed = conn
-                        .execute(
-                            "UPDATE runtime_effect_replay
-                             SET lease_expires_at_ms = 0
-                             WHERE replay_key = ?1",
-                            rusqlite::params![replay_key],
-                        )
-                        .expect("expire lease row");
-                    assert_eq!(changed, 1);
-                })
-            }),
-        },
-    )
-});
+include!("conformance/effect_lease_fencing.rs");
 
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;

@@ -1,5 +1,6 @@
-//! FIG-3528 — a store error on a `ToolAttempt` claim or finalize is a typed
-//! controller abort, never a model-visible tool result.
+//! FIG-3528 — a store error on a `ToolAttempt` claim or finalize, or a renew
+//! outage past the lease miss budget (FIG-3512), is a typed controller abort,
+//! never a model-visible tool result.
 //!
 //! The PostgreSQL counterpart of the SQLite store-fault laws: each test drives
 //! the production attempt coordinator (`coordinate_tool_invocation`) against
@@ -61,8 +62,12 @@ enum ProbeAnswer {
     /// A tool-produced failure — the case that must stay model-visible.
     Failure,
     /// `ToolOutcome::ok` after a delay long enough for the claim's renew
-    /// interval to fire mid-body — the case a renew fault must abort.
+    /// interval to fire mid-body, yet inside one lease TTL of a renewal
+    /// that lands — the case a single renew fault must not disturb.
     SlowSuccess,
+    /// `ToolOutcome::ok` after a delay well past one lease TTL — the case a
+    /// renew outage outlasting the miss budget must abort mid-body.
+    OutlastsLease,
 }
 
 struct ProbeTools {
@@ -106,6 +111,13 @@ impl ToolProvider for ProbeTools {
                 // Outlast several renew intervals (~667ms each under the 2s
                 // lease) so an armed renew fault lands while the body runs.
                 tokio::time::sleep(Duration::from_millis(2_200)).await;
+                ToolOutcome::ok(serde_json::json!({
+                    "echo": call.args.get("value").cloned().unwrap_or_default(),
+                }))
+                .into()
+            }
+            ProbeAnswer::OutlastsLease => {
+                tokio::time::sleep(Duration::from_millis(6_000)).await;
                 ToolOutcome::ok(serde_json::json!({
                     "echo": call.args.get("value").cloned().unwrap_or_default(),
                 }))
@@ -281,13 +293,13 @@ async fn tool_attempt_finalize_store_error_aborts_turn() {
     );
 }
 
-/// A store error on the lease renew — mid-body — aborts the call the same
-/// way. The abandoned execution still seals a `Failed` terminal recording the
-/// fault, so the redrive's claim replays that journaled failure as the
-/// attempt's recorded outcome (`tool_attempt_failed`, model-visible as
-/// today) instead of aborting again or re-running the body.
+/// A store error on the lease renew — mid-body — is a missed renewal, not a
+/// lost lease (FIG-3512): the lease TTL covers three renew intervals, so the
+/// renewal loop retries while the tool keeps running. The attempt completes
+/// with the tool's own outcome and seals it; nothing aborts and no
+/// `tool_attempt_failed` is recorded, and a redrive replays the success.
 #[tokio::test(flavor = "multi_thread")]
-async fn tool_attempt_renew_store_error_aborts_turn() {
+async fn tool_attempt_renew_store_error_within_budget_completes() {
     let Some((context, controller, calls, _lock)) = faulted_world(ProbeAnswer::SlowSuccess).await
     else {
         eprintln!("skipping the PostgreSQL store-fault law: LASH_POSTGRES_DATABASE_URL is not set");
@@ -296,38 +308,80 @@ async fn tool_attempt_renew_store_error_aborts_turn() {
     let faults = controller.replay_driver().journal_faults();
     faults.fail_next(EffectJournalFaultPoint::Renew, &attempt_replay_key(1));
 
-    assert_store_abort(&drive(&context).await);
-    assert!(faults.fired(), "the armed renew fault fired");
-    assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "the renew fault fired while the tool body was running"
-    );
-
-    // The `Failed` terminal the aborted execution sealed is the durable
-    // record: replaying it surfaces `tool_attempt_failed` rather than
-    // re-running the body or aborting the turn a second time (FIG-3528's
-    // "a recorded `Failed` terminal replayed for that tool stays
-    // model-visible").
     let launch = drive(&context).await;
     let ToolCallLaunch::Done(outcome) = launch else {
-        panic!("a recorded `Failed` terminal replays as a tool result: {launch:?}");
+        panic!("a renew error inside the miss budget must not abort the attempt: {launch:?}");
     };
-    let lash_core_execution::ToolCallOutcome::Failure(failure) = &outcome.record.output.outcome
-    else {
-        panic!("the journaled failure replays as a failure record: {outcome:?}");
+    assert!(
+        outcome.record.output.is_success(),
+        "the tool's own success is the attempt's outcome, not a recorded failure"
+    );
+    assert!(faults.fired(), "the armed renew fault fired");
+    assert!(
+        faults.calls_after_fire() >= 1,
+        "the renewal loop retried the failed renew while the body ran"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    // The sealed `Completed` terminal replays without re-running the body.
+    let launch = drive(&context).await;
+    let ToolCallLaunch::Done(replayed) = launch else {
+        panic!("a completed attempt replays as its recorded result: {launch:?}");
     };
-    assert_eq!(failure.code, "tool_attempt_failed");
+    assert!(replayed.record.output.is_success());
     assert_eq!(
         calls.load(Ordering::SeqCst),
         1,
-        "a recorded `Failed` terminal replays without re-executing the body"
+        "a recorded success replays without re-executing the body"
+    );
+}
+
+/// Renew errors that outlast the miss budget — no confirmed renewal for a
+/// full lease TTL — abort the call as a typed lease-lost controller error
+/// mid-body (FIG-3528's intent: nothing model-visible). No terminal is
+/// sealed: the row stays reclaimable, so once the store recovers a redrive
+/// re-runs the attempt to the tool's real outcome (FIG-3512, ADR 0042).
+#[tokio::test(flavor = "multi_thread")]
+async fn tool_attempt_renew_store_errors_past_budget_abort_turn() {
+    let Some((context, controller, calls, _lock)) = faulted_world(ProbeAnswer::OutlastsLease).await
+    else {
+        eprintln!("skipping the PostgreSQL store-fault law: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    let faults = controller.replay_driver().journal_faults();
+    faults.fail_until_healed(EffectJournalFaultPoint::Renew, &attempt_replay_key(1));
+
+    let launch = drive(&context).await;
+    let ToolCallLaunch::ControllerAborted(error) = &launch else {
+        panic!("renew errors past the budget must abort, not produce a tool result: {launch:?}");
+    };
+    assert_eq!(
+        error.code,
+        lash_core_execution::RuntimeErrorCode::PostgresEffectReplayLeaseLost,
+        "the abort carries the typed lease-lost controller error: {error:?}"
+    );
+    assert!(
+        faults.fires() >= 2,
+        "the budget tolerated missed renewals before giving the lease up"
     );
     assert_eq!(
-        faults.calls_after_fire(),
-        0,
-        "the faulted renew was never retried: its `Failed` terminal stands"
+        calls.load(Ordering::SeqCst),
+        1,
+        "the budget ran out while the tool body was running"
     );
+
+    // Nothing was sealed: the redrive reclaims the row once its lease lapses
+    // and re-runs the attempt to the tool's own outcome.
+    faults.heal();
+    let launch = drive(&context).await;
+    let ToolCallLaunch::Done(outcome) = launch else {
+        panic!("the redriven attempt must reach its own outcome: {launch:?}");
+    };
+    assert!(
+        outcome.record.output.is_success(),
+        "the redrive re-runs the attempt instead of replaying a sealed failure"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 /// The other half of the classification: a failure the tool *produced* is a

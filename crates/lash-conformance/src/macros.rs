@@ -1256,6 +1256,9 @@ macro_rules! effect_controller_lease_fencing_tests {
     ($fixture:block) => {
         $crate::effect_controller_lease_fencing_tests!(@catalogue $fixture; [
             (effect_controller_lease_fencing, "effect-controller-lease-fencing"),
+            (effect_lease_renew_transient_error_keeps_tool_running, "effect-lease-renew-transient-error"),
+            (effect_lease_renew_errors_past_budget_leave_row_reclaimable, "effect-lease-renew-budget-exhausted"),
+            (effect_lease_renew_stall_is_abandoned_at_the_deadline, "effect-lease-renew-stalled"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

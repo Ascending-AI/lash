@@ -118,6 +118,7 @@ pub use super::group_journal::{
 };
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
+use lease_renewal::ClaimedExecution;
 
 /// Delay between polls while another owner holds a live claim.
 const BUSY_POLL: Duration = Duration::from_millis(25);
@@ -1325,6 +1326,10 @@ fn group_child_cancel_decided(replay_key: &str) -> RuntimeEffectControllerError 
 struct ClaimedEffect {
     fence: EffectLeaseFence,
     due_at_ms: Option<u64>,
+    /// The monotonic instant the claim request was issued. The store stamps
+    /// the lease expiry no earlier than that instant plus the TTL, so the
+    /// renewal budget measured from here never overestimates the lease.
+    requested_at: Instant,
     /// The group this claim belongs to, when it does — carried from the claim
     /// request so the post-commit discharge can name it without re-reading the
     /// row.
@@ -1848,7 +1853,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                     let command_kind = envelope.command.kind();
                     let execution =
                         self.execute_claimed_effect_with_renewal(&claim, envelope, local_executor);
-                    let result = match cancel {
+                    let execution = match cancel {
                         None => execution.await,
                         Some(cancel) => {
                             tokio::pin!(execution);
@@ -1868,7 +1873,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                                         )
                                         .await
                                     {
-                                        Err(err) => Err(err),
+                                        Err(err) => ClaimedExecution::Finished(Err(err)),
                                         Ok(Some(arbitration))
                                             if matches!(
                                                 arbitration.commit_state,
@@ -1879,22 +1884,34 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                                             execution.await
                                         }
                                         _ => {
-                                            Err(child_cancelled_error(
-                                                cancel_membership
-                                                    .as_deref()
-                                                    .map_or("<ungrouped>", |membership| {
-                                                        membership.group_key.as_str()
-                                                    }),
-                                                cancel_membership
-                                                    .as_deref()
-                                                    .map_or(0, |membership| membership.position),
+                                            ClaimedExecution::Finished(Err(
+                                                child_cancelled_error(
+                                                    cancel_membership.as_deref().map_or(
+                                                        "<ungrouped>",
+                                                        |membership| membership.group_key.as_str(),
+                                                    ),
+                                                    cancel_membership
+                                                        .as_deref()
+                                                        .map_or(0, |membership| {
+                                                            membership.position
+                                                        }),
+                                                ),
                                             ))
                                         }
                                     }
                                 }
-                                result = &mut execution => result,
+                                execution = &mut execution => execution,
                             }
                         }
+                    };
+                    // A relinquished lease is not this execution's to seal:
+                    // the row stays `in_progress` under a lease that is gone
+                    // or about to expire, so the next claim of the address
+                    // re-executes the effect rather than replaying a
+                    // controller failure as its outcome.
+                    let result = match execution {
+                        ClaimedExecution::Finished(result) => result,
+                        ClaimedExecution::Relinquished(err) => return Err(err),
                     };
                     let finalize = self.finalize_effect(&claim, command_kind, &result).await;
                     return match (result, finalize) {
@@ -1961,6 +1978,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         {
             return Err(err);
         }
+        let requested_at = self.clock.now();
         match self.row_store.claim(&request).await? {
             EffectClaimObservation::Claimed { due_at_ms } => {
                 Ok(PreparedEffect::Claimed(ClaimedEffect {
@@ -1972,6 +1990,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                         lease_token: request.lease_token,
                     },
                     due_at_ms,
+                    requested_at,
                     group_key: request.group_key,
                 }))
             }
@@ -2196,52 +2215,6 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         }
     }
 
-    async fn renew_effect_lease(
-        &self,
-        fence: &EffectLeaseFence,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        #[cfg(feature = "testing")]
-        if let Some(err) =
-            self.take_journal_fault(EffectJournalFaultPoint::Renew, &fence.replay_key)
-        {
-            return Err(err);
-        }
-        if self
-            .row_store
-            .renew(fence, self.lease_timings.ttl_ms())
-            .await?
-        {
-            return Ok(());
-        }
-        Err(self.vocabulary().error(
-            EffectReplayFailure::LeaseLost,
-            format!(
-                "runtime effect replay lease was lost while executing scope `{}` replay key `{}`",
-                fence.scope_id, fence.replay_key
-            ),
-        ))
-    }
-
-    async fn execute_claimed_effect_with_renewal(
-        &self,
-        claim: &ClaimedEffect,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let renew_every = self.lease_timings.renew_interval();
-        let effect = self.execute_claimed_effect(claim, envelope, local_executor);
-        tokio::pin!(effect);
-
-        loop {
-            tokio::select! {
-                result = &mut effect => return result,
-                _ = self.clock.sleep(renew_every) => {
-                    self.renew_effect_lease(&claim.fence).await?;
-                }
-            }
-        }
-    }
-
     async fn execute_claimed_effect(
         &self,
         claim: &ClaimedEffect,
@@ -2386,6 +2359,7 @@ mod drain;
 mod groups;
 #[cfg(feature = "testing")]
 mod journal_faults;
+mod lease_renewal;
 #[cfg(feature = "testing")]
 pub use journal_faults::{EffectJournalFaultPoint, EffectJournalFaults};
 

@@ -63,6 +63,12 @@ struct EffectJournalFaultState {
     fired: AtomicBool,
     fired_notify: Notify,
     calls_after_fire: AtomicUsize,
+    /// Whether the armed fault stays armed after firing, failing every
+    /// matching call until [`EffectJournalFaults::heal`] (a store outage
+    /// rather than a single blip).
+    persistent: AtomicBool,
+    /// How many calls an armed fault has failed.
+    fires: AtomicUsize,
     /// This journal's `Store` vocabulary code: the code an injected error
     /// carries, so an observer can assert the exact code the caller sees.
     store_code: RuntimeErrorCode,
@@ -77,6 +83,8 @@ impl EffectJournalFaults {
                 fired: AtomicBool::new(false),
                 fired_notify: Notify::new(),
                 calls_after_fire: AtomicUsize::new(0),
+                persistent: AtomicBool::new(false),
+                fires: AtomicUsize::new(0),
                 store_code,
             }),
         }
@@ -84,7 +92,26 @@ impl EffectJournalFaults {
 
     /// Arm `point` to fail once on the next call for `replay_key`.
     pub fn fail_next(&self, point: EffectJournalFaultPoint, replay_key: &str) {
+        self.state.persistent.store(false, Ordering::SeqCst);
         *self.state.armed.lock_recover() = Some((point, replay_key.to_string()));
+    }
+
+    /// Arm `point` to fail every call for `replay_key` until [`heal`](Self::heal):
+    /// an outage that outlasts a retry budget, not a single blip.
+    pub fn fail_until_healed(&self, point: EffectJournalFaultPoint, replay_key: &str) {
+        self.state.persistent.store(true, Ordering::SeqCst);
+        *self.state.armed.lock_recover() = Some((point, replay_key.to_string()));
+    }
+
+    /// Disarm any armed fault; later calls reach the row store.
+    pub fn heal(&self) {
+        *self.state.armed.lock_recover() = None;
+        self.state.persistent.store(false, Ordering::SeqCst);
+    }
+
+    /// How many calls an armed fault has failed so far.
+    pub fn fires(&self) -> usize {
+        self.state.fires.load(Ordering::SeqCst)
     }
 
     /// The code an armed fault returns.
@@ -125,7 +152,10 @@ impl EffectJournalFaults {
             .as_ref()
             .is_some_and(|(armed_point, key)| *armed_point == point && key == replay_key)
         {
-            *armed = None;
+            if !self.state.persistent.load(Ordering::SeqCst) {
+                *armed = None;
+            }
+            self.state.fires.fetch_add(1, Ordering::SeqCst);
             *self.state.fired_for.lock_recover() = Some((point, replay_key.to_string()));
             self.state.fired.store(true, Ordering::SeqCst);
             self.state.fired_notify.notify_waiters();
