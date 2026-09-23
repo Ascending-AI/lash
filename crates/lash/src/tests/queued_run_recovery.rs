@@ -587,8 +587,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for ExhaustedWake {
 }
 
 #[tokio::test]
-async fn exhausted_queued_run_resumes_or_is_fenced_abandoned_without_new_input() -> Result<()> {
-    use lash_core::SessionStoreFactory as _;
+async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Result<()> {
     use tracing_subscriber::prelude::*;
     for abandon in [false, true] {
         let exhausted = Arc::new(tokio::sync::Notify::new());
@@ -626,7 +625,7 @@ async fn exhausted_queued_run_resumes_or_is_fenced_abandoned_without_new_input()
                     .await
                     .unwrap(),
                 ))
-                .store_factory(factory.clone())
+                .store_factory(factory)
                 .with_native_queued_work()
                 .native_substrate_config(lash_core::NativeSubstrateConfig {
                     work_cadence: lash_core::WorkCadencePolicy {
@@ -677,39 +676,17 @@ async fn exhausted_queued_run_resumes_or_is_fenced_abandoned_without_new_input()
         );
         probe.hook_release.add_permits(16);
         if abandon {
-            let store = factory
-                .open_existing_store_by_id(&SessionId::from("exhausted-queued-run"))
-                .await
-                .unwrap()
-                .unwrap();
-            let lease = store
-                .try_claim_session_execution_lease(
-                    &SessionId::from("exhausted-queued-run"),
-                    &crate::testing::runtime_lease_owner(),
-                    "host-disposition",
-                    60_000,
-                )
-                .await
-                .unwrap()
-                .acquired()
-                .expect("host acquires released lane");
             let receipt = session
-                .durable()
                 .abandon_queued_run(
-                    &lease.authority(),
                     pending.scope.clone(),
                     pending.revision,
-                    "host canceled failed submission".into(),
+                    "host canceled failed submission",
                 )
                 .await?;
             assert!(matches!(
                 receipt.terminal,
                 Some(lash_core::store::QueuedRunTerminal::Failed { .. })
             ));
-            store
-                .release_session_execution_lease(&lease.completion())
-                .await
-                .unwrap();
             let replay = session
                 .queued_turn()
                 .drain_id(pending.scope.id())
