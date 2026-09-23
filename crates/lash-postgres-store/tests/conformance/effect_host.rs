@@ -333,7 +333,7 @@ lash_conformance::migrated_tools_redrive_tests!({
     reset(storage.pool()).await;
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    let runner = lash_conformance::HostTurnRunner::new(Arc::clone(&host));
+    let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
     let orchestration: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
         Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
