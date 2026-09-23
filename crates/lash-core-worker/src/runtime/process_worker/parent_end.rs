@@ -8,21 +8,24 @@ fn page_bound() -> std::num::NonZeroUsize {
 }
 
 impl DurableProcessWorker {
-    /// Re-derive turn parent-end ledger rows a crash swallowed.
+    /// Re-derive opener parent-end ledger rows a crash swallowed.
     ///
-    /// A turn's ledger row is written immediately after the turn commit but
-    /// not inside it, because the session store and the process registry are
-    /// separate stores on every SQL tier. A crash in the gap would otherwise
-    /// leave `Cancel` children naming a turn that will never end again, so
-    /// recovery closes the window: the registry names the candidate scopes,
-    /// and the session that owns each candidate answers whether that turn's
-    /// commit is durable.
+    /// An opener's ledger row is written immediately after its end evidence —
+    /// the turn commit for a turn, the drain-end receipt for a queued-work
+    /// drain — but not inside it, because the session store and the process
+    /// registry are separate stores on every SQL tier. A crash in the gap
+    /// would otherwise leave `Cancel` children naming an owner that will
+    /// never end again, so recovery closes the window: the registry names the
+    /// candidate scopes, and the session that owns each candidate answers
+    /// whether that owner's end evidence is durable.
     ///
-    /// Only a committed turn gets a row. A turn that crashed before its own
+    /// Only an ended owner gets a row. A turn that crashed before its own
     /// commit is interrupted, not ended — the stop-backtracks-to-checkpoint
     /// rule drops its uncommitted tail so the turn replays and re-registers
-    /// exactly the children a sweep would have cancelled — so an uncommitted
-    /// candidate is left alone for the redrive and reconsidered next pass.
+    /// exactly the children a sweep would have cancelled — and a drain
+    /// interrupted before its epilogue is ended by its retry under the same
+    /// `drain_id` — so an unconfirmed candidate is left alone for the redrive
+    /// and reconsidered next pass.
     ///
     /// The pass is bounded and idempotent: `record_parent_end` preserves the
     /// first row, and a scope that already has one is never reported.
@@ -35,13 +38,13 @@ impl DurableProcessWorker {
     /// good. The cursor advances past everything this pass read, resolvable or
     /// not, and wraps to the start when a pass reads less than a full page, so
     /// a scope that becomes resolvable later is reconsidered on a later lap.
-    pub(super) async fn redrive_missing_turn_parent_end_rows(&self) -> Result<(), PluginError> {
+    pub(super) async fn redrive_missing_opener_parent_end_rows(&self) -> Result<(), PluginError> {
         let bound = page_bound();
         let mut cursor = self.parent_end_cursor.lock().await;
         let candidates = self
             .config
             .process_registry()
-            .list_unrecorded_turn_parents(cursor.as_deref(), bound)
+            .list_unrecorded_opener_parents(cursor.as_deref(), bound)
             .await?;
         // A short page means the scan reached the end of the candidate set, so
         // the next pass starts a new lap; a full page leaves the cursor on the
@@ -52,18 +55,41 @@ impl DurableProcessWorker {
         drop(cursor);
         let mut unopenable_sessions = 0usize;
         for parent in candidates {
-            let ParentScope::Owned(crate::EffectOpener::Turn {
-                session_id,
-                turn_id,
-            }) = &parent
-            else {
+            let ParentScope::Owned(opener) = &parent else {
                 continue;
             };
-            let Some(store) = self.open_session_store_for_read(session_id).await else {
-                unopenable_sessions += 1;
-                continue;
+            let (session_id, owner_label, confirmed) = match opener {
+                crate::EffectOpener::Turn {
+                    session_id,
+                    turn_id,
+                } => {
+                    let Some(store) = self.open_session_store_for_read(session_id).await else {
+                        unopenable_sessions += 1;
+                        continue;
+                    };
+                    (
+                        session_id,
+                        format!("turn:{turn_id}"),
+                        store.committed_turn_exists(turn_id).await,
+                    )
+                }
+                crate::EffectOpener::QueueDrain {
+                    session_id,
+                    drain_id,
+                } => {
+                    let Some(store) = self.open_session_store_for_read(session_id).await else {
+                        unopenable_sessions += 1;
+                        continue;
+                    };
+                    (
+                        session_id,
+                        format!("queue_drain:{drain_id}"),
+                        store.drain_end_exists(drain_id).await,
+                    )
+                }
+                crate::EffectOpener::Process { .. } => continue,
             };
-            match store.committed_turn_exists(turn_id).await {
+            match confirmed {
                 Ok(true) => {
                     self.config
                         .process_registry()
@@ -73,15 +99,16 @@ impl DurableProcessWorker {
                 // Interrupted, not ended: leave it for the redrive.
                 Ok(false) => {}
                 // A tier that writes the row inside the same durable execution
-                // as the turn commit has no window to re-derive, and reports no
-                // candidates; one that reports candidates must answer the read.
+                // as the end evidence has no window to re-derive, and reports
+                // no candidates; one that reports candidates must answer the
+                // read.
                 Err(crate::StoreError::UnsupportedStoreOperation { .. }) => {}
                 Err(error) => {
                     tracing::warn!(
                         session_id = %session_id,
-                        turn_id = %turn_id,
+                        owner = %owner_label,
                         error = %error,
-                        "committed-turn read failed; the parent-end row stays owed",
+                        "opener-end read failed; the parent-end row stays owed",
                     );
                 }
             }

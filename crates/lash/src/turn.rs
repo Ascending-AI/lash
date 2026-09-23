@@ -623,6 +623,12 @@ impl QueuedTurnBuilder {
     ///
     /// Persistence selects an identity when omitted. Explicit identities return
     /// their terminal receipt on later retries and never consume new arrivals.
+    ///
+    /// The drain is the durable owner of the children it starts, and its end
+    /// is its own write (ADR 0094, FIG-3419): the drain-end receipt and the
+    /// parent-end ledger row are keyed on this identity, so a retry under the
+    /// same `drain_id` is what completes an interrupted drain's end.
+    ///
     /// Do not combine this with [`Self::turn_id`].
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
         self.drain_id = Some(drain_id.into());

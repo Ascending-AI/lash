@@ -735,7 +735,10 @@ is defined as one applicator call per settled rank —
 whose `IncorporationLedger` makes the resumed re-run idempotent. The opener's
 own exit path supplying that applicator to the finalizer remains FIG-3397's
 obligation: the driver's finalizer runs on a `'static` host task and the
-execution context is `'run`-bound to the opener's turn.
+execution context is `'run`-bound to the opener's turn. The queue-drain
+epilogue is the first production caller of `resume_closing_groups`: a drain
+resumes its scope's closing groups before writing its own end
+(FIG-3419, ADR 0094's amendment).
 
 ---
 

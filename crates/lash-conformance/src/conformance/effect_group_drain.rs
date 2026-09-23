@@ -1724,7 +1724,7 @@ impl ExecutorAnswer {
 /// Answers are per group position, because the laws that put two drains in a
 /// race need one host to hold one child while another host reaches for a
 /// different one — a uniform answer cannot express that.
-pub(crate) struct RecordingExecutors {
+pub struct RecordingExecutors {
     asked: std::sync::Mutex<Vec<String>>,
     executed: ExecutionLog,
     by_position: Vec<ExecutorAnswer>,
@@ -1741,7 +1741,9 @@ impl RecordingExecutors {
         })
     }
 
-    pub(crate) fn settling() -> Arc<Self> {
+    /// The resolver a tier's group host registers: a law's staged executors
+    /// first, a settling answer for anything else.
+    pub fn settling() -> Arc<Self> {
         Self::uniform(ExecutorAnswer::Settle)
     }
 

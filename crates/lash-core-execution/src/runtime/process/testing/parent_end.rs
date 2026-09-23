@@ -116,12 +116,13 @@ pub(super) async fn get(
     Ok(state.parent_end_plans.get(&key).cloned())
 }
 
-/// Turn scopes with live `Cancel` children and no ledger row yet.
+/// Turn and queue-drain scopes with live `Cancel` children and no ledger row
+/// yet.
 ///
 /// The in-memory mirror of the SQL candidate query the parent-end recovery
-/// sweep pages: a crash between a turn's commit and its ledger row leaves
-/// exactly this shape.
-pub(super) async fn list_unrecorded_turn_parents(
+/// sweep pages: a crash between an opener's end evidence and its ledger row
+/// leaves exactly this shape.
+pub(super) async fn list_unrecorded_opener_parents(
     registry: &TestLocalProcessRegistry,
     after: Option<&str>,
     limit: NonZeroUsize,
@@ -136,7 +137,9 @@ pub(super) async fn list_unrecorded_turn_parents(
                 && managed.record.cancel_request.is_none()
                 && matches!(
                     managed.record.lifecycle.parent,
-                    ParentScope::Owned(crate::EffectOpener::Turn { .. })
+                    ParentScope::Owned(
+                        crate::EffectOpener::Turn { .. } | crate::EffectOpener::QueueDrain { .. }
+                    )
                 )
         })
         .filter_map(|managed| {
@@ -145,7 +148,7 @@ pub(super) async fn list_unrecorded_turn_parents(
             if after.is_some_and(|after| key.1.as_str() <= after) {
                 return None;
             }
-            (!state.parent_end_plans.contains_key(&key)).then(|| (key.1, parent.clone()))
+            (!state.parent_end_plans.contains_key(&key)).then(|| (key, parent.clone()))
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|(left, _), (right, _)| left.cmp(right));

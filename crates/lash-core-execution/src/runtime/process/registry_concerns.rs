@@ -567,16 +567,17 @@ pub trait ProcessLifecycle: Send + Sync {
     /// Mark one ledger row settled. Repetition is idempotent.
     async fn settle_parent_end_plan(&self, parent: &crate::ParentScope) -> Result<(), PluginError>;
 
-    /// Page turn parent scopes that still owe a ledger row.
+    /// Page turn and queue-drain parent scopes that still owe a ledger row.
     ///
     /// A turn's ledger row is written immediately after the turn commit rather
-    /// than inside it, because a session store and a process registry are
-    /// separate stores on every SQL tier. A crash between the two leaves live
-    /// children naming a turn that will never end again, so recovery re-derives
-    /// the row: these are the candidates, and the caller decides which of them
-    /// actually committed before writing anything.
+    /// than inside it, and a drain's row after its end receipt, because a
+    /// session store and a process registry are separate stores on every SQL
+    /// tier. A crash between the two leaves live children naming an owner that
+    /// will never end again, so recovery re-derives the row: these are the
+    /// candidates, and the caller decides which of them actually ended before
+    /// writing anything.
     ///
-    /// Returns distinct turn-owned `ParentScope`s named by at least one
+    /// Returns distinct owned `ParentScope`s named by at least one
     /// nonterminal child row and carrying no ledger row, ordered by scope id,
     /// resumed strictly after `after` and bounded by `limit`.
     ///
@@ -584,13 +585,13 @@ pub trait ProcessLifecycle: Send + Sync {
     /// candidate can be unresolvable for a long time — an uncommitted turn
     /// that is never redriven, a session whose store this worker cannot open —
     /// and without a cursor a full page of such scopes would occupy every pass
-    /// forever, so no later turn's row would ever be re-derived.
+    /// forever, so no later scope's row would ever be re-derived.
     ///
     /// The default is the empty page, which is the correct answer for a tier
-    /// whose turn commit and ledger row are steps of one durable execution:
+    /// whose end evidence and ledger row are steps of one durable execution:
     /// the substrate replays the second step, so there is no window to
     /// re-derive and no candidate to report.
-    async fn list_unrecorded_turn_parents(
+    async fn list_unrecorded_opener_parents(
         &self,
         after: Option<&str>,
         limit: NonZeroUsize,

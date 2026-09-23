@@ -265,6 +265,8 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
 
 #[path = "conformance/direct_turn_acceptance.rs"]
 mod direct_turn_acceptance;
+#[path = "conformance/drain_end.rs"]
+mod drain_end;
 #[path = "conformance/pre_frame_key.rs"]
 mod pre_frame_key;
 #[path = "conformance/pre_sleep_spec.rs"]

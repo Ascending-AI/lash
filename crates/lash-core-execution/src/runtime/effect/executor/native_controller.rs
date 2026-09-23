@@ -1725,6 +1725,18 @@ impl StoreEffectGroupClosing for NativeGroupClosing {
         NativeEffectGroups::finalize(&self.groups, group_key, steps).await
     }
 
+    async fn scope_is_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        // The in-memory twin: no journal rows exist here, so the scope's
+        // still-live work reduces to the grouped children the supervisor
+        // itself counts — a group short of a journaled child is an open seat,
+        // and a closed one's draining losers stay counted until each records
+        // its terminal (the same halves `scope_is_quiescent` covers on SQL).
+        Ok(self.groups.unsettled_children_under(scope) == 0)
+    }
+
     async fn resume_closing_groups(
         &self,
         scope: &ExecutionScope,

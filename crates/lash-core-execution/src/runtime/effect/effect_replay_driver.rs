@@ -817,11 +817,7 @@ pub fn decide_effect_claim(
 /// `lash-sqlite-store` and `lash-postgres-store`, so a crate-private supertrait
 /// would exclude them too. What the seal buys is that the backends-only intent
 /// is in the type system instead of only in prose.
-pub mod sealed {
-    /// Marker every [`EffectReplayRowStore`](super::EffectReplayRowStore)
-    /// implementation must also carry. See [the seal](super::sealed).
-    pub trait EffectReplayBackend {}
-}
+pub mod sealed;
 
 /// Atomic row operations a durable substrate must provide to journal effects.
 ///
@@ -1287,6 +1283,14 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     /// is written; the re-registered scope starts with the empty journal its
     /// prune left.
     async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError>;
+
+    /// The `WhenQuiescent` retirement proof as a standalone read: `true` when
+    /// `scope` carries no `in_progress` effect row, no group still short of a
+    /// journaled child, and no unresolved promise. Unlike the gate inside
+    /// [`retire_journal`](Self::retire_journal) this read takes no scope lock:
+    /// the caller is deciding whether to write an owner's end fact (FIG-3419),
+    /// not deleting the scope, so it needs the answer without the exclusion.
+    async fn scope_is_quiescent(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError>;
 }
 
 /// The refusal a quiescence-gated retirement reports for a scope that still

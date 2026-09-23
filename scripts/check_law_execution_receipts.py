@@ -2,7 +2,8 @@
 """Fail when a registered conformance law left no execution receipt.
 
 Registration is static: every ``(law, "label")`` row in a ``*_tests!``
-catalogue in ``crates/lash-conformance/src/macros.rs`` expands into a
+catalogue under ``crates/lash-conformance/src/`` (``macros.rs`` holds most of
+them; a suite may declare its catalogue beside its laws) expands into a
 ``#[tokio::test]`` in whichever backend test binary invokes the macro.  Until
 FIG-3429 item 8, nothing observed the other side: a generated test can finish
 green without the law ever running -- the fixture self-skips on a missing
@@ -76,10 +77,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MACROS = ROOT / "crates/lash-conformance/src/macros.rs"
-ADDITIONAL_MACRO_FILES = (
-    ROOT / "crates/lash-conformance/src/effect_host_macros.rs",
-    ROOT / "crates/lash-conformance/src/response_derivation_macros.rs",
-)
+CONFORMANCE_SRC = ROOT / "crates/lash-conformance/src"
 WORKSPACE_TARGETS = ROOT / "tools/bazel/workspace_targets.bzl"
 DEFERRED_MANIFEST = ROOT / "scripts/deferred-law-invocations.toml"
 RECEIPT_NAME = "law-receipts.txt"
@@ -197,9 +195,22 @@ def macro_blocks(text: str) -> dict[str, Macro]:
 
 
 def load_macros() -> dict[str, Macro]:
-    """Read every source file that exports a conformance law catalogue."""
-    paths = (MACROS, *ADDITIONAL_MACRO_FILES)
-    return macro_blocks("\n".join(path.read_text(encoding="utf-8") for path in paths))
+    """Every ``*_tests!`` catalogue definition the census owes against.
+
+    ``macros.rs`` first, then each other source under the conformance crate
+    that defines a suite macro, in path order. A catalogue declared beside its
+    laws, or split out to keep ``macros.rs`` inside its size budget, is as much
+    a registration as one in ``macros.rs``; a hand-kept file list silently
+    rejects every receipt of a suite it omits as misclaimed.
+    """
+    texts = [MACROS.read_text(encoding="utf-8")]
+    for path in sorted(CONFORMANCE_SRC.rglob("*.rs")):
+        if path == MACROS:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if SUITE_DEFINE.search(text):
+            texts.append(text)
+    return macro_blocks("\n".join(texts))
 
 
 def arm_rows(arm_body: str) -> set[tuple[str, str]]:

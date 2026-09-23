@@ -18,6 +18,21 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(exists)
     }
 
+    async fn drain_end_exists(&self, drain_id: &str) -> Result<bool, StoreError> {
+        let key = lash_core::store_backend_support::drain_end_receipt_storage_key(
+            &self.session_id,
+            drain_id,
+        )?;
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let exists: bool = sqlx::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
+            .bind(self.session_id.as_str())
+            .bind(&key)
+            .fetch_one(connection.as_mut())
+            .await
+            .map_err(store_sqlx_error)?;
+        Ok(exists)
+    }
+
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;

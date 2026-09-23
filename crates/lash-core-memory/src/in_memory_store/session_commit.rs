@@ -25,6 +25,18 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .contains_key(&(session_id, key)))
     }
 
+    async fn drain_end_exists(&self, drain_id: &str) -> Result<bool, crate::StoreError> {
+        let Some(session_id) = self.bound_session_id.lock_recover().clone() else {
+            return Ok(false);
+        };
+        let key =
+            crate::store_backend_support::drain_end_receipt_storage_key(&session_id, drain_id)?;
+        Ok(self
+            .runtime_turn_commits
+            .lock_recover()
+            .contains_key(&(session_id, key)))
+    }
+
     async fn admit_session_state(
         &self,
         lease: &crate::SessionExecutionLeaseAuthority,

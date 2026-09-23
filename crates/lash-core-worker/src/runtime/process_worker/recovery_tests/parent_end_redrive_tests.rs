@@ -206,7 +206,7 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
     commit_turn(&factory, "committed-turn", 0).await;
 
     worker
-        .redrive_missing_turn_parent_end_rows()
+        .redrive_missing_opener_parent_end_rows()
         .await
         .expect("re-derive the missing ledger rows");
 
@@ -243,7 +243,7 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
     // A second pass is a no-op: the settled row is never re-derived, and the
     // cancelled child keeps the first request's origin.
     worker
-        .redrive_missing_turn_parent_end_rows()
+        .redrive_missing_opener_parent_end_rows()
         .await
         .expect("second redrive pass");
     worker
@@ -302,7 +302,7 @@ async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() 
     commit_turn(&factory, "zz-committed-turn", 0).await;
 
     worker
-        .redrive_missing_turn_parent_end_rows()
+        .redrive_missing_opener_parent_end_rows()
         .await
         .expect("first pass reads a full page of stuck scopes");
     assert!(
@@ -315,7 +315,7 @@ async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() 
     );
 
     worker
-        .redrive_missing_turn_parent_end_rows()
+        .redrive_missing_opener_parent_end_rows()
         .await
         .expect("second pass resumes after the cursor");
     assert!(
@@ -343,7 +343,7 @@ async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() 
     // on the next pass only because the wrap happened.
     commit_turn(&factory, "stuck-turn-000", 1).await;
     worker
-        .redrive_missing_turn_parent_end_rows()
+        .redrive_missing_opener_parent_end_rows()
         .await
         .expect("the pass after a short page starts a new lap");
     assert!(

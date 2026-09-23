@@ -572,11 +572,11 @@ fn native_authority_retains_attempt_correlation_without_restate_identity() {
     assert_eq!(context.admitted_process_attempt(), Some(3));
 }
 
-/// A queued-work drain admits a host lifecycle parent until FIG-3419 lands the
-/// drain-end protocol that lets a drain own durable children — the derivation
-/// must not silently borrow the session's current turn.
+/// A queued-work drain is a durable owner with an end protocol (FIG-3419), so
+/// a child it starts parents on the drain itself — the derivation must not
+/// silently borrow the session's current turn.
 #[tokio::test]
-async fn a_child_started_from_a_queued_drain_parents_on_the_host() {
+async fn a_child_started_from_a_queued_drain_parents_on_the_drain() {
     let context = scoped_context(
         "session-1",
         crate::AdmittedScope::queue_drain("session-1", "drain-3"),
@@ -584,7 +584,7 @@ async fn a_child_started_from_a_queued_drain_parents_on_the_host() {
     assert_eq!(
         context
             .child_process_parent_scope()
-            .expect("a queued drain admits a host parent until FIG-3419"),
-        crate::ParentScope::Host,
+            .expect("a queued drain admits its own parent scope"),
+        crate::ParentScope::queue_drain("session-1", "drain-3"),
     );
 }

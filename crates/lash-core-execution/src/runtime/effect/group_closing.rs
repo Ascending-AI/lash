@@ -167,4 +167,18 @@ pub trait StoreEffectGroupClosing: Send + Sync {
         scope: &ExecutionScope,
         steps: &dyn OpenerFinalizationSteps,
     ) -> Result<Vec<GroupFinalizationReport>, RuntimeEffectControllerError>;
+
+    /// Whether `scope`'s journal is quiescent — no `in_progress` effect row,
+    /// no group still short of a journaled child, no unresolved promise.
+    ///
+    /// The same proof the `WhenQuiescent` retirement gate takes, exposed as a
+    /// read so an owner's end can be withheld while the scope still owes work
+    /// (FIG-3419: a queue drain ends only over a quiescent scope). Unlike the
+    /// gate this is a read, not a fence: the caller is deciding whether to
+    /// write an end fact, not deleting the scope, so it needs the answer
+    /// without the exclusion a retirement holds.
+    async fn scope_is_quiescent(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<bool, RuntimeEffectControllerError>;
 }

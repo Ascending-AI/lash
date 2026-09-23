@@ -227,6 +227,12 @@ impl EffectHost for StoreDelegatedTurnControlHost {
         self.owner.scoped_for_group_child(admitted, binding)
     }
 
+    fn effect_group_closing(
+        &self,
+    ) -> Option<Arc<dyn crate::runtime::effect::group_closing::StoreEffectGroupClosing>> {
+        self.owner.effect_group_closing()
+    }
+
     fn await_event_resolver(&self) -> &dyn crate::AwaitEventResolver {
         self
     }

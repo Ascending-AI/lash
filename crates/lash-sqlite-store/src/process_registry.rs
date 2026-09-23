@@ -860,12 +860,12 @@ impl lash_core::ProcessLifecycle for SqliteProcessRegistry {
         parent_end::settle(self, parent).await
     }
 
-    async fn list_unrecorded_turn_parents(
+    async fn list_unrecorded_opener_parents(
         &self,
         after: Option<&str>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<lash_core::ParentScope>, lash_core::PluginError> {
-        parent_end::list_unrecorded_turn_parents(self, after, limit).await
+        parent_end::list_unrecorded_opener_parents(self, after, limit).await
     }
 
     async fn record_first_started_with_authority(
