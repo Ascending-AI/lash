@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/remote-session-observation-event/v93",
+  "$id": "https://lash.dev/schemas/remote-session-observation-event/v94",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "EffectAddress": {
@@ -2809,6 +2809,6 @@
   ],
   "title": "RemoteSessionObservationEvent",
   "type": "object",
-  "x-lash-schema-version": 93,
+  "x-lash-schema-version": 94,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

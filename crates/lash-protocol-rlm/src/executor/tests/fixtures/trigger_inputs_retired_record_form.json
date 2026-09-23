@@ -2,8 +2,8 @@
   "artifact": {
     "exports": {
       "processes": {
-        "__process_d19384a1c0d885adca83032865668345bb608f11d8955d04efcaf777f5046fa2": {
-          "component": "282b6322080637262409738bedbe2cb2647a9eb0f3b2a131630fff3c759bbf9d",
+        "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {
+          "component": "4dadd524df34d3a43319a8104d6d08efa03cb62a602d94b79ae8bc439d4eadae",
           "pos": 0
         }
       }
@@ -132,7 +132,7 @@
         }
       }
     },
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37985e23de3515904abdeb7281986d4a28a20c2985bbf761e9acafa15425d8d9",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:a35dc68588158dc49f81c9fb6814f90919a99f2c705e9a3573a0f063f8614bba",
     "ir": {
       "declarations": [
         {
@@ -195,7 +195,7 @@
                 }
               }
             },
-            "name": "__process_d19384a1c0d885adca83032865668345bb608f11d8955d04efcaf777f5046fa2",
+            "name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
             "origin": {
               "hidden_params": 0,
               "kind": "lifted",
@@ -230,7 +230,7 @@
             "Assign": {
               "expr": {
                 "ProcessRef": {
-                  "process": "__process_d19384a1c0d885adca83032865668345bb608f11d8955d04efcaf777f5046fa2"
+                  "process": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf"
                 }
               },
               "target": {
@@ -355,25 +355,25 @@
         ]
       }
     },
-    "module_ref": "lashlang:v2:blake3:d5531af77e6c5cfc42163cc9a92c3c49d3858e060b7e8193402464e7c4ae5891"
+    "module_ref": "lashlang:v2:blake3:5bf05d5ee83645680e1f001a4c2a6f3c588edb36fb9a8b66d6de5f3e5bc7a242"
   },
   "compiled_program_debug": "CompiledProgram { instruction_count: 21, compile_stats: CompileStats { type_literals_total: 0, type_literals_const_folded: 0, type_literals_dynamic: 0, type_ref_sites: 0 } }",
   "exports": {
     "processes": {
-      "__process_d19384a1c0d885adca83032865668345bb608f11d8955d04efcaf777f5046fa2": {
-        "component": "282b6322080637262409738bedbe2cb2647a9eb0f3b2a131630fff3c759bbf9d",
+      "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {
+        "component": "4dadd524df34d3a43319a8104d6d08efa03cb62a602d94b79ae8bc439d4eadae",
         "pos": 0
       }
     }
   },
-  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37985e23de3515904abdeb7281986d4a28a20c2985bbf761e9acafa15425d8d9",
-  "module_ref": "lashlang:v2:blake3:d5531af77e6c5cfc42163cc9a92c3c49d3858e060b7e8193402464e7c4ae5891",
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:a35dc68588158dc49f81c9fb6814f90919a99f2c705e9a3573a0f063f8614bba",
+  "module_ref": "lashlang:v2:blake3:5bf05d5ee83645680e1f001a4c2a6f3c588edb36fb9a8b66d6de5f3e5bc7a242",
   "process_definition_identity": {
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37985e23de3515904abdeb7281986d4a28a20c2985bbf761e9acafa15425d8d9",
-    "module_ref": "lashlang:v2:blake3:d5531af77e6c5cfc42163cc9a92c3c49d3858e060b7e8193402464e7c4ae5891",
-    "process_name": "__process_d19384a1c0d885adca83032865668345bb608f11d8955d04efcaf777f5046fa2",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:a35dc68588158dc49f81c9fb6814f90919a99f2c705e9a3573a0f063f8614bba",
+    "module_ref": "lashlang:v2:blake3:5bf05d5ee83645680e1f001a4c2a6f3c588edb36fb9a8b66d6de5f3e5bc7a242",
+    "process_name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
     "process_ref": {
-      "component": "282b6322080637262409738bedbe2cb2647a9eb0f3b2a131630fff3c759bbf9d",
+      "component": "4dadd524df34d3a43319a8104d6d08efa03cb62a602d94b79ae8bc439d4eadae",
       "pos": 0
     }
   },
@@ -469,11 +469,11 @@
       "kind": "lashlang",
       "payload": {
         "args": {},
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37985e23de3515904abdeb7281986d4a28a20c2985bbf761e9acafa15425d8d9",
-        "module_ref": "lashlang:v2:blake3:d5531af77e6c5cfc42163cc9a92c3c49d3858e060b7e8193402464e7c4ae5891",
-        "process_name": "__process_d19384a1c0d885adca83032865668345bb608f11d8955d04efcaf777f5046fa2",
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:a35dc68588158dc49f81c9fb6814f90919a99f2c705e9a3573a0f063f8614bba",
+        "module_ref": "lashlang:v2:blake3:5bf05d5ee83645680e1f001a4c2a6f3c588edb36fb9a8b66d6de5f3e5bc7a242",
+        "process_name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
         "process_ref": {
-          "component": "282b6322080637262409738bedbe2cb2647a9eb0f3b2a131630fff3c759bbf9d",
+          "component": "4dadd524df34d3a43319a8104d6d08efa03cb62a602d94b79ae8bc439d4eadae",
           "pos": 0
         }
       },
@@ -483,11 +483,11 @@
       "definition": {
         "definition": {
           "$lash_process": true,
-          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:37985e23de3515904abdeb7281986d4a28a20c2985bbf761e9acafa15425d8d9",
-          "module_ref": "lashlang:v2:blake3:d5531af77e6c5cfc42163cc9a92c3c49d3858e060b7e8193402464e7c4ae5891",
-          "process_name": "__process_d19384a1c0d885adca83032865668345bb608f11d8955d04efcaf777f5046fa2",
+          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:a35dc68588158dc49f81c9fb6814f90919a99f2c705e9a3573a0f063f8614bba",
+          "module_ref": "lashlang:v2:blake3:5bf05d5ee83645680e1f001a4c2a6f3c588edb36fb9a8b66d6de5f3e5bc7a242",
+          "process_name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
           "process_ref": {
-            "component": "282b6322080637262409738bedbe2cb2647a9eb0f3b2a131630fff3c759bbf9d",
+            "component": "4dadd524df34d3a43319a8104d6d08efa03cb62a602d94b79ae8bc439d4eadae",
             "pos": 0
           }
         },
@@ -497,9 +497,9 @@
         }
       },
       "kind": "lashlang",
-      "label": "__process_d19384a1c0d885adca83032865668345bb608f11d8955d04efcaf777f5046fa2"
+      "label": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf"
     },
-    "target_label": "__process_d19384a1c0d885adca83032865668345bb608f11d8955d04efcaf777f5046fa2",
+    "target_label": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
     "wake_target": {
       "agent_frame_id": "test-frame",
       "session_id": "test-session"

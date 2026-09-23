@@ -1,6 +1,7 @@
-//! FIG-3571 is a clean cutover: process state written before it is refused
-//! with a typed terminal before any effect, never re-driven under the carrier
-//! IR's node ids.
+//! Under the current, temporary cutover policy, process state written before
+//! FIG-3571 is refused with a typed terminal before any effect, never
+//! re-driven under the carrier IR's node ids. The refusals name the old
+//! version, so a later migration or drain can identify that state.
 //!
 //! Each case runs `run_lashlang_process` on the real predecessor bytes behind
 //! an effect controller that counts every crossing, and asserts the run ends

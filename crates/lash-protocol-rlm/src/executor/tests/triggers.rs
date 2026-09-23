@@ -690,9 +690,11 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         // `const` the source spells. The derivation is unchanged; its input
         // moved with the dialect. Re-pinned again by FIG-3571: the target's
         // definition names the artifact that carries the linked program
-        // verbatim, so its module ref moved; the derivation is unchanged.
+        // verbatim, so its module ref moved; the derivation is unchanged. The
+        // FIG-3571 cutover moved it once more with the semantic hash version
+        // and the lifted-process name domain.
         let expected_key =
-            "derived/v3/4a0bc47a9f800bb2578eb69958bed2a1abd438fd22e7ca0963dfe298971c8bed";
+            "derived/v3/9579ddf94026db8f3517f8e16148c3a089d710c7efbbeffb4f74744a5b90f1dd";
         // The fixture's production effect address gives the deferred-resolution
         // journal its link identity, so the journaled resolution production
         // always wrote is now the first envelope; the register is the second.
@@ -1653,6 +1655,11 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// `source` and `handle` are spelled as authored again, the lifted process
 /// records its origin, and the module ref, the lifted name and the
 /// registration identity moved with them. The compiled program is unchanged.
+///
+/// The FIG-3571 cutover re-pinned them once more: `LASHLANG_SEMANTIC_HASH_VERSION`
+/// moved to `v17` and the lifted-process name domain to `v2`, so the lifted
+/// name, the module and host-requirement hashes and the registration identity
+/// moved. The canonical IR is otherwise byte-identical.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"

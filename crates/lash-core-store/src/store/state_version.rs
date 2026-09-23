@@ -13,8 +13,10 @@ pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 3;
 /// continuation was written under the retired lashlang node vocabulary: its
 /// cells' globals follow the old export rules and its journaled effects carry
 /// replay keys under the old node ids, so a redrive would miss them and
-/// dispatch again. Generation-2 sessions are refused at lease admission and
-/// recovery, before any turn, model, tool or provider effect.
+/// dispatch again. Under the current, temporary cutover policy, generation-2
+/// sessions are refused at lease admission and recovery, before any turn,
+/// model, tool or provider effect; the refusal names the found generation so
+/// a later migration or drain can identify them.
 pub const CURRENT_SESSION_STATE_VERSION: u32 = 3;
 
 /// Successful lease-fenced admission of one complete session-state generation.

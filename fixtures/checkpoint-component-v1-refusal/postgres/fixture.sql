@@ -1225,7 +1225,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('dur
 -- Data for Name: lash_session_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 2, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 3, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 
 --

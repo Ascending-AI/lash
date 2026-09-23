@@ -264,7 +264,11 @@ pub use usage_activity::*;
 // turn whose accepted input waits behind the claim bound returns a report
 // with `RemoteTurnOutcome::Queued { ahead }` instead of an error. A window-92
 // peer refuses the unknown tags, so peers must adopt 93.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 93;
+// Window 94: FIG-3571 moves the trace records a process observation carries
+// to trace schema 34, keyed by the carrier IR's node ids. A window-93 peer
+// refuses a schema-34 record at its trace version gate, and the published v93
+// item document names schema 33, so peers must adopt 94.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 94;
 
 /// One versioned remote-protocol message.
 ///

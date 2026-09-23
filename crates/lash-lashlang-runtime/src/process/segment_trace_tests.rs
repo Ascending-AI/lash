@@ -811,9 +811,10 @@ fn predecessor_segment_with_old_node_id_occurrence_counters_is_refused() {
     assert!(message.contains("recreate development/test stores"));
 }
 
-/// FIG-3571 is a clean cutover: a segment parked by the pre-cutover writer is
-/// refused at both of its fences — program identity and segment version —
-/// and is never restored under the carrier IR's node ids.
+/// Under the current, temporary cutover policy, a segment parked by the
+/// pre-FIG-3571 writer is refused at both of its fences — program identity and
+/// segment version, which names the old version — and is never restored under
+/// the carrier IR's node ids.
 #[test]
 fn pre_fig3571_parked_segment_is_refused_at_both_fences() {
     let fixture: serde_json::Value = serde_json::from_slice(SEGMENT_V17_PARKED_PRE_FIG3571)

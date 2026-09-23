@@ -154,7 +154,7 @@ fn node_failure_requires_typed_provenance_and_preserves_recorded_retry() {
 fn schema_14_trace_is_refused_before_typed_cell_failure_decode() {
     assert_eq!(
         lash_trace::TRACE_SCHEMA_VERSION,
-        33,
+        34,
         "current trace schema pin"
     );
     let predecessor = r#"{"schema_version":14,"id":"v14-cell-failure","timestamp":"2026-09-02T09:00:00+00:00","context":{},"type":"exec_code_completed","duration_ms":12,"output":"","output_chars":0,"observation_count":0,"observation_projections":[],"error":"host unavailable","terminal_finish":null,"tool_calls":[]}"#;
@@ -172,7 +172,7 @@ fn pre_frame_key_trace_schema_is_rejected_with_literal_versions() {
         lash_trace::ensure_trace_schema_version(3),
         Err(lash_trace::TraceSchemaVersionError {
             actual: 3,
-            expected: 33,
+            expected: 34,
         })
     );
 }
@@ -2281,7 +2281,7 @@ fn language_execution_records() -> Vec<TraceRecord> {
 #[test]
 fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-record/v33.schema.json"
+        "../../../schemas/host/trace-record/v34.schema.json"
     ))
     .expect("published trace schema");
     let context = TraceContext {
@@ -2312,7 +2312,7 @@ fn published_trace_record_schema_accepts_every_event_and_payload_sample() {
 #[test]
 fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_variants() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-record/v33.schema.json"
+        "../../../schemas/host/trace-record/v34.schema.json"
     ))
     .expect("published trace schema");
     let record = TraceRecord::new(
@@ -2343,7 +2343,7 @@ fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_v
 #[test]
 fn published_graph_schema_accepts_a_folded_snapshot_and_enforces_its_row() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-lashlang-graph/v33.schema.json"
+        "../../../schemas/host/trace-lashlang-graph/v34.schema.json"
     ))
     .expect("published trace schema");
     let graph = lash_trace::TraceLashlangGraphStore::fold(None, &language_execution_records())
