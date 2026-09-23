@@ -739,11 +739,16 @@ async fn fig1293_crash_and_redrive(
 /// incorporated prefix — reads as what it is, and a duplicated identity cannot
 /// hide in a total: the three group children (`cancel_process`, `spawn_agent`
 /// and the orchestrating `batch`), the spawn boundary's start and await, the
-/// batch body's two echo attempts, and the turn's own steps, each exactly once.
+/// batch body's two echo attempts, and the turn's own steps (its acceptance and
+/// the journaled initial drive set it claims, ADR 0069 §6), each exactly once.
 const FIG1293_MIGRATED_SESSION_ROWS: &[(&str, &str)] = &[
     ("accept_turn_input", "fig1293-restate-migrated-turn.accept"),
     ("checkpoint", "4"),
     ("checkpoint", "7"),
+    (
+        "claim_accepted_turn_input",
+        "fig1293-restate-migrated-turn.accept.claim_accepted_turn_input",
+    ),
     (
         "incorporate_group_settlements",
         "effect-group-incorporate:fig1293-restate-migrated-turn:group:fig1293-restate-migrated-tools:fig1293-restate-migrated-turn:1:0:tool_batch:3:1-3",
