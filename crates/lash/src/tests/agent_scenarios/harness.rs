@@ -748,34 +748,55 @@ async fn assert_remote_process_dto_surface(
             .expect("remote process record should convert back");
         assert_eq!(round_trip_record.id, process_id);
 
-        let events = registry
-            .recent_events(&process_id, 32)
+        let outcome = registry
+            .event_page_ref(
+                &process_ref,
+                std::num::NonZeroUsize::new(32).expect("nonzero page limit"),
+                lash_core::ProcessEventQueryMode::Full,
+                None,
+            )
             .await
-            .expect("load process event tail for remote DTO round trip");
-        let expected_tail = events
+            .expect("load process event page for remote DTO round trip");
+        let lash_core::ProcessEventReadOutcome::Retained(page) = &outcome else {
+            panic!("a live process's history is retained");
+        };
+        let lash_core::ProcessEventPageEvents::Full(page_events) = &page.events else {
+            panic!("a full projection returns full events");
+        };
+        let expected_tail = page_events
             .iter()
             .map(|event| (event.sequence, event.event_type.clone()))
             .collect::<Vec<_>>();
+        let expected_more = page.more.clone();
         let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::try_from((
             process_ref.clone(),
-            events,
+            outcome,
         ))
-        .expect("process events serialize for the remote protocol");
+        .expect("process events page serializes for the remote protocol");
         remote_events
             .validate()
-            .expect("remote process event tail should validate");
-        let (round_trip_process_ref, round_trip_events): (
+            .expect("remote process event page should validate");
+        let (round_trip_process_ref, round_trip_outcome): (
             lash_core::ProcessRef,
-            Vec<lash_core::ProcessEvent>,
+            lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
         ) = remote_events
             .try_into()
-            .expect("remote process event tail should convert back");
+            .expect("remote process event page should convert back");
+        let lash_core::ProcessEventReadOutcome::Retained(round_trip_page) = &round_trip_outcome
+        else {
+            panic!("round trip preserves the retained page");
+        };
+        let lash_core::ProcessEventPageEvents::Full(round_trip_events) = &round_trip_page.events
+        else {
+            panic!("round trip preserves the full projection");
+        };
         let round_trip_tail = round_trip_events
             .iter()
             .map(|event| (event.sequence, event.event_type.clone()))
             .collect::<Vec<_>>();
         assert_eq!(round_trip_process_ref, process_ref);
         assert_eq!(round_trip_tail, expected_tail);
+        assert_eq!(round_trip_page.more, expected_more);
     }
 }
 

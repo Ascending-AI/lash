@@ -2,6 +2,7 @@ pub use lash_core_store::process_identity::*;
 use lash_sansio::{CancelOrigin, CancelRequest};
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::model::{ProcessId, ProcessObserverBy, RecoveryContract};
@@ -553,7 +554,7 @@ pub struct ProcessEvent {
 }
 
 /// Payload projection selected for a bounded process-event page.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessEventQueryMode {
     /// Return the complete durable event, including its JSON payload.
@@ -741,15 +742,21 @@ impl ProcessEventPageTokenStoreExt for ProcessEventPageToken {
 }
 
 /// Event metadata returned by the payload-free SQL projection.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessEventLite {
     pub sequence: u64,
     pub event_type: String,
 }
 
 /// Projection-specific contents of one bounded event page.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "mode", content = "events", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "mode",
+    content = "events",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum ProcessEventPageEvents<Full = ProcessEvent, Lite = ProcessEventLite> {
     Full(Vec<Full>),
     Lite(Vec<Lite>),
@@ -769,15 +776,19 @@ impl<Full, Lite> ProcessEventPageEvents<Full, Lite> {
 }
 
 /// Whether a bounded event page completed the retained history.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProcessEventPageMore {
     Complete,
-    More { continuation: ProcessEventPageToken },
+    More {
+        #[schemars(with = "String")]
+        continuation: ProcessEventPageToken,
+    },
 }
 
 /// One bounded page from a retained process-event history.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessEventPage<Full = ProcessEvent, Lite = ProcessEventLite> {
     pub events: ProcessEventPageEvents<Full, Lite>,
     pub more: ProcessEventPageMore,
@@ -852,8 +863,8 @@ fn page_more<T>(
 }
 
 /// Why the exact process history named by a page read is no longer retained.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "reason", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProcessEventHistoryRetention {
     /// The process was pruned and its payload-free tombstone is still present.
     Pruned {
@@ -862,15 +873,22 @@ pub enum ProcessEventHistoryRetention {
     },
     /// The reusable process id now names a later incarnation.
     Retired {
+        #[schemars(with = "u64")]
         requested_incarnation: ProcessIncarnation,
+        #[schemars(with = "u64")]
         current_incarnation: ProcessIncarnation,
     },
 }
 
 /// Result of reading a process-event history without collapsing retention into
 /// an empty page.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "retention", content = "value", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "retention",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum ProcessEventReadOutcome<Page = ProcessEventPage> {
     Retained(Page),
     NoLongerRetained(ProcessEventHistoryRetention),
