@@ -193,7 +193,6 @@ runs:
           echo "--remote_default_exec_properties=kiln_executor_runtime=${POOL_RUNTIME}"
           echo "--remote_local_fallback=false"
           echo "--remote_download_outputs=toplevel"
-          echo "--remote_timeout=600"
           echo "--jobs=32"
           echo "EOF"
         } >> "$GITHUB_ENV"

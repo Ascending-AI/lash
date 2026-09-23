@@ -616,6 +616,7 @@ jobs:
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
             --profile="${RUNNER_TEMP}/bazel-feature-profile.json.gz" \
+            --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
             //:feature_lanes
 
       # The lane commands that are `cargo test`, not `cargo check`. They are
@@ -648,6 +649,18 @@ jobs:
         with:
           name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bazel-feature-profile.json.gz
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The compact execution log names every spawn with its inputs, cache
+      # result and runner: the evidence for "why did this miss the cache".
+      # Bazel's `src/tools/execlog` parser turns it into text.
+      - name: Upload Bazel execution log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-exec-log-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-exec-log.binpb.zst
           if-no-files-found: ignore
           retention-days: 14
 
@@ -720,6 +733,7 @@ jobs:
             --remote_download_regex='.*test\.outputs.*' \
             --cache_test_results=yes --test_output=errors \
             --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
+            --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
             -- //:workspace_tests -//:workspace_tail_tests //crates/lash:ui_fixtures
 
       # FIG-3429 item 8: conformance laws leave an execution receipt in each
@@ -744,6 +758,18 @@ jobs:
         with:
           name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bazel-profile.json.gz
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The compact execution log names every spawn with its inputs, cache
+      # result and runner: the evidence for "why did this miss the cache".
+      # Bazel's `src/tools/execlog` parser turns it into text.
+      - name: Upload Bazel execution log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-exec-log-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-exec-log.binpb.zst
           if-no-files-found: ignore
           retention-days: 14
 
@@ -790,6 +816,7 @@ jobs:
             --remote_download_regex='.*test\.outputs.*' \
             --cache_test_results=yes --test_output=errors \
             --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
+            --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
             //:workspace_tail_tests
 
       # Same law-execution census as the main leg: whichever law-bearing
@@ -813,6 +840,18 @@ jobs:
         with:
           name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bazel-profile.json.gz
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The compact execution log names every spawn with its inputs, cache
+      # result and runner: the evidence for "why did this miss the cache".
+      # Bazel's `src/tools/execlog` parser turns it into text.
+      - name: Upload Bazel execution log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-exec-log-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-exec-log.binpb.zst
           if-no-files-found: ignore
           retention-days: 14
 
@@ -1199,6 +1238,7 @@ jobs:
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
             --profile="${RUNNER_TEMP}/bazel-lint-profile.json.gz" \
+            --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
             -- "${targets[@]}"
           if [[ "$breadth" == false ]]; then
             exit 0
@@ -1229,6 +1269,18 @@ jobs:
         with:
           name: bazel-profile-${{ github.job }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/bazel-lint-profile.json.gz
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The compact execution log names every spawn with its inputs, cache
+      # result and runner: the evidence for "why did this miss the cache".
+      # Bazel's `src/tools/execlog` parser turns it into text.
+      - name: Upload Bazel execution log
+        if: always() && needs.plan.outputs.bazel_trusted == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-exec-log-${{ github.job }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-exec-log.binpb.zst
           if-no-files-found: ignore
           retention-days: 14
 
