@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -100,13 +101,13 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_docs_file_deletion_runs_every_expensive_family(self) -> None:
-        plan = ci_plan.classify([("D", "docs/adr/0008-confidence-gate.md")])
+        plan = ci_plan.classify([("D", "docs/adr/0079-x.md")])
         self.assertEqual("false", plan["docs_only"])
         self.assertEqual("docs deletion", plan["reason"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_docs_addition_and_modification_preserve_docs_only_skip(self) -> None:
-        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "CONTEXT.md")])
+        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "AGENTS.md")])
         self.assertEqual("true", plan["docs_only"])
         self.assertEqual("docs-only diff", plan["reason"])
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
@@ -266,12 +267,13 @@ class ClassifyTests(unittest.TestCase):
     def test_each_global_invalidator_runs_everything(self) -> None:
         paths = [
             "Cargo.lock",
-            "crates/lash-core/Cargo.toml",
+            "Cargo.toml",
             "rust-toolchain.toml",
             ".cargo/config.toml",
             ".config/nextest.toml",
             ".github/workflows/ci.yml",
-            "scripts/gate_scope.py",
+            "scripts/ci_plan.py",
+            ".github/actions/rust-toolchain/action.yml",
             "justfile",
             "deny.toml",
         ]
@@ -284,6 +286,379 @@ class ClassifyTests(unittest.TestCase):
         plan = ci_plan.classify([("M", "mystery.data")])
         self.assertEqual("true", plan["fail_open"])
         self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
+
+class PathClassifierTests(unittest.TestCase):
+    """`classify_path` is the one table; these pin the classes CI narrows on."""
+
+    def kind(self, path: str) -> "ci_plan.PathKind":
+        return ci_plan.classify_path(path).kind
+
+    def test_a_crate_manifest_is_crate_local_not_a_global_invalidator(self) -> None:
+        path_class = ci_plan.classify_path("crates/lash-core/Cargo.toml")
+        self.assertEqual(ci_plan.PathKind.PACKAGE, path_class.kind)
+        self.assertEqual("crates/lash-core", path_class.package)
+        self.assertTrue(path_class.manifest)
+        plan = ci_plan.classify([("M", "crates/lash-core/Cargo.toml")])
+        self.assertEqual("production-relevant diff", plan["reason"])
+        self.assertEqual("true", plan["rust"])
+        # The repository gates read every manifest (feature-lane resolution,
+        # dependency boundary); nothing else widens.
+        self.assertEqual("true", plan["tooling"])
+        for family in ("stores", "schema", "facade", "regress"):
+            self.assertEqual("false", plan[family], family)
+        store = ci_plan.classify([("M", "crates/lash-postgres-store/Cargo.toml")])
+        self.assertEqual("true", store["stores"])
+        self.assertEqual("true", store["schema"])
+
+    def test_the_root_manifests_stay_global(self) -> None:
+        for path in ("Cargo.toml", "Cargo.lock"):
+            with self.subTest(path=path):
+                self.assertEqual(ci_plan.PathKind.SHARED, self.kind(path))
+        # A nested workspace's lock file is its own package data, not the root's.
+        self.assertEqual(ci_plan.PathKind.DATA, self.kind("fuzz/Cargo.lock"))
+
+    def test_store_fixtures_select_stores_without_failing_open(self) -> None:
+        for path in (
+            "fixtures/checkpoint-component-v1-refusal/postgres/fixture.sql",
+            "fixtures/durable-read/v1/sqlite/durable-core.db",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(ci_plan.PathKind.DATA, self.kind(path))
+                plan = ci_plan.classify([("M", path)])
+                self.assertEqual("false", plan["fail_open"])
+                self.assertEqual("true", plan["rust"])
+                self.assertEqual("true", plan["stores"])
+                self.assertEqual("false", plan["facade"])
+                self.assertEqual("false", plan["tooling"])
+
+    def test_markdown_outside_a_package_is_docs(self) -> None:
+        for path in (
+            "AGENTS.md",
+            "README.md",
+            "fixtures/checkpoint-component-v1-refusal/README.md",
+            "schemas/host/README.md",
+            "runbooks/agent-service-branching/README.md",
+            "docs/agents/pr-style.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(ci_plan.PathKind.DOCS, self.kind(path))
+                self.assertEqual("true", ci_plan.classify([("M", path)])["docs_only"])
+
+    def test_markdown_inside_a_bazel_package_is_package_input(self) -> None:
+        # `include_str!` and test runfiles read package READMEs.
+        for path in ("crates/lash/README.md", "runbooks/rlm-smoke/README.md"):
+            with self.subTest(path=path):
+                self.assertEqual(ci_plan.PathKind.PACKAGE, self.kind(path))
+                self.assertEqual("true", ci_plan.classify([("M", path)])["rust"])
+
+    def test_prose_a_rust_test_reads_runs_rust(self) -> None:
+        for path in sorted(ci_plan.RUST_RUNTIME_DOC_INPUTS):
+            with self.subTest(path=path):
+                self.assertEqual(ci_plan.PathKind.DOC_INPUT, self.kind(path))
+                plan = ci_plan.classify([("M", path)])
+                self.assertEqual("false", plan["docs_only"])
+                self.assertEqual("true", plan["rust"])
+
+    def test_bazel_configuration_is_tooling(self) -> None:
+        for path in (".bazelrc", ".bazelversion", "MODULE.bazel", "MODULE.bazel.lock",
+                     "BUILD.bazel", "tools/bazel/clippy.bzl", ".gitattributes"):
+            with self.subTest(path=path):
+                self.assertEqual(ci_plan.PathKind.TOOLING, self.kind(path))
+                plan = ci_plan.classify([("M", path)])
+                self.assertEqual("false", plan["fail_open"])
+                self.assertEqual("true", plan["rust"])
+                self.assertEqual("true", plan["tooling"])
+                self.assertEqual("false", plan["stores"])
+
+    def test_every_tracked_path_has_a_known_class(self) -> None:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True
+        ).stdout.split("\0")
+        unknown = sorted(
+            path for path in listed
+            if path and ci_plan.classify_path(path).kind is ci_plan.PathKind.UNKNOWN
+        )
+        self.assertEqual([], unknown)
+
+
+class RustRuntimeDocInputTests(unittest.TestCase):
+    """Keep "docs-only means no Rust" true as the tree evolves.
+
+    The claim rests on prose not failing the Rust suite. That is a claim about
+    the *tree*, so it is checked against the tree: every reference to `docs/**`
+    or `CONTEXT.md` in a tracked Rust source must name a path the classifier
+    already treats as a Rust input. A new test that reads an ADR at run time
+    fails here until `RUST_RUNTIME_DOC_INPUTS` catches up.
+    """
+
+    # Leading `./` and `../` are stripped first so a crate-relative
+    # `include_str!("../../../docs/x.md")` is caught too.
+    LITERAL = re.compile(r'"((?:\.{1,2}/)*(?:docs/[^"\s]+|CONTEXT\.md))"')
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "*.rs"], cwd=ROOT, capture_output=True,
+            text=True, check=True,
+        )
+        cls.sources = [ROOT / entry for entry in listed.stdout.split("\0") if entry]
+
+    def referenced_paths(self) -> dict[str, list[str]]:
+        found: dict[str, list[str]] = {}
+        for source in self.sources:
+            body = source.read_text(encoding="utf-8", errors="replace")
+            for match in self.LITERAL.finditer(body):
+                path = re.sub(r"^(?:\.{1,2}/)+", "", match.group(1))
+                found.setdefault(path, []).append(source.relative_to(ROOT).as_posix())
+        return found
+
+    def test_the_sweep_finds_the_sources_it_is_meant_to_read(self) -> None:
+        # A silent zero-hit sweep would be a guard that cannot fail.
+        self.assertGreater(len(self.sources), 100)
+
+    def test_every_doc_path_named_in_rust_is_a_rust_input(self) -> None:
+        offenders = {
+            path: sorted(set(sources))
+            for path, sources in self.referenced_paths().items()
+            if ci_plan.classify_path(path).kind is ci_plan.PathKind.DOCS
+        }
+        self.assertEqual(
+            {}, offenders,
+            "these prose paths are read by Rust sources but classify as docs; "
+            f"add them to ci_plan.RUST_RUNTIME_DOC_INPUTS: {offenders}",
+        )
+
+    def test_the_pinned_list_stays_current(self) -> None:
+        referenced = self.referenced_paths()
+        stale = sorted(path for path in ci_plan.RUST_RUNTIME_DOC_INPUTS if path not in referenced)
+        self.assertEqual([], stale, "no Rust source reads these any more; drop them")
+
+
+PUSH_GATE = ROOT / "scripts/push-gate.sh"
+
+
+def push_gate_function(name: str) -> str:
+    """One shell function out of push-gate.sh, so the test drives the real one."""
+    script = PUSH_GATE.read_text(encoding="utf-8")
+    match = re.search(rf"^{re.escape(name)}\(\) \{{\n.*?^\}}\n", script, re.MULTILINE | re.DOTALL)
+    assert match, f"missing shell function {name}"
+    return match.group(0)
+
+
+class GateScopeTests(unittest.TestCase):
+    """The push gate's projection. Every ambiguity must run everything."""
+
+    RUST = ci_plan.GateFamily.RUST_COMPILE
+    SCRIPTS = ci_plan.GateFamily.SCRIPTS
+    WORKFLOWS = ci_plan.GateFamily.WORKFLOWS
+
+    def scope(self, *paths: str) -> "ci_plan.GateScope":
+        return ci_plan.gate_scope(list(paths))
+
+    def test_docs_skip_every_family_and_name_the_paths(self) -> None:
+        scope = self.scope("docs/guide.md", "README.md", "CONTRIBUTING.md")
+        self.assertEqual("docs-only", scope.classification)
+        self.assertEqual(frozenset(), scope.families)
+        self.assertIn("docs/guide.md", scope.reason)
+
+    def test_a_crate_change_runs_compile_only(self) -> None:
+        for path in ("crates/lash-core/src/runtime/turn_loop.rs", "crates/lash/README.md",
+                     "examples/slack-clone/ui/index.html"):
+            with self.subTest(path=path):
+                scope = self.scope(path)
+                self.assertEqual("rust-only", scope.classification)
+                self.assertEqual(frozenset({self.RUST}), scope.families)
+
+    def test_a_crate_manifest_adds_the_script_gates(self) -> None:
+        scope = self.scope("crates/lash-core/Cargo.toml")
+        self.assertEqual(frozenset({self.RUST, self.SCRIPTS}), scope.families)
+
+    def test_a_pinned_doc_input_runs_the_rust_battery(self) -> None:
+        scope = self.scope("docs/adr/0008-confidence-gate.md")
+        self.assertEqual("rust-input-docs", scope.classification)
+        self.assertEqual(frozenset({self.RUST}), scope.families)
+
+    def test_docs_plus_crates_is_mixed(self) -> None:
+        scope = self.scope("docs/guide.md", "crates/lash/src/lib.rs")
+        self.assertEqual("mixed", scope.classification)
+        self.assertEqual(frozenset({self.RUST}), scope.families)
+
+    def test_shared_inputs_unknown_paths_and_empty_sets_run_everything(self) -> None:
+        for paths, classification in (
+            (("Cargo.lock",), "shared-inputs"),
+            (("docs/guide.md", "Cargo.lock"), "shared-inputs"),
+            (("rust-toolchain.toml",), "shared-inputs"),
+            ((".github/workflows/ci.yml",), "shared-inputs"),
+            (("scripts/ci_plan.py",), "shared-inputs"),
+            (("mystery.data",), "unknown-paths"),
+            ((), "empty-diff"),
+            (("", "  "), "empty-diff"),
+        ):
+            with self.subTest(paths=paths):
+                scope = self.scope(*paths)
+                self.assertEqual(classification, scope.classification)
+                self.assertEqual(ci_plan.ALL_GATE_FAMILIES, scope.families)
+
+    def test_tooling_runs_compile_and_scripts(self) -> None:
+        scope = self.scope("tools/bazel/generate_build_files.py")
+        self.assertEqual(frozenset({self.RUST, self.SCRIPTS}), scope.families)
+
+    def test_text_output_lists_every_family_in_ascii(self) -> None:
+        lines = ci_plan.render_gate_text(self.scope("docs/guide.md")).splitlines()
+        self.assertEqual(len(ci_plan.GATE_FAMILIES) + 1, len(lines))
+        self.assertIn("rust-compile: skip", lines)
+        self.assertTrue(lines[-1].startswith("classification: docs-only -- "))
+        "\n".join(lines).encode("ascii")
+
+    def test_env_output_is_evaluable_and_publishes_the_closed_set(self) -> None:
+        env = ci_plan.render_gate_env(self.scope("docs/guide.md"))
+        self.assertIn("GATE_RUN_RUST_COMPILE=0", env)
+        self.assertIn("GATE_SCOPE_FAMILIES='RUST_COMPILE SCRIPTS WORKFLOWS'", env)
+        printed = subprocess.run(
+            ["bash", "-c", 'eval "$1"; printf "%s|%s" "$GATE_RUN_SCRIPTS" "$GATE_SCOPE_CLASSIFICATION"',
+             "bash", env], capture_output=True, text=True, check=True,
+        )
+        self.assertEqual("0|docs-only", printed.stdout)
+
+    def test_the_family_set_is_closed_and_ordered(self) -> None:
+        self.assertEqual(["rust-compile", "scripts", "workflows"],
+                         [str(family) for family in ci_plan.GATE_FAMILIES])
+        self.assertEqual(["GATE_RUN_RUST_COMPILE", "GATE_RUN_SCRIPTS", "GATE_RUN_WORKFLOWS"],
+                         [family.env_variable for family in ci_plan.GATE_FAMILIES])
+
+    def cli(self, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["python3", str(ROOT / "scripts/ci_plan.py"), "gate-scope", *args],
+            input=stdin, capture_output=True, text=True, check=False,
+        )
+
+    def test_cli_reads_paths_from_stdin_without_git(self) -> None:
+        result = self.cli("--paths-from", "-", "--format", "env", stdin="Cargo.lock\n")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("GATE_RUN_RUST_COMPILE=1", result.stdout)
+        self.assertIn("GATE_SCOPE_CLASSIFICATION=shared-inputs", result.stdout)
+
+    def test_cli_failures_exit_nonzero_and_say_run_everything(self) -> None:
+        for args in (("--paths-from", "/nonexistent/fig-1811"),
+                     ("--base", "refs/heads/no-such-ref-fig-1811")):
+            with self.subTest(args=args):
+                result = self.cli(*args)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("run everything", result.stderr)
+
+    def test_cli_against_a_real_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            git = lambda *args: subprocess.run(  # noqa: E731
+                ["git", *args], cwd=root, capture_output=True, text=True, check=True)
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "gate@example.com")
+            git("config", "user.name", "Gate")
+            (root / "docs").mkdir()
+            (root / "docs/guide.md").write_text("base\n")
+            git("add", "-A")
+            git("commit", "-qm", "base")
+            git("checkout", "-qb", "topic")
+            (root / "docs/guide.md").write_text("changed\n")
+            git("commit", "-qam", "docs")
+            out = self.cli("--repo", str(root), "--base", "main").stdout
+            self.assertIn("classification: docs-only", out)
+            # A dirty, staged shared input widens the scope unless excluded.
+            (root / "Cargo.lock").write_text("dirty\n")
+            git("add", "Cargo.lock")
+            self.assertIn("rust-compile: run", self.cli("--repo", str(root), "--base", "main").stdout)
+            self.assertIn("rust-compile: skip",
+                          self.cli("--repo", str(root), "--base", "main", "--no-worktree").stdout)
+            # A rename reports both of its paths.
+            git("reset", "-q", "Cargo.lock")
+            (root / "Cargo.lock").unlink()
+            (root / "crates").mkdir()
+            (root / "crates/a.rs").write_text("fn main() {}\n")
+            git("add", "-A")
+            git("commit", "-qm", "add")
+            git("mv", "crates/a.rs", "crates/b.rs")
+            out = self.cli("--repo", str(root), "--base", "main").stdout
+            self.assertIn("crates/a.rs", out)
+            self.assertIn("crates/b.rs", out)
+
+    def test_the_push_gate_sets_exactly_the_known_families(self) -> None:
+        script = PUSH_GATE.read_text(encoding="utf-8")
+        fallback = push_gate_function("gate_scope_apply")
+        assigned = set(re.findall(r"^  (GATE_RUN_[A-Z_]+)=", fallback, re.MULTILINE))
+        self.assertEqual({family.env_variable for family in ci_plan.GateFamily}, assigned)
+        self.assertIn("python3 scripts/ci_plan.py gate-scope", fallback)
+        used = set(re.findall(r"^scoped ([A-Z_]+) ", script, re.MULTILINE))
+        self.assertTrue(used)
+        self.assertLessEqual(used, {family.name for family in ci_plan.GateFamily})
+
+    def gate_family_runs(self, known: str, family: str) -> subprocess.CompletedProcess:
+        harness = "\n".join((
+            "set -euo pipefail",
+            f"GATE_SCOPE_FAMILIES={known!r}",
+            "GATE_RUN_RUST_COMPILE=1",
+            "GATE_RUN_SCRIPTS=0",
+            "GATE_RUN_WORKFLOWS=1",
+            push_gate_function("gate_family_runs"),
+            push_gate_function("scoped"),
+            'ran() { printf "RAN\\n"; }',
+            f'scoped {family} "label" ran',
+        ))
+        return subprocess.run(["bash", "-c", harness], capture_output=True, text=True, check=False)
+
+    def test_the_push_gate_refuses_unknown_families_once_the_set_is_known(self) -> None:
+        known = "RUST_COMPILE SCRIPTS WORKFLOWS"
+        refused = self.gate_family_runs(known, "NOT_A_FAMILY")
+        self.assertEqual(2, refused.returncode, refused.stderr)
+        self.assertIn("unknown gate family 'NOT_A_FAMILY'", refused.stderr)
+        # Fail-open survives: an unset set means every family runs.
+        self.assertIn("RAN", self.gate_family_runs("", "NOT_A_FAMILY").stdout)
+        self.assertIn("RAN", self.gate_family_runs(known, "RUST_COMPILE").stdout)
+        skipped = self.gate_family_runs(known, "SCRIPTS")
+        self.assertNotIn("RAN", skipped.stdout)
+        self.assertIn("skipped: label", skipped.stdout)
+
+
+class DevTestScopeTests(unittest.TestCase):
+    """dev-test's projection; its CLI behaviour is `test_dev_test.py`'s."""
+
+    def scope(self, *paths: str, scripts: frozenset[str] = frozenset()):
+        return ci_plan.dev_test_scope(list(paths), ROOT, scripts)
+
+    def test_a_package_source_selects_its_package(self) -> None:
+        scope = self.scope("crates/lash-core/src/lib.rs", "docs/guide.md")
+        self.assertEqual(("//crates/lash-core",), scope.packages)
+        self.assertFalse(scope.broad or scope.repository or scope.facade)
+
+    def test_the_facade_crate_names_the_seal(self) -> None:
+        self.assertTrue(self.scope("crates/lash/src/lib.rs").facade)
+        root = self.scope("Cargo.toml")
+        self.assertTrue(root.broad and root.facade)
+
+    def test_a_package_manifest_widens_without_repository_gates(self) -> None:
+        scope = self.scope("crates/lash-core/Cargo.toml")
+        self.assertTrue(scope.broad)
+        self.assertFalse(scope.repository)
+
+    def test_shared_inputs_and_tooling_widen_with_repository_gates(self) -> None:
+        for path in ("scripts/unknown.py", ".bazelrc", ".github/workflows/ci.yml"):
+            with self.subTest(path=path):
+                scope = self.scope(path)
+                self.assertTrue(scope.broad and scope.repository)
+
+    def test_the_test_xml_runner_runs_its_self_test(self) -> None:
+        tests = frozenset({"scripts/test_test_xml.py"})
+        for path in ("tools/bazel/junit_xml.py", "tools/bazel/test_xml_runner.sh"):
+            with self.subTest(path=path):
+                scope = self.scope(path, scripts=tests)
+                self.assertEqual(("scripts/test_test_xml.py",), scope.script_tests)
+                self.assertFalse(scope.broad or scope.repository)
+
+    def test_a_script_test_edit_runs_only_its_proof(self) -> None:
+        tests = frozenset({"scripts/test_ci_plan.py", "scripts/test_dev_test.py"})
+        scope = self.scope("scripts/ci_plan.py", "scripts/test_dev_test.py", scripts=tests)
+        self.assertEqual(("scripts/test_ci_plan.py", "scripts/test_dev_test.py"), scope.script_tests)
+        self.assertFalse(scope.broad or scope.repository)
 
 
 def successful_needs() -> dict[str, dict[str, object]]:

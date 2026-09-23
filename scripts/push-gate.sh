@@ -50,9 +50,9 @@ configure_bindgen_headers() {
 # gates that only exist in CI (see the omissions block below) — a self-test
 # whose gate nobody runs locally proves nothing about a local push.
 #
-# `test_gate_scope.py` is deliberately absent: it guards the decider that
-# decides whether this leg runs at all, so it is dispatched unscoped near the
-# top of the script instead.
+# The classifier's self-test is deliberately absent: it guards the decider
+# that decides whether this leg runs at all, so it is dispatched unscoped near
+# the top of the script instead.
 run_release_script_tests() {
   step "Repository script tests"
   python3 scripts/test_check_facade_only_examples.py
@@ -70,7 +70,7 @@ run_release_script_tests() {
   bash scripts/test-ci-reclaim-disk.sh
 }
 
-# Path-scoped gate selection. `scripts/gate_scope.py` maps this branch's
+# Path-scoped gate selection. `scripts/ci_plan.py gate-scope` maps this branch's
 # touched paths onto gate families and only ever answers `skip` for a family no
 # touched path can reach; every ambiguity -- a shared input, an unrecognised
 # path, an empty path set, its own failure -- answers `run`. Its table is
@@ -120,18 +120,18 @@ gate_scope_apply() {
   fi
   # Two invocations of the same pure classification: the first is the audit
   # trail a human reads, the second is the machine form this shell consumes.
-  if ! python3 scripts/gate_scope.py --base "$base_ref"; then
+  if ! python3 scripts/ci_plan.py gate-scope --base "$base_ref"; then
     echo "gate scope: classification failed; running every gate family"
     return
   fi
-  if ! env_output="$(python3 scripts/gate_scope.py --base "$base_ref" --format env)"; then
+  if ! env_output="$(python3 scripts/ci_plan.py gate-scope --base "$base_ref" --format env)"; then
     echo "gate scope: env classification failed; running every gate family"
     return
   fi
   eval "$env_output"
 }
 
-# A family name this script does not share with scripts/gate_scope.py used to
+# A family name this script does not share with scripts/ci_plan.py used to
 # read an unset variable and fall back to "run" -- safe, but silent, so a family
 # that should skip never skipped and nobody learned. Refuse the name once the
 # classifier has told us the closed set. While it has not (base ref unresolved,
@@ -466,7 +466,7 @@ configure_bindgen_headers
 # decider nobody tests is a decider nobody can audit, so it runs on every push
 # and its failure aborts before a single skip decision is taken.
 step "Gate scope self-test"
-python3 scripts/test_gate_scope.py
+python3 scripts/test_ci_plan.py PathClassifierTests GateScopeTests
 
 gate_scope_apply
 
