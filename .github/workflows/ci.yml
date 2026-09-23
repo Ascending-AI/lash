@@ -605,9 +605,10 @@ jobs:
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
-      # Every unit of every declared lane command, compiled at that command's
-      # own feature resolution. `--remote_download_outputs=minimal` because a
-      # compile-only proof needs the action's exit status, not its rlibs.
+      # Every unit of every declared lane command, checked at that command's
+      # own feature resolution: one metadata-only rustc action per unit, as
+      # `cargo check` runs it, with no codegen or link. The step name is
+      # pinned by scripts/test_check_feature_coverage.py.
       - name: Compile every feature lane
         shell: bash
         run: |

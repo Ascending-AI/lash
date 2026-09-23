@@ -343,6 +343,15 @@ recipes for these correctness contracts:
   additionally refuses a lane with no Bazel target, so the coverage plan and
   the lane graph cannot drift apart.
 
+  `//:feature_lanes` proves the lanes the way their commands do: as
+  `cargo check`. The `lash_rust_check` rule in `tools/bazel/clippy.bzl` runs
+  one metadata-only rustc action per variant (mnemonic `Clippy`, because it
+  reuses `rust_clippy_action` with rustc as the tool), with the target's own
+  lint table and no `-D warnings`. Test variants read every dependency as
+  `.rmeta`, as Cargo does. Binary variants keep their `bin` crate type and
+  so read full `.rlib`s. Nothing is linked; only the 40 `feature_lane_tests`
+  build and link binaries.
+
   The general feature-lane limitation is third-party: `crate.from_cargo` in
   `MODULE.bazel` pins `@crates` from one `//:Cargo.toml` + `//:Cargo.lock`
   resolution, so a variant sets `crate_features` on first-party targets but

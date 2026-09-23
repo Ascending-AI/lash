@@ -107,6 +107,46 @@ def _lash_clippy_aspect_impl(target, ctx):
 
     return [OutputGroupInfo(clippy_checks = depset([marker]))]
 
+_RULES_RUST_SETTINGS = {
+    # These attributes mirror `rust_clippy_aspect` so that
+    # `rust_clippy_action` sees the same build settings it does upstream.
+    "_capture_output": attr.label(
+        default = Label("@rules_rust//rust/settings:capture_clippy_output"),
+    ),
+    "_clippy_error_format": attr.label(
+        default = Label("@rules_rust//rust/settings:clippy_error_format"),
+    ),
+    "_clippy_flag": attr.label(
+        default = Label("@rules_rust//rust/settings:clippy_flag"),
+    ),
+    "_clippy_flags": attr.label(
+        default = Label("@rules_rust//rust/settings:clippy_flags"),
+    ),
+    "_clippy_output_diagnostics": attr.label(
+        default = Label("@rules_rust//rust/settings:clippy_output_diagnostics"),
+    ),
+    "_error_format": attr.label(
+        default = Label("@rules_rust//rust/settings:error_format"),
+    ),
+    "_extra_rustc_flag": attr.label(
+        default = Label("@rules_rust//rust/settings:extra_rustc_flag"),
+    ),
+    "_incompatible_change_clippy_error_format": attr.label(
+        default = Label("@rules_rust//rust/settings:incompatible_change_clippy_error_format"),
+    ),
+    "_per_crate_rustc_flag": attr.label(
+        default = Label("@rules_rust//rust/settings:per_crate_rustc_flag"),
+    ),
+}
+
+_TOOLCHAINS = [
+    str(Label("@rules_rust//rust:toolchain_type")),
+    config_common.toolchain_type(
+        "@bazel_tools//tools/cpp:toolchain_type",
+        mandatory = False,
+    ),
+]
+
 lash_clippy_aspect = aspect(
     implementation = _lash_clippy_aspect_impl,
     fragments = ["cpp"],
@@ -139,43 +179,8 @@ lash_clippy_aspect = aspect(
                 Label("//runbooks/rlm-smoke:clippy.toml"),
             ],
         ),
-        # The remaining attributes mirror `rust_clippy_aspect` so that
-        # `rust_clippy_action` sees the same build settings it does upstream.
-        "_capture_output": attr.label(
-            default = Label("@rules_rust//rust/settings:capture_clippy_output"),
-        ),
-        "_clippy_error_format": attr.label(
-            default = Label("@rules_rust//rust/settings:clippy_error_format"),
-        ),
-        "_clippy_flag": attr.label(
-            default = Label("@rules_rust//rust/settings:clippy_flag"),
-        ),
-        "_clippy_flags": attr.label(
-            default = Label("@rules_rust//rust/settings:clippy_flags"),
-        ),
-        "_clippy_output_diagnostics": attr.label(
-            default = Label("@rules_rust//rust/settings:clippy_output_diagnostics"),
-        ),
-        "_error_format": attr.label(
-            default = Label("@rules_rust//rust/settings:error_format"),
-        ),
-        "_extra_rustc_flag": attr.label(
-            default = Label("@rules_rust//rust/settings:extra_rustc_flag"),
-        ),
-        "_incompatible_change_clippy_error_format": attr.label(
-            default = Label("@rules_rust//rust/settings:incompatible_change_clippy_error_format"),
-        ),
-        "_per_crate_rustc_flag": attr.label(
-            default = Label("@rules_rust//rust/settings:per_crate_rustc_flag"),
-        ),
-    },
-    toolchains = [
-        str(Label("@rules_rust//rust:toolchain_type")),
-        config_common.toolchain_type(
-            "@bazel_tools//tools/cpp:toolchain_type",
-            mandatory = False,
-        ),
-    ],
+    } | _RULES_RUST_SETTINGS,
+    toolchains = _TOOLCHAINS,
 )
 
 def _lash_rust_clippy_impl(ctx):
@@ -210,6 +215,98 @@ lash_rust_clippy = rule(
                 [rust_common.test_crate_info],
             ],
             aspects = [lash_clippy_aspect],
+        ),
+    },
+)
+
+# -- `cargo check` as a Bazel action -------------------------------------------
+#
+# The feature lanes of `scripts/feature-coverage.toml` are `cargo check`
+# commands: they prove each resolution compiles, and nothing runs or links the
+# result. Building the variant labels instead ran codegen for every variant
+# library and codegen plus link for every variant test binary. The check aspect
+# runs the same `rust_clippy_action` with `rustc` itself as the tool: the
+# target's own flags, lint table and `--emit=metadata`, with no Clippy lints
+# and no `-D warnings`, as `cargo check` runs it. The workspace lint table's
+# deny-level lints still fail it, exactly as they fail the Cargo command.
+#
+# `rust_clippy_action` picks `.rmeta` dependencies only for library crates and
+# full `.rlib`s for anything that links. A check links nothing, so a test crate
+# is presented as an `rlib` for input selection, which is how Cargo checks a
+# test: every dependency as metadata. It keeps `--test`, which makes rustc
+# build the harness whatever `--crate-type` says. A binary keeps its `bin`
+# crate type, because rustc cannot mix it with `rlib` and `main` must root
+# dead-code analysis as it does under Cargo; its dependencies are `.rlib`s.
+
+def _lash_check_aspect_impl(target, ctx):
+    if OutputGroupInfo in target and hasattr(target[OutputGroupInfo], "check_markers"):
+        return []
+
+    crate_info = rust_clippy_action.get_clippy_ready_crate_info(target, ctx)
+    if not crate_info:
+        fail("target cannot be checked: {}".format(target.label))
+
+    if crate_info.is_test and crate_info.type != "rlib":
+        fields = {
+            field: getattr(crate_info, field)
+            for field in dir(crate_info)
+            if field not in ("to_json", "to_proto")
+        }
+        fields["type"] = "rlib"
+        crate_info = rust_common.create_crate_info(**fields)
+
+    marker = ctx.actions.declare_file(
+        ctx.label.name + ".lash-check.ok",
+        sibling = crate_info.output,
+    )
+    rust_clippy_action.action(
+        ctx = ctx,
+        clippy_executable = ctx.toolchains[str(Label("@rules_rust//rust:toolchain_type"))].rustc,
+        crate_info = crate_info,
+        config = ctx.file._config,
+        success_marker = marker,
+    )
+    return [OutputGroupInfo(check_markers = depset([marker]))]
+
+lash_check_aspect = aspect(
+    implementation = _lash_check_aspect_impl,
+    fragments = ["cpp"],
+    attrs = {
+        "_config": attr.label(
+            doc = "Required by `rust_clippy_action`; rustc never reads it.",
+            allow_single_file = True,
+            default = Label("//:clippy.toml"),
+        ),
+    } | _RULES_RUST_SETTINGS,
+    toolchains = _TOOLCHAINS,
+)
+
+def _lash_rust_check_impl(ctx):
+    markers = []
+    unchecked = []
+    for dep in ctx.attr.deps:
+        group = dep[OutputGroupInfo]
+        checks = group.check_markers if "check_markers" in dir(group) else depset()
+        if not checks.to_list():
+            unchecked.append(str(dep.label))
+            continue
+        markers.append(checks)
+    if unchecked:
+        fail("check produced no marker for: {}".format(", ".join(sorted(unchecked))))
+    checks = depset(transitive = markers)
+    return [DefaultInfo(files = checks)]
+
+lash_rust_check = rule(
+    doc = "Type-checks the listed first-party crate targets as `cargo check` does, without codegen or link.",
+    implementation = _lash_rust_check_impl,
+    attrs = {
+        "deps": attr.label_list(
+            doc = "First-party Rust targets to check.",
+            providers = [
+                [rust_common.crate_info],
+                [rust_common.test_crate_info],
+            ],
+            aspects = [lash_check_aspect],
         ),
     },
 )

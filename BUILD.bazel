@@ -1,5 +1,5 @@
 load("//tools/bazel:schema_checks.bzl", "schema_check", "schema_documents")
-load("//tools/bazel:clippy.bzl", "lash_rust_clippy")
+load("//tools/bazel:clippy.bzl", "lash_rust_check", "lash_rust_clippy")
 load(
     "//tools/bazel:feature_lanes.bzl",
     "FEATURE_LANE_CLIPPY_TARGETS",
@@ -70,15 +70,18 @@ test_suite(
     tests = WORKSPACE_TAIL_SUITE_LABELS,
 )
 
-# The feature-coverage lanes of scripts/feature-coverage.toml, compiled at each
-# command's own feature resolution rather than the workspace's. One pool build
-# replaces the fourteen `Package feature check` matrix legs and the
-# `Runtime feature boundary` Cargo legs; `tools/bazel/feature_variants.py`
-# explains how the resolutions are derived and what is NOT re-resolved.
-filegroup(
+# The feature-coverage lanes of scripts/feature-coverage.toml, checked at each
+# command's own feature resolution rather than the workspace's. The commands
+# are `cargo check`, so the lanes are proved the same way: one metadata-only
+# rustc action per variant over `.rmeta` dependencies, with no codegen and no
+# link (`tools/bazel/clippy.bzl`). One pool build replaces the fourteen
+# `Package feature check` matrix legs and the `Runtime feature boundary` Cargo
+# legs; `tools/bazel/feature_variants.py` explains how the resolutions are
+# derived and what is NOT re-resolved.
+lash_rust_check(
     name = "feature_lanes",
-    srcs = FEATURE_LANE_COMPILE_TARGETS,
     testonly = True,
+    deps = FEATURE_LANE_COMPILE_TARGETS,
 )
 
 # The lane commands that are `cargo test`, not `cargo check`. They are
