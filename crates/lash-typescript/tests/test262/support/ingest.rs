@@ -71,6 +71,34 @@ fn supply_assertion_message(source: String, callee: &str) -> String {
     output
 }
 
+/// `assert.throws(ReferenceError, fn)` names the error class by its
+/// constructor, which the dialect has no value for (constructors are not
+/// first-class). The call is bridged to the shim with the class's name, which
+/// the shim compares with the caught error's `name`.
+fn name_expected_error_class(source: &str) -> String {
+    const CALL: &str = "assert.throws(";
+    let mut output = String::with_capacity(source.len());
+    let mut remaining = source;
+    while let Some(start) = remaining.find(CALL) {
+        output.push_str(&remaining[..start]);
+        let after = &remaining[start + CALL.len()..];
+        let trimmed = after.trim_start();
+        let class = trimmed
+            .chars()
+            .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
+            .collect::<String>();
+        let rest = trimmed[class.len()..].trim_start();
+        assert!(
+            !class.is_empty() && rest.starts_with(','),
+            "assert.throws names its expected error class first"
+        );
+        output.push_str(&format!("assert[\"throws\"](\"{class}\""));
+        remaining = rest;
+    }
+    output.push_str(remaining);
+    output
+}
+
 pub(crate) fn source_for(path: &Path, test_metadata: &metadata::Metadata, finish: bool) -> String {
     let test = std::fs::read_to_string(path).expect("read vendored Test262 test");
     if test_metadata.flags.contains(&TestFlag::Raw) {
@@ -86,10 +114,12 @@ pub(crate) fn source_for(path: &Path, test_metadata: &metadata::Metadata, finish
         .replace("assert.sameValue", "assert[\"sameValue\"]")
         .replace("assert.notSameValue", "assert[\"notSameValue\"]")
         .replace("assert.compareArray", "assert[\"compareArray\"]");
+    let test = name_expected_error_class(&test);
     let test = [
         "assert[\"sameValue\"](",
         "assert[\"notSameValue\"](",
         "assert[\"compareArray\"](",
+        "assert[\"throws\"](",
     ]
     .into_iter()
     .fold(test, supply_assertion_message);

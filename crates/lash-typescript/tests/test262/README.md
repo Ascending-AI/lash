@@ -31,10 +31,21 @@ compiled and ran. A feature with no derivable one-line probe writes
 `probe-exempt:` and the reason, which a reader can check; a bare omission is not
 available. Non-rejected rows carry `-`.
 
-`manifest.tsv` selects 42 executable probes and assigns each an area plus a
+`manifest.tsv` selects 118 executable probes and assigns each an area plus a
 `pass` or ratcheted `skip` disposition. `skip-register.tsv` names every other
 upstream test path and its reason, so the 53,578-test source tree has no silent
-omissions. `expected-counts.tsv` pins 34 passes and 8 executable skips by area.
+omissions. `expected-counts.tsv` pins 59 passes and 59 executable skips by area.
+
+The `block-scope`, `per-iteration-bindings`, `let-const`, `tdz` and
+`global-code` areas (FIG-3599) probe the scoping classes the multi-cell
+defects touched. Every positive case that stays in the dialect passes; each
+case the dialect refuses is a ratcheted skip naming its refusal. A read in the
+temporal dead zone is refused statically (`TS_TEMPORAL_DEAD_ZONE`), so every
+`tdz` case is such a skip. The `global-code` cases compare global lexical and
+global object bindings across Scripts through `$262.evalScript`, top-level
+`this` and classes, none of which one script in the dialect can express; they
+are skips naming the refusal, and the Node session oracle
+(`tests/differential/sessions/`) carries the cross-Script rules instead.
 A skipped probe is still compiled: if its named rejection changes or it starts
 compiling, the suite fails and requires an explicit promotion/count update.
 For selected tests that Test262 would also synthesize in strict mode, a
@@ -51,6 +62,10 @@ runner therefore prepends the small implementations under `harness-shim/`:
 - `sta.js` supplies message-valued `Test262Error` and `$DONOTEVALUATE`.
 - `assert.js` supplies SameValue, not-SameValue, and array assertions.
 - `compareArray.js` compares dense arrays through the accepted loop surface.
+- `assert.throws` compares the caught error's `name` with the expected class,
+  which the runner passes by name (`assert.throws(ReferenceError, f)` becomes
+  `assert["throws"]("ReferenceError", f)`): the dialect has no constructor
+  values.
 - `propertyHelper.js` is an explicit failing stub because descriptors are not
   accepted; no passing selected test may use it.
 
