@@ -1,28 +1,35 @@
 name: Cache warm
 
 # GitHub Actions caches are branch-scoped: a workflow run restores entries
-# written on its own branch or on the default branch, and nothing else. ci.yml
-# deliberately has no `push` trigger, so the three GitHub-side caches it
-# consumes are written only under `pull_request` head refs and transient
-# `gh-readonly-queue/*` merge refs — every one of them invisible to the next
-# run. Measured 2026-09-20: every PR's `Test Cargo workspace partition` missed
-# its restore-keys and cold-compiled ~370 crates (~4 min), and the Bazel
-# repository cache and output base missed on the same runs.
+# written on its own ref or on the default branch, and nothing else. ci.yml
+# runs only on `pull_request` refs and transient `gh-readonly-queue/*` merge
+# refs, so an entry it saved was invisible to every later run: on
+# 2026-09-22/23 the Bazel repository cache missed 883 times against 99 hits,
+# the output base 876 against 106, and the per-ref uploads pushed the cache
+# list past its 10 GB budget.
 #
-# This workflow is the sole main-scoped writer of those three keys, the same
-# role seal-cache.yml plays for `linux-seal-2`. It is manual like every other
-# heavy job in this repository: nothing runs automatically on a push to main.
-# Dispatch it after a change to the key inputs (Cargo.lock, workspace
-# manifests, `rust-toolchain*`, `.cargo/**`, `MODULE.bazel*`, `.bazelversion`,
-# the toolchain/mold/install-tools actions, or this workflow); a source-only
-# change keeps the key prefixes and restores a tree the build warms
-# incrementally.
+# This workflow is the only writer of the caches ci.yml restores:
+# - `bazel-repository-v1` and `bazel-output-v1`, restored by every Bazel job
+#   through `.github/actions/bazel-shared-cache`, which exports the exact keys
+#   this workflow saves under;
+# - `linux-tests` and `workspace-tests-v2`, restored by the untrusted `Test
+#   Cargo workspace partition` job.
 #
-# Nothing here is gating. Each job uses `actions/cache` (restore-then-save)
-# under the exact keys ci.yml computes — the key expressions below must equal
-# the ones in `ci.yml` and `bazel-shared-cache/action.yml` or this writes
-# caches nothing reads.
+# It runs on every push to `main`, so the tree the next pull request branches
+# from is warm, including after an admin merge that skipped the queue; on a
+# daily schedule, which opens each day's output-base key before work starts;
+# and on dispatch. The Bazel job builds the clippy and test graphs on the pool:
+# after a merge-queue landing that is all cache hits, and after anything else
+# it is the prewarm the pool would otherwise pay on the next pull request.
+# The Cargo job serves fork pull requests only, so it runs on the schedule and
+# on dispatch, not on every push.
+#
+# Nothing here is gating, and nothing in ci.yml saves.
 on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * *"
   workflow_dispatch:
 
 # Only the newest tree is worth warming; an older run's key is already stale.
@@ -79,10 +86,8 @@ jobs:
           git checkout --detach --force FETCH_HEAD
 
       - name: Configure Bazel shared cache
+        id: cache
         uses: ./.github/actions/bazel-shared-cache
-        with:
-          save-repository-cache: "true"
-          save-output-base: "true"
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -102,12 +107,31 @@ jobs:
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" build \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
-            //:workspace_clippy //:feature_lane_clippy //:workspace_tests
+            //:workspace_clippy //:feature_lane_clippy //:workspace_tests \
+            //crates/lash:ui_fixtures
+          # A stopped server leaves a consistent output base to archive.
+          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" shutdown
 
       - name: Remove client credentials
         if: always()
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
+      # The keys are the ones ci.yml's jobs restore against, exported by the
+      # shared action; an exact hit already holds this content.
+      - name: Save Bazel repository cache
+        if: steps.cache.outputs.repository-cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/bazel-repository
+          key: ${{ steps.cache.outputs.repository-cache-key }}
+
+      - name: Save Bazel output base
+        if: steps.cache.outputs.output-base-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/bazel-output
+          key: ${{ steps.cache.outputs.output-base-key }}
 
   # Warms `workspace-tests-v2` under main scope — the `target/debug` subtrees
   # the `Test Cargo workspace partition` job restores. Builds the same scope
@@ -116,6 +140,7 @@ jobs:
     name: Warm workspace-test build cache
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    if: github.event_name != 'push'
     steps:
       - name: Check out repository
         env:

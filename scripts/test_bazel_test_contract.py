@@ -528,8 +528,7 @@ class BazelTestContractTests(unittest.TestCase):
         the window and the per-retry cap keeps its doubling backoff from
         pricing the extra attempts in hours. Retrying is only half of it: the
         repository cache is content-addressed, so an asset already seen is
-        never re-fetched at all, which is why every Bazel job restores it and
-        exactly one saves it.
+        never re-fetched at all, which is why every Bazel job restores it.
         """
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("common --http_connector_attempts=20", bazelrc)
@@ -542,49 +541,69 @@ class BazelTestContractTests(unittest.TestCase):
         flags = job_step(setup, "Export shared cache flags")["run"]
         self.assertIn("--repository_cache=$RUNNER_TEMP/bazel-repository", flags)
         restore = job_step(setup, "Restore Bazel repository cache")
-        save = job_step(setup, "Restore and save Bazel repository cache")
         self.assertEqual("${{ runner.temp }}/bazel-repository", restore["with"]["path"])
-        self.assertEqual("${{ runner.temp }}/bazel-repository", save["with"]["path"])
         self.assertTrue(restore["uses"].startswith("actions/cache/restore@"))
-        self.assertTrue(save["uses"].startswith("actions/cache@"))
-        # Exactly one job uploads the warmed cache; the rest restore only.
-        self.assertEqual("inputs.save-repository-cache != 'true'", restore["if"])
-        self.assertEqual("inputs.save-repository-cache == 'true'", save["if"])
-        saving_jobs = [
-            job
-            for job in workflow()["jobs"].values()
-            for step in job.get("steps", [])
-            if step.get("uses") == "./.github/actions/bazel-shared-cache"
-            and step.get("with", {}).get("save-repository-cache") == "true"
-        ]
-        self.assertEqual(1, len(saving_jobs))
+        self.assertEqual("${{ steps.keys.outputs.repository }}", restore["with"]["key"])
+        keys = job_step(setup, "Resolve Bazel cache keys")["run"]
+        self.assertIn(
+            "hashFiles('MODULE.bazel.lock', 'MODULE.bazel', 'Cargo.lock')", keys
+        )
 
-    def test_the_output_base_is_restored_everywhere_and_saved_once(self) -> None:
-        """Every Bazel job restores the previous run's output base; one saves.
+    def test_bazel_caches_are_restored_by_ci_and_saved_only_on_main(self) -> None:
+        """Every Bazel job restores; only cache-warm.yml, on main, saves.
 
-        The output base carries the local action cache and the materialised
-        runfiles trees that dominate the merge group's local-side bookkeeping.
-        Persisting it under RUNNER_TEMP is useless -- RUNNER_TEMP dies with the
-        runner -- so the shared action restores it into that path and exactly
-        one job (Lint, which runs on every trusted event) uploads it again.
+        An Actions cache is readable only from the ref that wrote it and from
+        the default branch. ci.yml never runs on `main`, so a save from one of
+        its jobs lands under a PR or merge-queue ref nothing else reads: 883
+        repository-cache misses against 99 hits in the 2026-09-22/23 window.
+        The shared action is restore-only and exports its keys; cache-warm.yml
+        saves exactly those keys from a `main` run.
         """
         setup = shared_cache_action()
-        restore = job_step(setup, "Restore Bazel output base")
-        save = job_step(setup, "Restore and save Bazel output base")
-        self.assertEqual("${{ runner.temp }}/bazel-output", restore["with"]["path"])
-        self.assertEqual("${{ runner.temp }}/bazel-output", save["with"]["path"])
-        self.assertTrue(restore["uses"].startswith("actions/cache/restore@"))
-        self.assertTrue(save["uses"].startswith("actions/cache@"))
-        self.assertEqual("inputs.save-output-base != 'true'", restore["if"])
-        self.assertEqual("inputs.save-output-base == 'true'", save["if"])
-        saving_jobs = [
-            job
-            for job in workflow()["jobs"].values()
-            for step in job.get("steps", [])
-            if step.get("uses") == "./.github/actions/bazel-shared-cache"
-            and step.get("with", {}).get("save-output-base") == "true"
-        ]
-        self.assertEqual(1, len(saving_jobs))
+        for step in setup["steps"]:
+            uses = step.get("uses", "")
+            with self.subTest(step=step.get("name")):
+                self.assertFalse(uses.startswith("actions/cache@"), uses)
+                self.assertFalse(uses.startswith("actions/cache/save@"), uses)
+        output_base = job_step(setup, "Restore Bazel output base")
+        self.assertEqual("${{ runner.temp }}/bazel-output", output_base["with"]["path"])
+        self.assertTrue(output_base["uses"].startswith("actions/cache/restore@"))
+        self.assertEqual("${{ steps.keys.outputs.output_base }}", output_base["with"]["key"])
+        action = yaml.load(
+            (ROOT / ".github/actions/bazel-shared-cache/action.yml").read_text(encoding="utf-8"),
+            Loader=yaml.BaseLoader,
+        )
+        self.assertNotIn("inputs", action)
+        self.assertEqual(
+            {"repository-cache-key", "repository-cache-hit", "output-base-key", "output-base-hit"},
+            set(action["outputs"]),
+        )
+
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertNotIn("actions/cache/save@", ci)
+        self.assertNotIn("save-repository-cache", ci)
+        self.assertNotIn("save-output-base", ci)
+
+        warm_workflow = yaml.load(
+            (ROOT / ".github/workflows/cache-warm.yml").read_text(encoding="utf-8"),
+            Loader=yaml.BaseLoader,
+        )
+        self.assertEqual({"branches": ["main"]}, warm_workflow["on"]["push"])
+        self.assertIn("schedule", warm_workflow["on"])
+        warm = warm_workflow["jobs"]["warm-bazel"]
+        setup_step = job_step(warm, "Configure Bazel shared cache")
+        self.assertEqual("cache", setup_step["id"])
+        for name, path, key, hit in (
+            ("Save Bazel repository cache", "bazel-repository",
+             "repository-cache-key", "repository-cache-hit"),
+            ("Save Bazel output base", "bazel-output", "output-base-key", "output-base-hit"),
+        ):
+            with self.subTest(save=name):
+                save = job_step(warm, name)
+                self.assertTrue(save["uses"].startswith("actions/cache/save@"))
+                self.assertEqual(f"${{{{ runner.temp }}}}/{path}", save["with"]["path"])
+                self.assertEqual(f"${{{{ steps.cache.outputs.{key} }}}}", save["with"]["key"])
+                self.assertEqual(f"steps.cache.outputs.{hit} != 'true'", save["if"])
 
     def test_the_shared_cache_action_fails_closed_on_a_bad_secret(self) -> None:
         """A misconfigured environment must name what is wrong, not build wrong.

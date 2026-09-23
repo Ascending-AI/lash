@@ -102,7 +102,7 @@ env:
   LASH_CI_FEATURES: ""
   # The linker is a property of the caches this workflow shares, not of any
   # one job's step list. RUSTFLAGS is part of cargo's per-unit fingerprint, so
-  # a job that restores `linux-debug` under a different RUSTFLAGS than the job
+  # a job that restores a Cargo cache under a different RUSTFLAGS than the job
   # that wrote it logs "cache restored" and then cold-builds the whole graph —
   # which is exactly what the five container/E2E readers did while the flag
   # was appended by a setup action they never ran. Setting it here makes
@@ -609,7 +609,7 @@ jobs:
           cache-bin: false
           shared-key: queue-lashlang-git-consumer
           workspaces: . -> target/lashlang-git-consumer
-          save-if: ${{ github.event_name != 'merge_group' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install mold
         uses: ./.github/actions/setup-mold
@@ -1028,6 +1028,9 @@ jobs:
           shared-key: linux-tests
           # Workspace outputs have their own source-aware cache below.
           cache-targets: false
+          # cache-warm.yml writes `linux-tests` on main; a save from this
+          # pull request's ref would be readable by nothing else.
+          save-if: false
 
       # Keep the primary key source-aware so an unchanged tree gets an exact
       # hit. The compatibility prefix deliberately stops before the source
@@ -1036,7 +1039,6 @@ jobs:
       # Only build-bearing target subtrees are retained, and cache service
       # failures never replace the test result.
       - name: Restore workspace test build outputs
-        id: workspace-test-cache
         continue-on-error: true
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1128,24 +1130,6 @@ jobs:
               --receipts "${LASH_LAW_RECEIPTS}"
           fi
 
-      - name: Save workspace test build outputs
-        if: success() && steps.workspace-test-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            target/debug/.fingerprint
-            target/debug/build
-            target/debug/deps
-            target/debug/examples
-            target/workspace-test-cache/source-mtimes.json
-          key: >-
-            workspace-tests-v2-${{ runner.os }}-${{ runner.arch }}-${{
-            steps.workspace-test-cache-inputs.outputs.compiler }}-${{
-            steps.workspace-test-cache-inputs.outputs.settings }}-${{
-            hashFiles('Cargo.lock', 'Cargo.toml', '**/Cargo.toml', '.cargo/**', 'rust-toolchain*', '.github/actions/rust-toolchain/**', '.github/actions/setup-mold/**', '.github/actions/install-tools/**')
-            }}-${{ steps.workspace-test-cache-inputs.outputs.source }}
-
       - name: Report cache disk capacity
         if: always()
         run: bash scripts/ci/report-cache.sh
@@ -1203,13 +1187,6 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
 
       - name: Install protoc and nextest
         uses: ./.github/actions/install-tools
@@ -1337,16 +1314,6 @@ jobs:
           cache-dependency-path: examples/workflow-graph-roundtrip/frontend/package-lock.json
 
 
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          # The `check` job is the sole writer of the shared linux-debug cache;
-          # the lint job only reads it so clippy reuses the checked dependency
-          # graph.
-          shared-key: linux-debug
-          save-if: false
-
       - name: Install protoc
         uses: ./.github/actions/install-tools
         with:
@@ -1372,12 +1339,6 @@ jobs:
       - name: Configure Bazel shared cache
         if: needs.plan.outputs.bazel_trusted == 'true'
         uses: ./.github/actions/bazel-shared-cache
-        # Lint is the designated writer of the shared repository cache:
-        # it is the one Bazel job that runs for every trusted event, so the
-        # key stays warm even on a run whose plan skips the other two.
-        with:
-          save-repository-cache: "true"
-          save-output-base: "true"
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
           CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
@@ -1703,22 +1664,13 @@ jobs:
         if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/rust-toolchain
 
-      - name: Restore cargo cache
-        if: needs.plan.outputs.bazel_trusted != 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
       - name: Install protoc and nextest
         if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc,nextest
 
-      # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache and installs its linker directly.
+      # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
         if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/setup-mold
@@ -1857,22 +1809,13 @@ jobs:
         if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/rust-toolchain
 
-      - name: Restore cargo cache
-        if: needs.plan.outputs.bazel_trusted != 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
       - name: Install protoc
         if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
-      # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache and installs its linker directly.
+      # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
         if: needs.plan.outputs.bazel_trusted != 'true'
         uses: ./.github/actions/setup-mold
@@ -2010,20 +1953,12 @@ jobs:
       - name: Install Rust toolchain
         uses: ./.github/actions/rust-toolchain
 
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
       - name: Install protoc
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
-      # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache and installs its linker directly.
+      # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
@@ -2100,7 +2035,8 @@ jobs:
           cache-bin: false
           shared-key: linux-worker-release
           cache-workspace-crates: true
-          save-if: true
+          # Only a main-scoped entry is readable by later runs.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build worker binaries once
         if: env.RUN_WORKER_ARTIFACTS == 'true'
@@ -2230,20 +2166,12 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
 
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
       - name: Install protoc
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
-      # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache and installs its linker directly.
+      # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
@@ -2350,20 +2278,12 @@ jobs:
         uses: ./.github/actions/rust-toolchain
 
 
-      - name: Restore cargo cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          cache-bin: false
-          shared-key: linux-debug
-          save-if: false
-
       - name: Install protoc
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
-      # Provides the linker the workflow-level RUSTFLAGS names. This job
-      # restores the `linux-debug` cache and installs its linker directly.
+      # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
@@ -2503,7 +2423,7 @@ jobs:
           cache-bin: false
           shared-key: linux-worker-tests
           cache-workspace-crates: true
-          save-if: ${{ matrix.segment == 1 }}
+          save-if: ${{ matrix.segment == 1 && github.ref == 'refs/heads/main' }}
 
       - name: Install protoc
         if: env.RUN_WORKERS_E2E == 'true'

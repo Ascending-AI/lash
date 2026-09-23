@@ -2900,7 +2900,26 @@ derive_mutation_jobs() {{
         self.assertIn("shared-key: linux-tests", workspace_tests)
         self.assertIn("cache-targets: false", workspace_tests)
         self.assertIn("actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workspace_tests)
-        self.assertIn("actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workspace_tests)
+        # Restore-only: cache-warm.yml writes both keys on main, and a save
+        # from a pull request's ref is readable by nothing else.
+        self.assertNotIn("actions/cache/save@", workspace_tests)
+        self.assertIn("save-if: false", workspace_tests)
+        warm = yaml.safe_load(
+            (ROOT / ".github" / "workflows" / "cache-warm.yml").read_text(encoding="utf-8")
+        )["jobs"]["warm-workspace-tests"]
+        ci_steps = {
+            step["name"]: step
+            for step in yaml.safe_load(workflow)["jobs"]["workspace-tests"]["steps"]
+        }
+        warm_steps = {step["name"]: step for step in warm["steps"]}
+        restore = ci_steps["Restore workspace test build outputs"]["with"]
+        writer = warm_steps["Restore and save workspace test build outputs"]["with"]
+        for field in ("path", "key", "restore-keys"):
+            self.assertEqual(restore[field], writer[field], field)
+        self.assertEqual(
+            {k: v for k, v in ci_steps["Restore cargo cache"]["with"].items() if k != "save-if"},
+            warm_steps["Restore cargo cache"]["with"],
+        )
         self.assertIn("workspace-tests-v2-${{ runner.os }}-${{ runner.arch }}", workspace_tests)
         self.assertIn("rustc -vV", workspace_tests)
         self.assertIn("outputs.compiler", workspace_tests)
