@@ -56,11 +56,11 @@ async fn row_store() -> SqliteEffectReplayRowStore {
     }
 }
 
-/// A controller scoped to `scope` over a fresh memory deployment's journal.
+/// A controller scoped to `scope` over a fresh memory backend's journal.
 async fn memory_controller(scope: ExecutionScope) -> SqliteRuntimeEffectController {
-    crate::SqliteDeployment::memory()
+    crate::SqliteBackend::memory()
         .await
-        .expect("open the memory deployment")
+        .expect("open the memory backend")
         .open_effect_controller(scope)
         .await
         .expect("open the in-memory effect journal")
@@ -1406,14 +1406,14 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
 #[tokio::test]
 async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row() {
     let scope = ExecutionScope::process("trigger-driver-process");
-    let deployment = crate::SqliteDeployment::memory()
+    let backend = crate::SqliteBackend::memory()
         .await
-        .expect("open the memory deployment");
-    let controller = deployment
+        .expect("open the memory backend");
+    let controller = backend
         .open_effect_controller(scope.clone())
         .await
         .expect("open the in-memory effect journal");
-    let triggers: Arc<dyn lash_core_execution::TriggerStore> = deployment.trigger_store();
+    let triggers: Arc<dyn lash_core_execution::TriggerStore> = backend.trigger_store();
     let owner_scope = lash_core_execution::TriggerOwnerScope::host("trigger-driver")
         .expect("trigger owner scope");
     let envelope = || {
@@ -1459,25 +1459,25 @@ async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row()
     );
 }
 
-/// Two hosts on one memory deployment park and wake on one journal
-/// notifier: the notifier is keyed on the deployment's identity, which every
-/// host opened on the deployment shares, while a second deployment's hosts
-/// share nothing with the first (ADR 0102). A memory deployment has no writer
+/// Two hosts on one memory backend park and wake on one journal
+/// notifier: the notifier is keyed on the backend's identity, which every
+/// host opened on the backend shares, while a second backend's hosts
+/// share nothing with the first (ADR 0102). A memory backend has no writer
 /// outside this process, so nothing about it is left to a poll.
 #[tokio::test]
-async fn hosts_on_one_memory_deployment_wake_each_other_and_no_other() {
-    let deployment = crate::SqliteDeployment::memory()
+async fn hosts_on_one_memory_backend_wake_each_other_and_no_other() {
+    let backend = crate::SqliteBackend::memory()
         .await
-        .expect("open the memory deployment");
-    let parked_host = deployment.effect_host();
-    let settling_host = deployment
+        .expect("open the memory backend");
+    let parked_host = backend.effect_host();
+    let settling_host = backend
         .reopen()
         .await
-        .expect("reopen the memory deployment")
+        .expect("reopen the memory backend")
         .effect_host();
-    let stranger_host = crate::SqliteDeployment::memory()
+    let stranger_host = crate::SqliteBackend::memory()
         .await
-        .expect("open a second memory deployment")
+        .expect("open a second memory backend")
         .effect_host();
     let key = |host: &SqliteEffectHost| JournalWakeKey::for_journal(&host.journal);
     let group = EffectJournalSubject::Group {
@@ -1496,11 +1496,11 @@ async fn hosts_on_one_memory_deployment_wake_each_other_and_no_other() {
         tokio::time::timeout(std::time::Duration::from_millis(50), woken.as_mut())
             .await
             .is_err(),
-        "another deployment's settlement must not wake this deployment's waiter"
+        "another backend's settlement must not wake this backend's waiter"
     );
 
     EffectJournalNotifiers::announce(&key(&settling_host).identity, group);
     tokio::time::timeout(std::time::Duration::from_secs(1), woken)
         .await
-        .expect("a settlement by a second host on the same deployment wakes the parked host");
+        .expect("a settlement by a second host on the same backend wakes the parked host");
 }

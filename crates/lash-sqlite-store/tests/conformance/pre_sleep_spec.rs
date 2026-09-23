@@ -72,8 +72,8 @@ fn rewrite_sleep_command_to_resolved_duration(canonical_json: &str) -> String {
 
 #[tokio::test]
 async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let controller = deployment
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let controller = backend
         .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))
         .await
         .expect("create current effect store");
@@ -87,7 +87,7 @@ async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
     assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
     drop(controller);
 
-    let conn = deployment.raw(SqliteDatabase::EffectReplay);
+    let conn = backend.raw(SqliteDatabase::EffectReplay);
     let envelope_json: String = conn
         .query_row(
             "SELECT envelope_json FROM runtime_effect_replay WHERE replay_key = ?1",
@@ -112,7 +112,7 @@ async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
         .expect("stamp the pre-SleepSpec effect generation");
     drop(conn);
 
-    let error = match deployment.try_reopen().await {
+    let error = match backend.try_reopen().await {
         Ok(_) => panic!("a pre-SleepSpec effect journal must be refused at open"),
         Err(error) => error,
     };
@@ -124,8 +124,8 @@ async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
 
 #[tokio::test]
 async fn sqlite_fresh_effect_journal_round_trips_a_sleep_across_reopen() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let controller = deployment
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let controller = backend
         .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))
         .await
         .expect("create current effect store");
@@ -139,7 +139,7 @@ async fn sqlite_fresh_effect_journal_round_trips_a_sleep_across_reopen() {
     assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
     drop(controller);
 
-    let reopened = deployment
+    let reopened = backend
         .reopen()
         .await
         .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))

@@ -18,7 +18,7 @@
 //!   encoding, group membership, and the loser drain. Backends plug into it
 //!   through [`EffectReplayRowStore`], which is dumb row storage and nothing
 //!   more; PostgreSQL and SQLite are two sets of rows under one state machine.
-//!   Every backend's await-event rows live as long as its deployment, so every
+//!   Every backend's await-event rows live as long as the backend does, so every
 //!   one issues completion keys. The
 //!   [`EffectHost`](super::executor::EffectHost) and
 //!   [`RuntimeEffectController`](super::executor::RuntimeEffectController)

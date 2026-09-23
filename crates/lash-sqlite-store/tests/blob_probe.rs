@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 /// Raw probes into one durable-core catalog, reached by the name a raw SQLite
-/// connection opens it through (a path, or a deployment's URI).
+/// connection opens it through (a path, or a backend's URI).
 pub(crate) struct SqliteBlobProbe {
     _guard: Option<Arc<dyn std::any::Any + Send + Sync>>,
     catalog: String,

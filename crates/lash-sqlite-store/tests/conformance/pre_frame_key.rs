@@ -75,9 +75,9 @@ fn rewrite_completed_continue_as_outcome_to_frame_id(outcome_json: &str) -> Stri
 
 #[tokio::test]
 async fn sqlite_refuses_completed_pre_frame_key_continue_as_at_open() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let backend = TestBackend::open(SUBSTRATE).await;
     let (envelope, outcome) = completed_continue_as_effect_fixture();
-    let controller = deployment
+    let controller = backend
         .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))
         .await
         .expect("create current effect store");
@@ -90,7 +90,7 @@ async fn sqlite_refuses_completed_pre_frame_key_continue_as_at_open() {
         .expect("journal completed continue_as");
     drop(controller);
 
-    let conn = deployment.raw(SqliteDatabase::EffectReplay);
+    let conn = backend.raw(SqliteDatabase::EffectReplay);
     let outcome_json: String = conn
         .query_row(
             "SELECT outcome_json FROM runtime_effect_replay WHERE replay_key = ?1",
@@ -110,7 +110,7 @@ async fn sqlite_refuses_completed_pre_frame_key_continue_as_at_open() {
         .expect("stamp pre-frame-key effect schema");
     drop(conn);
 
-    let error = match deployment.try_reopen().await {
+    let error = match backend.try_reopen().await {
         Ok(_) => panic!("pre-frame-key journal must be refused at open"),
         Err(error) => error,
     };

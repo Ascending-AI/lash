@@ -12,7 +12,7 @@
 //! - for a journal another process can write unannounced, the bounded
 //!   [`CROSS_PROCESS_POLL`] elapses.
 //!
-//! Nothing else re-reads the journal. A memory deployment, where every writer
+//! Nothing else re-reads the journal. A memory backend, where every writer
 //! is in this process, has no poll at all.
 //!
 //! The clock is the injected [`Clock`](crate::Clock), and its sleeps are the

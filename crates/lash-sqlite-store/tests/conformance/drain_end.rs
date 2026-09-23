@@ -16,11 +16,11 @@ use lash_core_execution::{EffectHost, ProcessRegistry, SessionStoreFactory};
 use lash_sansio::SessionId;
 
 use super::{Retained, SUBSTRATE};
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 
 async fn sqlite_drain_end_world(retained: Retained) -> DrainEndWorld {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend
         .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
@@ -32,21 +32,21 @@ async fn sqlite_drain_end_world(retained: Retained) -> DrainEndWorld {
         })
         .await
         .expect("create the drain-end session store");
-    let group_host = deployment.reopen().await.effect_host();
+    let group_host = backend.reopen().await.effect_host();
     let world = DrainEndWorld {
         store: store as Arc<dyn RuntimePersistence>,
-        registry: deployment.process_registry() as Arc<dyn ProcessRegistry>,
-        session_factory: deployment.session_store_factory() as Arc<dyn SessionStoreFactory>,
+        registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
+        session_factory: backend.session_store_factory() as Arc<dyn SessionStoreFactory>,
         effect_host: lash_conformance::install_drain_end_executors(
-            deployment.effect_host() as Arc<dyn EffectHost>
+            backend.effect_host() as Arc<dyn EffectHost>
         ),
         group_host: Some(lash_conformance::install_drain_end_executors(
             group_host as Arc<dyn EffectHost>,
         )),
     };
-    // The store connections the world returns read and write the deployment
+    // The store connections the world returns read and write the backend
     // for the whole law, not just for the factory call.
-    retained.keep(&deployment);
+    retained.keep(&backend);
     world
 }
 

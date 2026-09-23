@@ -876,23 +876,23 @@ macro_rules! process_change_horizon_tests {
     };
 }
 
-/// Register the laws every `Deployment` implementation answers (ADR 0102).
+/// Register the laws every `Backend` implementation answers (ADR 0102).
 ///
-/// The fixture yields `(guard, Arc<dyn Deployment>)`.
+/// The fixture yields `(guard, Arc<dyn Backend>)`.
 #[macro_export]
-macro_rules! deployment_tests {
+macro_rules! backend_tests {
     ($fixture:block) => {
-        $crate::deployment_tests!(@catalogue $fixture; [
-            (a_deployment_binds_its_effect_host_to_its_identity, "deployment-binding-identity"),
+        $crate::backend_tests!(@catalogue $fixture; [
+            (a_backend_binds_its_effect_host_to_its_identity, "backend-binding-identity"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, deployment) = $fixture;
+                let (_fixture_guard, backend) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(deployment).await;
+                $crate::registration_macro_support::$law(backend).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*

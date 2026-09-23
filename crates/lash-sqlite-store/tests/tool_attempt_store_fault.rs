@@ -158,15 +158,15 @@ async fn faulted_world(
     Arc<AtomicUsize>,
 ) {
     let scope = ExecutionScope::turn(SessionId::from(SESSION.to_string()), TURN);
-    let controller = lash_sqlite_store::SqliteDeployment::memory_with_options_and_clock(
-        lash_sqlite_store::SqliteDeploymentOptions {
+    let controller = lash_sqlite_store::SqliteBackend::memory_with_options_and_clock(
+        lash_sqlite_store::SqliteBackendOptions {
             effect_replay: short_lease_options(),
-            ..lash_sqlite_store::SqliteDeploymentOptions::memory()
+            ..lash_sqlite_store::SqliteBackendOptions::memory()
         },
         Arc::new(lash_core_execution::facade_support::SystemClock),
     )
     .await
-    .expect("memory deployment")
+    .expect("memory backend")
     .open_effect_controller(scope)
     .await
     .expect("in-memory SQLite effect controller");

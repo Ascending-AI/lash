@@ -1,7 +1,7 @@
 //! [`SqliteAttachmentStore`]: the attachment port over the SQLite session
 //! catalog.
 //!
-//! A SQLite deployment keeps its attachment bytes in the same durable-core
+//! A SQLite backend keeps its attachment bytes in the same durable-core
 //! database as the attachment manifest and the GC condemnation fence
 //! (`attachments.rs`), in the `attachment_blobs` table. The store is the flat,
 //! content-addressed [`AttachmentStore`] the port asks for and nothing more:
@@ -92,8 +92,8 @@ impl SqliteAttachmentStore {
     /// through the same connection, stamped by the same clock.
     ///
     /// Its persistence is the catalog's location: bytes in a file catalog are
-    /// durable; bytes in a memory deployment's catalog live as long as the
-    /// deployment does.
+    /// durable; bytes in a memory backend's catalog live as long as the
+    /// backend does.
     pub fn for_store(store: &Store) -> Self {
         Self {
             conn: store.conn.clone(),

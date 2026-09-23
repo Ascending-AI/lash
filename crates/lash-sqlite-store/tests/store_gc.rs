@@ -61,9 +61,9 @@ async fn factory_state(
 
 #[tokio::test]
 async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
-    let store = lash_sqlite_store::SqliteDeployment::memory()
+    let store = lash_sqlite_store::SqliteBackend::memory()
         .await
-        .expect("memory deployment")
+        .expect("memory backend")
         .open_store()
         .await
         .expect("store");

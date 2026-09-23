@@ -386,7 +386,7 @@ pub(super) fn timer_trigger_resources() -> lashlang::LashlangHostCatalog {
 }
 
 /// Captures every effect envelope a runtime sends through a SQLite memory
-/// deployment's effect host, which journals and runs each one.
+/// backend's effect host, which journals and runs each one.
 #[derive(Clone, Default)]
 pub(super) struct TriggerEffectCapture {
     envelopes: Arc<std::sync::Mutex<Vec<lash_core::RuntimeEffectEnvelope>>>,
@@ -406,14 +406,14 @@ impl lash_core::testing::EffectLayer for TriggerEffectCapture {
 }
 
 impl TriggerEffectCapture {
-    /// A fresh memory deployment's effect host with this capture layered over
+    /// A fresh memory backend's effect host with this capture layered over
     /// it.
     async fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
-        let deployment = lash_sqlite_store::SqliteDeployment::memory()
+        let backend = lash_sqlite_store::SqliteBackend::memory()
             .await
-            .expect("open a memory deployment");
+            .expect("open a memory backend");
         Arc::new(lash_core::testing::LayeredEffectHost::new(
-            deployment.effect_host(),
+            backend.effect_host(),
             Arc::new(self.clone()),
         ))
     }

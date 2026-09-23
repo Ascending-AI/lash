@@ -1,5 +1,5 @@
 //! `SqliteAttachmentStore`: the shared attachment-store suite on the
-//! deployment's catalog, and the GC agreeing with the manifest over it.
+//! backend's catalog, and the GC agreeing with the manifest over it.
 
 use super::*;
 
@@ -11,10 +11,10 @@ use lash_core_execution::{
 };
 use lash_sansio::MediaType;
 
-/// What the catalog's bytes outlive: a file, or the memory deployment.
+/// What the catalog's bytes outlive: a file, or the memory backend.
 const PERSISTENCE: AttachmentStorePersistence = match SUBSTRATE {
-    crate::deployment_fixture::Substrate::File => AttachmentStorePersistence::Durable,
-    crate::deployment_fixture::Substrate::Memory => AttachmentStorePersistence::Ephemeral,
+    crate::backend_fixture::Substrate::File => AttachmentStorePersistence::Durable,
+    crate::backend_fixture::Substrate::Memory => AttachmentStorePersistence::Ephemeral,
 };
 
 lash_conformance::attachment_store_reopenable_tests!({
@@ -22,14 +22,14 @@ lash_conformance::attachment_store_reopenable_tests!({
     (
         retained.clone(),
         move || {
-            let deployment = retained.open_blocking();
+            let backend = retained.open_blocking();
             let reopened = sync_await({
-                let deployment = deployment.clone();
-                async move { deployment.reopen().await }
+                let backend = backend.clone();
+                async move { backend.reopen().await }
             });
             retained.keep(&reopened);
             lash_conformance::ReopenableAttachmentStore {
-                open: deployment.attachment_store() as Arc<dyn AttachmentStore>,
+                open: backend.attachment_store() as Arc<dyn AttachmentStore>,
                 reopen: reopened.attachment_store() as Arc<dyn AttachmentStore>,
             }
         },
@@ -82,8 +82,8 @@ fn state_referencing(session_id: &SessionId, reference: &AttachmentRef) -> Runti
     state
 }
 
-fn checkpoint_blob_count(deployment: &TestDeployment) -> i64 {
-    deployment
+fn checkpoint_blob_count(backend: &TestBackend) -> i64 {
+    backend
         .raw(SqliteDatabase::DurableCore)
         .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
         .expect("count checkpoint blobs")
@@ -91,11 +91,11 @@ fn checkpoint_blob_count(deployment: &TestDeployment) -> i64 {
 
 async fn sweep(
     factory: &lash_sqlite_store::SqliteSessionStoreFactory,
-    backend: &Arc<dyn AttachmentStore>,
+    attachments: &Arc<dyn AttachmentStore>,
 ) -> lash_core_execution::attachments::AttachmentReclamationReport {
     reclaim_unreferenced_attachments(
         factory,
-        backend.as_ref(),
+        attachments.as_ref(),
         AttachmentReclamationPolicy {
             grace_period_ms: 0,
             empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
@@ -113,8 +113,8 @@ async fn sweep(
 /// go too.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let factory = deployment.session_store_factory();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory();
     let session_id = SessionId::from("attachment-gc-holder");
     let session = factory
         .create_store(
@@ -126,9 +126,9 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         )
         .await
         .expect("create holding session");
-    let backend: Arc<dyn AttachmentStore> = deployment.attachment_store();
+    let attachments: Arc<dyn AttachmentStore> = backend.attachment_store();
 
-    let held = SessionAttachmentStore::new(Arc::clone(&backend), session.clone(), &session_id)
+    let held = SessionAttachmentStore::new(Arc::clone(&attachments), session.clone(), &session_id)
         .put(b"held by a committed turn".to_vec(), octet_meta())
         .await
         .expect("session put records an intent and stores the bytes");
@@ -141,22 +141,22 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         .commit_runtime_state(commit)
         .await
         .expect("commit the turn that holds the attachment");
-    let unheld = backend
+    let unheld = attachments
         .put(b"no manifest row holds this".to_vec(), octet_meta())
         .await
         .expect("store an unreferenced blob");
-    let checkpoint_blobs = checkpoint_blob_count(&deployment);
+    let checkpoint_blobs = checkpoint_blob_count(&backend);
     assert!(
         checkpoint_blobs > 0,
         "the committed turn must have written checkpoint bytes for the sweep to spare"
     );
     assert_eq!(
-        backend.list().await.expect("list before sweep").len(),
+        attachments.list().await.expect("list before sweep").len(),
         2,
         "the attachment listing holds the two attachment blobs and no checkpoint bytes"
     );
 
-    let report = sweep(&factory, &backend).await;
+    let report = sweep(&factory, &attachments).await;
     assert_eq!(
         report.fence,
         AttachmentGcFence::Fenced,
@@ -167,7 +167,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         "only the unheld blob is reclaimed: {report:?}"
     );
     assert_eq!(
-        backend
+        attachments
             .get(&held.id)
             .await
             .expect("a blob a committed manifest row holds survives the sweep")
@@ -176,20 +176,20 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
     );
     assert!(
         matches!(
-            backend.get(&unheld.id).await,
+            attachments.get(&unheld.id).await,
             Err(AttachmentStoreError::NotFound(_))
         ),
         "a blob no manifest row holds is collected"
     );
     assert_eq!(
-        checkpoint_blob_count(&deployment),
+        checkpoint_blob_count(&backend),
         checkpoint_blobs,
         "the attachment sweep never touches checkpoint bytes"
     );
 
     // A second sweep changes nothing while the row still holds the blob.
-    assert_eq!(sweep(&factory, &backend).await.reclaimed_count, 0);
-    backend
+    assert_eq!(sweep(&factory, &attachments).await.reclaimed_count, 0);
+    attachments
         .get(&held.id)
         .await
         .expect("the held blob survives a repeated sweep");
@@ -200,13 +200,13 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         .await
         .expect("delete the holding session");
     assert_eq!(
-        sweep(&factory, &backend).await.reclaimed_count,
+        sweep(&factory, &attachments).await.reclaimed_count,
         1,
         "with its holder deleted, nothing roots the blob"
     );
     assert!(
         matches!(
-            backend.get(&held.id).await,
+            attachments.get(&held.id).await,
             Err(AttachmentStoreError::NotFound(_))
         ),
         "the released blob is collected"

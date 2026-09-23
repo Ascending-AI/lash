@@ -16,7 +16,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         VOCABULARY
     }
 
-    /// The process-wide notifier for this deployment and subject; see
+    /// The process-wide notifier for this backend and subject; see
     /// [`JournalWakeKey`] for which writers it reaches.
     async fn journal_wake(
         &self,

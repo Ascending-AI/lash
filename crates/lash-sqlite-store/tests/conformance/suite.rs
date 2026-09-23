@@ -1,8 +1,8 @@
 //! The SQLite conformance suite, registered once per substrate (ADR 0102).
 //!
 //! `conformance.rs` and `conformance_memory.rs` each mount this module under a
-//! `SUBSTRATE`: every fixture opens its databases through a [`TestDeployment`]
-//! on that substrate, so the same laws hold a file deployment and a named
+//! `SUBSTRATE`: every fixture opens its databases through a [`TestBackend`]
+//! on that substrate, so the same laws hold a file backend and a named
 //! in-memory one to one standard. Laws that need a database file by nature —
 //! pre-seeded legacy schemas, path spellings, a second OS process, WAL
 //! snapshot reads — live in `conformance.rs` alone.
@@ -36,13 +36,12 @@ use lash_core_execution::{
     SessionStoreFactory, TriggerStore,
 };
 use lash_sqlite_store::{
-    SqliteDatabase, SqliteDeploymentOptions, SqliteEffectReplayOptions,
-    SqliteRuntimeEffectController,
+    SqliteBackendOptions, SqliteDatabase, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
 
 use super::SUBSTRATE;
-use crate::deployment_fixture::durable_turn_scope;
-use crate::deployment_fixture::{TestDeployment, sync_await};
+use crate::backend_fixture::durable_turn_scope;
+use crate::backend_fixture::{TestBackend, sync_await};
 
 #[path = "attachment_store.rs"]
 mod attachment_store;
@@ -94,33 +93,33 @@ mod wake_delivery;
 include!("append_identity.rs");
 include!("effect_lease_fencing.rs");
 
-/// Deployments a fixture opened and must keep alive for its whole law.
+/// Backends a fixture opened and must keep alive for its whole law.
 #[derive(Clone, Default)]
-struct Retained(Arc<Mutex<Vec<TestDeployment>>>);
+struct Retained(Arc<Mutex<Vec<TestBackend>>>);
 
 impl Retained {
-    fn keep(&self, deployment: &TestDeployment) {
-        self.0.lock_recover().push(deployment.clone());
+    fn keep(&self, backend: &TestBackend) {
+        self.0.lock_recover().push(backend.clone());
     }
 
-    /// A fresh deployment, kept alive with the fixture.
-    fn open_blocking(&self) -> TestDeployment {
-        let deployment = TestDeployment::blocking(SUBSTRATE);
-        self.keep(&deployment);
-        deployment
+    /// A fresh backend, kept alive with the fixture.
+    fn open_blocking(&self) -> TestBackend {
+        let backend = TestBackend::blocking(SUBSTRATE);
+        self.keep(&backend);
+        backend
     }
 }
 
-/// One deployment per scenario name: a law that asks twice for the same
+/// One backend per scenario name: a law that asks twice for the same
 /// scenario is reopening the store it wrote, so it gets a fresh store on the
-/// same deployment.
+/// same backend.
 #[derive(Clone)]
-struct ScenarioDeployments {
+struct ScenarioBackends {
     clock: Arc<dyn lash_core_execution::Clock>,
-    by_scenario: Arc<Mutex<HashMap<String, TestDeployment>>>,
+    by_scenario: Arc<Mutex<HashMap<String, TestBackend>>>,
 }
 
-impl ScenarioDeployments {
+impl ScenarioBackends {
     fn new(clock: Arc<dyn lash_core_execution::Clock>) -> Self {
         Self {
             clock,
@@ -130,17 +129,17 @@ impl ScenarioDeployments {
 
     fn store(&self, scenario: &str) -> Arc<dyn RuntimePersistence> {
         let existing = self.by_scenario.lock_recover().get(scenario).cloned();
-        let deployment = existing.unwrap_or_else(|| {
+        let backend = existing.unwrap_or_else(|| {
             let clock = Arc::clone(&self.clock);
-            let deployment =
-                sync_await(async move { TestDeployment::open_with_clock(SUBSTRATE, clock).await });
+            let backend =
+                sync_await(async move { TestBackend::open_with_clock(SUBSTRATE, clock).await });
             self.by_scenario
                 .lock_recover()
                 .entry(scenario.to_string())
-                .or_insert(deployment)
+                .or_insert(backend)
                 .clone()
         });
-        deployment.blocking_store() as Arc<dyn RuntimePersistence>
+        backend.blocking_store() as Arc<dyn RuntimePersistence>
     }
 }
 
@@ -154,24 +153,24 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
 }
 
 lash_conformance::attachment_adoption_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let factory = deployment.session_store_factory();
-    (deployment, factory)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory();
+    (backend, factory)
 });
 
 lash_conformance::attachment_condemnation_recovery_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let factory = deployment.session_store_factory();
-    let reopen = deployment.clone();
-    (deployment, factory, move || async move {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory();
+    let reopen = backend.clone();
+    (backend, factory, move || async move {
         reopen.reopen().await.session_store_factory() as Arc<dyn SessionStoreFactory>
     })
 });
 
 #[tokio::test]
 async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let factory = deployment.session_store_factory();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory();
     let session_id = SessionId::from("condemnation-corruption");
     factory
         .create_store(
@@ -183,7 +182,7 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         )
         .await
         .expect("materialize catalog");
-    let connection = deployment.raw(SqliteDatabase::DurableCore);
+    let connection = backend.raw(SqliteDatabase::DurableCore);
     connection
         .execute_batch(
             "PRAGMA ignore_check_constraints = ON;
@@ -215,11 +214,11 @@ lash_conformance::abandoned_attachment_recovery_tests!({
     (retained.clone(), move || {
         let retained = retained.clone();
         async move {
-            let deployment = TestDeployment::open(SUBSTRATE).await;
-            retained.keep(&deployment);
-            let factory = deployment.session_store_factory() as Arc<dyn SessionStoreFactory>;
+            let backend = TestBackend::open(SUBSTRATE).await;
+            retained.keep(&backend);
+            let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
             (factory, move || async move {
-                deployment.reopen().await.session_store_factory() as Arc<dyn SessionStoreFactory>
+                backend.reopen().await.session_store_factory() as Arc<dyn SessionStoreFactory>
             })
         }
     })
@@ -242,24 +241,24 @@ fn sqlite_conformance_invocation(
     )
 }
 
-/// A controller over a fresh deployment's journal, and the deployment that
+/// A controller over a fresh backend's journal, and the backend that
 /// keeps it alive.
 async fn open_effect_controller(
     scope: ExecutionScope,
-) -> (TestDeployment, SqliteRuntimeEffectController) {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let controller = deployment
+) -> (TestBackend, SqliteRuntimeEffectController) {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let controller = backend
         .open_effect_controller(scope)
         .await
         .expect("open the effect controller");
-    (deployment, controller)
+    (backend, controller)
 }
 
 /// Effect-replay options whose leases last `lease_timings`.
 fn with_lease_timings(
     lease_timings: lash_core_execution::facade_support::LeaseTimings,
-) -> impl FnOnce(SqliteDeploymentOptions) -> SqliteDeploymentOptions {
-    move |options| SqliteDeploymentOptions {
+) -> impl FnOnce(SqliteBackendOptions) -> SqliteBackendOptions {
+    move |options| SqliteBackendOptions {
         effect_replay: SqliteEffectReplayOptions {
             lease_timings,
             ..options.effect_replay.clone()
@@ -269,7 +268,7 @@ fn with_lease_timings(
 }
 
 struct SqliteSessionExecutionLeaseRenewalZeroRowInjector {
-    deployment: TestDeployment,
+    backend: TestBackend,
 }
 
 #[async_trait::async_trait]
@@ -278,7 +277,7 @@ impl SessionExecutionLeaseRenewalZeroRowInjector
 {
     async fn arm(&self, session_id: &SessionId) {
         assert_eq!(session_id, "zero-row-session-lease-renewal");
-        self.deployment
+        self.backend
             .raw(SqliteDatabase::DurableCore)
             .execute_batch(
                 "CREATE TRIGGER lash_test_session_lease_renewal_zero_row
@@ -292,7 +291,7 @@ impl SessionExecutionLeaseRenewalZeroRowInjector
     }
 
     async fn disarm(&self) {
-        self.deployment
+        self.backend
             .raw(SqliteDatabase::DurableCore)
             .execute_batch("DROP TRIGGER lash_test_session_lease_renewal_zero_row;")
             .expect("disarm SQLite zero-row renewal trigger");
@@ -300,21 +299,21 @@ impl SessionExecutionLeaseRenewalZeroRowInjector
 }
 
 lash_conformance::session_execution_lease_renewal_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.store().await;
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
     (
         (),
         SessionExecutionLeaseRenewalZeroRowHandles {
             store: store as Arc<dyn RuntimePersistence>,
-            injector: Arc::new(SqliteSessionExecutionLeaseRenewalZeroRowInjector { deployment }),
+            injector: Arc::new(SqliteSessionExecutionLeaseRenewalZeroRowInjector { backend }),
         },
     )
 });
 
 fn artifact_store_handles(
-    deployment: &TestDeployment,
+    backend: &TestBackend,
 ) -> lash_conformance::fused_artifact_store::ArtifactStoreHandles {
-    let store = deployment.blocking_store();
+    let store = backend.blocking_store();
     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
         artifacts: Arc::clone(&store) as Arc<dyn lashlang::LashlangArtifactStore>,
         process_env: store as Arc<dyn ProcessExecutionEnvStore>,
@@ -322,7 +321,7 @@ fn artifact_store_handles(
 }
 
 struct SqliteTriggerOccurrenceListingFaultInjector {
-    deployment: TestDeployment,
+    backend: TestBackend,
 }
 
 #[async_trait::async_trait]
@@ -330,7 +329,7 @@ impl lash_conformance::TriggerOccurrenceListingFaultInjector
     for SqliteTriggerOccurrenceListingFaultInjector
 {
     async fn insert_malformed_occurrence(&self) {
-        let conn = self.deployment.raw(SqliteDatabase::Triggers);
+        let conn = self.backend.raw(SqliteDatabase::Triggers);
         conn.execute(
             "INSERT INTO trigger_occurrences (
                 occurrence_id, idempotency_key, source_type, source_key,
@@ -349,7 +348,7 @@ impl lash_conformance::TriggerOccurrenceListingFaultInjector
     }
 
     async fn make_occurrence_query_unavailable(&self) {
-        self.deployment
+        self.backend
             .raw(SqliteDatabase::Triggers)
             .execute_batch("DROP TABLE trigger_occurrences")
             .expect("make SQLite occurrence query unavailable");
@@ -357,12 +356,12 @@ impl lash_conformance::TriggerOccurrenceListingFaultInjector
 }
 
 struct SqliteFenceIntegrityInjector {
-    deployment: TestDeployment,
+    backend: TestBackend,
 }
 
 impl SqliteFenceIntegrityInjector {
     fn connection(&self, target: &FenceIntegrityTarget) -> rusqlite::Connection {
-        self.deployment.raw(match target {
+        self.backend.raw(match target {
             FenceIntegrityTarget::TriggerRevision { .. } => SqliteDatabase::Triggers,
             _ => SqliteDatabase::DurableCore,
         })
@@ -485,24 +484,24 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
 
 lash_conformance::fence_integrity_tests!({
     ((), |_case| async move {
-        let deployment = TestDeployment::open(SUBSTRATE).await;
+        let backend = TestBackend::open(SUBSTRATE).await;
         FenceIntegrityHandles {
-            runtime: deployment.store().await,
-            triggers: deployment.trigger_store(),
-            injector: Arc::new(SqliteFenceIntegrityInjector { deployment }),
+            runtime: backend.store().await,
+            triggers: backend.trigger_store(),
+            injector: Arc::new(SqliteFenceIntegrityInjector { backend }),
         }
     })
 });
 
 struct SqliteGraphIntegrityInjector {
-    deployment: TestDeployment,
+    backend: TestBackend,
     runtime: Arc<lash_sqlite_store::Store>,
 }
 
 #[async_trait::async_trait]
 impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
     async fn inject(&self, target: &GraphIntegrityTarget) {
-        let conn = self.deployment.raw(SqliteDatabase::DurableCore);
+        let conn = self.backend.raw(SqliteDatabase::DurableCore);
         match target.corruption {
             GraphIntegrityCorruption::OrphanLeaf => {
                 let changed = conn
@@ -605,22 +604,19 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
 
 lash_conformance::graph_integrity_tests!({
     ((), |_case| async move {
-        let deployment = TestDeployment::open(SUBSTRATE).await;
-        let runtime = deployment.store().await;
+        let backend = TestBackend::open(SUBSTRATE).await;
+        let runtime = backend.store().await;
         GraphIntegrityHandles {
             runtime: Arc::clone(&runtime) as Arc<dyn RuntimePersistence>,
-            injector: Arc::new(SqliteGraphIntegrityInjector {
-                deployment,
-                runtime,
-            }),
+            injector: Arc::new(SqliteGraphIntegrityInjector { backend, runtime }),
         }
     })
 });
 
 #[tokio::test]
 async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.store().await;
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
     let session_id = "healthy-whole-session-graph";
     let mut state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
@@ -656,18 +652,18 @@ async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
 }
 
 lash_conformance::signed_counter_write_domain_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.store().await;
-    (deployment, store)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
+    (backend, store)
 });
 
 lash_conformance::artifact_store_reopenable_tests!({
     let retained = Retained::default();
     (retained.clone(), move || {
-        let deployment = retained.open_blocking();
+        let backend = retained.open_blocking();
         lash_conformance::fused_artifact_store::ReopenableArtifactStore {
-            open: artifact_store_handles(&deployment),
-            reopen: Arc::new(move || artifact_store_handles(&deployment)),
+            open: artifact_store_handles(&backend),
+            reopen: Arc::new(move || artifact_store_handles(&backend)),
         }
     })
 });
@@ -729,14 +725,14 @@ fn current_epoch_ms_for_test() -> u64 {
 lash_conformance::process_registry_reopenable_tests!({
     let retained = Retained::default();
     (retained.clone(), move |_label: &str| {
-        let deployment = retained.open_blocking();
+        let backend = retained.open_blocking();
         let reopened = sync_await({
-            let deployment = deployment.clone();
-            async move { deployment.reopen().await }
+            let backend = backend.clone();
+            async move { backend.reopen().await }
         });
         retained.keep(&reopened);
         ReopenableProcessRegistry {
-            open: deployment.process_registry()
+            open: backend.process_registry()
                 as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
             reopen: reopened.process_registry()
                 as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
@@ -746,8 +742,8 @@ lash_conformance::process_registry_reopenable_tests!({
 
 #[tokio::test]
 async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let registry = deployment.process_registry();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let registry = backend.process_registry();
     registry
         .register_process(
             ProcessRegistration::new(
@@ -786,7 +782,7 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
         | lash_core_execution::ProcessCompletionOutcome::Superseded { stored: record } => record,
     };
 
-    let conn = deployment.raw(SqliteDatabase::ProcessRegistry);
+    let conn = backend.raw(SqliteDatabase::ProcessRegistry);
     assert_eq!(
         conn.execute(
             "UPDATE processes SET updated_at_ms = 0 WHERE process_id = ?1",
@@ -826,11 +822,11 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
 }
 
 lash_conformance::process_projection_repair_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let registry = deployment.process_registry();
-    let corruption = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let registry = backend.process_registry();
+    let corruption = backend.clone();
     (
-        deployment,
+        backend,
         registry as Arc<dyn ProcessRegistry>,
         move |stale: lash_core_execution::ProcessRecord| async move {
             let conn = corruption.raw(SqliteDatabase::ProcessRegistry);
@@ -853,11 +849,11 @@ lash_conformance::store_contract_state_machine_tests!({
     ((), "sqlite", move |_seed, _| {
         let retained = retained.clone();
         async move {
-            let deployment = TestDeployment::open(SUBSTRATE).await;
-            retained.keep(&deployment);
+            let backend = TestBackend::open(SUBSTRATE).await;
+            retained.keep(&backend);
             lash_conformance::StoreContractHandles {
-                registry: deployment.process_registry() as Arc<dyn ProcessRegistry>,
-                runtime: deployment.store().await as Arc<dyn RuntimePersistence>,
+                registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
+                runtime: backend.store().await as Arc<dyn RuntimePersistence>,
             }
         }
     })
@@ -868,10 +864,10 @@ lash_conformance::runtime_persistence_state_machine_tests!({
     ((), "sqlite", move |_| {
         let retained = retained.clone();
         async move {
-            let deployment = TestDeployment::open(SUBSTRATE).await;
-            retained.keep(&deployment);
+            let backend = TestBackend::open(SUBSTRATE).await;
+            retained.keep(&backend);
             lash_conformance::RuntimePersistenceStateMachineHandles::create(
-                deployment.session_store_factory(),
+                backend.session_store_factory(),
                 true,
             )
             .await
@@ -885,27 +881,27 @@ lash_conformance::session_graph_state_machine_tests!({
     ((), "sqlite", move |_| {
         let retained = retained.clone();
         async move {
-            let deployment = TestDeployment::open(SUBSTRATE).await;
-            retained.keep(&deployment);
-            deployment.session_store_factory() as Arc<dyn SessionStoreFactory>
+            let backend = TestBackend::open(SUBSTRATE).await;
+            retained.keep(&backend);
+            backend.session_store_factory() as Arc<dyn SessionStoreFactory>
         }
     })
 });
 
 lash_conformance::process_continuation_store_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let storage = deployment.process_registry();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let storage = backend.process_registry();
     let registry = Arc::clone(&storage) as Arc<dyn lash_core_execution::ProcessRegistry>;
     let store = storage as Arc<dyn lash_core_execution::ProcessContinuationStore>;
-    (deployment, registry, store)
+    (backend, registry, store)
 });
 
 lash_conformance::session_store_factory_tests!({
     let retained = Retained::default();
-    let unbound_deployment = TestDeployment::open(SUBSTRATE).await;
-    retained.keep(&unbound_deployment);
+    let unbound_backend = TestBackend::open(SUBSTRATE).await;
+    retained.keep(&unbound_backend);
     let unbound =
-        Some(unbound_deployment.store().await as Arc<dyn lash_core_execution::StoreMaintenance>);
+        Some(unbound_backend.store().await as Arc<dyn lash_core_execution::StoreMaintenance>);
     let make_retained = retained.clone();
     let make = move || {
         make_retained.open_blocking().session_store_factory()
@@ -922,43 +918,43 @@ lash_conformance::fresh_session_admission_tests!({
 });
 
 lash_conformance::observer_intent_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let factory = deployment.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    (deployment, factory)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    (backend, factory)
 });
 
 lash_conformance::session_graph_append_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let factory = deployment.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    (deployment, factory)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    (backend, factory)
 });
 
 lash_conformance::attachment_owner_cold_replay_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(
         current_epoch_ms_for_test().saturating_sub(100_000),
     ));
-    let deployment = TestDeployment::open_with_clock(
+    let backend = TestBackend::open_with_clock(
         SUBSTRATE,
         clock.clone() as Arc<dyn lash_core_execution::Clock>,
     )
     .await;
-    let registry = deployment.process_registry() as Arc<dyn ProcessRegistry>;
-    let factory = deployment.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
+    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
     let scope = durable_turn_scope("attachment-owner-cold-replay", "attachment-owner-turn");
     let first = Arc::new(
-        deployment
+        backend
             .open_effect_controller(scope.clone())
             .await
             .expect("first effect controller"),
     ) as Arc<dyn RuntimeEffectController>;
     let reopen_effect_controller = {
-        let deployment = deployment.clone();
+        let backend = backend.clone();
         Arc::new(move || {
-            let deployment = deployment.clone();
+            let backend = backend.clone();
             let scope = scope.clone();
             Box::pin(async move {
                 Arc::new(
-                    deployment
+                    backend
                         .reopen()
                         .await
                         .open_effect_controller(scope)
@@ -975,7 +971,7 @@ lash_conformance::attachment_owner_cold_replay_tests!({
     };
 
     (
-        deployment,
+        backend,
         lash_conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
@@ -991,24 +987,24 @@ lash_conformance::attachment_owner_cold_replay_tests!({
 });
 
 lash_conformance::process_prune_session_store_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let registry = deployment.process_registry() as Arc<dyn ProcessRegistry>;
-    let factory = deployment.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    (deployment, factory, registry)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
+    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    (backend, factory, registry)
 });
 
 lash_conformance::runtime_persistence_clock_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(20_000));
     let advance_clock = Arc::clone(&clock);
     let verify_clock = Arc::clone(&clock);
-    let deployment = TestDeployment::open_with_clock(
+    let backend = TestBackend::open_with_clock(
         SUBSTRATE,
         clock.clone() as Arc<dyn lash_core_execution::Clock>,
     )
     .await;
-    let store = deployment.store().await as Arc<dyn RuntimePersistence>;
+    let store = backend.store().await as Arc<dyn RuntimePersistence>;
     (
-        deployment,
+        backend,
         store,
         move |duration_ms| advance_clock.advance(duration_ms),
         move |store: Arc<dyn RuntimePersistence>| async move {
@@ -1028,35 +1024,35 @@ lash_conformance::runtime_persistence_clock_tests!({
 lash_conformance::trigger_store_reopenable_tests!({
     let retained = Retained::default();
     (retained.clone(), move || {
-        let deployment = retained.open_blocking();
+        let backend = retained.open_blocking();
         let reopened = sync_await({
-            let deployment = deployment.clone();
-            async move { deployment.reopen().await }
+            let backend = backend.clone();
+            async move { backend.reopen().await }
         });
         retained.keep(&reopened);
         ReopenableTriggerStore {
-            open: deployment.trigger_store() as Arc<dyn TriggerStore>,
+            open: backend.trigger_store() as Arc<dyn TriggerStore>,
             reopen: reopened.trigger_store() as Arc<dyn TriggerStore>,
         }
     })
 });
 
 lash_conformance::trigger_occurrence_listing_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.trigger_store() as Arc<dyn TriggerStore>;
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.trigger_store() as Arc<dyn TriggerStore>;
     let injector = Arc::new(SqliteTriggerOccurrenceListingFaultInjector {
-        deployment: deployment.clone(),
+        backend: backend.clone(),
     });
-    (deployment, store, injector)
+    (backend, store, injector)
 });
 
 #[tokio::test]
 async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let backend = TestBackend::open(SUBSTRATE).await;
     let source_type = "ui.button.pressed";
     let source_key = lash_core_execution::facade_support::empty_trigger_source_key(source_type)
         .expect("source key");
-    let store = deployment.trigger_store();
+    let store = backend.trigger_store();
     let register = |owner: &str, key: &str| lash_core_execution::TriggerCommand::Register {
         owner_scope: lash_core_execution::TriggerOwnerScope::session(owner),
         actor: lash_core_execution::ProcessOriginator::session(
@@ -1094,7 +1090,7 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     };
     drop(store);
 
-    let conn = deployment.raw(SqliteDatabase::Triggers);
+    let conn = backend.raw(SqliteDatabase::Triggers);
     conn.execute(
         "UPDATE trigger_subscriptions SET record_json = ?2 WHERE subscription_id = ?1",
         rusqlite::params![malformed.subscription_id.as_str(), "{not valid json"],
@@ -1102,7 +1098,7 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     .expect("poison trigger row");
     drop(conn);
 
-    let reopened = deployment.reopen().await.trigger_store();
+    let reopened = backend.reopen().await.trigger_store();
     let ingress = reopened
         .ingest_occurrence(lash_core_execution::TriggerOccurrenceRequest::new(
             source_type,
@@ -1128,9 +1124,9 @@ lash_conformance::runtime_persistence_reopenable_tests!({
         move |session_id: &str| {
             let request = root_session_request(session_id);
             let clock = store_clock.clone() as Arc<dyn lash_core_execution::Clock>;
-            let (deployment, open, reopen) = sync_await(async move {
-                let deployment = TestDeployment::open_with_clock(SUBSTRATE, clock).await;
-                let factory = deployment.session_store_factory();
+            let (backend, open, reopen) = sync_await(async move {
+                let backend = TestBackend::open_with_clock(SUBSTRATE, clock).await;
+                let factory = backend.session_store_factory();
                 let open = factory
                     .create_store(&request)
                     .await
@@ -1140,9 +1136,9 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     .await
                     .expect("open explicit SQLite conformance store")
                     .expect("created SQLite conformance store exists");
-                (deployment, open, reopen)
+                (backend, open, reopen)
             });
-            retained.keep(&deployment);
+            retained.keep(&backend);
             ReopenableRuntimePersistence { open, reopen }
         },
         lash_conformance::RuntimePersistenceLeaseTiming::controlled({
@@ -1154,14 +1150,12 @@ lash_conformance::runtime_persistence_reopenable_tests!({
 
 lash_conformance::unbound_session_read_tests!({
     (Retained::default(), move |_admission_state| async move {
-        let deployment = TestDeployment::open(SUBSTRATE).await;
-        let factory = deployment.session_store_factory();
+        let backend = TestBackend::open(SUBSTRATE).await;
+        let factory = backend.session_store_factory();
         lash_conformance::UnboundSessionResolutionHandles {
             backend_name: "SQLite",
             factory,
-            open_unbound: Arc::new(move || {
-                deployment.blocking_store() as Arc<dyn RuntimePersistence>
-            }),
+            open_unbound: Arc::new(move || backend.blocking_store() as Arc<dyn RuntimePersistence>),
         }
     })
 });
@@ -1169,7 +1163,7 @@ lash_conformance::unbound_session_read_tests!({
 lash_conformance::store_recovery_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
     let scenarios =
-        ScenarioDeployments::new(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>);
+        ScenarioBackends::new(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>);
     (
         (),
         move |scenario: &str| scenarios.store(scenario),
@@ -1180,7 +1174,7 @@ lash_conformance::store_recovery_tests!({
 });
 
 lash_conformance::turn_crash_matrix_tests!({
-    let scenarios = ScenarioDeployments::new(crate::deployment_fixture::system_clock());
+    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
     let retained = Retained::default();
     (
         retained.clone(),
@@ -1191,10 +1185,10 @@ lash_conformance::turn_crash_matrix_tests!({
             // so the claim/finalize/renew placements arm real journal faults.
             // The short renew interval lets a `renew` fault fire while the
             // parked tool attempt is still open.
-            let (deployment, controller) = sync_await({
+            let (backend, controller) = sync_await({
                 let scope = scope.clone();
                 async move {
-                    let deployment = TestDeployment::open_with(
+                    let backend = TestBackend::open_with(
                         SUBSTRATE,
                         with_lease_timings(
                             lash_core_execution::facade_support::LeaseTimings::new(
@@ -1203,17 +1197,17 @@ lash_conformance::turn_crash_matrix_tests!({
                             )
                             .expect("error-return effect lease timings"),
                         ),
-                        crate::deployment_fixture::system_clock(),
+                        crate::backend_fixture::system_clock(),
                     )
                     .await;
-                    let controller = deployment
+                    let controller = backend
                         .open_effect_controller(scope)
                         .await
                         .expect("journaled error-return controller");
-                    (deployment, controller)
+                    (backend, controller)
                 }
             });
-            retained.keep(&deployment);
+            retained.keep(&backend);
             sqlite_conformance_invocation(controller.clone(), scope)
                 .with_effect_journal_faults(controller.effect_journal_faults())
         },
@@ -1222,7 +1216,7 @@ lash_conformance::turn_crash_matrix_tests!({
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {
-    let scenarios = ScenarioDeployments::new(crate::deployment_fixture::system_clock());
+    let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
     Box::pin(
         lash_conformance::held_turn_input_visibility_survives_claim_holder_crash(
             |scenario| scenarios.store(scenario),
@@ -1233,19 +1227,19 @@ async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {
 }
 
 lash_conformance::checkpoint_component_reopen_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let reopen = deployment.clone();
-    (deployment, move || {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let reopen = backend.clone();
+    (backend, move || {
         reopen.blocking_store() as Arc<dyn RuntimePersistence>
     })
 });
 
 lash_conformance::append_head_switch_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.store().await;
-    let mutation = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
+    let mutation = backend.clone();
     (
-        deployment,
+        backend,
         store as Arc<dyn RuntimePersistence>,
         move |leaf_node_id: lash_core_execution::NodeId| async move {
             let conn = mutation.raw(SqliteDatabase::DurableCore);
@@ -1261,11 +1255,11 @@ lash_conformance::append_head_switch_tests!({
 });
 
 lash_conformance::append_tombstone_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.store().await;
-    let mutation = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
+    let mutation = backend.clone();
     (
-        deployment,
+        backend,
         store as Arc<dyn RuntimePersistence>,
         move |node_id: lash_core_execution::NodeId| async move {
             let conn = mutation.raw(SqliteDatabase::DurableCore);
@@ -1279,9 +1273,9 @@ lash_conformance::append_tombstone_tests!({
 });
 
 lash_conformance::append_receipt_envelope_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.store().await;
-    (deployment, store as Arc<dyn RuntimePersistence>)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
+    (backend, store as Arc<dyn RuntimePersistence>)
 });
 
 // The commit-seam pause needs the fault injector, which only the `testing`
@@ -1293,24 +1287,24 @@ mod cancelled_queued_append {
 
     lash_conformance::append_usage_cancellation_tests!({
         let injector = SqliteFaultInjector::default();
-        let deployment = TestDeployment::open_with(
+        let backend = TestBackend::open_with(
             SUBSTRATE,
             {
                 let injector = injector.clone();
-                move |options| SqliteDeploymentOptions {
+                move |options| SqliteBackendOptions {
                     fault_injector: Some(injector),
                     ..options
                 }
             },
-            crate::deployment_fixture::system_clock(),
+            crate::backend_fixture::system_clock(),
         )
         .await;
-        let store = deployment
+        let store = backend
             .session_store_factory()
             .create_store(&root_session_request("root"))
             .await
             .expect("create cancellation store");
-        (deployment, store, move || {
+        (backend, store, move || {
             // Pause the graph append after lease-fenced admission's write transaction.
             let pause = injector.pause_after(SqliteFaultPoint::BeforeCommit, 2);
             async move {
@@ -1322,11 +1316,11 @@ mod cancelled_queued_append {
 }
 
 lash_conformance::append_receipt_rewrite_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.store().await;
-    let mutation = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
+    let mutation = backend.clone();
     (
-        deployment,
+        backend,
         store as Arc<dyn RuntimePersistence>,
         move || async move {
             let conn = mutation.raw(SqliteDatabase::DurableCore);
@@ -1358,8 +1352,8 @@ lash_conformance::append_receipt_rewrite_tests!({
 
 #[tokio::test]
 async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let conn = deployment.raw(SqliteDatabase::DurableCore);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let conn = backend.raw(SqliteDatabase::DurableCore);
     for removed in [
         concat!("runtime_", "turn_", "checkpoints"),
         concat!("runtime_", "effect_", "journal"),
@@ -1381,8 +1375,8 @@ async fn sqlite_store_schema_excludes_embedded_turn_replay_tables() {
 
 #[tokio::test]
 async fn sqlite_runtime_turn_receipt_identity_columns_are_nullable() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let conn = deployment.raw(SqliteDatabase::DurableCore);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let conn = backend.raw(SqliteDatabase::DurableCore);
     let mut stmt = conn
         .prepare("PRAGMA table_info(runtime_turn_commits)")
         .expect("prepare receipt schema query");
@@ -1404,8 +1398,8 @@ async fn sqlite_runtime_turn_receipt_identity_columns_are_nullable() {
 
 #[tokio::test]
 async fn sqlite_runtime_turn_receipt_rejects_half_populated_append_identity() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let conn = deployment.raw(SqliteDatabase::DurableCore);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let conn = backend.raw(SqliteDatabase::DurableCore);
     let error = conn
         .execute(
             "INSERT INTO runtime_turn_commits (
@@ -1427,38 +1421,38 @@ fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {
 }
 
 lash_conformance::effect_host_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let reopen = deployment.clone();
-    (deployment, move || {
-        let deployment = reopen.clone();
-        sync_await(async move { deployment.reopen().await.effect_host() }) as Arc<dyn EffectHost>
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let reopen = backend.clone();
+    (backend, move || {
+        let backend = reopen.clone();
+        sync_await(async move { backend.reopen().await.effect_host() }) as Arc<dyn EffectHost>
     })
 });
 
 lash_conformance::turn_work_driver_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let host = deployment.effect_host() as Arc<dyn EffectHost>;
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let host = backend.effect_host() as Arc<dyn EffectHost>;
     (
-        deployment,
+        backend,
         host,
         lash_conformance::await_event_registration_observed,
     )
 });
 
 lash_conformance::effect_host_await_event_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let reopen = deployment.clone();
-    (deployment, move || {
-        let deployment = reopen.clone();
-        sync_await(async move { deployment.reopen().await.effect_host() }) as Arc<dyn EffectHost>
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let reopen = backend.clone();
+    (backend, move || {
+        let backend = reopen.clone();
+        sync_await(async move { backend.reopen().await.effect_host() }) as Arc<dyn EffectHost>
     })
 });
 
 lash_conformance::tool_batch_parallelism_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let host = deployment.effect_host() as Arc<dyn EffectHost>;
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let host = backend.effect_host() as Arc<dyn EffectHost>;
     (
-        deployment,
+        backend,
         "sqlite",
         Arc::clone(&host),
         // The producers this crate reaches. `Promise.all` on the RLM bridge and
@@ -1469,13 +1463,13 @@ lash_conformance::tool_batch_parallelism_tests!({
     )
 });
 
-/// Every store-backed deployment issues completion keys: the promise rows
-/// live as long as the deployment, file or memory, and a key resolves for
+/// Every store-backed backend issues completion keys: the promise rows
+/// live as long as the backend, file or memory, and a key resolves for
 /// that whole lifetime (ADR 0102).
 #[tokio::test]
-async fn sqlite_deployments_issue_completion_keys() {
+async fn sqlite_backends_issue_completion_keys() {
     let scope = durable_turn_scope("completion-key-session", "completion-key-turn");
-    let (_deployment, controller) = open_effect_controller(scope.clone()).await;
+    let (_backend, controller) = open_effect_controller(scope.clone()).await;
     assert!(matches!(
         controller
             .prepare_completion_key(
@@ -1490,7 +1484,7 @@ async fn sqlite_deployments_issue_completion_keys() {
 }
 
 lash_conformance::effect_host_cold_await_event_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let backend = TestBackend::open(SUBSTRATE).await;
     // The parked-owner vector abandons an in-progress effect, so its cold
     // successor must wait one lease TTL before reclaiming it. A one-second
     // test policy preserves that semantic wait without spending the
@@ -1500,14 +1494,14 @@ lash_conformance::effect_host_cold_await_event_tests!({
         std::time::Duration::from_secs(1),
     )
     .expect("cold-instance conformance lease timings");
-    let reopen = deployment.clone();
-    (deployment, move || {
-        let deployment = reopen.clone();
+    let reopen = backend.clone();
+    (backend, move || {
+        let backend = reopen.clone();
         sync_await(async move {
-            deployment
+            backend
                 .reopen_with(
                     with_lease_timings(lease_timings),
-                    crate::deployment_fixture::system_clock(),
+                    crate::backend_fixture::system_clock(),
                 )
                 .await
                 .effect_host()
@@ -1517,13 +1511,13 @@ lash_conformance::effect_host_cold_await_event_tests!({
 
 #[tokio::test]
 async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let backend = TestBackend::open(SUBSTRATE).await;
     let scope = durable_turn_scope("pure-key-session", "pure-key-turn");
     let wait = AwaitEventWaitIdentity::tool_completion("pure-key-call");
 
     let (first, second) = tokio::join!(
         async {
-            deployment
+            backend
                 .reopen()
                 .await
                 .effect_host()
@@ -1532,7 +1526,7 @@ async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
                 .expect("first concurrent key")
         },
         async {
-            deployment
+            backend
                 .reopen()
                 .await
                 .effect_host()
@@ -1546,7 +1540,7 @@ async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
         "concurrent openers must read one store secret"
     );
 
-    let observer = deployment.reopen().await.effect_host();
+    let observer = backend.reopen().await.effect_host();
     assert!(
         observer
             .list_outstanding_await_event_keys(&SessionId::from("unknown-pure-key-session"))
@@ -1562,7 +1556,7 @@ async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
             .is_empty()
     );
 
-    let connection = deployment.raw(SqliteDatabase::EffectReplay);
+    let connection = backend.raw(SqliteDatabase::EffectReplay);
     let wait_count: i64 = connection
         .query_row("SELECT COUNT(*) FROM await_event_waits", [], |row| {
             row.get(0)
@@ -1591,9 +1585,9 @@ async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
 /// which is also what PostgreSQL always reported.
 #[tokio::test]
 async fn sqlite_await_event_terminal_decode_failures_report_the_decode_vocabulary() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let backend = TestBackend::open(SUBSTRATE).await;
     let scope = durable_turn_scope("corrupt-terminal-session", "corrupt-terminal-turn");
-    let host = deployment.effect_host();
+    let host = backend.effect_host();
     let key = host
         .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call"))
         .await
@@ -1605,7 +1599,7 @@ async fn sqlite_await_event_terminal_decode_failures_report_the_decode_vocabular
         ResolveOutcome::Accepted
     );
 
-    let connection = deployment.raw(SqliteDatabase::EffectReplay);
+    let connection = backend.raw(SqliteDatabase::EffectReplay);
     connection
         .execute(
             "UPDATE await_event_waits SET terminal_json = ?2 WHERE key_id = ?1",
@@ -1636,12 +1630,12 @@ async fn sqlite_await_event_terminal_decode_failures_report_the_decode_vocabular
 async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
     const INJECTED_MS: u64 = 1_234_567_890_000;
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(INJECTED_MS));
-    let deployment = TestDeployment::open_with_clock(
+    let backend = TestBackend::open_with_clock(
         SUBSTRATE,
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
     .await;
-    let host = deployment.effect_host();
+    let host = backend.effect_host();
     let key = host
         .await_event_key(
             &durable_turn_scope("injected-clock-session", "injected-clock-turn"),
@@ -1656,7 +1650,7 @@ async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
         ResolveOutcome::Accepted
     );
 
-    let connection = deployment.raw(SqliteDatabase::EffectReplay);
+    let connection = backend.raw(SqliteDatabase::EffectReplay);
     let stamps: (i64, i64) = connection
         .query_row(
             "SELECT created_at_ms, resolved_at_ms FROM await_event_waits WHERE key_id = ?1",
@@ -1679,12 +1673,12 @@ async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
 async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
     const INJECTED_MS: u64 = 1_234_567_890_000;
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(INJECTED_MS));
-    let deployment = TestDeployment::open_with_clock(
+    let backend = TestBackend::open_with_clock(
         SUBSTRATE,
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
     .await;
-    let controller = deployment
+    let controller = backend
         .open_effect_controller(durable_turn_scope(
             "injected-clock-effect-session",
             "injected-clock-effect-turn",
@@ -1724,9 +1718,9 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
     });
     entered_rx.await.expect("executor entered under the claim");
 
-    let claim_deployment = deployment.clone();
+    let claim_backend = backend.clone();
     let (created_at_ms, lease_expires_at_ms) = tokio::task::spawn_blocking(move || {
-        let connection = claim_deployment.raw(SqliteDatabase::EffectReplay);
+        let connection = claim_backend.raw(SqliteDatabase::EffectReplay);
         connection
             .query_row(
                 "SELECT created_at_ms, lease_expires_at_ms
@@ -1758,7 +1752,7 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
         "stamped",
     );
 
-    let connection = deployment.raw(SqliteDatabase::EffectReplay);
+    let connection = backend.raw(SqliteDatabase::EffectReplay);
     let (updated_at_ms, released_lease): (i64, i64) = connection
         .query_row(
             "SELECT updated_at_ms, lease_expires_at_ms
@@ -1776,16 +1770,16 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
 
 lash_conformance::effect_controller_replay_tests!({
     let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
-    let (deployment, controller) = open_effect_controller(scope.clone()).await;
-    (deployment, move || {
+    let (backend, controller) = open_effect_controller(scope.clone()).await;
+    (backend, move || {
         sqlite_conformance_invocation(controller.clone(), scope.clone())
     })
 });
 
 lash_conformance::effect_controller_response_derivation_tests!({
     let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
-    let (deployment, controller) = open_effect_controller(scope.clone()).await;
-    (deployment, move || {
+    let (backend, controller) = open_effect_controller(scope.clone()).await;
+    (backend, move || {
         sqlite_conformance_invocation(controller.clone(), scope.clone())
     })
 });
@@ -1793,7 +1787,7 @@ lash_conformance::effect_controller_response_derivation_tests!({
 #[tokio::test]
 async fn sqlite_effect_controller_replays_without_local_executor() {
     let scope = durable_turn_scope("session", "turn");
-    let (_deployment, controller) = open_effect_controller(scope.clone()).await;
+    let (_backend, controller) = open_effect_controller(scope.clone()).await;
     let envelope = value_envelope(
         scope,
         lash_core_execution::RuntimeAttribution::for_turn("session", "turn", 1, 0),
@@ -1816,7 +1810,7 @@ async fn sqlite_effect_controller_replays_without_local_executor() {
 
 #[tokio::test]
 async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let backend = TestBackend::open(SUBSTRATE).await;
     let scope = durable_turn_scope("sqlite-intent-session", "sqlite-intent-turn");
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
@@ -1873,7 +1867,7 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
         capture: None,
     };
     let expected_bytes = serde_json::to_vec(&expected).expect("serialize literal intent outcome");
-    let first_controller = deployment
+    let first_controller = backend
         .open_effect_controller(scope.clone())
         .await
         .expect("open first SQLite intent controller");
@@ -1893,7 +1887,7 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
     );
     drop(first_controller);
 
-    let replay_controller = deployment
+    let replay_controller = backend
         .reopen()
         .await
         .open_effect_controller(scope)
@@ -1917,30 +1911,30 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
 }
 
 lash_conformance::effect_host_retirement_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let host = deployment.effect_host() as Arc<dyn EffectHost>;
-    (deployment, host)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let host = backend.effect_host() as Arc<dyn EffectHost>;
+    (backend, host)
 });
 
 lash_conformance::effect_controller_replay_mismatch_tests!({
     let scope = durable_turn_scope("session", "turn");
-    let (deployment, controller) = open_effect_controller(scope.clone()).await;
+    let (backend, controller) = open_effect_controller(scope.clone()).await;
     (
-        deployment,
+        backend,
         move || sqlite_conformance_invocation(controller.clone(), scope.clone()),
         "sqlite_effect_replay_hash_conflict",
     )
 });
 
-lash_conformance::deployment_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let dynamic = Arc::new(lash_sqlite_store::SqliteDeployment::clone(&deployment))
-        as Arc<dyn lash_core_execution::Deployment>;
-    (deployment, dynamic)
+lash_conformance::backend_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let dynamic = Arc::new(lash_sqlite_store::SqliteBackend::clone(&backend))
+        as Arc<dyn lash_core_execution::Backend>;
+    (backend, dynamic)
 });
 
 lash_conformance::retention_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let factory = deployment.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    (deployment, factory)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    (backend, factory)
 });

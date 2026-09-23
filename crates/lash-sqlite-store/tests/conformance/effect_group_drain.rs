@@ -3,7 +3,7 @@
 //!
 //! The suite lives in `lash-core` so both SQL tiers answer one set of laws. All
 //! this file supplies is the wiring the laws are about: a host over one
-//! deployment's journal, built with the lease window the law asked for,
+//! backend's journal, built with the lease window the law asked for,
 //! registered with the resolver the law supplied, and the drain that host hands
 //! out over the same journal and the same resolver.
 //!
@@ -16,18 +16,18 @@ use std::time::Duration;
 
 use lash_conformance::{DrainWorld, DrainWorldFactory, DrainWorldSpec};
 use lash_core_execution::EffectHost;
-use lash_sqlite_store::{SqliteDeploymentOptions, SqliteEffectReplayOptions};
+use lash_sqlite_store::{SqliteBackendOptions, SqliteEffectReplayOptions};
 
 use super::SUBSTRATE;
-use crate::deployment_fixture::{TestDeployment, system_clock};
+use crate::backend_fixture::{TestBackend, system_clock};
 
-/// A world over one deployment's journal.
+/// A world over one backend's journal.
 ///
 /// The host is opened *inside* the returned future rather than cloned from an
 /// outer one, because a crash law calls this factory from the runtime it is
 /// about to destroy: the SQLite connection must belong to that runtime so it
 /// dies with it.
-async fn world(deployment: TestDeployment, spec: DrainWorldSpec) -> DrainWorld {
+async fn world(backend: TestBackend, spec: DrainWorldSpec) -> DrainWorld {
     let ttl = Duration::from_millis(spec.lease_ttl_ms);
     let effect_replay = SqliteEffectReplayOptions {
         lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
@@ -37,9 +37,9 @@ async fn world(deployment: TestDeployment, spec: DrainWorldSpec) -> DrainWorld {
             .map(lash_core_execution::EffectGroupDrainBudget::new)
             .unwrap_or_default(),
     };
-    let host = deployment
+    let host = backend
         .reopen_with(
-            move |options| SqliteDeploymentOptions {
+            move |options| SqliteBackendOptions {
                 effect_replay,
                 ..options
             },
@@ -63,19 +63,19 @@ async fn world(deployment: TestDeployment, spec: DrainWorldSpec) -> DrainWorld {
 
 // The durable SQLite tier answers the loser-drain contract (FIG-1536).
 lash_conformance::store_effect_group_drain_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let worlds = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let worlds = backend.clone();
     let make: DrainWorldFactory =
         Arc::new(move |spec: DrainWorldSpec| Box::pin(world(worlds.clone(), spec)));
-    (deployment, make)
+    (backend, make)
 });
 
 // The durable SQLite tier answers the §7 durable-closing contract (FIG-3410) —
 // the same world factory, the closing seam beside the drain on the same host.
 lash_conformance::store_effect_group_closing_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let worlds = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let worlds = backend.clone();
     let make: DrainWorldFactory =
         Arc::new(move |spec: DrainWorldSpec| Box::pin(world(worlds.clone(), spec)));
-    (deployment, make)
+    (backend, make)
 });

@@ -555,7 +555,7 @@ class RealTreeTests(unittest.TestCase):
             },
         )
         # The SQLite suite is one module mounted by two binaries, one per
-        # deployment substrate (ADR 0102), so each claims it under its own path.
+        # backend substrate (ADR 0102), so each claims it under its own path.
         for label, claimant in (
             ("//crates/lash-sqlite-store:conformance__test", "conformance::suite"),
             ("//crates/lash-sqlite-store:conformance_memory__test", "conformance_memory::suite"),

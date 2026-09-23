@@ -55,7 +55,7 @@ fn encode_owner(owner_scope: &TriggerOwnerScope) -> Result<String, rusqlite::Err
 /// SQLite-backed process-definition registry.
 pub struct SqliteProcessDefinitionRegistry {
     conn: SqliteConnection,
-    /// Held so a registry opened on a memory deployment keeps its database
+    /// Held so a registry opened on a memory backend keeps its database
     /// alive.
     _location: DatabaseLocation,
     clock: Arc<dyn Clock>,

@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
 use super::SUBSTRATE;
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 
 lash_conformance::session_read_view_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(
         1_800_000_000_000,
     ));
-    let deployment = TestDeployment::open_with_clock(
+    let backend = TestBackend::open_with_clock(
         SUBSTRATE,
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
     .await;
-    let factory = deployment.session_store_factory();
-    (deployment, factory, move || clock.advance(1))
+    let factory = backend.session_store_factory();
+    (backend, factory, move || clock.advance(1))
 });

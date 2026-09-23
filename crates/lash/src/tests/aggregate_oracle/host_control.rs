@@ -11,7 +11,7 @@ use super::*;
 use std::sync::atomic::AtomicBool;
 
 /// Fails every settlement read while `fail_settlements` is raised; every
-/// other operation is the SQLite memory deployment's own.
+/// other operation is the SQLite memory backend's own.
 struct SettlementFaultLayer {
     fail_settlements: AtomicBool,
 }
@@ -54,9 +54,9 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell(tier: &JournaledTi
         register_intent_target(registry.as_ref(), &session_id).await;
         let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
         let host = lash_core::testing::LayeredEffectHost::new(
-            lash_sqlite_store::SqliteDeployment::memory()
+            lash_sqlite_store::SqliteBackend::memory()
                 .await
-                .expect("open a memory deployment")
+                .expect("open a memory backend")
                 .effect_host(),
             Arc::new(SettlementFaultLayer {
                 fail_settlements: AtomicBool::new(true),

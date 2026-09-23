@@ -4,11 +4,11 @@ use lash_core_execution::{
 use lash_sansio::SessionId;
 
 use super::SUBSTRATE;
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 
 lash_conformance::unbound_session_meta_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let factory = deployment.session_store_factory();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory();
     for session_id in ["unbound-session-meta-a", "unbound-session-meta-b"] {
         factory
             .create_store(&SessionStoreCreateRequest {
@@ -20,8 +20,8 @@ lash_conformance::unbound_session_meta_tests!({
             .await
             .unwrap_or_else(|error| panic!("admit `{session_id}`: {error}"));
     }
-    let unbound = deployment.store().await;
-    (deployment, "SQLite", async move {
+    let unbound = backend.store().await;
+    (backend, "SQLite", async move {
         unbound.load_session_meta().await
     })
 });

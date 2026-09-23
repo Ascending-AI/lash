@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn deployment_drain_status_keeps_waiting_process_non_drained() {
-    let registry = lash_sqlite_store::SqliteDeployment::memory()
+    let registry = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open in-memory process registry")
         .process_registry();

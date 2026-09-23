@@ -8,18 +8,18 @@ use lash_core_execution::{ProcessRegistry, SessionStoreFactory};
 use lash_sqlite_store::SqliteDatabase;
 
 use super::SUBSTRATE;
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 
-// The deployment's registry prunes the process-owned session stores out of
-// the deployment's own catalog, which the factory owns.
+// The backend's registry prunes the process-owned session stores out of
+// the backend's own catalog, which the factory owns.
 lash_conformance::process_prune_reclaim_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let factory = deployment.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    let registry = deployment.process_registry() as Arc<dyn ProcessRegistry>;
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let probe = Arc::new(crate::blob_probe::SqliteBlobProbe::new(
-        deployment.database_uri(SqliteDatabase::DurableCore),
+        backend.database_uri(SqliteDatabase::DurableCore),
         "fail_process_prune_blob_delete",
         None,
     ));
-    (deployment, "sqlite", factory, registry, probe)
+    (backend, "sqlite", factory, registry, probe)
 });

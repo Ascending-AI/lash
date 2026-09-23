@@ -492,7 +492,7 @@ impl SqliteEffectHost {
         Self::open_at(&DatabaseLocation::standalone_file(path), options, clock).await
     }
 
-    /// The host over the journal at `journal`, keyed on its deployment's
+    /// The host over the journal at `journal`, keyed on its backend's
     /// identity.
     pub(crate) async fn open_at(
         journal: &DatabaseLocation,
@@ -733,12 +733,12 @@ pub struct SqliteEffectReplayRowStore {
 }
 
 /// Where a SQLite journal's change notifications go: the process-wide
-/// notifier table under the deployment's identity (`sqlite:<canonical path>`
+/// notifier table under the backend's identity (`sqlite:<canonical path>`
 /// or `sqlite-memory:<id>`, the identity the turn-control binding is keyed
-/// on), so two hosts over one deployment in one process wake each other; and
+/// on), so two hosts over one backend in one process wake each other; and
 /// whether a writer the table cannot reach exists.
 ///
-/// SQLite has no `NOTIFY`. A memory deployment's databases exist only in this
+/// SQLite has no `NOTIFY`. A memory backend's databases exist only in this
 /// process, so every writer announces through the table. A file is open to
 /// any process, whose commits wake nothing here, so its waiters keep the
 /// driver's bounded cross-process poll.
@@ -749,7 +749,7 @@ pub(crate) struct JournalWakeKey {
 }
 
 impl JournalWakeKey {
-    /// The key for `journal`'s deployment.
+    /// The key for `journal`'s backend.
     pub(crate) fn for_journal(journal: &DatabaseLocation) -> Self {
         Self {
             identity: Arc::clone(journal.identity()),
@@ -770,7 +770,7 @@ impl SqliteEffectReplayRowStore {
     }
 
     /// Wake every waiter on `subject` — this host's or another host's on the
-    /// same deployment. Called after the commit that changed it has landed.
+    /// same backend. Called after the commit that changed it has landed.
     fn announce(&self, subject: EffectJournalSubject<'_>) {
         EffectJournalNotifiers::announce(&self.wake.identity, subject);
     }

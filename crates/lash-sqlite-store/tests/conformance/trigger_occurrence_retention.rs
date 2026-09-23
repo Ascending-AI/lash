@@ -7,16 +7,16 @@ use lash_core_execution::{ProcessRegistry, TriggerStore};
 use lash_sqlite_store::SqliteDatabase;
 
 use super::{Retained, SUBSTRATE};
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 
 struct SqliteTriggerOccurrenceRetentionFaultInjector {
-    deployment: TestDeployment,
+    backend: TestBackend,
 }
 
 #[async_trait::async_trait]
 impl TriggerOccurrenceRetentionFaultInjector for SqliteTriggerOccurrenceRetentionFaultInjector {
     async fn fail_occurrence_delete(&self, occurrence_id: &str) {
-        let conn = self.deployment.raw(SqliteDatabase::Triggers);
+        let conn = self.backend.raw(SqliteDatabase::Triggers);
         let occurrence_id = occurrence_id.replace('\'', "''");
         conn.execute_batch(&format!(
             "CREATE TRIGGER fail_fig1507_occurrence_delete
@@ -30,19 +30,19 @@ impl TriggerOccurrenceRetentionFaultInjector for SqliteTriggerOccurrenceRetentio
     }
 
     async fn clear_occurrence_delete_failure(&self) {
-        let conn = self.deployment.raw(SqliteDatabase::Triggers);
+        let conn = self.backend.raw(SqliteDatabase::Triggers);
         conn.execute_batch("DROP TRIGGER IF EXISTS fail_fig1507_occurrence_delete")
             .expect("clear SQLite occurrence delete failure trigger");
     }
 }
 
 lash_conformance::trigger_retention_fault_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.trigger_store() as Arc<dyn TriggerStore>;
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.trigger_store() as Arc<dyn TriggerStore>;
     let fault = Arc::new(SqliteTriggerOccurrenceRetentionFaultInjector {
-        deployment: deployment.clone(),
+        backend: backend.clone(),
     });
-    (deployment, store, fault)
+    (backend, store, fault)
 });
 
 lash_conformance::process_trigger_retention_tests!({
@@ -50,12 +50,12 @@ lash_conformance::process_trigger_retention_tests!({
     ((), move || {
         let retained = retained.clone();
         async move {
-            let deployment = TestDeployment::open(SUBSTRATE).await;
-            retained.keep(&deployment);
+            let backend = TestBackend::open(SUBSTRATE).await;
+            retained.keep(&backend);
             lash_conformance::ProcessTriggerRetentionHandles {
-                registry: deployment.process_registry() as Arc<dyn ProcessRegistry>,
-                triggers: deployment.trigger_store() as Arc<dyn TriggerStore>,
-                sessions: deployment.session_store_factory()
+                registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
+                triggers: backend.trigger_store() as Arc<dyn TriggerStore>,
+                sessions: backend.session_store_factory()
                     as Arc<dyn lash_core_execution::SessionStoreFactory>,
             }
         }

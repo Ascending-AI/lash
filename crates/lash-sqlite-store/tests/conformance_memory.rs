@@ -1,6 +1,6 @@
-//! Runs the shared conformance suites against SQLite memory deployments: four
-//! named `memdb` databases pinned by the deployment's anchors per fixture
-//! (ADR 0102). The same suite runs over file deployments in `conformance.rs`.
+//! Runs the shared conformance suites against SQLite memory backends: four
+//! named `memdb` databases pinned by the backend's anchors per fixture
+//! (ADR 0102). The same suite runs over file backends in `conformance.rs`.
 
 #![expect(
     clippy::expect_used,
@@ -11,11 +11,11 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+#[path = "conformance/backend_fixture.rs"]
+mod backend_fixture;
 #[path = "blob_probe.rs"]
 mod blob_probe;
-#[path = "conformance/deployment_fixture.rs"]
-mod deployment_fixture;
 #[path = "conformance/suite.rs"]
 mod suite;
 
-const SUBSTRATE: deployment_fixture::Substrate = deployment_fixture::Substrate::Memory;
+const SUBSTRATE: backend_fixture::Substrate = backend_fixture::Substrate::Memory;

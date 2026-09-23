@@ -1,4 +1,4 @@
-# 0102: Zero-infra is a SQLite in-memory deployment; every host journals; one substrate per deployment
+# 0102: Zero-infra is a SQLite in-memory backend; every host journals; one substrate per backend
 
 ## Status
 
@@ -6,6 +6,11 @@ Accepted 2026-09-23 (FIG-3574) as the design freeze for arc FIG-3573. **Not yet
 implemented**: FIG-3575 through FIG-3584 build it, and FIG-3585 is the cut that
 deletes the superseded code and rewrites the passages listed at the end. Nothing
 below describes current behaviour unless it says so.
+
+The combined value was first called a deployment. Sam renamed it a backend on
+2026-09-23, because "deployment" names where an application runs. It stays one
+value; loosely coupled parts, such as the Postgres attachment backend, are
+constructor arguments of the backend, never separate builder setters.
 
 The rulings are Sam's, recorded on FIG-3573 on 2026-09-23. The evidence is a
 targeted prospect round over seven references read from local clones, every
@@ -53,31 +58,31 @@ process-exec-env stores.
 ADR 0045's last permitted tier question goes with it. There is no host that runs
 effects without recording them.
 
-### D2. One substrate per deployment
+### D2. One substrate per backend
 
-A deployment is one value that supplies every persistence port and the effect
+A backend is one value that supplies every persistence port and the effect
 host: SQLite (file or memory), Postgres, or Restate. What D2 forbids is
 non-journaled effects, and ports assembled by hand from different substrates. No
 API accepts a mixed set.
 
-A Restate deployment is the Restate engine host over one SQL store set. Restate
-journals effects and stores no sessions, so engine-plus-SQL is one deployment,
+A Restate backend is the Restate engine host over one SQL store set. Restate
+journals effects and stores no sessions, so engine-plus-SQL is one backend,
 not a mixture, and D2 does not forbid it. The pairing of SQL session stores with
 a non-journaled effect host is deleted, with the machinery that exists only for
 it: `store_turn_control.rs`, the store turn-cancellation-authority seam,
 `TurnControlAuthorityOwner` and the `HostOwned` turn-control binding.
 
-### D3. Zero-infra is a SQLite in-memory deployment
+### D3. Zero-infra is a SQLite in-memory backend
 
 Zero-infra is SQLite in memory for every persistence port SQLite implements:
 sessions, effects, process registry, triggers, process definitions, process exec
 env and attachments. It runs the same `StoreEffectReplayDriver` over the same
-SQLite store as a file deployment. `lash-core-memory` and the `InMemory*`
+SQLite store as a file backend. `lash-core-memory` and the `InMemory*`
 persistence stores (attachment, process-exec-env, trigger, process-definition
 registry, `TestLocalProcessRegistry`) are deleted. The live-replay stream buffer
 stays, because it is observation, not persistence.
 
-**The memory form is named `memdb` databases, not `:memory:`.** A deployment
+**The memory form is named `memdb` databases, not `:memory:`.** A backend
 opens many connections that must reach each other by name: one core connection
 per session, the effect driver and its closure lifecycle, the registry, the
 effect journal that ATTACHes the registry for scope fences, and the retention
@@ -88,55 +93,55 @@ makes a contending writer wait.
 
 - Each of the four databases (core, effects, registry, triggers) keeps its own
   schema version and is opened as `file:/lash-<uuid>/<db>?vfs=memdb`.
-- The deployment holds one **anchor connection** per database for its lifetime.
+- The backend holds one **anchor connection** per database for its lifetime.
   A `memdb` database disappears with its last connection, so the anchors are
-  what keep it alive, and dropping the deployment releases them.
-- The deployment's identity is `sqlite-memory:<uuid>`, beside `sqlite:<canonical
-  root>` for a file deployment. That one identity drives the turn-control
+  what keep it alive, and dropping the backend releases them.
+- The backend's identity is `sqlite-memory:<uuid>`, beside `sqlite:<canonical
+  root>` for a file backend. That one identity drives the turn-control
   binding, the key of the journal notifiers the replay driver parks on, and the
   registry and retention ATTACHes.
   The store and the host no longer mint their own. `validate_effect_host_path`
   keeps refusing raw `:memory:` and `file:` strings; the typed location is the
   only way in.
-- A memory deployment's effect host issues completion keys, and they resolve for
-  the deployment's lifetime. There is no process-lifetime opt-in.
+- A memory backend's effect host issues completion keys, and they resolve for
+  the backend's lifetime. There is no process-lifetime opt-in.
 
-A fresh four-database memory deployment costs about 5–6 ms with full DDL, and a
+A fresh four-database memory backend costs about 5–6 ms with full DDL, and a
 single-row write transaction about 6 µs.
 
 ### D4. Names follow the substrate; one cutover
 
 There is no "native" effect host. The zero-infra entry point is
-`lash::sqlite::SqliteDeployment::memory()`, beside `open(root)` and
+`lash::sqlite::SqliteBackend::memory()`, beside `open(root)` and
 `memory_with_clock(..)`. The in-process worker drivers (`NativeSubstrateConfig`,
 `NativeQueuedWork`, `NativeProcessWork`, `with_native_queued_work`) are not
 effect hosts; they drive queued and process work in process over whichever
-deployment is configured, and they keep their names. The cutover happens once,
+backend is configured, and they keep their names. The cutover happens once,
 with no aliases, forwarding constructors, dual paths or legacy mode.
 
-### The `Deployment` trait
+### The `Backend` trait
 
-A `Deployment` trait in lash-core-execution is the one value from which a
+A `Backend` trait in lash-core-execution is the one value from which a
 runtime takes every persistence port and its effect host: the session-store
 factory, the effect host, the process registry, the trigger store, the
 process-definition registry, the process-exec-env store, the attachment store,
 and the binding identity.
 
-- **`SqliteDeployment`**, file or memory, supplies all of them from one typed
+- **`SqliteBackend`**, file or memory, supplies all of them from one typed
   location, including a SQLite attachment store over the core database.
-- **The Postgres deployment** takes an attachment backend at construction.
-  Postgres implements no `AttachmentStore`, and a deployment with no attachment
-  port is not a deployment.
-- **The Restate deployment** is the Restate host over one SQL store set.
+- **The Postgres backend** takes an attachment backend at construction.
+  Postgres implements no `AttachmentStore`, and a backend with no attachment
+  port is not a backend.
+- **The Restate backend** is the Restate host over one SQL store set.
 
-The runtime builder takes the deployment as a required argument, so a build
+The runtime builder takes the backend as a required argument, so a build
 without one cannot be written, and the per-port setters are gone. No in-memory
 default exists anywhere: every fallback listed in *Context* is deleted.
 
 The kernel names no concrete store and no concrete effect host.
 lash-sqlite-store, lash-postgres-store and lashlang depend on lash-core-execution
 and lower crates, not on lash-core, so lash-core and lash-core-worker tests can
-use a SQLite memory deployment as a dev-dependency without a cycle.
+use a SQLite memory backend as a dev-dependency without a cycle.
 
 ### Failure settlement is classified by cause, on every host
 
@@ -160,15 +165,15 @@ deleting `Local` changes nothing a host can observe.
 
 The facade's `sqlite` feature stays optional and `default = []` stands (ADR
 0079). Postgres- and Restate-only embedders do not compile SQLite. `lash::testing`
-never pulls in SQLite: a fixture that needs a deployment takes one, and the
-SQLite memory deployment is reached through `sqlite`, not through `testing`.
+never pulls in SQLite: a fixture that needs a backend takes one, and the
+SQLite memory backend is reached through `sqlite`, not through `testing`.
 
 ### Conformance
 
-The SQLite suite runs on both a file and a memory deployment. The `in_memory`
+The SQLite suite runs on both a file and a memory backend. The `in_memory`
 conformance module is gone. `store_contract_state_machine` keeps its independent
-reference model; its memory backend becomes the SQLite memory deployment.
-lash-sim's memory world is the SQLite memory deployment under `SimClock`.
+reference model; its memory backend becomes the SQLite memory backend.
+lash-sim's memory world is the SQLite memory backend under `SimClock`.
 
 ADR 0044's main complaint is closed: the default test host replays.
 
@@ -177,7 +182,7 @@ ADR 0044's main complaint is closed: the default test host replays.
 `memdb` has no WAL. A reader blocks while any writer holds a write transaction
 (`memdbLock` in the bundled `sqlite3.c`). Any path that holds a transaction on
 one connection while waiting on another connection will stall or time out on a
-memory deployment where it passes on a file one. Lanes must respect this: when
+memory backend where it passes on a file one. Lanes must respect this: when
 the memory conformance run exposes such a wait, fix the ordering in the store.
 Do not raise the busy timeout to hide it and do not special-case memory.
 
@@ -205,12 +210,12 @@ storage behind one trait.
 
 ## Consequences
 
-- **Embedders.** Zero-infra is `lash::sqlite::SqliteDeployment::memory()` and
-  needs `features = ["sqlite"]`. The builder takes the deployment as an
+- **Embedders.** Zero-infra is `lash::sqlite::SqliteBackend::memory()` and
+  needs `features = ["sqlite"]`. The builder takes the backend as an
   argument.
 - **Failures.** Deterministic failures are still recorded as failed turns. Live
   faults return `Err` carrying the acceptance receipt.
-- **Completion keys** on a memory deployment resolve for the deployment's
+- **Completion keys** on a memory backend resolve for the backend's
   lifetime. ADR 0099 W18 already promises nothing past process death.
 - **The durable-admission gate** now applies to zero-infra sessions, because
   every session has a store. FIG-3416 becomes user-visible on the quickstart.

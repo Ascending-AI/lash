@@ -328,7 +328,7 @@ mod listing_plan_tests;
 
 pub struct SqliteTriggerStore {
     conn: SqliteConnection,
-    /// Held so a store opened on a memory deployment keeps its database alive.
+    /// Held so a store opened on a memory backend keeps its database alive.
     _location: crate::location::DatabaseLocation,
     clock: Arc<dyn lash_core_execution::Clock>,
     fixed_incarnation: Option<String>,

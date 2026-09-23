@@ -1,7 +1,7 @@
-//! Runs the shared conformance suites against SQLite file deployments.
+//! Runs the shared conformance suites against SQLite file backends.
 //!
 //! The suite proper lives in `conformance/suite.rs` and is registered twice
-//! (ADR 0102): here over file deployments, and in `conformance_memory.rs` over
+//! (ADR 0102): here over file backends, and in `conformance_memory.rs` over
 //! named in-memory ones. What else stays here needs a database file by
 //! nature: a legacy schema seeded before the first open, a path spelling, a
 //! second OS process, or a WAL snapshot read.
@@ -28,14 +28,14 @@ use lash_sqlite_store::{
     SqliteEffectHost, SqliteProcessRegistry, SqliteRuntimeEffectController, SqliteTriggerStore,
 };
 
+#[path = "conformance/backend_fixture.rs"]
+mod backend_fixture;
 #[path = "blob_probe.rs"]
 mod blob_probe;
-#[path = "conformance/deployment_fixture.rs"]
-mod deployment_fixture;
 #[path = "conformance/suite.rs"]
 mod suite;
 
-const SUBSTRATE: deployment_fixture::Substrate = deployment_fixture::Substrate::File;
+const SUBSTRATE: backend_fixture::Substrate = backend_fixture::Substrate::File;
 
 #[path = "conformance/attachment_owner_kind.rs"]
 mod attachment_owner_kind;
@@ -46,7 +46,7 @@ mod schema_refusal;
 #[path = "conformance/turn_cancel_closure.rs"]
 mod turn_cancel_closure;
 
-use deployment_fixture::durable_turn_scope;
+use backend_fixture::durable_turn_scope;
 use lash_conformance::cold_process_turn_parent;
 
 #[cfg(feature = "testing")]

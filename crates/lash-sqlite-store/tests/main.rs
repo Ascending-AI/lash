@@ -32,5 +32,5 @@ mod tool_attempt_store_fault;
 mod turn_control_binding;
 
 mod attachment_owner_proof;
+mod backend_binding_compat;
 mod boundary_retry;
-mod deployment_binding_compat;

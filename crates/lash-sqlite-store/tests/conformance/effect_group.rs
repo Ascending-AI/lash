@@ -4,7 +4,7 @@
 //! The suite itself lives in `lash-core` and is the same one the in-memory
 //! reference host answers, so the two tiers are held to one contract rather
 //! than two copies of it. The group laws open and close many hosts over one
-//! deployment's journal: each host is a fresh reopen of the deployment.
+//! backend's journal: each host is a fresh reopen of the backend.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,9 +14,9 @@ use lash_core_execution::{EffectHost, GroupExecutors};
 use lash_sqlite_store::{SqliteDatabase, SqliteEffectHost};
 
 use super::{SUBSTRATE, with_lease_timings};
-use crate::deployment_fixture::{TestDeployment, sync_await, system_clock};
+use crate::backend_fixture::{TestBackend, sync_await, system_clock};
 
-/// One host over `deployment`'s journal, registered with the suite's executor
+/// One host over `backend`'s journal, registered with the suite's executor
 /// resolver.
 ///
 /// Registration is what makes the host support groups at all: since FIG-1578 a
@@ -25,11 +25,11 @@ use crate::deployment_fixture::{TestDeployment, sync_await, system_clock};
 /// are about — the same database, so "a refused open journals nothing" is asked
 /// of the journal the wired hosts read.
 fn host(
-    deployment: &TestDeployment,
+    backend: &TestBackend,
     executors: Option<Arc<dyn GroupExecutors>>,
 ) -> Arc<SqliteEffectHost> {
-    let deployment = deployment.clone();
-    let host = sync_await(async move { deployment.reopen().await.effect_host() });
+    let backend = backend.clone();
+    let host = sync_await(async move { backend.reopen().await.effect_host() });
     if let Some(executors) = executors {
         host.register_group_executors(executors)
             .expect("a freshly opened host has no resolver yet");
@@ -40,9 +40,9 @@ fn host(
 // The durable SQLite tier answers the effect-group contract the same way the
 // in-memory reference host does (FIG-1564).
 lash_conformance::effect_group_host_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let hosts = deployment.clone();
-    (deployment, move |executors| {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let hosts = backend.clone();
+    (backend, move |executors| {
         host(&hosts, executors) as Arc<dyn EffectHost>
     })
 });
@@ -50,9 +50,9 @@ lash_conformance::effect_group_host_tests!({
 // A cancelled child's cancellation is journaled as its terminal, and a host
 // that was not running when the close happened reads it back (FIG-1564).
 lash_conformance::effect_group_cancelled_child_terminal_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let hosts = deployment.clone();
-    (deployment, move |executors| {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let hosts = backend.clone();
+    (backend, move |executors| {
         host(&hosts, executors) as Arc<dyn EffectHost>
     })
 });
@@ -61,11 +61,11 @@ lash_conformance::effect_group_cancelled_child_terminal_tests!({
 // transaction and leaves the fence, while an in-flight operation keeps every
 // row (FIG-2500).
 lash_conformance::effect_group_runtime_retirement_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let hosts = deployment.clone();
-    let verify = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let hosts = backend.clone();
+    let verify = backend.clone();
     (
-        deployment,
+        backend,
         move |executors| host(&hosts, executors) as Arc<dyn EffectHost>,
         move |(retired, in_flight): (String, String)| async move {
             let conn = verify.raw(SqliteDatabase::EffectReplay);
@@ -130,8 +130,8 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
         }
     }
 
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let host = host(&deployment, None);
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let host = host(&backend, None);
     // Before any registration the host does no groups, and says so through the
     // group surface itself rather than through a capability flag (FIG-2266).
     let unwired_view = host
@@ -187,8 +187,8 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     // The winner's registration stands whatever the losers did, and that is now
     // read off the refusal's code: a *wired* host that cannot route this child
     // answers with the routing refusal, never with the unsupported-host one.
-    // The two codes are what separates "this deployment does no groups" from
-    // "this deployment does groups but has no runner for this child".
+    // The two codes are what separates "this backend does no groups" from
+    // "this backend does groups but has no runner for this child".
     let wired_view = host
         .scoped(lash_core_execution::AdmittedScope::runtime_operation(
             "registration-race",
@@ -241,16 +241,16 @@ async fn open_race_group(
 /// test waits it out, long enough that the claim is observed first.
 const CRASH_LEASE_MS: u64 = 900;
 
-/// One host over `deployment`'s journal with the drain suite's lease window,
+/// One host over `backend`'s journal with the drain suite's lease window,
 /// so a killed process's claims lapse on a scale a test can wait out.
 fn host_with_lease(
-    deployment: &TestDeployment,
+    backend: &TestBackend,
     executors: Arc<dyn GroupExecutors>,
 ) -> Arc<SqliteEffectHost> {
-    let deployment = deployment.clone();
+    let backend = backend.clone();
     let host = sync_await(async move {
         let ttl = Duration::from_millis(CRASH_LEASE_MS);
-        deployment
+        backend
             .reopen_with(
                 with_lease_timings(
                     lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
@@ -377,10 +377,10 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
     const KEY: &str = "canonical-reopen";
     const CHILD_KEY: &str = "canonical-reopen:child:0";
 
-    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let backend = TestBackend::open(SUBSTRATE).await;
 
     // Process A: open the group, observe the claim row, die with the runtime.
-    let crash_deployment = deployment.clone();
+    let crash_backend = backend.clone();
     std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -390,7 +390,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
         runtime.block_on(async move {
             let entered = Arc::new(AtomicUsize::new(0));
             let host = host_with_lease(
-                &crash_deployment,
+                &crash_backend,
                 Arc::new(ParkingExecutors {
                     entered: Arc::clone(&entered),
                 }),
@@ -404,7 +404,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
                 .open_effect_group(group)
                 .await
                 .expect("the group opens");
-            let conn = crash_deployment.raw(SqliteDatabase::EffectReplay);
+            let conn = crash_backend.raw(SqliteDatabase::EffectReplay);
             let deadline = std::time::Instant::now() + Duration::from_secs(30);
             loop {
                 let claimed = conn
@@ -442,7 +442,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
     .expect("process A runs its phase before dying");
 
     // Reformat the retained membership row: same JSON value, different bytes.
-    let conn = deployment.raw(SqliteDatabase::EffectReplay);
+    let conn = backend.raw(SqliteDatabase::EffectReplay);
     let retained: String = conn
         .query_row(
             "SELECT envelope_json FROM runtime_effect_group_child WHERE group_key = ?1",
@@ -496,10 +496,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
     // Process B: a fresh host over the same journal, a one-shot resolver, and
     // the identical honest group.
     let executors = Arc::new(OneShotExecutors::default());
-    let host = host_with_lease(
-        &deployment,
-        Arc::clone(&executors) as Arc<dyn GroupExecutors>,
-    );
+    let host = host_with_lease(&backend, Arc::clone(&executors) as Arc<dyn GroupExecutors>);
     let scoped = host
         .scoped(lash_core_execution::AdmittedScope::runtime_operation(KEY))
         .expect("a scope binds");
@@ -548,11 +545,11 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
 // fences nothing; once the drain settles it removes the rows and leaves the
 // fence (FIG-2499 fix round 1).
 lash_conformance::effect_group_quiescent_retirement_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let hosts = deployment.clone();
-    let verify = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let hosts = backend.clone();
+    let verify = backend.clone();
     (
-        deployment,
+        backend,
         move |executors| host(&hosts, executors) as Arc<dyn EffectHost>,
         move |scope_id| async move {
             let conn = verify.raw(SqliteDatabase::EffectReplay);

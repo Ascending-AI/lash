@@ -1,6 +1,6 @@
 //! FIG-3575: a turn failure settles by its cause, identically on every host.
 //!
-//! Each law runs the facade over a file-backed SQLite deployment — the
+//! Each law runs the facade over a file-backed SQLite backend — the
 //! journaled `SqliteEffectHost` beside `SqliteSessionStoreFactory` — which is
 //! where the tier-keyed rule was live: a deterministic failure before the model
 //! call aborted instead of being recorded, a queued run retried it and stayed
@@ -45,14 +45,14 @@ impl lash_core::plugin::ProtocolSessionPlugin for RefusingBeforeLlmCall {
     }
 }
 
-struct SqliteDeployment {
+struct SqliteBackend {
     directory: tempfile::TempDir,
     effect_host: Arc<lash_sqlite_store::SqliteEffectHost>,
 }
 
-impl SqliteDeployment {
+impl SqliteBackend {
     async fn open() -> Self {
-        let directory = tempfile::tempdir().expect("temporary durable deployment");
+        let directory = tempfile::tempdir().expect("temporary durable backend");
         let effect_host = Arc::new(
             lash_sqlite_store::SqliteEffectHost::open(&directory.path().join("effects.sqlite"))
                 .await
@@ -98,7 +98,7 @@ impl SqliteDeployment {
                 self.directory.path().join("sessions"),
             )))
             .build(crate::testing::runtime_lease_owner())
-            .expect("file-backed SQLite deployment")
+            .expect("file-backed SQLite backend")
     }
 }
 
@@ -150,10 +150,10 @@ fn assert_recorded_before_llm_failure(report: &TurnReport) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_turn() -> Result<()>
 {
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let protocol = Arc::new(RefusingBeforeLlmCall::default());
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         Some(protocol.clone()),
     );
@@ -192,9 +192,9 @@ async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_attempt() -> Result<()>
 {
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let protocol = Arc::new(RefusingBeforeLlmCall::default());
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::default(), Arc::default()),
         Some(protocol.clone()),
     );
@@ -235,12 +235,12 @@ async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_atte
 /// Aborts `turn_id`'s first model call with a live journal fault, and returns
 /// the error with the id of the one input the aborted turn accepted.
 async fn abort_direct_turn_with_live_fault(
-    deployment: &SqliteDeployment,
+    backend: &SqliteBackend,
     session: &crate::LashSession,
     session_id: &str,
     turn_id: &str,
 ) -> (EmbedError, lash_core::InputId) {
-    let faults = deployment.effect_host.effect_journal_faults();
+    let faults = backend.effect_host.effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Claim,
         &first_llm_call_key(session_id, turn_id),
@@ -279,17 +279,17 @@ async fn abort_direct_turn_with_live_fault(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn live_fault_on_a_direct_turn_returns_its_receipt_to_withdraw_the_input() -> Result<()> {
     const SESSION: &str = "direct-live-fault";
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
         None,
     );
     let session = core.session(SESSION).open().await?;
 
     let (error, input_id) =
-        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "faulted-turn").await;
+        abort_direct_turn_with_live_fault(&backend, &session, SESSION, "faulted-turn").await;
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     let receipt = error
         .turn_input_acceptance()
@@ -329,17 +329,17 @@ async fn live_fault_on_a_direct_turn_returns_its_receipt_to_withdraw_the_input()
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id() -> Result<()> {
     const SESSION: &str = "direct-live-fault-redrive";
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
         None,
     );
     let session = core.session(SESSION).open().await?;
 
     let (error, _) =
-        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "redriven-turn").await;
+        abort_direct_turn_with_live_fault(&backend, &session, SESSION, "redriven-turn").await;
     let receipt = error
         .turn_input_acceptance()
         .cloned()
@@ -383,17 +383,17 @@ async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id() -> Result<()> 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input() -> Result<()> {
     const SESSION: &str = "direct-live-fault-next-turn";
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
         None,
     );
     let session = core.session(SESSION).open().await?;
 
     let (error, input_id) =
-        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "bound-turn").await;
+        abort_direct_turn_with_live_fault(&backend, &session, SESSION, "bound-turn").await;
     let receipt = error
         .turn_input_acceptance()
         .cloned()
@@ -471,10 +471,10 @@ async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input() -> Result<()>
 async fn cancelling_a_bound_input_returns_the_rest_of_its_drive_to_the_queue() -> Result<()> {
     const SESSION: &str = "direct-live-fault-cancel-absorbed";
     const EARLIER_WORDS: &str = "an earlier queued admission";
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
         None,
     );
@@ -485,7 +485,7 @@ async fn cancelling_a_bound_input_returns_the_rest_of_its_drive_to_the_queue() -
         .id("earlier-admission")
         .send()
         .await?;
-    let faults = deployment.effect_host.effect_journal_faults();
+    let faults = backend.effect_host.effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Claim,
         &first_llm_call_key(SESSION, "absorbing-turn"),
@@ -575,15 +575,15 @@ async fn cancelling_a_bound_input_returns_the_rest_of_its_drive_to_the_queue() -
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_drive_whose_outcome_was_lost_still_binds_its_input() -> Result<()> {
     const SESSION: &str = "direct-drive-finalize-fault";
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
         None,
     );
     let session = core.session(SESSION).open().await?;
-    let faults = deployment.effect_host.effect_journal_faults();
+    let faults = backend.effect_host.effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Finalize,
         &format!("{SESSION}:drive-lost-turn:accept_turn_input:claim_accepted_turn_input"),
@@ -649,16 +649,16 @@ async fn a_drive_whose_outcome_was_lost_still_binds_its_input() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_drain_never_answers_an_aborted_turns_input() -> Result<()> {
     const SESSION: &str = "direct-live-fault-drain";
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         None,
     );
     let session = core.session(SESSION).open().await?;
 
     let (error, input_id) =
-        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "drained-turn").await;
+        abort_direct_turn_with_live_fault(&backend, &session, SESSION, "drained-turn").await;
     assert_eq!(
         error
             .turn_input_acceptance()
@@ -690,7 +690,7 @@ async fn a_drain_never_answers_an_aborted_turns_input() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> Result<()> {
     const SESSION: &str = "direct-crash-reclaim";
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let (entered_tx, entered_rx) = oneshot::channel::<()>();
     let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
     let requests = Arc::new(StdMutex::new(Vec::new()));
@@ -716,7 +716,7 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> R
         })
         .build()
         .into_handle();
-    let core = deployment.core(provider, None);
+    let core = backend.core(provider, None);
     let session = core.session(SESSION).open().await?;
     let crashed = tokio::spawn({
         let session = session.clone();
@@ -807,10 +807,10 @@ fn assert_queued_run_pending(result: Result<crate::QueuedTurnDrain<crate::TurnOu
 /// the retry instead of settling failed for good.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_plugin_session_fault_in_a_queued_finalize_hook_is_retried_to_completion() -> Result<()> {
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let finalize_calls = Arc::new(AtomicUsize::new(0));
     let provider_calls = Arc::new(AtomicUsize::new(0));
-    let core = deployment.core_with_plugins(
+    let core = backend.core_with_plugins(
         counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         None,
         vec![failing_after_turn(Arc::clone(&finalize_calls), 1)],
@@ -848,9 +848,9 @@ async fn a_plugin_session_fault_in_a_queued_finalize_hook_is_retried_to_completi
 async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_retry() -> Result<()>
 {
     const SESSION: &str = "queued-journal-fault";
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         None,
     );
@@ -861,7 +861,7 @@ async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_re
         .id("journal-blip")
         .send()
         .await?;
-    let faults = deployment.effect_host.effect_journal_faults();
+    let faults = backend.effect_host.effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Claim,
         &first_llm_call_key(SESSION, "queued-turn"),
@@ -894,7 +894,7 @@ async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_re
 /// aborting on the replayed live code forever.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_journaled_live_coded_failure_replays_as_a_recorded_failed_turn() -> Result<()> {
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let checkpoint_calls = Arc::new(AtomicUsize::new(0));
     let finalize_calls = Arc::new(AtomicUsize::new(0));
     let failing_checkpoint = plugin(
@@ -912,7 +912,7 @@ async fn a_journaled_live_coded_failure_replays_as_a_recorded_failed_turn() -> R
             }
         })),
     );
-    let core = deployment.core_with_plugins(
+    let core = backend.core_with_plugins(
         counting_text_provider(Arc::default(), Arc::default()),
         None,
         vec![
@@ -948,7 +948,7 @@ async fn a_journaled_live_coded_failure_replays_as_a_recorded_failed_turn() -> R
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancellation_still_settles_stopped_cancelled() -> Result<()> {
-    let deployment = SqliteDeployment::open().await;
+    let backend = SqliteBackend::open().await;
     let (entered_tx, entered_rx) = oneshot::channel::<()>();
     let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
     let provider = crate::testing::TestProvider::builder()
@@ -965,7 +965,7 @@ async fn cancellation_still_settles_stopped_cancelled() -> Result<()> {
         })
         .build()
         .into_handle();
-    let core = deployment.core(provider, None);
+    let core = backend.core(provider, None);
     let session = core.session("direct-cancelled").open().await?;
     let cancel = CancellationToken::new();
     let running = tokio::spawn({

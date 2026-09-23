@@ -145,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn worklist_plans_use_the_partial_index_without_a_temp_sort() {
-        let registry = crate::SqliteDeployment::memory()
+        let registry = crate::SqliteBackend::memory()
             .await
             .expect("open in-memory process registry")
             .process_registry();

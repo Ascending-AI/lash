@@ -1,7 +1,7 @@
 use super::*;
 
 struct SqliteWakeDeliveryOrderingGroupFaultInjector {
-    deployment: TestDeployment,
+    backend: TestBackend,
 }
 
 #[async_trait::async_trait]
@@ -9,7 +9,7 @@ impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
     for SqliteWakeDeliveryOrderingGroupFaultInjector
 {
     async fn discard_without_reason(&self, delivery_id: &str) {
-        let conn = self.deployment.raw(SqliteDatabase::ProcessRegistry);
+        let conn = self.backend.raw(SqliteDatabase::ProcessRegistry);
         assert_eq!(
             conn.execute(
                 "UPDATE process_wake_deliveries
@@ -27,9 +27,9 @@ lash_conformance::wake_delivery_crash_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(
         1_800_000_000_000,
     ));
-    let deployment = TestDeployment::open_with(
+    let backend = TestBackend::open_with(
         SUBSTRATE,
-        |options| SqliteDeploymentOptions {
+        |options| SqliteBackendOptions {
             wake_delivery: lash_core_execution::WakeDeliveryConfig::new(10_000)
                 .expect("valid test retention")
                 .with_enqueuing_stale_after_ms(25)
@@ -40,13 +40,13 @@ lash_conformance::wake_delivery_crash_tests!({
     )
     .await;
     let registry =
-        deployment.process_registry() as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
-    let factory = deployment.session_store_factory() as Arc<dyn SessionStoreFactory>;
+        backend.process_registry() as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
+    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
     let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
-        deployment,
+        backend,
         factory,
         registry,
         clock,
@@ -58,15 +58,15 @@ lash_conformance::wake_delivery_crash_tests!({
 });
 
 lash_conformance::wake_delivery_ordering_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let registry = deployment.process_registry();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let registry = backend.process_registry();
     let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
-        deployment.clone(),
+        backend.clone(),
         registry as Arc<dyn ProcessRegistry>,
-        Arc::new(SqliteWakeDeliveryOrderingGroupFaultInjector { deployment }),
+        Arc::new(SqliteWakeDeliveryOrderingGroupFaultInjector { backend }),
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Direct,
         || async {},

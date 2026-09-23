@@ -17,7 +17,7 @@ use lash_core_execution::{
 };
 
 use super::SUBSTRATE;
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 
 const ROUNDS: usize = 200;
 
@@ -54,14 +54,14 @@ async fn mint(
 }
 
 /// One host peeks process-scope promises while a second host on the same
-/// deployment resolves them and fences their scopes, and the factory sweeps
+/// backend resolves them and fences their scopes, and the factory sweeps
 /// retained evidence across the catalog, the journal and the registry.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn retention_sweeps_and_process_scope_promises_never_wait_on_each_other() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let reader = deployment.effect_host();
-    let writer = deployment.reopen().await.effect_host();
-    let factory = deployment.session_store_factory();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let reader = backend.effect_host();
+    let writer = backend.reopen().await.effect_host();
+    let factory = backend.session_store_factory();
     let wait = AwaitEventWaitIdentity::tool_completion("lock-order-call");
 
     let peeks = tokio::spawn({

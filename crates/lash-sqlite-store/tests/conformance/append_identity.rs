@@ -1,9 +1,9 @@
 lash_conformance::append_receipt_identity_corruption_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment.store().await;
-    let mutation = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
+    let mutation = backend.clone();
     (
-        deployment,
+        backend,
         store as Arc<dyn RuntimePersistence>,
         move || async move {
             let conn = mutation.raw(SqliteDatabase::DurableCore);

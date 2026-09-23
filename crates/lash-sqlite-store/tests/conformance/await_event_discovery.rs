@@ -2,8 +2,8 @@ use super::*;
 
 #[tokio::test]
 async fn sqlite_await_event_discovery_refuses_inconsistent_persisted_rows() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let host = deployment.effect_host();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let host = backend.effect_host();
 
     let inconsistent_session = SessionId::from("inconsistent-discovery-session");
     let inconsistent_scope = durable_turn_scope(&inconsistent_session, "turn");
@@ -18,7 +18,7 @@ async fn sqlite_await_event_discovery_refuses_inconsistent_persisted_rows() {
             .expect("materialize inconsistent-row witness"),
         ResolveOutcome::Accepted
     );
-    let connection = deployment.raw(SqliteDatabase::EffectReplay);
+    let connection = backend.raw(SqliteDatabase::EffectReplay);
     connection
         .execute(
             "UPDATE await_event_waits
@@ -45,7 +45,7 @@ async fn sqlite_await_event_discovery_refuses_inconsistent_persisted_rows() {
     host.revoke_await_events_for_session(&revoked_session)
         .await
         .expect("tombstone revoked-row witness session");
-    let connection = deployment.raw(SqliteDatabase::EffectReplay);
+    let connection = backend.raw(SqliteDatabase::EffectReplay);
     connection
         .execute(
             "INSERT INTO await_event_waits (
