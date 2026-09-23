@@ -34,7 +34,8 @@ use crate::durable_wait::{
     LashDurableWaitIndexClient, LashDurableWaitWorkflowClient, RestateDurableWaitAddress,
     RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupChildMembershipRequest, RestateDurableWaitGroupRequest,
-    RestateDurableWaitResolveRequest, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
+    RestateDurableWaitResolveRefusal, RestateDurableWaitResolveRequest,
+    RestateDurableWaitResolveResponse, RestateTurnCancelGate, RestateTurnCancelRaceOutcome,
     RestateTurnCancelWake, durable_wait_index_object_key, register_turn_cancel_gate,
     restate_await_event_key_for_authority, restate_durable_wait_request, retire_turn_cancel_gate,
 };
@@ -62,6 +63,14 @@ pub(crate) use wake::{
 ///
 /// `T` is what the guarded wait produces when it wins: `()` for a timer, a
 /// `Resolution` for an await-event, the process output for a process await.
+/// What a handler's durable-wait resolve answers: the index's outcome, or its
+/// typed cancel-decided refusal (ADR 0099 §4, W17).
+pub(crate) type ResolveEventFuture<'run> = Pin<
+    Box<
+        dyn Future<Output = Result<RestateDurableWaitResolveResponse, TerminalError>> + Send + 'run,
+    >,
+>;
+
 type TurnCancelRaceFuture<'run, T> = Pin<
     Box<dyn Future<Output = Result<RestateTurnCancelRaceOutcome<T>, TerminalError>> + Send + 'run>,
 >;
@@ -385,7 +394,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn resolve_event<'run>(
         &'run self,
         request: RestateDurableWaitResolveRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<ResolveOutcome, TerminalError>> + Send + 'run>>
+    ) -> ResolveEventFuture<'run>
     where
         'ctx: 'run;
 
@@ -915,10 +924,16 @@ macro_rules! impl_restate_controller_context {
                                         resolution: Resolution::Cancelled,
                                     }))
                                     .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                                let Json(outcome) = resolve_request.call().await?;
-                                Ok(match outcome {
-                                    ResolveOutcome::AlreadyResolved { terminal } => terminal,
-                                    ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked => {
+                                let Json(response) = resolve_request.call().await?;
+                                // A cancel-decided child's key refuses the
+                                // release (ADR 0099 §4): the waiter was
+                                // cancelled either way.
+                                Ok(match response {
+                                    RestateDurableWaitResolveResponse::Outcome(ResolveOutcome::AlreadyResolved {
+                                        terminal,
+                                    }) => terminal,
+                                    RestateDurableWaitResolveResponse::Outcome(_)
+                                    | RestateDurableWaitResolveResponse::Refused(RestateDurableWaitResolveRefusal::CancelDecided) => {
                                         Resolution::Cancelled
                                     }
                                 })
@@ -1125,7 +1140,7 @@ macro_rules! impl_restate_controller_context {
                 fn resolve_event<'run>(
                     &'run self,
                     request: RestateDurableWaitResolveRequest,
-                ) -> Pin<Box<dyn Future<Output = Result<ResolveOutcome, TerminalError>> + Send + 'run>>
+                ) -> ResolveEventFuture<'run>
                 where
                     'ctx: 'run,
                 {

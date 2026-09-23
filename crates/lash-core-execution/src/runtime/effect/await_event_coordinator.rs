@@ -133,6 +133,34 @@ impl std::fmt::Debug for PersistedPromise {
     }
 }
 
+/// The encoded terminal a group child's cancel decision writes into its
+/// completion key's promise row (ADR 0099 §4, W17).
+///
+/// Not a [`Resolution`]: no resolver proposed it, and the coordinator decodes
+/// it to [`PromiseState::CancelDecided`] before any resolution decode — a
+/// resolve that finds it is refused, typed, and a waiter reads `Cancelled`.
+/// Its `status` is one no `Resolution` encoding carries, so the two can never
+/// be mistaken for each other.
+pub const CANCEL_DECIDED_TERMINAL_JSON: &str = r#"{"status":"cancel_decided"}"#;
+
+/// The promise row a group child's cancel decision closes, as the substrate
+/// owning that decision writes it inside its own decision transaction.
+///
+/// Built by [`AwaitEventCoordinator::cancel_decision_fence`] so the identity
+/// columns are exactly the ones a resolve compares; the write itself is the
+/// substrate's: insert the row when it is missing, or set its terminal when it
+/// is still pending and names the same promise, and leave a terminal that won
+/// first untouched (`promise_semantics::cancel_decision_fences`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AwaitEventCancelFence {
+    /// The deterministic key id of the child's completion key.
+    pub key_id: String,
+    /// The promise identity the row carries.
+    pub identity: AwaitEventRowIdentity,
+    /// Always [`CANCEL_DECIDED_TERMINAL_JSON`].
+    pub terminal_json: &'static str,
+}
+
 /// Outcome of a backend's fenced first-writer-wins terminal write.
 ///
 /// The write predicate is exactly [`promise_semantics::resolve`]'s `Store`
@@ -429,13 +457,30 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
                 return Ok(ResolveOutcome::Accepted);
             }
             TerminalCas::AlreadyResolved { terminal_json } => {
-                PromiseState::Resolved(self.decode_resolution(&terminal_json)?)
+                self.decode_terminal(&terminal_json)?
             }
             TerminalCas::UnknownOrRevoked => PromiseState::Revoked,
         };
-        Ok(promise_semantics::resolve(observed, resolution)
+        promise_semantics::resolve(observed, resolution)
             .resolve_outcome()
-            .expect("resolve never returns the unchanged transition"))
+            .expect("resolve never returns the unchanged transition")
+    }
+
+    /// The promise row a cancel decision closes for the completion key
+    /// `scope`/`wait` names (ADR 0099 §4, W17).
+    ///
+    /// The substrate that owns the group child's cancel fence writes it in the
+    /// same transaction as the decision, so no resolve can land between them.
+    pub fn cancel_decision_fence(
+        &self,
+        scope: &ExecutionScope,
+        wait: &AwaitEventWaitIdentity,
+    ) -> Result<AwaitEventCancelFence, RuntimeError> {
+        Ok(AwaitEventCancelFence {
+            key_id: promise_semantics::derive_key_id(scope, wait)?,
+            identity: self.identity_for(scope, wait)?,
+            terminal_json: CANCEL_DECIDED_TERMINAL_JSON,
+        })
     }
 
     /// `None` covers both "no row yet" and "pending": neither is oracular
@@ -444,6 +489,9 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         match self.inspect(key).await? {
             PromiseState::Missing | PromiseState::Pending => Ok(None),
             PromiseState::Resolved(terminal) => Ok(Some(terminal)),
+            PromiseState::CancelDecided => {
+                Ok(Some(promise_semantics::cancel_decided_observation()))
+            }
             PromiseState::Revoked => Err(unknown_or_revoked()),
         }
     }
@@ -480,6 +528,9 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         loop {
             match self.inspect(key).await? {
                 PromiseState::Resolved(terminal) => return Ok(terminal),
+                PromiseState::CancelDecided => {
+                    return Ok(promise_semantics::cancel_decided_observation());
+                }
                 PromiseState::Revoked => return Err(unknown_or_revoked()),
                 PromiseState::Missing | PromiseState::Pending => {}
             }
@@ -622,21 +673,36 @@ impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {
         match self.backend.inspect(&key.key_id, &identity).await? {
             PersistedPromise::Missing => Ok(PromiseState::Missing),
             PersistedPromise::Pending => Ok(PromiseState::Pending),
-            PersistedPromise::Resolved { terminal_json } => Ok(PromiseState::Resolved(
-                self.decode_resolution(&terminal_json)?,
-            )),
+            PersistedPromise::Resolved { terminal_json } => self.decode_terminal(&terminal_json),
             PersistedPromise::UnknownOrRevoked => Ok(PromiseState::Revoked),
         }
     }
 
     fn row_identity(&self, key: &AwaitEventKey) -> Result<AwaitEventRowIdentity, RuntimeError> {
+        self.identity_for(&key.scope, &key.wait)
+    }
+
+    fn identity_for(
+        &self,
+        scope: &ExecutionScope,
+        wait: &AwaitEventWaitIdentity,
+    ) -> Result<AwaitEventRowIdentity, RuntimeError> {
         Ok(AwaitEventRowIdentity {
-            scope_json: serde_json::to_string(&key.scope).map_err(|err| self.encode_error(&err))?,
-            scope_id: key.scope.journal_identity()?.key().to_string(),
-            wait_json: serde_json::to_string(&key.wait).map_err(|err| self.encode_error(&err))?,
-            session_id: key.scope.session_id().map(ToOwned::to_owned),
-            turn_control: key.wait.is_turn_control(),
+            scope_json: serde_json::to_string(scope).map_err(|err| self.encode_error(&err))?,
+            scope_id: scope.journal_identity()?.key().to_string(),
+            wait_json: serde_json::to_string(wait).map_err(|err| self.encode_error(&err))?,
+            session_id: scope.session_id().map(ToOwned::to_owned),
+            turn_control: wait.is_turn_control(),
         })
+    }
+
+    /// A stored terminal as the transition table reads it: the cancel
+    /// decision's marker, or a resolution that won.
+    fn decode_terminal(&self, encoded: &str) -> Result<PromiseState, RuntimeError> {
+        if encoded == CANCEL_DECIDED_TERMINAL_JSON {
+            return Ok(PromiseState::CancelDecided);
+        }
+        self.decode_resolution(encoded).map(PromiseState::Resolved)
     }
 
     fn encode_resolution(&self, resolution: &Resolution) -> Result<String, RuntimeError> {

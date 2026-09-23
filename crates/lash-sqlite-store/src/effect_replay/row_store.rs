@@ -450,6 +450,25 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         ),
                     )));
                 }
+                // §4, W17: the decision closes the child's completion key in
+                // this same transaction, so no resolve lands between them.
+                if let Some(fence) = &request.completion_fence {
+                    tx.execute(
+                        crate::await_event::wait_sql(Schema::Main)
+                            .shared
+                            .fence_cancel_decided
+                            .sql(),
+                        params![
+                            fence.key_id.as_str(),
+                            fence.identity.scope_json.as_str(),
+                            fence.identity.wait_json.as_str(),
+                            fence.identity.session_id.as_deref(),
+                            fence.identity.turn_control,
+                            fence.terminal_json,
+                            now as i64,
+                        ],
+                    )?;
+                }
                 Ok(TxOutcome::Commit(EffectCancelOutcome::Decided {
                     settlement_seq: u64_from_sql("RuntimeEffectGroup", "next_seq", settlement_seq)?,
                 }))

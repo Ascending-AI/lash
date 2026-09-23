@@ -124,6 +124,11 @@ pub enum PromiseState {
     Resolved(Resolution),
     /// The owning session has been durably revoked.
     Revoked,
+    /// The group child that owns this completion key is cancel-decided: its
+    /// cancel decision closed the key's completion delivery (ADR 0099 §4,
+    /// W17). Readers observe `Cancelled`; a resolve is refused, typed, and
+    /// writes nothing.
+    CancelDecided,
 }
 
 /// Pure decision returned for a proposed terminal transition.
@@ -135,17 +140,24 @@ pub enum PromiseTransition {
     AlreadyResolved(Resolution),
     /// The key must use the common non-oracular unknown/revoked result.
     UnknownOrRevoked,
+    /// The owning group child is cancel-decided, so the proposed terminal is
+    /// refused with [`cancel_decided_refusal`] and nothing is written.
+    CancelDecided,
     /// The operation intentionally leaves this promise unchanged.
     Unchanged,
 }
 
 impl PromiseTransition {
     /// `Unchanged` is not a resolve result; it is used only by cancel sweeps.
-    pub fn resolve_outcome(self) -> Option<ResolveOutcome> {
+    /// `CancelDecided` is the typed refusal a late completion earns.
+    pub fn resolve_outcome(self) -> Option<Result<ResolveOutcome, RuntimeError>> {
         match self {
-            Self::Store(_) => Some(ResolveOutcome::Accepted),
-            Self::AlreadyResolved(terminal) => Some(ResolveOutcome::AlreadyResolved { terminal }),
-            Self::UnknownOrRevoked => Some(ResolveOutcome::UnknownOrRevoked),
+            Self::Store(_) => Some(Ok(ResolveOutcome::Accepted)),
+            Self::AlreadyResolved(terminal) => {
+                Some(Ok(ResolveOutcome::AlreadyResolved { terminal }))
+            }
+            Self::UnknownOrRevoked => Some(Ok(ResolveOutcome::UnknownOrRevoked)),
+            Self::CancelDecided => Some(Err(cancel_decided_refusal())),
             Self::Unchanged => None,
         }
     }
@@ -157,7 +169,38 @@ pub fn resolve(state: PromiseState, proposed: Resolution) -> PromiseTransition {
         PromiseState::Missing | PromiseState::Pending => PromiseTransition::Store(proposed),
         PromiseState::Resolved(terminal) => PromiseTransition::AlreadyResolved(terminal),
         PromiseState::Revoked => PromiseTransition::UnknownOrRevoked,
+        PromiseState::CancelDecided => PromiseTransition::CancelDecided,
     }
+}
+
+/// Whether a group child's cancel decision closes this promise (ADR 0099 §4).
+///
+/// The decision fences completion delivery to the child's completion key: a
+/// promise nobody resolved yet — missing or pending — becomes
+/// [`PromiseState::CancelDecided`]. A terminal that won before the decision
+/// stays authoritative (that completion was not late), a revoked promise stays
+/// revoked, and a second decision is idempotent.
+pub fn cancel_decision_fences(state: &PromiseState) -> bool {
+    matches!(state, PromiseState::Missing | PromiseState::Pending)
+}
+
+/// What a waiter or peek observes on a cancel-decided promise: the child it
+/// belongs to was cancelled.
+pub fn cancel_decided_observation() -> Resolution {
+    Resolution::Cancelled
+}
+
+/// The typed refusal a completion delivered after its owning group child's
+/// cancel decision earns (ADR 0099 §4, W17): the same
+/// `RuntimeEffectGroupChildCancelDecided` a late final record earns, because
+/// both are completions reaching a child whose cancel disposition already won
+/// the linearization point.
+pub fn cancel_decided_refusal() -> RuntimeError {
+    RuntimeError::new(
+        RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+        "the group child that owns this completion key is cancel-decided; ADR 0099 §4 \
+         refuses a completion delivered after its cancel decision, and nothing was written",
+    )
 }
 
 /// Turn-control promises are never swept: cancelling their observation must
@@ -175,6 +218,7 @@ pub(crate) fn cancel_sweep(
         PromiseState::Pending => PromiseTransition::Store(Resolution::Cancelled),
         PromiseState::Resolved(terminal) => PromiseTransition::AlreadyResolved(terminal),
         PromiseState::Revoked => PromiseTransition::UnknownOrRevoked,
+        PromiseState::CancelDecided => PromiseTransition::Unchanged,
     }
 }
 

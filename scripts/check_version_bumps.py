@@ -837,6 +837,15 @@ IDENTIFIER_RENAME_BASELINES = {
     # hand-written serialize/deserialize codecs, so the serialized bytes are
     # identical and PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION stays 1.
     'crates/lash-core-store/src/protocol_turn_options.rs:PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION': 'sha256:ad097b283e75c77ba0efeb14e03898e87e8f4673eb9eeb2a52c996c8fa42d01b',
+    # FIG-3568: the durable-wait index gained the cancel-decided completion
+    # fence (ADR 0099 §4, W17). Every existing encoding is byte-identical: the
+    # index metadata's new `cancel_decided` set is `serde(default)` and
+    # skipped while empty, and `LashDurableWaitIndex/resolve` answers an
+    # untagged superset of `ResolveOutcome` whose outcome arm encodes exactly
+    # as before, so recorded journals replay (the checked-in tool-intent
+    # journal corpus holds one such answer). Only the refusal itself is new
+    # bytes, so the epoch stays 6.
+    'crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_INDEX_IDENTITY_EPOCH': 'sha256:e1ef76dded48453bc4dc1726a28bd365786116168b8723f7ae8966fd10b3cb2e',
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

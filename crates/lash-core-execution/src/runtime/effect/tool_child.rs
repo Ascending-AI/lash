@@ -475,6 +475,30 @@ pub struct ToolChildRequest {
 }
 
 impl ToolChildRequest {
+    /// The completion key this child's deferred attempt parks on, as the
+    /// scope and wait identity it is minted from — `None` for an `Inline`
+    /// child, which never takes one.
+    ///
+    /// The child's controller is constructed under its admitted scope, and a
+    /// tool context mints its key there for its own call id, so this is the
+    /// promise a completion for this child is delivered to. The substrate that
+    /// owns the child's cancel fence closes it at the cancel decision (ADR
+    /// 0099 §4, W17): completion delivery is one of the sinks the fence
+    /// covers.
+    #[must_use]
+    pub fn completion_wait(
+        &self,
+    ) -> Option<(crate::ExecutionScope, crate::AwaitEventWaitIdentity)> {
+        match self.completion_routing {
+            ToolChildCompletionRouting::Inline => None,
+            ToolChildCompletionRouting::Durable
+            | ToolChildCompletionRouting::ProcessLifetime { .. } => Some((
+                self.scope.admitted_scope.scope().clone(),
+                crate::AwaitEventWaitIdentity::tool_completion(self.call.call_id.clone()),
+            )),
+        }
+    }
+
     /// Assembles a request at the current format version.
     ///
     /// The facts with no sensible absence are taken here; the three that may

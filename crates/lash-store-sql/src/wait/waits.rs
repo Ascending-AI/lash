@@ -82,6 +82,25 @@ crate::statements! {
                )
              ORDER BY key_id";
 
+        /// Close promise `?1` because the group child that owns it is
+        /// cancel-decided (ADR 0099 §4, W17), inside the decision's own
+        /// transaction: insert it closed when no row exists, or close the
+        /// row when it is still pending and names the same promise. `?6` is
+        /// the coordinator's cancel-decided marker, never a resolution. A
+        /// terminal that won first is left authoritative, so a completion
+        /// that was not late keeps its answer.
+        fence_cancel_decided = "INSERT INTO await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT (key_id) DO UPDATE
+                 SET terminal_json = excluded.terminal_json,
+                     resolved_at_ms = excluded.resolved_at_ms
+                 WHERE await_event_waits.terminal_json IS NULL
+                   AND await_event_waits.scope_json = excluded.scope_json
+                   AND await_event_waits.wait_json = excluded.wait_json";
+
         delete_by_session = "DELETE FROM await_event_waits WHERE session_id = ?1";
 
         /// Delete every promise under the scope whose canonical JSON is `?1`.

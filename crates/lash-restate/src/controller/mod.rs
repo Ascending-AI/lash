@@ -216,7 +216,8 @@ where
                 lash_core::RuntimeErrorCode::RestateEffectController,
                 err.to_string(),
             )
-        })
+        })?
+        .into_result()
 }
 fn restate_turn_cancel_wait_request(
     authority_id: &RestateAuthorityId,

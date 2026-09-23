@@ -4,7 +4,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use crate::controller::context::ProcessWorkflowStartFailure;
+use crate::controller::context::{ProcessWorkflowStartFailure, ResolveEventFuture};
+use crate::durable_wait::RestateDurableWaitResolveResponse;
 use lash_core::ProcessEventLogTestSupport as _;
 
 mod helpers;
@@ -715,12 +716,12 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     fn resolve_event<'run>(
         &'run self,
         request: RestateDurableWaitResolveRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<ResolveOutcome, TerminalError>> + Send + 'run>>
+    ) -> ResolveEventFuture<'run>
     where
         'ctx: 'run,
     {
         let outcome = self.resolve_durable_event(request);
-        Box::pin(async move { Ok(outcome) })
+        Box::pin(async move { Ok(RestateDurableWaitResolveResponse::Outcome(outcome)) })
     }
 
     fn update_session_waits<'run>(
@@ -1892,7 +1893,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
     fn resolve_event<'run>(
         &'run self,
         request: RestateDurableWaitResolveRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<ResolveOutcome, TerminalError>> + Send + 'run>>
+    ) -> ResolveEventFuture<'run>
     where
         'ctx: 'run,
     {
@@ -1904,7 +1905,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
         } else {
             ResolveOutcome::UnknownOrRevoked
         };
-        Box::pin(async move { Ok(outcome) })
+        Box::pin(async move { Ok(RestateDurableWaitResolveResponse::Outcome(outcome)) })
     }
 
     fn update_session_waits<'run>(
@@ -2285,7 +2286,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     fn resolve_event<'run>(
         &'run self,
         request: RestateDurableWaitResolveRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<ResolveOutcome, TerminalError>> + Send + 'run>>
+    ) -> ResolveEventFuture<'run>
     where
         'ctx: 'run,
     {

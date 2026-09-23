@@ -331,6 +331,50 @@ pub struct RestateDurableWaitResolveRequest {
     pub resolution: Resolution,
 }
 
+/// What `LashDurableWaitIndex/resolve` answers: the promise's first-writer
+/// outcome, or the typed refusal a completion delivered to a cancel-decided
+/// group child's key earns (ADR 0099 §4, W17).
+///
+/// The encoding is a superset of [`ResolveOutcome`]'s: an outcome encodes
+/// exactly as before, so a journal that recorded this handler's answer before
+/// the refusal existed still replays, and the refusal is the one further
+/// `status` no outcome carries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum RestateDurableWaitResolveResponse {
+    Outcome(ResolveOutcome),
+    Refused(RestateDurableWaitResolveRefusal),
+}
+
+/// The refusal arm of [`RestateDurableWaitResolveResponse`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum RestateDurableWaitResolveRefusal {
+    CancelDecided,
+}
+
+impl RestateDurableWaitResolveResponse {
+    /// The host-facing answer: the outcome, or
+    /// `RuntimeEffectGroupChildCancelDecided`.
+    pub fn into_result(self) -> Result<ResolveOutcome, RuntimeError> {
+        match self {
+            Self::Outcome(outcome) => Ok(outcome),
+            Self::Refused(RestateDurableWaitResolveRefusal::CancelDecided) => {
+                Err(lash_core::facade_support::promise_semantics::cancel_decided_refusal())
+            }
+        }
+    }
+}
+
+/// Closes the completion key `scope`/`wait` names, because the group child
+/// that owns it is cancel-decided (ADR 0099 §4, W17). Sent by the group index
+/// that decides the child, to the index object that owns `scope`'s waits.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitCancelDecidedRequest {
+    pub scope: ExecutionScope,
+    pub wait: AwaitEventWaitIdentity,
+}
+
 #[cfg(test)]
 impl RestateDurableWaitResolveRequest {
     pub(crate) fn address(&self) -> RestateDurableWaitAddress {
@@ -451,6 +495,34 @@ pub(crate) struct RestateDurableWaitIndexMetadata {
     revoked: bool,
     #[serde(default)]
     awakeables: Vec<RestateDurableWaitAwakeableRequest>,
+    /// Completion keys their owning group child's cancel decision closed, by
+    /// the key's authority-free identity (`promise_semantics::derive_key_id`),
+    /// so the group index that decides the child can name them (ADR 0099 §4,
+    /// W17). Carried in the metadata every handler already reads, so the
+    /// check journals nothing new; absent from the encoding while empty.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    cancel_decided: std::collections::BTreeSet<String>,
+}
+
+impl RestateDurableWaitIndexMetadata {
+    fn is_cancel_decided(
+        &self,
+        scope: &ExecutionScope,
+        wait: &AwaitEventWaitIdentity,
+    ) -> Result<bool, TerminalError> {
+        Ok(!self.cancel_decided.is_empty()
+            && self
+                .cancel_decided
+                .contains(&cancel_decided_id(scope, wait)?))
+    }
+}
+
+fn cancel_decided_id(
+    scope: &ExecutionScope,
+    wait: &AwaitEventWaitIdentity,
+) -> Result<String, TerminalError> {
+    lash_core::facade_support::promise_semantics::derive_key_id(scope, wait)
+        .map_err(|error| TerminalError::new(error.to_string()))
 }
 /// Fire a gate entry because the turn-control wait it guards has settled.
 ///
@@ -734,7 +806,15 @@ pub trait LashDurableWaitIndex {
     ) -> HandlerResult<Json<()>>;
     async fn resolve(
         request: Json<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Json<ResolveOutcome>>;
+    ) -> HandlerResult<Json<RestateDurableWaitResolveResponse>>;
+    /// Close a cancel-decided group child's completion key: every resolve of
+    /// it from now on is refused, typed, and writes nothing (ADR 0099 §4,
+    /// W17). A waiter that already holds a terminal keeps it; the key is
+    /// named by its authority-free identity, because the group index that
+    /// decides the child does not hold the minting authority.
+    async fn fence_cancel_decided(
+        request: Json<RestateDurableWaitCancelDecidedRequest>,
+    ) -> HandlerResult<Json<()>>;
     /// Wake any current waiter and retain this resolution for every later
     /// registration, even when the wait workflow had an earlier notification.
     async fn retain_resolution(
@@ -996,6 +1076,7 @@ async fn read_outstanding_waits(
             .get::<Json<Resolution>>(&durable_wait_index_resolution_key(&address))
             .await?
             .is_none()
+            && !metadata.is_cancel_decided(&key.scope, &key.wait)?
         {
             outstanding.push(key);
         }
@@ -1279,15 +1360,27 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         &self,
         ctx: ObjectContext<'_>,
         Json(request): Json<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Json<ResolveOutcome>> {
+    ) -> HandlerResult<Json<RestateDurableWaitResolveResponse>> {
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
         let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
         if metadata.revoked {
-            return Ok(Json(ResolveOutcome::UnknownOrRevoked));
+            return Ok(Json(RestateDurableWaitResolveResponse::Outcome(
+                ResolveOutcome::UnknownOrRevoked,
+            )));
+        }
+        // §4, W17: the owning group child's cancel decision closed this key.
+        // Checked before any retained terminal, because the close's own
+        // release of the child's wait may have retained one since.
+        if metadata.is_cancel_decided(&request.key.scope, &request.key.wait)? {
+            return Ok(Json(RestateDurableWaitResolveResponse::Refused(
+                RestateDurableWaitResolveRefusal::CancelDecided,
+            )));
         }
         let resolution_key = durable_wait_index_resolution_key(&address);
         if let Some(Json(terminal)) = ctx.get::<Json<Resolution>>(&resolution_key).await? {
-            return Ok(Json(ResolveOutcome::AlreadyResolved { terminal }));
+            return Ok(Json(RestateDurableWaitResolveResponse::Outcome(
+                ResolveOutcome::AlreadyResolved { terminal },
+            )));
         }
         let resolution = request.resolution.clone();
         let replay_key = request.key.key_id.clone();
@@ -1304,7 +1397,7 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         };
         mirror_resolve_outcome(&ctx, &address, resolution, &outcome);
         if outcome == ResolveOutcome::UnknownOrRevoked {
-            return Ok(Json(outcome));
+            return Ok(Json(RestateDurableWaitResolveResponse::Outcome(outcome)));
         }
         let mut retained = Vec::with_capacity(metadata.awakeables.len());
         for entry in std::mem::take(&mut metadata.awakeables) {
@@ -1316,7 +1409,31 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         }
         metadata.awakeables = retained;
         ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
-        Ok(Json(outcome))
+        Ok(Json(RestateDurableWaitResolveResponse::Outcome(outcome)))
+    }
+
+    async fn fence_cancel_decided(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitCancelDecidedRequest>,
+    ) -> HandlerResult<Json<()>> {
+        let expected = durable_wait_index_key_for_scope(&request.scope);
+        if expected != ctx.key() {
+            return Err(TerminalError::new(format!(
+                "cancel-decided completion fence for scope {expected} addressed index {}",
+                ctx.key()
+            ))
+            .into());
+        }
+        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if !metadata.revoked
+            && metadata
+                .cancel_decided
+                .insert(cancel_decided_id(&request.scope, &request.wait)?)
+        {
+            ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+        }
+        Ok(Json(()))
     }
 
     async fn cancel_all(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {

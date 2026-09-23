@@ -370,6 +370,28 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 request.replay_key, request.group_key
             )));
         }
+        // §4, W17: the decision closes the child's completion key in this
+        // same transaction, so no resolve lands between them. The promise
+        // row's own conflict handling orders it against a concurrent resolve:
+        // whichever writes the row's terminal first holds it.
+        if let Some(fence) = &request.completion_fence {
+            sqlx::query(
+                crate::await_event::wait_sql()
+                    .shared
+                    .fence_cancel_decided
+                    .sql(),
+            )
+            .bind(&fence.key_id)
+            .bind(&fence.identity.scope_json)
+            .bind(&fence.identity.wait_json)
+            .bind(fence.identity.session_id.as_deref())
+            .bind(fence.identity.turn_control)
+            .bind(fence.terminal_json)
+            .bind(now_ms as i64)
+            .execute(&mut *tx)
+            .await
+            .map_err(effect_store_error)?;
+        }
         tx.commit().await.map_err(effect_store_error)?;
         Ok(EffectCancelOutcome::Decided {
             settlement_seq: u64::try_from(settlement_seq).map_err(|_| {

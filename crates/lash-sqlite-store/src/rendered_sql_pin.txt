@@ -164,6 +164,18 @@ SELECT key_id, scope_json, wait_json, turn_control
                    WHERE session_id = ?1
                )
              ORDER BY key_id
+=== main | wait::waits::WaitStatements | await_event_wait.fence_cancel_decided
+INSERT INTO main.await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT (key_id) DO UPDATE
+                 SET terminal_json = excluded.terminal_json,
+                     resolved_at_ms = excluded.resolved_at_ms
+                 WHERE main.await_event_waits.terminal_json IS NULL
+                   AND main.await_event_waits.scope_json = excluded.scope_json
+                   AND main.await_event_waits.wait_json = excluded.wait_json
 === main | wait::waits::WaitStatements | await_event_wait.delete_by_session
 DELETE FROM main.await_event_waits WHERE session_id = ?1
 === main | wait::waits::WaitStatements | await_event_wait.delete_by_scope_json
@@ -479,6 +491,18 @@ SELECT key_id, scope_json, wait_json, turn_control
                    WHERE session_id = ?1
                )
              ORDER BY key_id
+=== effect_journal | wait::waits::WaitStatements | await_event_wait.fence_cancel_decided
+INSERT INTO effect_journal.await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT (key_id) DO UPDATE
+                 SET terminal_json = excluded.terminal_json,
+                     resolved_at_ms = excluded.resolved_at_ms
+                 WHERE effect_journal.await_event_waits.terminal_json IS NULL
+                   AND effect_journal.await_event_waits.scope_json = excluded.scope_json
+                   AND effect_journal.await_event_waits.wait_json = excluded.wait_json
 === effect_journal | wait::waits::WaitStatements | await_event_wait.delete_by_session
 DELETE FROM effect_journal.await_event_waits WHERE session_id = ?1
 === effect_journal | wait::waits::WaitStatements | await_event_wait.delete_by_scope_json
@@ -794,6 +818,18 @@ SELECT key_id, scope_json, wait_json, turn_control
                    WHERE session_id = ?1
                )
              ORDER BY key_id
+=== process_registry | wait::waits::WaitStatements | await_event_wait.fence_cancel_decided
+INSERT INTO process_registry.await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT (key_id) DO UPDATE
+                 SET terminal_json = excluded.terminal_json,
+                     resolved_at_ms = excluded.resolved_at_ms
+                 WHERE process_registry.await_event_waits.terminal_json IS NULL
+                   AND process_registry.await_event_waits.scope_json = excluded.scope_json
+                   AND process_registry.await_event_waits.wait_json = excluded.wait_json
 === process_registry | wait::waits::WaitStatements | await_event_wait.delete_by_session
 DELETE FROM process_registry.await_event_waits WHERE session_id = ?1
 === process_registry | wait::waits::WaitStatements | await_event_wait.delete_by_scope_json
