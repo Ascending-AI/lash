@@ -36,6 +36,28 @@ macro_rules! tool_child_turn_cancel_tests {
     };
 }
 
+/// Register the FIG-1293 migrated-tools crash-redrive law. The fixture hands
+/// back a guard, a prefix, the effect host, a process registry, the tier's
+/// turn runner and the orchestration plugin factories (`spawn_agent`,
+/// `cancel_process`) from the crates above this one.
+#[macro_export]
+macro_rules! migrated_tools_redrive_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::migrated_tools_redrive_tests!(@law [$(#[$attr])*] $fixture;
+            (public_migrated_tools_redrive_to_literal_outcomes, "migrated-tools-redrive"));
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, registry, runner, orchestration) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, registry, runner, orchestration)
+                .await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
 /// Register one turn-runner law.
 #[macro_export]
 macro_rules! __turn_runner_register {

@@ -18,6 +18,7 @@ pub use super::graph_integrity::*;
 pub use super::hostile_input::*;
 pub use super::lineage::*;
 pub use super::live_replay::*;
+pub use super::migrated_tools_redrive::*;
 pub use super::observer_intent::*;
 pub use super::process_change_feed::*;
 pub use super::process_change_horizon::*;
