@@ -235,7 +235,14 @@ pub use usage_activity::*;
 // `code` (`<namespace>:<spelling>`). A window-87 peer drops `code` on decode
 // and a window-88 peer reads the retired columns as `code: None`, so peers
 // must adopt 88.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 88;
+// Window 89: FIG-3500 bounds the remote process-events read the way the
+// store bounds it. `RemoteProcessEventsRequest` trades `after_sequence` for
+// `limit`, a `mode` projection, and an opaque `continuation` token, and
+// `RemoteProcessEventsResponse` answers with a `ProcessEventReadOutcome` page
+// carrying `more` — including the no-longer-retained verdicts — instead of a
+// flat unbounded event list. A window-88 peer's request lacks `limit` and
+// `mode` and is refused rather than defaulted, so peers must adopt 89.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 89;
 
 /// One versioned remote-protocol message.
 ///

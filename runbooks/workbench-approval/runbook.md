@@ -18,7 +18,7 @@ to an operator, approve resumes successfully, deny reaches the cell as a typed
 tool failure, and a parked wait survives a workbench process restart.
 
 **Deterministic companion.** Run
-`cargo test -p agent-workbench approval -- --nocapture` plus the three named
+`kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=approval --test_arg=--nocapture` plus the three named
 tests in `src/main_sections/tests/approvals.rs`. These use a scripted provider
 and a file-backed `SqliteEffectHost`; this judged run uses the production
 Restate deployment and a real model from `.env`.
@@ -28,7 +28,7 @@ Restate deployment and a real model from `.env`.
 From the fork root, source `env.sh`, then run:
 
 ```sh
-cargo nextest run --locked -p agent-workbench -E 'test(async_completion_)'
+kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=async_completion_
 ```
 
 Require **4 passed**: `async_completion_{success,failure,timeout,cancel}_crosses_session_reopen_and_redrive`.

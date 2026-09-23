@@ -12,6 +12,12 @@ which converts the last unowned tables, deletes the gate's `converted` list and
 makes the gate total over both store crates. The arc's measured outcome is in
 *Consequences*.
 
+Amended 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) deletes the
+`pending_turn_inputs`, `queued_work_batches` and `queued_work_items` tables and
+adds `session_ingress` (`lash_session_ingress`), owned by one table module in
+the turn-ingress family. The head row gains the `pending_follow_on_json` column.
+The ownership rules here apply unchanged.
+
 ## Context
 
 Lash keeps two SQL stores. Measured at `b0b94f1f7`, the SQLite store held 368

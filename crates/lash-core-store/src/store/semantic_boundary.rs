@@ -202,8 +202,8 @@ mod semantic_boundary_request_identity_tests {
         // per adopting operation. Any projection change requires an explicit
         // per-operation encoding-version bump and corpus replacement. To
         // refresh after an intentional grammar change:
-        // export UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1
-        // cargo test -p lash-internal-core \
+        // UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN=1 kiln run \
+        //   //crates/lash-core-store:lash-core-store__unit_test -- \
         //   semantic_boundary_request_identity_v1_golden_corpus
         let rows = [
             ("record-config", "protocol-materialization", 3),
@@ -229,9 +229,18 @@ mod semantic_boundary_request_identity_tests {
         .join("\n")
             + "\n";
         if std::env::var_os("UPDATE_SEMANTIC_BOUNDARY_REQUEST_V1_GOLDEN").is_some() {
+            let workspace = std::env::var_os("BUILD_WORKSPACE_DIRECTORY");
+            assert!(
+                workspace.is_some()
+                    || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).is_absolute(),
+                "Bazel regeneration requires BUILD_WORKSPACE_DIRECTORY"
+            );
+            let manifest_dir = workspace.map_or_else(
+                || std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+                |root| std::path::PathBuf::from(root).join("crates/lash-core-store"),
+            );
             std::fs::write(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("src/store/testdata/semantic_boundary_request_v1.golden"),
+                manifest_dir.join("src/store/testdata/semantic_boundary_request_v1.golden"),
                 &rows,
             )
             .expect("write semantic-boundary golden corpus");

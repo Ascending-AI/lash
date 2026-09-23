@@ -4,11 +4,14 @@ SQLite-backed localhost chat example for `lash`, RLM mode, typed session
 plugin activation, app-owned board tools, semantic streaming, and optional
 Restate-backed turns.
 
-Run it:
+Run it from a Kiln fork:
 
 ```bash
-OPENROUTER_API_KEY=... cargo run -p agent-service
+OPENROUTER_API_KEY=... AGENT_SERVICE_DATA_DIR="$PWD/.agent-service" \
+  kiln run //examples/agent-service:agent-service
 ```
+
+From a checkout without Kiln, use `OPENROUTER_API_KEY=... cargo run -p agent-service`.
 
 ## Raw turn activities
 
@@ -33,7 +36,7 @@ the Restate section below.
 Validate the example build and unit tests:
 
 ```bash
-cargo test -p agent-service --all-targets
+kiln test //examples/agent-service:agent-service__unit_test //examples/agent-service:fresh_boot__test
 ```
 
 ## Retention

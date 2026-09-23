@@ -17,7 +17,7 @@ resident `tools.search` capability returns a non-resident utility and persists i
 the model calls that utility in a separate next TypeScript cell, and the same grant remains
 callable after the Workbench process restarts against the same SQLite state.
 
-**Deterministic companion.** `cargo test -p agent-workbench deferred_ -- --nocapture`
+**Deterministic companion.** `kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=deferred_ --test_arg=--nocapture`
 gates ranking, capped preview rendering, typed unavailable outcomes, the scripted-provider
 search-observation → call round trip, and SQLite reopen. This browser run judges the real
 model, rendered product surface, app API, traces, and on-disk grant database together.

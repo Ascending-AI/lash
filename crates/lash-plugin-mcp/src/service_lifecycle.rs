@@ -16,7 +16,7 @@ use rmcp::transport::streamable_http_client::{
 };
 use tokio::time::Instant;
 
-use crate::config::{McpServerConfig, McpTransport};
+use crate::config::{McpServerConfig, McpStdioTransport, McpTransport};
 use crate::error::McpError;
 use crate::host::{LashMcpClientHandler, McpHostServices, McpToolListChangedHandler};
 
@@ -55,10 +55,6 @@ pub(crate) struct ConnectingService {
     pub(crate) stdio_child: Option<StdioChildGuard>,
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "spawning the configured MCP stdio server is this plugin's purpose; the host supplies the command (FIG-2971)"
-)]
 pub(crate) fn connect_service(
     server_name: &str,
     config: &McpServerConfig,
@@ -73,23 +69,7 @@ pub(crate) fn connect_service(
     match &config.transport {
         McpTransport::Stdio(transport) => {
             let command = &transport.command;
-            let args = &transport.args;
-            let env = &transport.env;
-            let cwd = &transport.cwd;
-            let mut cmd = std::process::Command::new(command);
-            cmd.args(args);
-            if let Some(cwd) = cwd {
-                cmd.current_dir(cwd);
-            }
-            for (key, value) in env {
-                cmd.env(key, value);
-            }
-            cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
-            let child = cmd.spawn().map_err(|err| {
-                McpError::Protocol(format!(
-                    "failed to spawn `{command}` for `{server_name}`: {err}"
-                ))
-            })?;
+            let child = spawn_stdio_server(server_name, transport)?;
             // Preparation errors are returned by the handshake future so the actor first takes
             // ownership of the exact child handle and can always reap it.
             let mut stdio_child = StdioChildGuard::new(server_name, child, shutdown_requested);
@@ -143,6 +123,74 @@ pub(crate) fn connect_service(
             })
         }
     }
+}
+
+/// Spawns the configured stdio server. On Unix the child leads its own
+/// process group (`setpgid(0, 0)` via
+/// [`std::os::unix::process::CommandExt::process_group`]), so the
+/// forced-shutdown path can signal the whole group — grandchildren spawned
+/// through `npx`/`uvx` wrappers included — instead of the bare pid.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "spawning the configured MCP stdio server is this plugin's purpose; the host supplies the command (FIG-2971)"
+)]
+fn spawn_stdio_server(
+    server_name: &str,
+    transport: &McpStdioTransport,
+) -> Result<std::process::Child, McpError> {
+    let command = &transport.command;
+    let mut cmd = std::process::Command::new(command);
+    cmd.args(&transport.args);
+    if let Some(cwd) = &transport.cwd {
+        cmd.current_dir(cwd);
+    }
+    for (key, value) in &transport.env {
+        cmd.env(key, value);
+    }
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd.spawn().map_err(|err| {
+        McpError::Protocol(format!(
+            "failed to spawn `{command}` for `{server_name}`: {err}"
+        ))
+    })
+}
+
+/// Signals the child's whole process group when the child leads one — the
+/// spawn path makes every stdio server its own group leader — and falls back
+/// to the bare pid otherwise, so a guard wrapped around an ungrouped child
+/// can never signal the host's own group. `ESRCH` means the process is
+/// already gone and reports success: the shutdown goal is met either way.
+#[cfg(unix)]
+#[expect(
+    unsafe_code,
+    reason = "terminating an MCP stdio server's process group needs kill(2) and getpgid(2); libc is the narrowest FFI for both (FIG-3519)"
+)]
+fn signal_child_process_group(pid: u32, signal: libc::c_int) -> std::io::Result<()> {
+    // SAFETY: kill(2) and getpgid(2) are syscalls with no memory-safety
+    // contract. A negative target reaches the process group only when the
+    // child verifiably leads it, so an ungrouped child never lets a group
+    // signal hit the host's own process group.
+    let target = unsafe {
+        if libc::getpgid(pid as i32) == pid as i32 {
+            -(pid as i32)
+        } else {
+            pid as i32
+        }
+    };
+    if unsafe { libc::kill(target, signal) } == -1 {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(libc::ESRCH) {
+            Ok(())
+        } else {
+            Err(error)
+        };
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -218,11 +266,14 @@ pub(crate) fn equal_jitter(max: std::time::Duration) -> std::time::Duration {
 pub(crate) enum LifecycleEvent {
     /// The actor took ownership of a freshly spawned stdio child.
     Spawned { pid: u32 },
-    /// Graceful reaping began; the child is killed at `deadline` unless it
-    /// exits first.
+    /// Graceful reaping began; forced termination begins at `deadline` unless
+    /// the child exits first.
     GraceArmed { pid: u32, deadline: Instant },
-    /// The kill request was sent; the child is abandoned at `deadline` unless
-    /// it exits first.
+    /// The terminate request was sent to the child's process group; the group
+    /// is hard-killed at `deadline` unless it exits first.
+    TermIssued { pid: u32, deadline: Instant },
+    /// The kill request was sent to the child's process group; the child is
+    /// abandoned at `deadline` unless it exits first.
     KillIssued { pid: u32, deadline: Instant },
     /// The child exited and was reaped.
     Reaped { pid: u32 },
@@ -335,9 +386,12 @@ fn child_signal_stream() -> Option<tokio::signal::unix::Signal> {
 
 /// Exact child-process handle retained outside rmcp's async service task.
 ///
-/// Explicit shutdown closes the child's stdin, gives it a grace period, and
-/// waits to reap it. Dropping the guard without that shutdown only kills and
-/// logs: waiting in `Drop` cannot be made reliably bounded.
+/// Explicit shutdown closes the child's stdin, gives it a grace period, then
+/// escalates SIGTERM then SIGKILL to the child's process group — the spawn
+/// path makes every stdio server a group leader, so the signals reach
+/// grandchildren a `npx`/`uvx` wrapper leaves behind — and waits to reap it.
+/// Dropping the guard without that shutdown sends the same escalation back to
+/// back and logs: waiting in `Drop` cannot be made reliably bounded.
 ///
 /// Reap deadlines are runtime-clock instants (`tokio::time`), the same clock
 /// the lifecycle actor's own timers use; child exits arrive as a SIGCHLD
@@ -392,7 +446,20 @@ impl StdioChildGuard {
             return Ok(());
         }
 
-        let kill_error = self.child.kill().err();
+        // A well-behaved server exits on SIGTERM; the same bound then separates
+        // the terminate request from the kill it precedes.
+        let term_error = self.terminate().err();
+        let term_deadline = Instant::now() + post_kill_wait;
+        #[cfg(test)]
+        self.emit(LifecycleEvent::TermIssued {
+            pid: self.pid,
+            deadline: term_deadline,
+        });
+        if self.exited_by(&mut exits, term_deadline).await? {
+            return Ok(());
+        }
+
+        let kill_error = self.force_kill().err();
         let reap_deadline = Instant::now() + post_kill_wait;
         #[cfg(test)]
         self.emit(LifecycleEvent::KillIssued {
@@ -402,9 +469,11 @@ impl StdioChildGuard {
         if self.exited_by(&mut exits, reap_deadline).await? {
             return Ok(());
         }
-        let kill_context = kill_error.map_or_else(String::new, |error| {
-            format!("; kill request failed: {error}")
-        });
+        let kill_context = [term_error, kill_error]
+            .into_iter()
+            .flatten()
+            .map(|error| format!("; termination request failed: {error}"))
+            .collect::<String>();
         Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
             format!(
@@ -443,6 +512,32 @@ impl StdioChildGuard {
         self.pid
     }
 
+    /// SIGTERM to the child's process group — or the bare pid when the child
+    /// leads no group — asking the whole server tree to exit.
+    fn terminate(&mut self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            signal_child_process_group(self.pid, libc::SIGTERM)
+        }
+        #[cfg(not(unix))]
+        {
+            self.child.kill()
+        }
+    }
+
+    /// SIGKILL to the child's process group — or the bare pid when the child
+    /// leads no group. SIGKILL cannot be trapped, so it always lands.
+    fn force_kill(&mut self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        {
+            signal_child_process_group(self.pid, libc::SIGKILL)
+        }
+        #[cfg(not(unix))]
+        {
+            self.child.kill()
+        }
+    }
+
     pub(crate) fn begin_bounded_cleanup(&mut self) {
         self.explicit_abandonment = true;
     }
@@ -478,7 +573,11 @@ impl StdioChildGuard {
 impl Drop for StdioChildGuard {
     fn drop(&mut self) {
         if !self.reaped {
-            let _ = self.child.kill();
+            // Drop cannot interpose a bounded wait, so the same TERM-then-KILL
+            // escalation goes to the process group back to back — on Unix this
+            // is effectively the group SIGKILL, which is what must not miss.
+            let _ = self.terminate();
+            let _ = self.force_kill();
             if self.explicit_abandonment || self.shutdown_requested.load(Ordering::SeqCst) {
                 tracing::error!(
                     pid = self.pid,
@@ -567,34 +666,137 @@ mod tests {
         guard.child.stdin.take();
         let started = Instant::now();
         guard
-            .reap_after_graceful_close(Duration::from_millis(50), Duration::from_secs(30))
+            .reap_after_graceful_close(Duration::from_millis(50), Duration::from_millis(100))
             .await
             .expect("kill reaps the child");
         assert!(
-            started.elapsed() >= Duration::from_millis(50),
-            "the kill request waits for the grace period to elapse"
+            started.elapsed() >= Duration::from_millis(150),
+            "a child ignoring SIGTERM consumes the grace and post-terminate windows"
         );
         let observed = drain(&mut events);
-        assert_eq!(observed.len(), 3, "{observed:?}");
+        assert_eq!(observed.len(), 4, "{observed:?}");
         let LifecycleEvent::GraceArmed {
             deadline: grace, ..
         } = observed[0]
         else {
             panic!("{observed:?}");
         };
+        let LifecycleEvent::TermIssued {
+            pid: termed,
+            deadline: term,
+        } = observed[1]
+        else {
+            panic!("{observed:?}");
+        };
+        assert_eq!(termed, pid);
+        assert!(
+            term >= grace + Duration::from_millis(100),
+            "the terminate deadline is armed when the grace deadline passes"
+        );
         let LifecycleEvent::KillIssued {
             pid: killed,
             deadline: cleanup,
-        } = observed[1]
+        } = observed[2]
         else {
             panic!("{observed:?}");
         };
         assert_eq!(killed, pid);
         assert!(
-            cleanup >= grace + Duration::from_secs(30),
-            "cleanup deadline is armed after the grace deadline passes"
+            cleanup >= term + Duration::from_millis(100),
+            "cleanup deadline is armed after the terminate deadline passes"
         );
-        assert_eq!(observed[2], LifecycleEvent::Reaped { pid });
+        assert_eq!(observed[3], LifecycleEvent::Reaped { pid });
+    }
+
+    /// A stdio server that ignores stdin EOF and SIGTERM — and a grandchild
+    /// that does the same — must both die to the group SIGKILL. This is the
+    /// FIG-3519 leak: a `npx`/`uvx` wrapper is reaped while the server it
+    /// spawned keeps running.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mcp_stdio_shutdown_terminates_process_group() {
+        let dir = tempfile::tempdir().expect("fixture dir");
+        let grandchild_pidfile = dir.path().join("grandchild.pid");
+        // The grandchild records its own pid and, like its parent, never reads
+        // stdin and ignores SIGTERM; only a group-wide SIGKILL ends both.
+        let script = format!(
+            "sh -c 'echo $$ > \"{0}\"; trap \"\" TERM; while :; do sleep 5; done' & trap '' TERM; while :; do sleep 5; done",
+            grandchild_pidfile.display()
+        );
+        let transport = McpStdioTransport::new("sh", vec!["-c".to_string(), script]);
+        let child = spawn_stdio_server("fixture", &transport).expect("spawn fixture server");
+        let mut guard = StdioChildGuard::new("fixture", child, Arc::new(AtomicBool::new(false)));
+        let pid = guard.pid();
+        assert_eq!(
+            process_group_of(pid),
+            Some(pid),
+            "the spawn path must make the stdio server a process-group leader"
+        );
+        guard.child.stdin.take();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let grandchild = loop {
+            if let Ok(text) = std::fs::read_to_string(&grandchild_pidfile)
+                && let Ok(grandchild) = text.trim().parse::<u32>()
+            {
+                break grandchild;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "grandchild pidfile never appeared"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert_ne!(grandchild, pid);
+
+        guard
+            .reap_after_graceful_close(Duration::from_millis(50), Duration::from_millis(200))
+            .await
+            .expect("group kill reaps the fixture server");
+
+        // The grandchild is orphaned when its group dies; whether it lingers
+        // as an unreaped zombie is the adoptive reaper's business, so the
+        // probe accepts zombie state as dead.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !process_exited(grandchild) {
+            assert!(
+                Instant::now() < deadline,
+                "grandchild {grandchild} outlived its process group"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(process_exited(pid));
+    }
+
+    /// `getpgid` of a live child: `Some(pgid)` while the process exists.
+    #[expect(
+        unsafe_code,
+        reason = "test support: getpgid(2) probes the fixture's process-group leadership"
+    )]
+    fn process_group_of(pid: u32) -> Option<u32> {
+        // SAFETY: getpgid(2) is a pure query with no memory-safety contract.
+        let pgid = unsafe { libc::getpgid(pid as i32) };
+        (pgid >= 0).then_some(pgid as u32)
+    }
+
+    /// `kill(pid, 0)` liveness probe; an orphan's zombie counts as dead — its
+    /// reaping is the adoptive parent's job, not this shutdown's.
+    #[expect(
+        unsafe_code,
+        reason = "test support: kill(2) signal 0 is the portable liveness probe"
+    )]
+    fn process_exited(pid: u32) -> bool {
+        // SAFETY: kill(2) with signal 0 performs error checking only.
+        if unsafe { libc::kill(pid as i32, 0) } == -1 {
+            return std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH);
+        }
+        #[cfg(target_os = "linux")]
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            && let Some((_, state)) = stat.rsplit_once(") ")
+            && state.starts_with('Z')
+        {
+            return true;
+        }
+        false
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -607,7 +809,7 @@ mod tests {
             .reap_after_graceful_close(Duration::from_millis(20), Duration::from_millis(30))
             .await
             .expect_err("a child the reaper never observes is abandoned");
-        assert!(started.elapsed() >= Duration::from_millis(50));
+        assert!(started.elapsed() >= Duration::from_millis(80));
         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
         assert_eq!(
             error.to_string(),
@@ -619,6 +821,7 @@ mod tests {
                 observed.as_slice(),
                 [
                     LifecycleEvent::GraceArmed { .. },
+                    LifecycleEvent::TermIssued { .. },
                     LifecycleEvent::KillIssued { .. },
                     LifecycleEvent::Abandoned { pid: abandoned }
                 ] if *abandoned == pid

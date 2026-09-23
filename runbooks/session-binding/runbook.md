@@ -54,10 +54,8 @@ cancel rows, and each control deployment's gate resolutions.
 
 ## Evidence
 
-Run `kiln build` (the workspace check) and `kiln build //:workspace_clippy` (the
-authoritative workspace clippy gate). `kiln` has no `clippy` subcommand, so do not read the
-older "run workspace check and clippy" wording as licence to drop back to bare
-`cargo clippy`. Then run the focused binding and deletion regressions.
+Run `kiln build` for the workspace compile and `kiln clippy` for the workspace
+lint gate. Then run the focused binding and deletion regressions.
 
 Both live durable geometries — `just agent-workbench-restate-e2e` and
 `just restate-postgres-workers-e2e` — are also required, but **not in one pass**: each

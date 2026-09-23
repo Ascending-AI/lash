@@ -63,12 +63,13 @@ pub fn lashlang_value_to_json(
 /// object.
 pub fn protocol_tool_reply_to_lashlang_value(
     reply: lash_core::facade_support::ToolInvocationReply,
+    replay_key: &str,
     cancellation: &ExecutionCancellation,
 ) -> Result<LashlangValue, ExecutionHostError> {
     let output = reply.output;
     match &output.outcome {
         ToolCallOutcome::Failure(failure) => {
-            return Err(ExecutionHostError::from_tool_failure(failure));
+            return Err(ExecutionHostError::from_tool_failure(failure, replay_key));
         }
         ToolCallOutcome::Cancelled(cancelled) => {
             return Err(cancelled_tool_terminal(cancelled, cancellation));
@@ -82,11 +83,14 @@ pub fn protocol_tool_reply_to_lashlang_value(
 /// that keep the output (the RLM executor keeps it for its call ledger).
 pub fn protocol_tool_output_to_lashlang_value(
     output: &lash_core::ToolCallOutput,
+    replay_key: &str,
     cancellation: &ExecutionCancellation,
 ) -> Result<LashlangValue, ExecutionHostError> {
     match &output.outcome {
         ToolCallOutcome::Success(_) => Ok(lashlang::from_json(output.value_for_projection())),
-        ToolCallOutcome::Failure(failure) => Err(ExecutionHostError::from_tool_failure(failure)),
+        ToolCallOutcome::Failure(failure) => {
+            Err(ExecutionHostError::from_tool_failure(failure, replay_key))
+        }
         ToolCallOutcome::Cancelled(cancelled) => {
             Err(cancelled_tool_terminal(cancelled, cancellation))
         }
@@ -220,8 +224,9 @@ mod tests {
         let borrowed = ToolCallOutput::failure(policy_failure(ToolRetryStatus::Safe {
             after_ms: Some(1_250),
         }));
-        let borrowed_error = protocol_tool_output_to_lashlang_value(&borrowed, &cancellation)
-            .expect_err("a failed output must remain an execution-host error");
+        let borrowed_error =
+            protocol_tool_output_to_lashlang_value(&borrowed, "borrowed-key", &cancellation)
+                .expect_err("a failed output must remain an execution-host error");
         assert_eq!(
             serde_json::to_value(borrowed_error).expect("execution-host error serializes"),
             serde_json::json!({
@@ -231,6 +236,7 @@ mod tests {
                     "code": "approval_denied",
                     "source": "policy",
                     "retry": { "type": "safe", "after_ms": 1_250 }
+                    ,"replay_key": "borrowed-key"
                 }
             })
         );
@@ -238,7 +244,7 @@ mod tests {
         let reply = ToolInvocationReply::from_output(ToolCallOutput::failure(policy_failure(
             ToolRetryStatus::Exhausted { attempts: 3 },
         )));
-        let owned_error = protocol_tool_reply_to_lashlang_value(reply, &cancellation)
+        let owned_error = protocol_tool_reply_to_lashlang_value(reply, "owned-key", &cancellation)
             .expect_err("a failed reply must remain an execution-host error");
         assert_eq!(
             serde_json::to_value(owned_error).expect("execution-host error serializes"),
@@ -249,6 +255,7 @@ mod tests {
                     "code": "approval_denied",
                     "source": "policy",
                     "retry": { "type": "exhausted", "attempts": 3 }
+                    ,"replay_key": "owned-key"
                 }
             })
         );
@@ -260,10 +267,40 @@ mod tests {
     }
 
     #[test]
+    fn observed_failure_keeps_recorded_retry_and_replay_key_before_projection() {
+        let output =
+            ToolCallOutput::failure(policy_failure(ToolRetryStatus::Exhausted { attempts: 3 }));
+        let observed = protocol_tool_output_to_lashlang_value(
+            &output,
+            "stable-effect-key",
+            &ExecutionCancellation::new(),
+        )
+        .expect_err("failed tool output has typed provenance")
+        .tool_failure()
+        .expect("typed host error has effect provenance");
+        assert_eq!(observed.class, ToolFailureClass::PermissionDenied);
+        assert_eq!(observed.code, "approval_denied");
+        assert_eq!(observed.message, "approval was denied");
+        assert_eq!(observed.replay_key, "stable-effect-key");
+        assert_eq!(observed.source, ToolFailureSource::Policy);
+        assert_eq!(observed.retry, ToolRetryStatus::Exhausted { attempts: 3 });
+        assert_eq!(
+            protocol_tool_output_to_lashlang_value(
+                &ToolCallOutput::success(serde_json::json!("ok")),
+                "stable-effect-key",
+                &ExecutionCancellation::new(),
+            )
+            .expect("successful output projects"),
+            LashlangValue::String("ok".into()),
+        );
+    }
+
+    #[test]
     fn successful_tool_bridges_keep_scalar_record_and_attachment_projections() {
         let cancellation = ExecutionCancellation::new();
         let owned = protocol_tool_reply_to_lashlang_value(
             ToolInvocationReply::success(serde_json::json!("ok")),
+            "success-key",
             &cancellation,
         )
         .expect("a successful scalar reply projects");
@@ -283,8 +320,9 @@ mod tests {
         );
         let output = ToolCallOutput::success_tool_value(ToolValue::Object(record));
         let expected = output.value_for_projection();
-        let borrowed = protocol_tool_output_to_lashlang_value(&output, &cancellation)
-            .expect("a successful record reply projects");
+        let borrowed =
+            protocol_tool_output_to_lashlang_value(&output, "success-key", &cancellation)
+                .expect("a successful record reply projects");
         assert_eq!(
             lashlang_value_to_json(&borrowed).expect("projected Lashlang value serializes"),
             expected
@@ -347,8 +385,9 @@ mod tests {
         };
 
         let borrowed_scope = ExecutionCancellation::new();
-        let borrowed_error = protocol_tool_output_to_lashlang_value(&cancelled(), &borrowed_scope)
-            .expect_err("a cancelled output is neither a value nor a retryable failure");
+        let borrowed_error =
+            protocol_tool_output_to_lashlang_value(&cancelled(), "cancel-key", &borrowed_scope)
+                .expect_err("a cancelled output is neither a value nor a retryable failure");
         assert_eq!(
             borrowed_error.message(),
             "approval window closed",
@@ -367,6 +406,7 @@ mod tests {
         let owned_scope = ExecutionCancellation::new();
         let owned_error = protocol_tool_reply_to_lashlang_value(
             ToolInvocationReply::from_output(cancelled()),
+            "cancel-key",
             &owned_scope,
         )
         .expect_err("a cancelled reply is neither a value nor a retryable failure");
@@ -408,6 +448,7 @@ mod tests {
                         &ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
                             "approval window closed",
                         )),
+                        "cancel-key",
                         &self.cancellation,
                     )
                     .map(lashlang::AbilityResult::Value)

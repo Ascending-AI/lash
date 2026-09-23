@@ -623,7 +623,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         needs["workspace-tests"]["result"] = "skipped"
         for job in dispatch_only:
             needs[job] = {"result": "skipped", "outputs": {}}
+        needs["bazel-tests-tail"] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
+        needs["bazel-tests-tail"] = {"result": "success", "outputs": {}}
         self.assertEqual(evaluate(needs, "merge_group"), [])
         dispatch_needs = {
             job: {"result": "success", "outputs": dict(value.get("outputs", {}))}
@@ -855,15 +857,15 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         ):
             self.assertIn(f"::tests::{leaf}", scenario_harnesses)
             self.assertIn(
-                f"cargo test -p lash-internal-conformance --locked ::tests::{leaf}",
+                f"kiln run //crates/lash-conformance:lash-conformance__unit_test -- {leaf}",
                 justfile,
             )
-            for package in (
-                "lash-internal-sqlite-store",
-                "lash-internal-postgres-store",
+            for package, target in (
+                ("lash-sqlite-store", "conformance__test"),
+                ("lash-postgres-store", "conformance__test"),
             ):
                 self.assertIn(
-                    f"cargo test -p {package} --locked --test conformance {leaf}",
+                    f"kiln run //crates/{package}:{target} -- {leaf}",
                     justfile,
                 )
             self.assertNotIn(f"conformance::tests::{leaf}", scenario_harnesses)

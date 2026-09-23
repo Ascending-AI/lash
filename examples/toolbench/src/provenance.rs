@@ -3,6 +3,7 @@
 
 use serde::Serialize;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -48,13 +49,20 @@ pub(crate) fn stamp(row: &mut Value) -> serde_json::Result<()> {
 }
 
 fn git_state() -> Option<(String, bool)> {
-    let dir = env!("CARGO_MANIFEST_DIR");
-    let revision = git(dir, &["rev-parse", "HEAD"])?;
-    let dirty = !git(dir, &["status", "--porcelain"])?.is_empty();
+    let dir = source_dir(std::env::var_os("BUILD_WORKSPACE_DIRECTORY"));
+    let revision = git(&dir, &["rev-parse", "HEAD"])?;
+    let dirty = !git(&dir, &["status", "--porcelain"])?.is_empty();
     Some((revision, dirty))
 }
 
-fn git(dir: &str, args: &[&str]) -> Option<String> {
+fn source_dir(workspace: Option<std::ffi::OsString>) -> PathBuf {
+    workspace.map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        |root| PathBuf::from(root).join("examples/toolbench"),
+    )
+}
+
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -100,5 +108,14 @@ mod tests {
         let provenance = collect();
         assert!(!provenance.lash_revision.is_empty());
         assert!(!provenance.binary_sha256.is_empty());
+    }
+
+    #[test]
+    fn source_dir_uses_bazel_workspace_for_local_run() {
+        assert_eq!(
+            source_dir(Some("/tmp/lash-fork".into())),
+            PathBuf::from("/tmp/lash-fork/examples/toolbench")
+        );
+        assert_eq!(source_dir(None), PathBuf::from(env!("CARGO_MANIFEST_DIR")));
     }
 }

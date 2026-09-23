@@ -178,9 +178,65 @@ fn node_failed(event_key: &str, occurrence: u64, error: &str) -> TraceLanguageEx
             label: "if ready".to_string(),
             occurrence,
             call_id: None,
-            error: error.to_string(),
+            failure: TraceLanguageExecutionFailure::Runtime {
+                code: "test_failure".to_string(),
+                message: error.to_string(),
+            },
         },
     }
+}
+
+#[test]
+fn failed_occurrence_one_is_distinct_across_attempts_and_reused_incarnations() {
+    let failure = |attempt, incarnation, message: &str| {
+        let mut event = node_failed("same-publication-key", 1, message);
+        event.identity.subject = TraceRuntimeSubject::Process {
+            process_id: ProcessId::from("worker"),
+        };
+        event.identity.generation = Some(crate::TraceLanguageExecutionGeneration::new(
+            attempt,
+            incarnation,
+        ));
+        event
+    };
+    let records = [
+        record_at(failure(1, 7, "first attempt"), 1_000),
+        record_at(failure(2, 7, "retried segment"), 2_000),
+        record_at(failure(1, 8, "new incarnation"), 3_000),
+    ];
+    let store = TraceLashlangGraphStore::default();
+    // A repeated delivery of the first invocation is still one observation.
+    store.append(&records[0]).expect("first delivery");
+    let before_replay = store.graphs();
+    store.append(&records[0]).expect("replayed delivery");
+    assert_eq!(store.graphs(), before_replay);
+    for record in &records[1..] {
+        store.append(record).expect("later generation");
+    }
+    let graphs = store.graphs();
+    assert_eq!(
+        graphs.len(),
+        3,
+        "same node and occurrence must not merge generations"
+    );
+    for (attempt, incarnation, expected_message) in [
+        (1, 7, "first attempt"),
+        (2, 7, "retried segment"),
+        (1, 8, "new incarnation"),
+    ] {
+        let key = format!("process:worker:incarnation:{incarnation}:attempt:{attempt}");
+        let graph = store.graph(&key).expect("generation graph");
+        assert!(matches!(
+            &graph.nodes[0].observation,
+            TraceLashlangNodeObservation::Failed { occurrence: 1, failure, .. }
+                if failure.message() == expected_message
+        ));
+    }
+    let reversed = TraceLashlangGraphStore::default();
+    for record in records.iter().rev() {
+        reversed.append(record).expect("permuted delivery");
+    }
+    assert_eq!(reversed.graphs(), graphs);
 }
 
 fn execution_finished(event_key: &str, status: LanguageExecutionStatus) -> TraceLanguageExecution {
@@ -741,14 +797,14 @@ fn branch_selection_and_terminal_observation_are_distinct_facts() {
                         start,
                         end,
                         duration_ms,
-                        error,
+                        failure,
                         ..
                     },
                 ) => {
                     assert_eq!(start.map(|value| value.timestamp_millis()), Some(1_000));
                     assert_eq!(end.timestamp_millis(), 1_200);
                     assert_eq!(*duration_ms, Some(200));
-                    assert_eq!(error, "branch failed");
+                    assert_eq!(failure.message(), "branch failed");
                 }
                 pair => panic!("explicit terminal did not dominate selection: {pair:?}"),
             }
@@ -1069,7 +1125,10 @@ fn terminal_classification_is_exhaustive() {
             start: None,
             end: Utc.timestamp_millis_opt(2).single().expect("timestamp"),
             duration_ms: None,
-            error: "failed".to_string(),
+            failure: TraceLanguageExecutionFailure::Runtime {
+                code: "test_failure".to_string(),
+                message: "failed".to_string(),
+            },
         }
         .is_terminal()
     );

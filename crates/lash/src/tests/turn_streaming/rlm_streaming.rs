@@ -1166,10 +1166,8 @@ finish("done");"#,
     core.flush_trace_sink()?;
 
     let logged = std::fs::read_to_string(&trace_path).expect("read trace");
-    let entries = logged
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json log entry"))
-        .collect::<Vec<_>>();
+    let entries =
+        lash_trace::parse_jsonl_records::<serde_json::Value>(&logged).expect("json log entries");
 
     // The native substrate never persists progress boundaries, but the protocol
     // events returned by those boundaries must still reach the trace sink.
@@ -1332,10 +1330,8 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
 
         core.flush_trace_sink()?;
         let logged = std::fs::read_to_string(&trace_path).expect("read trace");
-        let entries = logged
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace JSON"))
-            .collect::<Vec<_>>();
+        let entries =
+            lash_trace::parse_jsonl_records::<serde_json::Value>(&logged).expect("trace JSON");
         entries
             .iter()
             .find(|entry| {

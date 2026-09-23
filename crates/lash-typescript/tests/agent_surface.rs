@@ -4,6 +4,9 @@ use lashlang::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[path = "agent_surface/fig3463_observation.rs"]
+mod fig3463_observation;
+
 struct Host;
 
 impl ExecutionHost for Host {
@@ -336,6 +339,7 @@ impl ExecutionHost for ProcessAwaitFailureHost {
                         retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
                         raw: None,
                     },
+                    "await-effect-key",
                 )),
                 Self::MessageOnly => Err(ExecutionHostError::new("plain await failure")),
             },
@@ -347,7 +351,7 @@ impl ExecutionHost for ProcessAwaitFailureHost {
     }
 }
 
-fn caught_process_await(host: &ProcessAwaitFailureHost, probe: &str) -> Value {
+fn caught_process_await(host: &impl ExecutionHost, probe: &str) -> Value {
     let source = format!(
         r#"
         const worker = async () => {{ return null; }};

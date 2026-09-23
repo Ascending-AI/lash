@@ -46,9 +46,12 @@ use super::exceptions::PendingErrorOrigin;
 /// misses the effect it is supposed to reuse. A counter's contents are part of
 /// this envelope's meaning even when its type is not.
 ///
+/// v17 carries the replay key with a pending execution-host tool failure so a
+/// resumed segment retains the recorded failure's observation provenance.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 16;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 17;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).

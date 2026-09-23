@@ -109,6 +109,24 @@ impl Lifecycle {
         }
     }
 
+    pub(super) async fn term_issued(&mut self, pid: u32) -> Instant {
+        loop {
+            match self.next().await {
+                LifecycleEvent::TermIssued {
+                    pid: termed,
+                    deadline,
+                } => {
+                    assert_eq!(termed, pid);
+                    return deadline;
+                }
+                LifecycleEvent::Reaped { pid: reaped } => {
+                    panic!("child {reaped} was reaped before the terminate request")
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub(super) async fn kill_issued(&mut self, pid: u32) -> Instant {
         loop {
             match self.next().await {
@@ -264,7 +282,10 @@ impl Mock {
 }
 
 const SERVER: &str = r#"
-import json, os, socket, sys, threading
+import json, os, signal, socket, sys, threading
+# The mock ignores SIGTERM so scripted tests deterministically reach the
+# SIGKILL stage of forced shutdown; graceful stdin-EOF exit is unchanged.
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
 control = socket.create_connection(('127.0.0.1', int(os.environ['CONTROL_PORT'])))
 output_lock = threading.Lock()
 event_lock = threading.Lock()

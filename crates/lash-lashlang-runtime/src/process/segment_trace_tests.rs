@@ -71,6 +71,92 @@ fn process_trace_session_attribution_comes_only_from_a_session_originator() {
 }
 
 #[test]
+fn interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generations() {
+    let graphs = std::sync::Arc::new(lash_trace::TraceLashlangGraphStore::default());
+    let trace_for_attempt = |attempt| {
+        let hash = lashlang::ContentHash::new("retried-resource-trace");
+        LashlangProcessExecutionTrace::new(
+            Some(graphs.clone()),
+            lash_trace::TraceContext::default(),
+            LashlangProcessTraceIdentity {
+                session_id: None,
+                process_id: lash_core::ProcessId::from("recovered-process"),
+                source_identity: "source-identity".to_string(),
+                module_ref: lashlang::ModuleRef::new(&hash),
+                process_ref: lashlang::ProcessRef::new(hash, 0),
+                process_name: "main".to_string(),
+                attempt,
+                incarnation: lash_core::ProcessIncarnation::from_registration_sequence(3),
+                restate_invocation_id: None,
+            },
+        )
+    };
+    let site = lashlang::LashlangExecutionSite {
+        node_id: "node:read".to_string(),
+        node_kind: lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND.to_string(),
+        label: "read".to_string(),
+        branch: None,
+        workflow_site: lashlang::WorkflowExecutionSite::new(
+            "main",
+            [0],
+            lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND,
+            "read",
+        ),
+    };
+    let call_site = lashlang::LashlangExecutionCallSite {
+        site: site.clone(),
+        occurrence: 1,
+    };
+
+    let interrupted = trace_for_attempt(1);
+    interrupted.emit_observation(lashlang::LashlangExecutionObservation::NodeStarted {
+        site: site.clone(),
+        occurrence: 1,
+    });
+    interrupted.record_resource_call(&call_site, "same-settled-effect-key");
+    drop(interrupted); // A worker loss leaves the node started, without a terminal observation.
+
+    let retried = trace_for_attempt(2);
+    retried.emit_observation(lashlang::LashlangExecutionObservation::NodeStarted {
+        site: site.clone(),
+        occurrence: 1,
+    });
+    retried.record_resource_call(&call_site, "same-settled-effect-key");
+    retried.emit_observation(lashlang::LashlangExecutionObservation::NodeCompleted {
+        site,
+        occurrence: 1,
+    });
+
+    let first = graphs
+        .graph(&trace_for_attempt(1).identity().graph_key())
+        .expect("interrupted attempt remains visible");
+    let second = graphs
+        .graph(&trace_for_attempt(2).identity().graph_key())
+        .expect("retry has its own trace graph");
+    assert_eq!(graphs.graphs().len(), 2);
+    assert_eq!(first.nodes.len(), 1);
+    assert_eq!(second.nodes.len(), 1);
+    assert!(matches!(
+        first.nodes[0].observation,
+        lash_trace::TraceLashlangNodeObservation::Running { occurrence: 1, .. }
+    ));
+    assert!(matches!(
+        second.nodes[0].observation,
+        lash_trace::TraceLashlangNodeObservation::Completed { occurrence: 1, .. }
+    ));
+    for graph in [first, second] {
+        assert!(graph.history.iter().any(|record| matches!(
+            &record.event.payload,
+            lash_trace::TraceLanguageExecutionPayload::NodeStarted {
+                occurrence: 1,
+                call_id: Some(call_id),
+                ..
+            } if call_id == "same-settled-effect-key"
+        )));
+    }
+}
+
+#[test]
 fn untraced_completed_resource_calls_retain_no_correlation_state() {
     let hash = lashlang::ContentHash::new("untraced-resource-correlation");
     let trace = LashlangProcessExecutionTrace::new(
@@ -373,7 +459,7 @@ fn resume_rejects_changed_bytecode_program_hash_with_typed_failure() {
 
 #[test]
 fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
-    let fixture: serde_json::Value = serde_json::from_slice(BYTECODE_V17_PARKED_LOOP)
+    let mut fixture: serde_json::Value = serde_json::from_slice(BYTECODE_V17_PARKED_LOOP)
         .expect("the version-17 parked-loop fixture is JSON");
     assert_eq!(fixture["bytecode_format_version"], 17);
     assert_eq!(
@@ -400,6 +486,10 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
                 if failure.code == "restate_segment_program_hash_mismatch")
     ));
 
+    // Keep the predecessor capture intact. Only re-envelope its parked VM at
+    // the current continuation version to reach the bytecode identity fence.
+    fixture["segment_state"]["vm"]["format_version"] =
+        serde_json::json!(lashlang::VM_CONTINUATION_FORMAT_VERSION);
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
         .expect("the fixture carries a structurally valid current-envelope continuation");
     assert_eq!(

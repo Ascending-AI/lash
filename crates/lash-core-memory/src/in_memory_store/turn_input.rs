@@ -405,14 +405,24 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             return Ok(existing.input.clone());
         }
         let mut next_seq = self.pending_turn_input_next_seq.lock_recover();
-        *next_seq = crate::StoreError::checked_monotonic_increment(
+        let candidate_seq = crate::StoreError::checked_monotonic_increment(
             "turn_input_enqueue_sequence",
             *next_seq,
         )?;
         let input_id = draft
             .input_id
             .map(crate::InputId::new)
-            .unwrap_or_else(|| crate::InputId::new(format!("recording-ti-{next_seq}")));
+            .unwrap_or_else(|| crate::InputId::new(format!("recording-ti-{candidate_seq}")));
+        // `input_id` is unique across the store, as on the SQL schemas'
+        // `UNIQUE` column: a draft reusing an id any row already carries is
+        // refused, whatever session that row belongs to.
+        if pending.iter().any(|entry| entry.input.input_id == input_id) {
+            return Err(crate::store::StoreError::PendingTurnInputIdConflict {
+                session_id: draft.session_id,
+                input_id,
+            });
+        }
+        *next_seq = candidate_seq;
         let stored = crate::PendingTurnInput {
             input_id,
             session_id: draft.session_id,

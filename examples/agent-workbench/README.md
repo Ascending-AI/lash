@@ -73,7 +73,7 @@ plain-text current selection the runbook drivers read and write, and
 Validate the example build and unit tests:
 
 ```bash
-cargo test -p agent-workbench --all-targets
+kiln test //examples/agent-workbench:agent-workbench__unit_test
 ```
 
 ## Coverage

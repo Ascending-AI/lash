@@ -353,7 +353,7 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                         "type": "function_call",
                         "call_id": call_id,
                         "name": tool_name,
-                        "arguments": input_json,
+                        "arguments": tool_call_input_replay_string(input_json),
                     });
                     // `id` (e.g. `fc_...`) pairs a function_call with its
                     // sibling reasoning item across turns; omit when absent.

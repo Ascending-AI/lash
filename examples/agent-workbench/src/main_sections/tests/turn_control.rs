@@ -524,12 +524,13 @@ async fn dangling_routed_turn_does_not_hang_stop_and_is_pruned_inner() {
         "the timeline must render a projected note row"
     );
 
-    let traces = std::fs::read_to_string(&trace_path)
-        .expect("read the cancel trace")
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).expect("trace record"))
-        .filter(|record| record["name"] == "agent_workbench.turn.terminal_unknown")
-        .collect::<Vec<_>>();
+    let traces = lash::tracing::parse_jsonl_records::<Value>(
+        &std::fs::read_to_string(&trace_path).expect("read the cancel trace"),
+    )
+    .expect("trace records")
+    .into_iter()
+    .filter(|record| record["name"] == "agent_workbench.turn.terminal_unknown")
+    .collect::<Vec<_>>();
     assert_eq!(
         traces.len(),
         1,
@@ -953,12 +954,13 @@ fn concurrent_stops_publish_one_done_and_trace_winning_request() {
             done_count, 1,
             "concurrent stops must publish one live terminal"
         );
-        let traces = std::fs::read_to_string(trace_path)
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).unwrap())
-            .filter(|record| record["name"] == "agent_workbench.turn.cancel_requested")
-            .collect::<Vec<_>>();
+        let traces = lash::tracing::parse_jsonl_records::<Value>(
+            &std::fs::read_to_string(trace_path).unwrap(),
+        )
+        .unwrap()
+        .into_iter()
+        .filter(|record| record["name"] == "agent_workbench.turn.cancel_requested")
+        .collect::<Vec<_>>();
         assert_eq!(traces.len(), 2);
         for trace in traces {
             assert_eq!(

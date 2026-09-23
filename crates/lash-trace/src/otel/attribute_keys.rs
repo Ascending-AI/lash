@@ -65,6 +65,24 @@ pub(super) const LASH_LANGUAGE_EXECUTION_ENTRY_KIND: &str = "lash.language_execu
 pub(super) const LASH_LANGUAGE_EXECUTION_ENTRY_NAME: &str = "lash.language_execution.entry_name";
 pub(super) const LASH_LANGUAGE_EXECUTION_ENTRY_REF: &str = "lash.language_execution.entry_ref";
 pub(super) const LASH_LANGUAGE_EXECUTION_ERROR: &str = "lash.language_execution.error";
+pub(super) const LASH_LANGUAGE_EXECUTION_FAILURE_KIND: &str =
+    "lash.language_execution.failure.kind";
+pub(super) const LASH_LANGUAGE_EXECUTION_FAILURE_CLASS: &str =
+    "lash.language_execution.failure.class";
+pub(super) const LASH_LANGUAGE_EXECUTION_FAILURE_CODE: &str =
+    "lash.language_execution.failure.code";
+pub(super) const LASH_LANGUAGE_EXECUTION_FAILURE_MESSAGE: &str =
+    "lash.language_execution.failure.message";
+pub(super) const LASH_LANGUAGE_EXECUTION_FAILURE_REPLAY_KEY: &str =
+    "lash.language_execution.failure.replay_key";
+pub(super) const LASH_LANGUAGE_EXECUTION_FAILURE_SOURCE: &str =
+    "lash.language_execution.failure.source";
+pub(super) const LASH_LANGUAGE_EXECUTION_FAILURE_RETRY: &str =
+    "lash.language_execution.failure.retry";
+pub(super) const LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_AFTER_MS: &str =
+    "lash.language_execution.failure.retry_after_ms";
+pub(super) const LASH_LANGUAGE_EXECUTION_FAILURE_RETRY_ATTEMPTS: &str =
+    "lash.language_execution.failure.retry_attempts";
 pub(super) const LASH_LANGUAGE_EXECUTION_EVENT_JSON: &str = "lash.language_execution.event_json";
 pub(super) const LASH_LANGUAGE_EXECUTION_EVENT_KEY: &str = "lash.language_execution.event_key";
 pub(super) const LASH_LANGUAGE_EXECUTION_GRAPH_KEY: &str = "lash.language_execution.graph_key";

@@ -5,6 +5,11 @@
 Accepted. Ratified on FIG-3366; extended on FIG-3367 with the tool-restore
 report and the tool-source policy.
 
+Amended 2026-09-23 (FIG-3540): under [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) the handle's
+pending-input and queued-work reads, cancels and abandons become one set over
+Session Ingress items, and batch ids become item ids, with no aliases. The split
+between the two authorities is unchanged.
+
 ## Context
 
 Reaching a session's durable queue required `LashSession`, and the only way to

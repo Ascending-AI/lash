@@ -63,7 +63,8 @@ The package-level build/unit check is lighter and does not start the distributed
 services:
 
 ```sh
-cargo test -p lash-restate-postgres-workers-e2e --all-targets
+kiln build //runbooks/restate-postgres-workers:all
+kiln test //runbooks/restate-postgres-workers:test_batch
 ```
 
 The focused parked-tool process-loss replay gate lives at the Restate endpoint
@@ -71,8 +72,9 @@ protocol seam, where it can splice the first worker incarnation's exact command
 journal into a fresh handler incarnation deterministically:
 
 ```sh
-cargo test -p lash-internal-restate \
-  fig1126_pending_tool_redrives_after_worker_loss_and_resumes_once -- --nocapture
+kiln test //crates/lash-restate:lash-restate__unit_test \
+  --test_arg=fig1126_pending_tool_redrives_after_worker_loss_and_resumes_once \
+  --test_arg=--nocapture
 ```
 
 That test parks a journaled pending tool on its completion key, discards the

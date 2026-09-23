@@ -1,4 +1,5 @@
 use super::*;
+use lash_lashlang_runtime::TraceLanguageExecutionFailure;
 
 fn approval_request_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
@@ -12,6 +13,7 @@ fn approval_request_definition() -> lash_core::ToolDefinition {
         ["approval"],
         "request",
     ))
+    .with_retry_policy(lash_core::ToolRetryPolicy::safe(3, 10, 100))
 }
 
 struct PolicyDeniedToolProvider;
@@ -116,6 +118,91 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
                 "settledRetry": "never"
             }))
         );
+    });
+}
+
+#[derive(Default)]
+struct FailureTraceSink(std::sync::Mutex<Vec<lash_core::facade_support::TraceRecord>>);
+
+impl lash_core::facade_support::TraceSink for FailureTraceSink {
+    fn append(
+        &self,
+        record: &lash_core::facade_support::TraceRecord,
+    ) -> Result<(), lash_core::facade_support::TraceSinkError> {
+        self.0.lock().expect("trace sink lock").push(record.clone());
+        Ok(())
+    }
+}
+
+#[test]
+fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
+    block_on(async {
+        for code in [
+            "await approval.request({ reason: 'scalar' });",
+            "await Promise.all([approval.request({ reason: 'batch' })]);",
+        ] {
+            let sink = Arc::new(FailureTraceSink::default());
+            let response = execute_code_with_channel_and_bounds(
+                &mut RlmExecutionState::for_engine("typescript"),
+                lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+                    Arc::new(PolicyDeniedToolProvider),
+                    lash_core::ToolCatalog::from_tool_definitions(vec![approval_request_definition()]),
+                    lash_core::testing::exec_code_invocation(
+                        "failure-session", "failure-turn", 0, 0, "failure-exec", "exec:failure",
+                    ),
+                ),
+                ExecRequest { language: "typescript".into(), code: code.into() },
+                lashlang::global_in_memory_lashlang_artifact_store(),
+                LashlangSurface::default(),
+                None,
+                RlmProjectedBindings::default(),
+                Arc::new(ProjectionRegistry::new()),
+                RlmLashlangExecutionTraceConfig {
+                    sink: Some(sink.clone()),
+                    trace_context: TraceContext::default(),
+                },
+                lashlang::ExecutionBounds::unbounded(),
+                crate::plugin::RlmChannel::Cell,
+            ).await;
+            assert!(response.error.is_some(), "the effect must fail: {code}");
+            let records = sink.0.lock().expect("trace sink lock");
+            let failed = records
+                .iter()
+                .find_map(|record| match &record.event {
+                    lash_core::TraceEvent::LanguageExecution { event, .. } => {
+                        match &event.payload {
+                            TraceLanguageExecutionPayload::NodeFailed {
+                                call_id, failure, ..
+                            } => Some((call_id, failure)),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+                .expect("a failed effect node must be observed");
+            let TraceLanguageExecutionFailure::Effect {
+                class,
+                code: failure_code,
+                message,
+                replay_key,
+                source,
+                retry,
+            } = failed.1
+            else {
+                panic!("failed effect lost its typed provenance: {:?}", failed.1);
+            };
+            assert_eq!(*class, lash_core::ToolFailureClass::PermissionDenied);
+            assert_eq!(failure_code, "approval_denied");
+            assert_eq!(message, "approval was denied");
+            assert_eq!(*source, lash_core::ToolFailureSource::Policy);
+            assert_eq!(*retry, lash_core::ToolRetryStatus::Never);
+            assert_eq!(failed.0.as_deref(), Some(replay_key.as_str()));
+            assert!(replay_key.starts_with("lashlang:"), "{replay_key}");
+            assert!(
+                !replay_key.contains(":attempt:"),
+                "telemetry attempt entered effect identity"
+            );
+        }
     });
 }
 

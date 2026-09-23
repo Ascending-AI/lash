@@ -128,6 +128,40 @@ fn turn_input_round_trips_remote_safe_fields() {
 }
 
 #[test]
+fn remote_turn_request_idempotency_key_contract() {
+    // `idempotency_key` is a host-transport key that lash does not deduplicate
+    // on (see `RemoteTurnRequest::idempotency_key`), so it must never reach
+    // the core turn input. Two requests that differ only in the key convert
+    // identically: the same key is admitted twice, and dedup is the host's
+    // `source_key` at admission.
+    fn request(idempotency_key: Option<&str>) -> RemoteTurnRequest {
+        RemoteTurnRequest {
+            session_id: SessionId::from("session"),
+            turn_id: TurnId::from("turn"),
+            idempotency_key: idempotency_key.map(str::to_string),
+            input: RemoteTurnInput::text("hello"),
+            tool_grants: Vec::new(),
+            metadata: HashMap::new(),
+        }
+    }
+
+    let keyed =
+        lash_core::TurnInput::try_from(request(Some("same-key"))).expect("keyed request converts");
+    let resend = lash_core::TurnInput::try_from(request(Some("same-key")))
+        .expect("resent keyed request converts");
+    let unkeyed = lash_core::TurnInput::try_from(request(None)).expect("unkeyed request converts");
+
+    assert_eq!(
+        serde_json::to_value(&keyed).expect("serialize keyed"),
+        serde_json::to_value(&resend).expect("serialize resend"),
+    );
+    assert_eq!(
+        serde_json::to_value(&keyed).expect("serialize keyed"),
+        serde_json::to_value(&unkeyed).expect("serialize unkeyed"),
+    );
+}
+
+#[test]
 fn turn_input_rejects_non_remote_safe_fields() {
     struct DummyTurnExtension;
 
@@ -843,14 +877,20 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
             "process:record",
             lash_core::ProcessIncarnation::from_registration_sequence(1),
         ),
-        vec![event],
+        lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
+            events: lash_core::ProcessEventPageEvents::Full(vec![event]),
+            more: lash_core::ProcessEventPageMore::Complete,
+        }),
     ))
     .expect("remote process events");
-    let (process_ref, events) =
-        <(lash_core::ProcessRef, Vec<lash_core::ProcessEvent>)>::try_from(events_response)
-            .expect("events response");
+    let (process_ref, events): (
+        _,
+        lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+    ) = events_response.try_into().expect("events response");
     assert_eq!(process_ref.process_id, "process:record");
-    assert_eq!(events.len(), 1);
+    assert!(
+        matches!(events, lash_core::ProcessEventReadOutcome::Retained(page) if page.events.len() == 1)
+    );
 }
 
 #[test]

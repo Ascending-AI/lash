@@ -392,27 +392,57 @@ impl TryFrom<RemoteProcessAwaitOutcome> for (lash_core::ProcessRef, lash_core::P
     }
 }
 
-impl TryFrom<(lash_core::ProcessRef, Vec<lash_core::ProcessEvent>)>
-    for RemoteProcessEventsResponse
+impl
+    TryFrom<(
+        lash_core::ProcessRef,
+        lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+    )> for RemoteProcessEventsResponse
 {
     type Error = RemoteProtocolError;
 
     fn try_from(
-        (process_ref, events): (lash_core::ProcessRef, Vec<lash_core::ProcessEvent>),
+        (process_ref, outcome): (
+            lash_core::ProcessRef,
+            lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+        ),
     ) -> Result<Self, Self::Error> {
+        let outcome = match outcome {
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(retention) => {
+                lash_core::ProcessEventReadOutcome::NoLongerRetained(retention)
+            }
+            lash_core::ProcessEventReadOutcome::Retained(page) => {
+                let events = match page.events {
+                    lash_core::ProcessEventPageEvents::Full(events) => {
+                        lash_core::ProcessEventPageEvents::Full(
+                            events
+                                .into_iter()
+                                .map(TryInto::try_into)
+                                .collect::<Result<_, _>>()?,
+                        )
+                    }
+                    lash_core::ProcessEventPageEvents::Lite(events) => {
+                        lash_core::ProcessEventPageEvents::Lite(events)
+                    }
+                };
+                lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
+                    events,
+                    more: page.more,
+                })
+            }
+        };
         Ok(Self {
             process_id: process_ref.process_id,
             incarnation: process_ref.incarnation.registration_sequence(),
-            events: events
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
+            outcome,
         })
     }
 }
 
 impl TryFrom<RemoteProcessEventsResponse>
-    for (lash_core::ProcessRef, Vec<lash_core::ProcessEvent>)
+    for (
+        lash_core::ProcessRef,
+        lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+    )
 {
     type Error = RemoteProtocolError;
 
@@ -421,17 +451,38 @@ impl TryFrom<RemoteProcessEventsResponse>
         let RemoteProcessEventsResponse {
             process_id,
             incarnation,
-            events,
+            outcome,
         } = value;
+        let outcome = match outcome {
+            lash_core::ProcessEventReadOutcome::NoLongerRetained(retention) => {
+                lash_core::ProcessEventReadOutcome::NoLongerRetained(retention)
+            }
+            lash_core::ProcessEventReadOutcome::Retained(page) => {
+                let events = match page.events {
+                    lash_core::ProcessEventPageEvents::Full(events) => {
+                        lash_core::ProcessEventPageEvents::Full(
+                            events
+                                .into_iter()
+                                .map(TryInto::try_into)
+                                .collect::<Result<_, _>>()?,
+                        )
+                    }
+                    lash_core::ProcessEventPageEvents::Lite(events) => {
+                        lash_core::ProcessEventPageEvents::Lite(events)
+                    }
+                };
+                lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
+                    events,
+                    more: page.more,
+                })
+            }
+        };
         Ok((
             lash_core::ProcessRef::new(
                 process_id,
                 lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
             ),
-            events
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
+            outcome,
         ))
     }
 }

@@ -33,10 +33,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+mod jsonl_records;
+mod language_execution_failure;
 mod lashlang_graph;
 #[cfg(feature = "otel")]
 pub mod otel;
 
+use jsonl_records::truncate_torn_tail;
+pub use jsonl_records::{JsonlTraceReadError, parse_jsonl_records};
+pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_sansio::llm::types::GenerationReceipt;
 pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
@@ -129,7 +134,8 @@ pub use lashlang_graph::{
 /// Version 29 (FIG-1961) renames the compaction decision fields from
 /// `context_budget_tokens` to `used_tokens`: the value is now the checked
 /// provider-reported usage, not a derived budget snapshot.
-pub const TRACE_SCHEMA_VERSION: u32 = 29;
+/// Version 30 (FIG-3463) adds typed failure provenance to language observations.
+pub const TRACE_SCHEMA_VERSION: u32 = 30;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1625,7 +1631,7 @@ pub enum TraceLanguageExecutionPayload {
         occurrence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_id: Option<String>,
-        error: String,
+        failure: TraceLanguageExecutionFailure,
     },
     BranchSelected {
         node_id: String,
@@ -1802,8 +1808,17 @@ impl JsonlTraceSink {
     reason = "JsonlTraceSink is the filesystem trace sink; the host injects the path (FIG-2971)"
 )]
 impl TraceSink for JsonlTraceSink {
+    /// Write the record as one `line\n` call.
+    ///
+    /// The record and its newline go out in a single `write_all`: issuing them
+    /// as two writes (`writeln!` on a fresh handle does exactly that) lets a
+    /// kill or a short write tear between the record and its terminator, and
+    /// the next append would glue onto the partial line. When the file's last
+    /// line is already unterminated — a torn record left behind — the tail is
+    /// truncated first, so every line in the file stays a complete record.
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        let line = serde_json::to_string(record)?;
+        let mut line = serde_json::to_string(record)?;
+        line.push('\n');
         let _guard = self.lock.lock_recover();
         if let Some(parent) = self.path.parent()
             && !parent.as_os_str().is_empty()
@@ -1815,16 +1830,19 @@ impl TraceSink for JsonlTraceSink {
         }
         let mut file = OpenOptions::new()
             .create(true)
+            .read(true)
             .append(true)
             .open(&self.path)
             .map_err(|source| TraceSinkError::Open {
                 path: self.path.clone(),
                 source,
             })?;
-        writeln!(file, "{line}").map_err(|source| TraceSinkError::Write {
-            path: self.path.clone(),
-            source,
-        })
+        truncate_torn_tail(&mut file)
+            .and_then(|()| file.write_all(line.as_bytes()))
+            .map_err(|source| TraceSinkError::Write {
+                path: self.path.clone(),
+                source,
+            })
     }
 
     /// `fsync` the trace file to durable storage.

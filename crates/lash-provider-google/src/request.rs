@@ -204,8 +204,7 @@ impl GoogleOAuthProvider {
                             "functionCall": {
                                 "id": call_id,
                                 "name": tool_name,
-                                "args": serde_json::from_str::<Value>(input_json)
-                                    .unwrap_or_else(|_| json!({"_raw": input_json})),
+                                "args": tool_call_input_replay_value(input_json),
                             }
                         });
                         // The host's explicit Gemini-3 dialect opts into the wire's

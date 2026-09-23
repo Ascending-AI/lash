@@ -223,6 +223,51 @@ class SchemaValidationTests(unittest.TestCase):
                     else:
                         self.assertIn(gate, commands)
 
+    def test_local_workflow_graph_gate_uses_kiln_test_partition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in (
+                "scripts/workflow-graph-integration-verify.sh",
+                "examples/workflow-graph-roundtrip/scripts/generate-contract-schema.py",
+            ):
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                if relative.endswith("generate-contract-schema.py"):
+                    destination.write_text("raise SystemExit(0)\n")
+                else:
+                    shutil.copy2(ROOT / relative, destination)
+            (root / "scripts/check-workflow-graph-model.sh").write_text(
+                '#!/bin/sh\necho model >> "$COMMAND_LOG"\n'
+            )
+            (root / "examples/workflow-graph-roundtrip/frontend").mkdir(parents=True)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            for name in ("npm", "kiln", "cargo"):
+                tool = bin_dir / name
+                exit_code = 97 if name == "cargo" else 0
+                tool.write_text(
+                    f'#!/bin/sh\necho "{name} $*" >> "$COMMAND_LOG"\n'
+                    f"exit {exit_code}\n"
+                )
+                tool.chmod(0o755)
+            log = root / "commands"
+            result = subprocess.run(
+                ["bash", str(root / "scripts/workflow-graph-integration-verify.sh")],
+                env={
+                    **os.environ,
+                    "PATH": f"{bin_dir}:/usr/bin:/bin",
+                    "GITHUB_ACTIONS": "",
+                    "COMMAND_LOG": str(log),
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            commands = log.read_text()
+            self.assertIn("kiln test //examples/workflow-graph-roundtrip:test_batch", commands)
+            self.assertIn("//examples/workflow-graph-roundtrip:workflow_graph__test", commands)
+            self.assertNotIn("cargo ", commands)
+
     def test_functional_e2e_portable_route_requires_explicit_dispatch(self) -> None:
         result = subprocess.run(
             [

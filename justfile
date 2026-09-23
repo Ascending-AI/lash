@@ -38,7 +38,7 @@ agent-workbench-foreground port='3030':
   ./scripts/agent-workbench-dev.sh foreground --port "{{port}}"
 
 toolbench model='z-ai/glm-5.3-flash' *args:
-  cargo run -p toolbench --locked -- --model "{{model}}" {{args}}
+  kiln run //examples/toolbench:toolbench -- --model "{{model}}" {{args}}
 
 rlm-smoke-e2e:
   bash "{{repo}}/scripts/rlm-smoke-e2e.sh"
@@ -401,24 +401,24 @@ test-changed base='origin/main':
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
 store-contract-soak cases='256':
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-conformance --locked ::tests::store_contract_state_machine -- --nocapture
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance store_contract_state_machine -- --nocapture
-  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance store_contract_state_machine -- --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-conformance --locked ::tests::session_graph_state_machine -- --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance session_graph_state_machine -- --nocapture
-  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance session_graph_state_machine -- --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-conformance:lash-conformance__unit_test -- store_contract_state_machine --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- store_contract_state_machine --nocapture
+  LASH_STORE_CONTRACT_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- store_contract_state_machine --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-conformance:lash-conformance__unit_test -- session_graph_state_machine --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- session_graph_state_machine --nocapture
+  LASH_SESSION_GRAPH_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- session_graph_state_machine --nocapture
 
 # Opt-in runtime-persistence property soak. PostgreSQL executes when its
 # standard LASH_POSTGRES_DATABASE_URL configuration is present.
 runtime-persistence-soak cases='256':
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-conformance --locked ::tests::runtime_persistence_state_machine -- --nocapture
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-sqlite-store --locked --test conformance runtime_persistence_state_machine -- --nocapture
-  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" cargo test -p lash-internal-postgres-store --locked --test conformance runtime_persistence_state_machine -- --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-conformance:lash-conformance__unit_test -- runtime_persistence_state_machine --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- runtime_persistence_state_machine --nocapture
+  LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- runtime_persistence_state_machine --nocapture
 
 # Opt-in three-backend raw durable-state soak. Requires the standard Postgres
 # configuration and logs the operation kinds omitted by each bounded seed.
 cross-backend-store-soak cases='64' seed='852':
-  LASH_REQUIRE_POSTGRES=1 LASH_CROSS_BACKEND_CASES="{{cases}}" LASH_CROSS_BACKEND_SEED="{{seed}}" cargo test -p lash-sim --locked --test cross_backend_store_differential generated_cross_backend_surface_differential_agrees -- --nocapture --include-ignored
+  LASH_REQUIRE_POSTGRES=1 LASH_CROSS_BACKEND_CASES="{{cases}}" LASH_CROSS_BACKEND_SEED="{{seed}}" kiln run //crates/lash-sim:cross_backend_store_differential__test -- generated_cross_backend_surface_differential_agrees --nocapture --include-ignored
 
 # The runtime leg gates on allocation ceilings and phase inventory only;
 # wall-clock budgets print as advisories (see scripts/perf_guard_budgets.json,

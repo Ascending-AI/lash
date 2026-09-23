@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::ProcessEventPageTokenStoreExt;
 use lash_sansio::ProcessId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -136,32 +137,69 @@ impl RemoteProcessAwaitOutcome {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessEventsRequest {
     pub process_id: ProcessId,
     pub incarnation: u64,
-    #[serde(default)]
-    pub after_sequence: u64,
+    pub limit: std::num::NonZeroUsize,
+    pub mode: lash_core::ProcessEventQueryMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub continuation: Option<lash_core::ProcessEventPageToken>,
 }
 
 impl RemoteProcessEventsRequest {
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::new(self).encode_json()
+    }
+
+    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        let request = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        request.validate()?;
+        Ok(request)
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         RemoteProcessRef {
             process_id: self.process_id.clone(),
             incarnation: self.incarnation,
         }
-        .validate("RemoteProcessEventsRequest")
+        .validate("RemoteProcessEventsRequest")?;
+        if let Some(token) = &self.continuation
+            && (token.process_id() != self.process_id
+                || token.process_incarnation().registration_sequence() != self.incarnation
+                || token.mode() != self.mode)
+        {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessEventsRequest",
+                message: "continuation belongs to another process incarnation or mode".to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessEventsResponse {
     pub process_id: ProcessId,
     pub incarnation: u64,
-    #[serde(default)]
-    pub events: Vec<RemoteProcessEvent>,
+    pub outcome: lash_core::ProcessEventReadOutcome<
+        lash_core::ProcessEventPage<RemoteProcessEvent, lash_core::ProcessEventLite>,
+    >,
 }
 
 impl RemoteProcessEventsResponse {
+    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::new(self).encode_json()
+    }
+
+    pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
+        let response = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        response.validate()?;
+        Ok(response)
+    }
+
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty(
             "RemoteProcessEventsResponse",
@@ -173,8 +211,40 @@ impl RemoteProcessEventsResponse {
             incarnation: self.incarnation,
         }
         .validate("RemoteProcessEventsResponse")?;
-        for event in &self.events {
-            event.validate("RemoteProcessEventsResponse")?;
+        if let lash_core::ProcessEventReadOutcome::Retained(page) = &self.outcome {
+            let mode = match &page.events {
+                lash_core::ProcessEventPageEvents::Full(_) => {
+                    lash_core::ProcessEventQueryMode::Full
+                }
+                lash_core::ProcessEventPageEvents::Lite(_) => {
+                    lash_core::ProcessEventQueryMode::Lite
+                }
+            };
+            if let lash_core::ProcessEventPageMore::More { continuation } = &page.more
+                && (continuation.process_id() != self.process_id
+                    || continuation.process_incarnation().registration_sequence()
+                        != self.incarnation
+                    || continuation.mode() != mode)
+            {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteProcessEventsResponse",
+                    message: "page continuation belongs to another process incarnation or mode"
+                        .to_string(),
+                });
+            }
+            if let lash_core::ProcessEventPageEvents::Full(events) = &page.events {
+                for event in events {
+                    event.validate("RemoteProcessEventsResponse")?;
+                    if event.process_id != self.process_id
+                        || event.process_incarnation != self.incarnation
+                    {
+                        return Err(RemoteProtocolError::InvalidEnvelope {
+                            type_name: "RemoteProcessEventsResponse",
+                            message: "event belongs to another process incarnation".to_string(),
+                        });
+                    }
+                }
+            }
         }
         Ok(())
     }

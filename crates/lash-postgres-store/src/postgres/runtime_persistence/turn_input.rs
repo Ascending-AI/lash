@@ -537,7 +537,7 @@ impl TurnInputStore for PostgresSessionStore {
             .bind(now as i64)
             .fetch_one(&mut *tx)
             .await
-            .map_err(store_sqlx_error)?;
+            .map_err(|err| pending_turn_input_insert_error(err, &draft.session_id, &input_id))?;
             let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
             if !draft.submitted_content_matches(&input).map_err(|err| {
                 StoreError::Backend(format!(
@@ -568,7 +568,7 @@ impl TurnInputStore for PostgresSessionStore {
             .bind(now as i64)
             .execute(&mut *tx)
             .await
-            .map_err(store_sqlx_error)?;
+            .map_err(|err| pending_turn_input_insert_error(err, &draft.session_id, &input_id))?;
             load_pending_turn_input(&mut tx, &draft.session_id, &input_id)
                 .await?
                 .ok_or_else(|| {

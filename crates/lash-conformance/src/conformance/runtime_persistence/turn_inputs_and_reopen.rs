@@ -1523,3 +1523,79 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     );
     release_session_execution_lease_for_test(&store, &successor).await;
 }
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn pending_turn_input_duplicate_input_id(store: Arc<dyn RuntimePersistence>) {
+    let first = store
+        .enqueue_pending_turn_input(
+            pending_next_turn_input_draft(&SessionId::from("root"), "first")
+                .with_input_id("dup:input"),
+        )
+        .await
+        .expect("enqueue first pending input");
+    // A draft reusing a stored `input_id` is refused, whatever content or
+    // session it carries: the SQL schemas declare the column globally UNIQUE.
+    let changed = store
+        .enqueue_pending_turn_input(
+            pending_next_turn_input_draft(&SessionId::from("root"), "changed")
+                .with_input_id("dup:input"),
+        )
+        .await
+        .expect_err("a second pending input reusing an input_id must be refused");
+    assert!(
+        matches!(
+            changed,
+            StoreError::PendingTurnInputIdConflict {
+                ref session_id,
+                ref input_id,
+            } if session_id.as_str() == "root" && input_id.as_str() == "dup:input"
+        ),
+        "the refusal is the typed id-conflict error, got {changed:?}"
+    );
+    let identical = store
+        .enqueue_pending_turn_input(
+            pending_next_turn_input_draft(&SessionId::from("root"), "first")
+                .with_input_id("dup:input"),
+        )
+        .await
+        .expect_err("an identical replay still names a taken input_id");
+    assert!(
+        matches!(identical, StoreError::PendingTurnInputIdConflict { .. }),
+        "input_id uniqueness is not an adoption channel, got {identical:?}"
+    );
+    let cross_session = store
+        .enqueue_pending_turn_input(
+            pending_next_turn_input_draft(&SessionId::from("other"), "other")
+                .with_input_id("dup:input"),
+        )
+        .await
+        .expect_err("input_id uniqueness spans sessions");
+    assert!(
+        matches!(cross_session, StoreError::PendingTurnInputIdConflict { .. }),
+        "the cross-session refusal is the typed id-conflict error, got {cross_session:?}"
+    );
+
+    // The refused drafts filed nothing: the stored row is untouched and alone.
+    let listed = store
+        .list_pending_turn_inputs(&SessionId::from("root"))
+        .await
+        .expect("list pending inputs after the refused duplicates");
+    assert_eq!(
+        listed
+            .iter()
+            .map(|read| read.input.input_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![first.input_id.as_str()]
+    );
+    assert_eq!(pending_input_text(&listed[0].input), Some("first"));
+    assert!(
+        store
+            .list_pending_turn_inputs(&SessionId::from("other"))
+            .await
+            .expect("list other session after the refused duplicate")
+            .is_empty()
+    );
+}

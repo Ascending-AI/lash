@@ -305,10 +305,27 @@ def apply_event_deferrals(needs: dict, event: str) -> dict:
 
     for job in ci_plan.DISPATCH_ONLY_JOBS:
         needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
+    if event == "pull_request":
+        needs["bazel-tests-tail"]["result"] = "skipped"
     return needs
 
 
 class ConclusionTests(unittest.TestCase):
+    def test_trusted_pr_requires_preflight_and_defers_full_tail_to_queue(self) -> None:
+        needs = apply_event_deferrals(successful_needs(), "pull_request")
+        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
+        needs["bazel-tests-tail"]["result"] = "success"
+        self.assertTrue(any(
+            "bazel-tests-tail" in problem
+            for problem in ci_plan.evaluate_conclusion(needs, "pull_request")
+        ))
+        needs["bazel-tests-tail"]["result"] = "skipped"
+        needs["bazel-tests"]["result"] = "skipped"
+        self.assertTrue(any(
+            "bazel-tests" in problem
+            for problem in ci_plan.evaluate_conclusion(needs, "pull_request")
+        ))
+
     def test_bazel_job_succeeds_for_trusted_and_skips_only_when_untrusted(self) -> None:
         trusted = successful_needs()
         self.assertEqual([], ci_plan.evaluate_conclusion(trusted, bazel_is_trusted=True))

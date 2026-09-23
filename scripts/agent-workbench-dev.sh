@@ -152,6 +152,10 @@ print(f"{host} {port}")
 
 canonical_service_host() {
   local host="$1"
+  if [[ "$host" = 127.0.0.1 || "$host" = ::1 ]]; then
+    printf 'loopback\n'
+    return 0
+  fi
   python3 -c '
 import ipaddress
 import socket

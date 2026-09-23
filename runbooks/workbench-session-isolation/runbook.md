@@ -54,7 +54,7 @@ markers and structural API state, never exact assistant prose.
   `{"button":"Blue"}`; the `button` value is case-sensitive, so lowercase `red` or
   `blue` returns HTTP 422.
 - Deterministic companion gate:
-  `cargo test -p agent-workbench concurrent_sessions_isolate_transcripts_triggers_and_processes`.
+  `kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=concurrent_sessions_isolate_transcripts_triggers_and_processes`.
   It runs simultaneous turns and simultaneous session-scoped occurrences against shared
   stores, then asserts transcript non-membership and disjoint process projections.
 

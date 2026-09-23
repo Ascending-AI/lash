@@ -237,9 +237,9 @@ pub mod tools {
         ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProcessEventClient,
         ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionAdmin, ToolSessionModel, ToolValue,
         derive_tool_intent_identity, facade_support::OrchestrationContext,
-        facade_support::ReconfigureError, facade_support::ToolRegistryFacadeOps,
-        facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
-        facade_support::ToolTriggerClient, turn_outcome_from_tool_control,
+        facade_support::ReconfigureError, facade_support::ToolSourceHandle,
+        facade_support::ToolStateFacadeOps, facade_support::ToolTriggerClient,
+        turn_outcome_from_tool_control,
     };
     pub use lash_core::{
         InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
@@ -905,10 +905,11 @@ pub mod tracing {
         TraceLlmResponse, TracePromptComponent, TraceProviderReplayDropEvent,
         TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
         TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRuntimeStreamEvent,
-        TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceSink,
-        facade_support::TraceBranchSelection, facade_support::TraceLabelMetadata,
-        facade_support::TraceRecord, facade_support::TraceRuntimeScope,
-        facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
+        TraceTokenUsage, TraceToolSpec, facade_support::JsonlTraceReadError,
+        facade_support::JsonlTraceSink, facade_support::TraceBranchSelection,
+        facade_support::TraceLabelMetadata, facade_support::TraceRecord,
+        facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
+        facade_support::TraceSinkError, facade_support::parse_jsonl_records,
     };
     /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
     /// can name — match on, take in a signature, or build in a test — what a
@@ -920,17 +921,17 @@ pub mod tracing {
         TextProjectionMetadata, TraceAgentFrameSwitch, TraceAttemptUsageDisposition,
         TraceDurableTimerStatus, TraceDurableWaitResolution, TraceExecToolCall,
         TraceExecutionEvidence, TraceJournaledEffectStatus, TraceLanguageChildExecution,
-        TraceLanguageExecution, TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity,
-        TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
-        TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangEdgeSelection,
-        TraceLashlangEventIdentity, TraceLashlangEventTransition, TraceLashlangGraph,
-        TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
-        TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
-        TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphStore,
-        TraceLashlangNodeObservation, TraceLashlangNodeSummary, TraceLashlangNodeTerminalSummary,
-        TraceRetryAttempt, TraceRetryAttemptOutcome, TraceRlmStepOutcome, TraceToolCallStatus,
-        TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
-        TraceTurnOutcome, fold_lashlang_graph,
+        TraceLanguageExecution, TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration,
+        TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
+        TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
+        TraceLashlangEdgeSelection, TraceLashlangEventIdentity, TraceLashlangEventTransition,
+        TraceLashlangGraph, TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness,
+        TraceLashlangGraphConflict, TraceLashlangGraphConflictKind, TraceLashlangGraphEdge,
+        TraceLashlangGraphFoldError, TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode,
+        TraceLashlangGraphStore, TraceLashlangNodeObservation, TraceLashlangNodeSummary,
+        TraceLashlangNodeTerminalSummary, TraceRetryAttempt, TraceRetryAttemptOutcome,
+        TraceRlmStepOutcome, TraceToolCallStatus, TraceTurnCancellationEvidence,
+        TraceTurnCompletionReason, TraceTurnFailureReason, TraceTurnOutcome, fold_lashlang_graph,
     };
     pub use lash_trace::{
         StderrTraceSink, TeeTraceSink, TraceContext, TraceLevel, TraceSink, TraceToolCallOutcome,
@@ -1062,9 +1063,11 @@ pub mod provider {
     /// [`LlmTransportError`](facade_support::LlmTransportError) and attempt
     /// journals: `lash:` codes are workspace-authored, `provider:` codes came
     /// off the provider wire, and a host names its own vocabulary through
-    /// [`Namespace::host`] plus [`FailureCode::foreign`] — a host namespace is
-    /// first-class, never `provider:`.
-    pub use lash_core::{FailureCode, InvalidNamespace, Namespace};
+    /// [`HostNamespace`] plus [`FailureCode::host`] — a host namespace is
+    /// first-class, never `provider:`. [`Namespace::host`] plus
+    /// [`FailureCode::foreign`] remain for namespaces only known at runtime
+    /// or decoded off the wire.
+    pub use lash_core::{FailureCode, HostNamespace, InvalidNamespace, Namespace};
 }
 
 pub use crate::core::ForkRequest;

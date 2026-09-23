@@ -304,9 +304,8 @@ WORKERS_E2E_JOBS = {
 }
 
 BAZEL_TEST_JOB = "bazel-tests"
-# Both legs of the Bazel partition share one policy: run on trusted rust
-# diffs, skip otherwise. `bazel-tests` carries `//:workspace_tests` minus the
-# tail suite; `bazel-tests-tail` carries `//:workspace_tail_tests`.
+# Trusted Rust pull requests run reverse-dependency tests in `bazel-tests`.
+# Merge groups run the complete core and tail partitions on the combined tree.
 BAZEL_TEST_JOBS = frozenset({BAZEL_TEST_JOB, "bazel-tests-tail"})
 
 
@@ -604,7 +603,11 @@ def evaluate_conclusion(
         result = needs[job].get("result")
         if job in BAZEL_TEST_JOBS:
             rust_on = plan_outputs.get("rust") == "true"
-            wanted = "success" if bazel_is_trusted and rust_on else "skipped"
+            wanted = (
+                "success" if bazel_is_trusted and rust_on
+                and (job == BAZEL_TEST_JOB or event_name != "pull_request")
+                else "skipped"
+            )
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} for a"

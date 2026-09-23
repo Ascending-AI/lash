@@ -16,6 +16,11 @@ pub use lash_core::testing::run_tool;
 /// Runs one granted tool call with mock contexts, so a provider's granted
 /// branch is exercisable outside a live turn.
 pub use lash_core::testing::run_tool_granted;
+/// A standalone [`ToolRegistry`](crate::tools::ToolRegistry) plus the
+/// [`ToolSourceHandle`](crate::tools::ToolSourceHandle) `provider` registered
+/// under — the same live-source route `session.admin().tools().add_provider`
+/// takes, for host tests that exercise source routing without a live session.
+pub use lash_core::testing::tool_registry_with_live_provider;
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
     mock_tool_context, mock_tool_context_with_execution_binding, test_code_protocol_factories,
@@ -35,7 +40,24 @@ pub use lash_core::testing::{
     code_execution_context_with_tool_provider_catalog_and_invocation,
     code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation,
     code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
+    exec_code_invocation,
 };
+
+/// The [`DeferredResolutionLinkKey`](crate::tools::DeferredResolutionLinkKey) a
+/// deferred link admits for an [`exec_code_invocation`]-built invocation —
+/// the infallible counterpart of
+/// [`DeferredResolutionLinkKey::from_exec_code_invocation`](crate::tools::DeferredResolutionLinkKey::from_exec_code_invocation)
+/// for a fixture known to carry an admitted `ExecCode` effect address. Seed a
+/// [`DeferredResolutionRecord`](crate::tools::DeferredResolutionRecord) with it
+/// when a host test drives
+/// [`link_with_deferred_resolution`](crate::tools::link_with_deferred_resolution).
+#[cfg(feature = "rlm")]
+pub fn deferred_resolution_link_key(
+    invocation: &lash_core::RuntimeInvocation,
+) -> crate::tools::DeferredResolutionLinkKey {
+    crate::tools::DeferredResolutionLinkKey::from_exec_code_invocation(invocation)
+        .expect("an exec_code_invocation carries an admitted ExecCode effect address")
+}
 
 #[cfg(test)]
 pub(crate) fn runtime_lease_owner() -> lash_core::LeaseOwnerIdentity {

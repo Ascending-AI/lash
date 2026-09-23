@@ -106,6 +106,97 @@ fn correlation_fields_are_exported_as_otel_attributes() {
 }
 
 #[test]
+fn node_failure_provenance_is_exported_as_typed_attributes() {
+    let identity = crate::TraceLanguageExecutionIdentity {
+        scope: crate::TraceRuntimeScope::new("s1"),
+        subject: crate::TraceRuntimeSubject::Process {
+            process_id: ProcessId::from("p1"),
+        },
+        source_identity: "source".into(),
+        module_ref: "module".into(),
+        entry_kind: "process".into(),
+        entry_ref: None,
+        entry_name: "main".into(),
+        restate_invocation_id: None,
+        generation: Some(crate::TraceLanguageExecutionGeneration::new(2, 4)),
+    };
+    let record = |failure| {
+        TraceRecord::new(
+            TraceContext::default(),
+            TraceEvent::LanguageExecution {
+                language: "lashlang".into(),
+                event: crate::TraceLanguageExecution {
+                    event_key: "node-failed".into(),
+                    identity: identity.clone(),
+                    payload: crate::TraceLanguageExecutionPayload::NodeFailed {
+                        node_id: "node".into(),
+                        node_kind: "resource_operation".into(),
+                        label: "read".into(),
+                        occurrence: 1,
+                        call_id: Some("effect-1".into()),
+                        failure,
+                    },
+                },
+            },
+        )
+    };
+    let effect = record(crate::TraceLanguageExecutionFailure::Effect {
+        class: lash_sansio::ToolFailureClass::PermissionDenied,
+        code: "approval_denied".into(),
+        message: "denied".into(),
+        replay_key: "effect-1".into(),
+        source: lash_sansio::ToolFailureSource::Policy,
+        retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
+    });
+    let attrs = event_attributes(&effect, &OtelTraceOptions::default());
+    for (key, expected) in [
+        ("lash.language_execution.failure.kind", "effect"),
+        ("lash.language_execution.failure.class", "permission_denied"),
+        ("lash.language_execution.failure.code", "approval_denied"),
+        ("lash.language_execution.failure.message", "denied"),
+        ("lash.language_execution.failure.replay_key", "effect-1"),
+        ("lash.language_execution.failure.source", "policy"),
+        ("lash.language_execution.failure.retry", "exhausted"),
+    ] {
+        assert_eq!(
+            attribute_value(&attrs, key),
+            &OtelValue::String(expected.into())
+        );
+    }
+    assert_eq!(
+        attribute_value(&attrs, "lash.language_execution.failure.retry_attempts"),
+        &OtelValue::I64(3)
+    );
+    assert_eq!(
+        attribute_value(&attrs, "lash.language_execution.attempt"),
+        &OtelValue::I64(2)
+    );
+    assert_eq!(
+        attribute_value(&attrs, "lash.language_execution.incarnation"),
+        &OtelValue::I64(4)
+    );
+
+    let runtime = record(crate::TraceLanguageExecutionFailure::Runtime {
+        code: "VmStackUnderflow".into(),
+        message: "vm stack underflow".into(),
+    });
+    let attrs = event_attributes(&runtime, &OtelTraceOptions::default());
+    assert_eq!(
+        attribute_value(&attrs, "lash.language_execution.failure.kind"),
+        &OtelValue::String("runtime".into())
+    );
+    assert_eq!(
+        attribute_value(&attrs, "lash.language_execution.failure.code"),
+        &OtelValue::String("VmStackUnderflow".into())
+    );
+    assert!(
+        !attrs
+            .iter()
+            .any(|attr| attr.key.as_str() == "lash.language_execution.failure.retry")
+    );
+}
+
+#[test]
 fn typed_exec_diagnostics_preserve_the_otel_span_family() {
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor};
 
@@ -458,7 +549,10 @@ fn failed_language_execution_yields_error_span() {
                     label: "eval".to_string(),
                     occurrence: 1,
                     call_id: None,
-                    error: "syntax error".to_string(),
+                    failure: crate::TraceLanguageExecutionFailure::Runtime {
+                        code: "InvalidJson".to_string(),
+                        message: "syntax error".to_string(),
+                    },
                 },
             },
         },

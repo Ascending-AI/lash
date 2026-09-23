@@ -264,3 +264,494 @@ async fn absent_session_surface_is_refused_at_admission() {
         "refusal must name the missing vocabulary: {failure:?}"
     );
 }
+
+struct RecoveryEchoTool {
+    executions: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl RecoveryEchoTool {
+    fn definition() -> lash_core::ToolDefinition {
+        lash_core::ToolDefinition::raw(
+            "tool:recovery_echo",
+            "recovery_echo",
+            "Echo once after process recovery.",
+            serde_json::json!({"type":"object","properties":{"line":{"type":"string"}},"required":["line"],"additionalProperties":false}),
+            serde_json::json!({"type":"object"}),
+        )
+        .with_tool_binding(ToolBinding::new(["tools"], "recovery_echo"))
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for RecoveryEchoTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "recovery_echo").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.executions
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if call.args.get("line").and_then(serde_json::Value::as_str) == Some("deny") {
+            return lash_core::ToolOutcome::failure(lash_core::ToolFailure {
+                class: lash_core::ToolFailureClass::PermissionDenied,
+                code: "approval_denied".to_owned(),
+                message: "approval was denied".to_owned(),
+                source: lash_core::ToolFailureSource::Policy,
+                retry: lash_core::ToolRetryStatus::Exhausted { attempts: 3 },
+                raw: None,
+            })
+            .into();
+        }
+        lash_core::ToolAttemptOutcome::done_without_intents(lash_core::ToolOutcomeDone::ok(
+            serde_json::json!({
+                "echo": call.args.get("line").and_then(serde_json::Value::as_str)
+            }),
+        ))
+    }
+}
+
+fn recovery_echo_catalog() -> lashlang::LashlangHostCatalog {
+    let contract = RecoveryEchoTool::definition().contract();
+    let mut catalog = lashlang::LashlangHostCatalog::new();
+    catalog
+        .add_module_operation_contract(
+            ["tools"],
+            "Tools",
+            "recovery_echo",
+            "tool:recovery_echo",
+            &lashlang::OperationContract::new(
+                contract.input_schema.canonical().clone(),
+                contract.output_schema.canonical().clone(),
+            ),
+        )
+        .expect("recovery echo catalog");
+    catalog
+}
+
+struct CrashAfterFirstNodeCompleted {
+    graphs: Arc<lash_trace::TraceLashlangGraphStore>,
+    crashed: std::sync::atomic::AtomicBool,
+    notified: tokio::sync::Notify,
+}
+
+impl lash_trace::TraceSink for CrashAfterFirstNodeCompleted {
+    fn append(&self, record: &lash_trace::TraceRecord) -> Result<(), lash_trace::TraceSinkError> {
+        self.graphs.append(record)?;
+        if matches!(
+            &record.event,
+            lash_trace::TraceEvent::LanguageExecution {
+                event: lash_trace::TraceLanguageExecution {
+                    payload: lash_trace::TraceLanguageExecutionPayload::NodeCompleted { .. },
+                    ..
+                },
+                ..
+            }
+        ) && !self.crashed.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.notified.notify_one();
+            panic!("injected worker crash after NodeCompleted");
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes_effect_once() {
+    let artifact_store: Arc<dyn LashlangArtifactStore> =
+        Arc::new(InMemoryLashlangArtifactStore::new());
+    let environment = lashlang::LashlangHostEnvironment::new(
+        recovery_echo_catalog(),
+        lashlang::LashlangAbilities::default(),
+    );
+    let module = b::module(
+        vec![b::process(
+            "main",
+            Vec::new(),
+            b::finish(b::receiver_call(
+                b::resource(&["tools"]),
+                "recovery_echo",
+                vec![b::record(vec![("line", b::string("once"))])],
+            )),
+        )],
+        Vec::new(),
+    );
+    let linked = lashlang::LinkedModule::link(module, &environment).expect("link recovery process");
+    artifact_store
+        .publish_module_artifact(&ArtifactOwner::host("fig3463-recovery"), &linked.artifact)
+        .await
+        .expect("publish recovery process");
+    let process_input = LashlangProcessInput {
+        module_ref: linked.module_ref,
+        process_ref: linked
+            .artifact
+            .process_ref("main")
+            .expect("main process")
+            .clone(),
+        host_requirements_ref: linked.host_requirements_ref,
+        process_name: "main".to_string(),
+        args: serde_json::Map::new(),
+    };
+    let process_identity = process_input.process_identity();
+    let process_id = lash_sansio::ProcessId::from("fig3463-crash-retry");
+    let env_store: Arc<dyn ProcessExecutionEnvStore> =
+        Arc::new(InMemoryProcessExecutionEnvStore::new());
+    let env_ref = lash_core::runtime::publish_process_execution_env(
+        env_store.as_ref(),
+        &ArtifactOwner::host("fig3463-recovery-env"),
+        &ProcessExecutionEnvSpec::new(PluginOptions::empty(), session_policy()),
+    )
+    .await
+    .expect("publish process env");
+    let registry: Arc<dyn ProcessRegistry> =
+        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
+    let crash_sink = Arc::new(CrashAfterFirstNodeCompleted {
+        graphs: Arc::clone(&graphs),
+        crashed: std::sync::atomic::AtomicBool::new(false),
+        notified: tokio::sync::Notify::new(),
+    });
+    let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let journal_dir = tempfile::tempdir().expect("effect journal directory");
+    let journal_path = journal_dir.path().join("effects.sqlite");
+    let effect_host_a: Arc<dyn lash_core::EffectHost> = Arc::new(
+        lash_sqlite_store::SqliteEffectHost::open(&journal_path)
+            .await
+            .expect("open first effect journal"),
+    );
+    let effect_host_b: Arc<dyn lash_core::EffectHost> = Arc::new(
+        lash_sqlite_store::SqliteEffectHost::open(&journal_path)
+            .await
+            .expect("reopen effect journal for retry"),
+    );
+    let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "fig3463-recovery-echo",
+            PluginSpec::new().with_tool_provider(Arc::new(RecoveryEchoTool {
+                executions: Arc::clone(&executions),
+            })),
+        ));
+    let worker = |sink: Arc<dyn lash_trace::TraceSink>,
+                  effect_host: Arc<dyn lash_core::EffectHost>| {
+        let engine =
+            LashlangProcessEngine::new(Arc::clone(&artifact_store), LashlangSurface::default())
+                .with_execution_trace(Some(sink), lash_trace::TraceContext::default());
+        let runtime_host = RuntimeHostConfig::new(
+            effect_host,
+            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            Arc::clone(&env_store),
+            CommitBudget::bounded(1024 * 1024, 512),
+            QueuedWorkBatchingConfig::new(1),
+        )
+        .with_lease_timings(
+            lash_core::facade_support::LeaseTimings::from_ttl(std::time::Duration::from_millis(
+                120,
+            ))
+            .expect("short crash lease"),
+        )
+        .with_process_engine_registration(lashlang_process_engine_registration(engine));
+        let mut factories = lash_core::testing::test_code_protocol_factories();
+        factories.push(Arc::clone(&tool_factory));
+        DurableProcessWorker::new(
+            DurableProcessWorkerConfig::new(
+                Arc::new(PluginHost::new(factories)),
+                runtime_host,
+                Arc::new(InMemorySessionStoreFactory::new()),
+                WorkerProcessWork::SelfNative(watch_process_registry(Arc::clone(&registry))),
+                Arc::new(NoQueuedWork::new()),
+                lash_core::testing::runtime_lease_owner(),
+            )
+            .with_session_policy(session_policy()),
+        )
+        .expect("recovery worker")
+    };
+    registry
+        .register_process(
+            ProcessRegistration::new(
+                process_id.clone(),
+                process_input.into_process_input().expect("process input"),
+                RecoveryContract::Rerunnable,
+                ProcessProvenance::host(),
+                ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+            )
+            .with_admitted_identity(AdmittedProcessIdentity::for_testing(process_identity))
+            .with_execution_env_ref(Some(env_ref)),
+        )
+        .await
+        .expect("register recovery process");
+    let worker_a = worker(crash_sink.clone(), effect_host_a);
+    let first_report = worker_a
+        .drive_pending_processes()
+        .await
+        .expect("admit first attempt");
+    if tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crash_sink.notified.notified(),
+    )
+    .await
+    .is_err()
+    {
+        panic!(
+            "first attempt must crash after NodeCompleted: report={first_report:?}, process={:?}, graphs={:?}",
+            registry.get_process(&process_id).await,
+            graphs.graphs()
+        );
+    }
+    assert_eq!(
+        executions.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the effect must already be journaled before the crash"
+    );
+    drop(worker_a);
+    let worker_b = worker(graphs.clone(), effect_host_b);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let _ = worker_b
+                .drive_pending_processes()
+                .await
+                .expect("drive retry when the crashed worker lease expires");
+            if registry
+                .get_process(&process_id)
+                .await
+                .expect("read retried process")
+                .is_some_and(|record| record.is_terminal())
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("retry is admitted after lease expiry");
+    let terminal = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        NativeProcessWork::for_registry(Arc::clone(&registry)).await_terminal(&process_id),
+    )
+    .await
+    .expect("retry reaches terminal")
+    .expect("await retried process");
+    assert!(
+        matches!(terminal, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success())
+    );
+    assert_eq!(executions.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let graphs = graphs.graphs();
+    assert_eq!(graphs.len(), 2, "both attempts must remain visible");
+    let mut attempts = graphs
+        .iter()
+        .map(|graph| {
+            graph
+                .history
+                .first()
+                .expect("attempt has trace history")
+                .event
+                .identity
+                .attempt()
+                .expect("process attempt")
+        })
+        .collect::<Vec<_>>();
+    attempts.sort_unstable();
+    assert_eq!(attempts, [1, 2]);
+    let call_ids = graphs
+        .iter()
+        .map(|graph| {
+            graph
+                .history
+                .iter()
+                .find_map(|record| match &record.event.payload {
+                    lash_trace::TraceLanguageExecutionPayload::NodeStarted {
+                        call_id: Some(call_id),
+                        ..
+                    } => Some(call_id.clone()),
+                    _ => None,
+                })
+                .expect("resource node records its effect key")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(call_ids.len(), 2);
+    assert_eq!(
+        call_ids[0], call_ids[1],
+        "telemetry retry must reuse the journaled effect key"
+    );
+    assert!(!call_ids[0].contains(":attempt:"));
+    for attempt in [1, 2] {
+        let graph = graphs
+            .iter()
+            .find(|graph| graph.history[0].event.identity.attempt() == Some(attempt))
+            .expect("one graph per attempt");
+        assert!(graph.nodes.iter().any(|node| matches!(
+            node.observation,
+            lash_trace::TraceLashlangNodeObservation::Completed { occurrence: 1, .. }
+        )));
+    }
+}
+
+#[tokio::test]
+async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_provenance() {
+    let call = || {
+        b::receiver_call(
+            b::resource(&["tools"]),
+            "recovery_echo",
+            vec![b::record(vec![("line", b::string("deny"))])],
+        )
+    };
+    let module = b::module(
+        vec![
+            b::process("scalar", Vec::new(), b::finish(b::unwrap(call()))),
+            b::process(
+                "batch",
+                Vec::new(),
+                b::finish(b::await_expr(b::list(vec![b::unwrap(call())]))),
+            ),
+        ],
+        Vec::new(),
+    );
+    let artifact_store: Arc<dyn LashlangArtifactStore> =
+        Arc::new(InMemoryLashlangArtifactStore::new());
+    let linked = lashlang::LinkedModule::link(
+        module,
+        lashlang::LashlangHostEnvironment::new(
+            recovery_echo_catalog(),
+            lashlang::LashlangAbilities::default(),
+        ),
+    )
+    .expect("link failing process calls");
+    artifact_store
+        .publish_module_artifact(&ArtifactOwner::host("fig3463-failures"), &linked.artifact)
+        .await
+        .expect("publish failing processes");
+    let env_store: Arc<dyn ProcessExecutionEnvStore> =
+        Arc::new(InMemoryProcessExecutionEnvStore::new());
+    let env_ref = lash_core::runtime::publish_process_execution_env(
+        env_store.as_ref(),
+        &ArtifactOwner::host("fig3463-failures-env"),
+        &ProcessExecutionEnvSpec::new(PluginOptions::empty(), session_policy()),
+    )
+    .await
+    .expect("publish failing process env");
+    let registry: Arc<dyn ProcessRegistry> =
+        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
+    let engine = LashlangProcessEngine::new(artifact_store, LashlangSurface::default())
+        .with_execution_trace(Some(graphs.clone()), lash_trace::TraceContext::default());
+    let runtime_host = RuntimeHostConfig::new(
+        Arc::new(lash_core::facade_support::NativeEffectHost::default()),
+        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+        env_store,
+        CommitBudget::bounded(1024 * 1024, 512),
+        QueuedWorkBatchingConfig::new(1),
+    )
+    .with_process_engine_registration(lashlang_process_engine_registration(engine));
+    let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            "fig3463-failure-tool",
+            PluginSpec::new().with_tool_provider(Arc::new(RecoveryEchoTool {
+                executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            })),
+        ));
+    let mut factories = lash_core::testing::test_code_protocol_factories();
+    factories.push(tool_factory);
+    let worker = DurableProcessWorker::new(
+        DurableProcessWorkerConfig::new(
+            Arc::new(PluginHost::new(factories)),
+            runtime_host,
+            Arc::new(InMemorySessionStoreFactory::new()),
+            WorkerProcessWork::SelfNative(watch_process_registry(Arc::clone(&registry))),
+            Arc::new(NoQueuedWork::new()),
+            lash_core::testing::runtime_lease_owner(),
+        )
+        .with_session_policy(session_policy()),
+    )
+    .expect("failure worker");
+    for name in ["scalar", "batch"] {
+        let input = LashlangProcessInput {
+            module_ref: linked.module_ref.clone(),
+            process_ref: linked
+                .artifact
+                .process_ref(name)
+                .expect("process ref")
+                .clone(),
+            host_requirements_ref: linked.host_requirements_ref.clone(),
+            process_name: name.to_owned(),
+            args: serde_json::Map::new(),
+        };
+        let identity = input.process_identity();
+        registry
+            .register_process(
+                ProcessRegistration::new(
+                    format!("fig3463-failure-{name}"),
+                    input.into_process_input().expect("process input"),
+                    RecoveryContract::Rerunnable,
+                    ProcessProvenance::host(),
+                    ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+                )
+                .with_admitted_identity(AdmittedProcessIdentity::for_testing(identity))
+                .with_execution_env_ref(Some(env_ref.clone())),
+            )
+            .await
+            .expect("register failure process");
+    }
+    let _ = worker
+        .drive_pending_processes()
+        .await
+        .expect("drive failed calls");
+    for name in ["scalar", "batch"] {
+        let process_id = lash_sansio::ProcessId::from(format!("fig3463-failure-{name}"));
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            NativeProcessWork::for_registry(Arc::clone(&registry)).await_terminal(&process_id),
+        )
+        .await
+        .expect("failed process settles")
+        .expect("await failed process");
+        let graph = graphs
+            .graphs()
+            .into_iter()
+            .find(|graph| {
+                graph.history.first().is_some_and(|record| {
+                    matches!(&record.event.identity.subject,
+                    lash_trace::TraceRuntimeSubject::Process { process_id: id } if id == process_id)
+                })
+            })
+            .expect("failed process graph");
+        let (call_id, failure) = graph
+            .history
+            .iter()
+            .find_map(|record| match &record.event.payload {
+                lash_trace::TraceLanguageExecutionPayload::NodeFailed {
+                    call_id: Some(call_id),
+                    failure:
+                        lash_trace::TraceLanguageExecutionFailure::Effect {
+                            replay_key,
+                            class,
+                            code,
+                            source,
+                            retry,
+                            ..
+                        },
+                    ..
+                } => Some((call_id, (replay_key, class, code, source, retry))),
+                _ => None,
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "failed {name} leaf retains typed effect provenance: {:?}",
+                    graph
+                        .history
+                        .iter()
+                        .map(|record| &record.event.payload)
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(call_id, failure.0, "leaf owns the recorded replay key");
+        assert_eq!(*failure.1, lash_core::ToolFailureClass::PermissionDenied);
+        assert_eq!(failure.2, "approval_denied");
+        assert_eq!(*failure.3, lash_core::ToolFailureSource::Policy);
+        assert_eq!(
+            *failure.4,
+            lash_core::ToolRetryStatus::Exhausted { attempts: 3 }
+        );
+    }
+}

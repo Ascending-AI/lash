@@ -129,6 +129,9 @@ impl TryFrom<RemoteTurnRequest> for lash_core::TurnInput {
         value.validate()?;
         // Identity/routing fields are consumed by the transport layer, not the
         // core turn input; tool grants are applied separately.
+        // `idempotency_key` in particular is a host-transport key: admission
+        // dedup is the host's `source_key`, so the field must not reach core
+        // (see `RemoteTurnRequest::idempotency_key`).
         let RemoteTurnRequest {
             session_id: _,
             turn_id: _,

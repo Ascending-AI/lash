@@ -53,7 +53,7 @@ fn authored_tool_examples() -> Vec<&'static str> {
         r#"await files.edit({ path: "src/main.rs", edits: [{ oldText: "old();", newText: "new();" }] })?"#,
         r#"await files.glob({ pattern: "**/*.rs", path: "crates/lash/src", limit: 50 })?"#,
         r#"await files.write({ path: "hello.txt", content: "hello\n" })?"#,
-        r#"await shell.exec({ cmd: "cargo test -p lash-protocol-rlm", timeout_ms: 600000 })?"#,
+        r#"await shell.exec({ cmd: "kiln test //crates/lash-protocol-rlm:protocol_drivers__test", timeout_ms: 600000 })?"#,
         "probe = await shell.exec({ cmd: \"test -f Cargo.lock\" })?\nfinish probe.exit_code == 0",
         r#"await shell.start({ cmd: "nohup ./daemon --serve", detach: true })?"#,
         r#"await shell.write({ process_id: "call-shell-1", chars: "", close_stdin: true })?"#,

@@ -87,6 +87,7 @@ use lash::process::ProcessStartRequest as _;
 use lash::process::ProcessStatusFilter as _;
 use lash::process::SessionScope as _;
 use lash::provider::CacheControlDialect as _;
+use lash::provider::HostNamespace as _;
 use lash::provider::LlmContentBlock as _;
 use lash::provider::LlmJsonSchema as _;
 use lash::provider::LlmRequest as _;
@@ -210,8 +211,10 @@ mod testing_inventory {
     use lash::testing::TestLocalProcessRegistry as _;
     use lash::testing::TestProvider as _;
     use lash::testing::code_execution_context as _;
+    use lash::testing::exec_code_invocation as _;
     use lash::testing::mock_tool_context_with_execution_binding as _;
     use lash::testing::store_fixtures::authorize_completion_deferral_for_test as _;
+    use lash::testing::tool_registry_with_live_provider as _;
     // The durable-backend certification laws ride the facade: a host certifies
     // its store through `lash::testing::conformance` alone.
     use lash::testing::conformance::ReopenableAttachmentStore as _;
@@ -230,6 +233,7 @@ mod rlm_testing_inventory {
     };
 
     use lash::rlm::lang::testing::conformance::ReopenableLashlangArtifactStore as _;
+    use lash::testing::deferred_resolution_link_key as _;
     // The host names `lashlang_artifact_store_reopenable`; the live name of the
     // same conformance entry point is `survives_reopen`.
     use lash::rlm::lang::testing::conformance::survives_reopen as _;

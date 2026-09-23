@@ -1,4 +1,6 @@
-use crate::{HostRequirementsRef, LashlangExecutionCallSite, ModuleRef, ProcessRef};
+use crate::{
+    HostRequirementsRef, LashlangEffectFailure, LashlangExecutionCallSite, ModuleRef, ProcessRef,
+};
 
 use super::{
     ExecutionScratch, ProfileReport, ProjectedBindings, Record, RuntimeFailure, Value,
@@ -622,7 +624,7 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
 pub struct ExecutionHostError {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    tool_failure: Option<ExecutionHostToolFailure>,
+    tool_failure: Option<Box<ExecutionHostToolFailure>>,
 }
 
 impl ExecutionHostError {
@@ -639,16 +641,30 @@ impl ExecutionHostError {
     /// execution-host error contract. Callers can inspect the stable failure
     /// classification without treating foreign JSON as structured control
     /// data.
-    pub fn from_tool_failure(failure: &ToolFailure) -> Self {
+    pub fn from_tool_failure(failure: &ToolFailure, replay_key: impl Into<String>) -> Self {
         Self {
             message: failure.message.clone(),
-            tool_failure: Some(ExecutionHostToolFailure {
+            tool_failure: Some(Box::new(ExecutionHostToolFailure {
                 class: failure.class.clone(),
                 code: failure.code.clone(),
                 source: failure.source.clone(),
                 retry: failure.retry.clone(),
-            }),
+                replay_key: replay_key.into(),
+            })),
         }
+    }
+
+    /// The recorded tool failure attached to this host error, if any.
+    pub fn tool_failure(&self) -> Option<LashlangEffectFailure> {
+        let failure = self.tool_failure.as_ref()?;
+        Some(LashlangEffectFailure {
+            class: failure.class.clone(),
+            code: failure.code.clone(),
+            message: self.message.clone(),
+            replay_key: failure.replay_key.clone(),
+            source: failure.source.clone(),
+            retry: failure.retry.clone(),
+        })
     }
 
     pub fn message(&self) -> &str {

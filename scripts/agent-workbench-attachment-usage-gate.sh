@@ -50,7 +50,8 @@ cleanup() {
 trap cleanup EXIT
 
 printf '[attachment-usage-gate] SQLite file-store/session-store pass\n'
-cargo test -p agent-workbench attachment_usage_gate_sqlite -- --nocapture --test-threads=1
+kiln run //examples/agent-workbench:agent-workbench__unit_test -- \
+  attachment_usage_gate_sqlite --nocapture --test-threads=1
 
 if [[ -z "$database_url" ]]; then
   bash "$repo_root/scripts/docker-pull-with-retry.sh" "$postgres_image"
@@ -75,7 +76,7 @@ fi
 
 printf '[attachment-usage-gate] Postgres session-store pass\n'
 AGENT_WORKBENCH_USAGE_GATE_DATABASE_URL="$database_url" \
-  cargo test -p agent-workbench attachment_usage_gate_postgres \
-    -- --ignored --nocapture --test-threads=1
+  kiln run //examples/agent-workbench:agent-workbench__unit_test -- \
+    attachment_usage_gate_postgres --ignored --nocapture --test-threads=1
 
 printf '[attachment-usage-gate] upload -> reference -> persist -> retrieve and usage restart gates passed\n'

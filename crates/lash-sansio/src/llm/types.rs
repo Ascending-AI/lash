@@ -479,6 +479,30 @@ impl LlmMessage {
     }
 }
 
+/// Object key under which a historical tool call's raw argument text is
+/// wrapped on provider replay when the text never parsed as JSON.
+pub const RAW_TOOL_CALL_ARGUMENTS_KEY: &str = "_raw";
+
+/// The one replay rule for a historical tool call's argument text: valid
+/// JSON replays as the parsed value; anything else is wrapped as
+/// `{ "_raw": "<verbatim text>" }`. Every provider presents a malformed call
+/// identically instead of refusing the request or inventing arguments.
+pub fn tool_call_input_replay_value(input_json: &str) -> serde_json::Value {
+    serde_json::from_str(input_json)
+        .unwrap_or_else(|_| serde_json::json!({ RAW_TOOL_CALL_ARGUMENTS_KEY: input_json }))
+}
+
+/// The same replay rule for wire fields that carry tool-call arguments as a
+/// JSON string (OpenAI Chat `arguments`, Responses `function_call.arguments`):
+/// valid JSON replays verbatim; malformed text replays as the `_raw`
+/// wrapper's JSON encoding.
+pub fn tool_call_input_replay_string(input_json: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(input_json) {
+        Ok(_) => input_json.to_string(),
+        Err(_) => tool_call_input_replay_value(input_json).to_string(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LlmRequestScope {
     /// Logical Lash session.

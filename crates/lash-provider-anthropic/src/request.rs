@@ -75,22 +75,12 @@ impl AnthropicProvider {
                 tool_name,
                 input_json,
                 ..
-            } => {
-                let input: Value = serde_json::from_str(input_json).map_err(|err| {
-                    LlmTransportError::new(format!(
-                        "Anthropic tool_use input for `{tool_name}` is not JSON: {err}"
-                    ))
-                    .with_kind(ProviderFailureKind::Validation)
-                    .with_lash_code(TurnFailureCode::InvalidToolCallInputJson)
-                    .with_raw(input_json.clone())
-                })?;
-                Ok(Some(json!({
-                    "type": "tool_use",
-                    "id": normalize_tool_call_id(call_id)?,
-                    "name": tool_name,
-                    "input": input,
-                })))
-            }
+            } => Ok(Some(json!({
+                "type": "tool_use",
+                "id": normalize_tool_call_id(call_id)?,
+                "name": tool_name,
+                "input": tool_call_input_replay_value(input_json),
+            }))),
             LlmContentBlock::ToolResult {
                 call_id, content, ..
             } => Ok(Some(json!({
