@@ -67,13 +67,16 @@ class WithServiceContract(unittest.TestCase):
         self.assertEqual([], bare, "a store suite runs outside with-service.sh")
         for service, suite in wrapped:
             with self.subTest(suite=suite):
-                if suite.startswith("pg"):
-                    self.assertEqual("pg${{ matrix.postgres }}", service)
+                if suite == "pg-catalog-compatibility":
+                    # Every compatibility major, one container each.
+                    self.assertEqual("pg${major}", service)
+                elif suite.startswith("pg"):
+                    self.assertEqual("pg${POSTGRES_PRIMARY}", service)
                 else:
                     self.assertEqual("s3", service)
 
     def test_every_matrix_major_is_a_declared_service(self) -> None:
-        """`pg${{ matrix.postgres }}` must name a service for every major."""
+        """`pg<major>` must name a service for every major the plan selects."""
         plan = (ROOT / "scripts" / "ci_plan.py").read_text(encoding="utf-8")
         majors = set(re.findall(r'"postgres":\s*"(\d+)"', plan))
         self.assertTrue(majors)

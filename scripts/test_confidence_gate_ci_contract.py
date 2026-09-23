@@ -356,9 +356,13 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         (writer_job,) = writer["jobs"].values()
         saver = next(s for s in writer_job["steps"] if "rust-cache@" in s.get("uses", ""))
         self.assertEqual(lane["uses"], saver["uses"])
-        self.assertEqual(lane["with"], saver["with"])
+        # The lane restores only: a save from a pull request lands in that
+        # PR's own branch scope, which nothing else can read.
+        self.assertIs(False, lane["with"]["save-if"])
+        restore = {key: value for key, value in lane["with"].items() if key != "save-if"}
+        self.assertEqual(restore, saver["with"])
         self.assertRegex(saver["with"]["shared-key"], r"^linux-seal-[0-9]+$")
-        self.assertNotIn("save-if", lane["with"])
+        self.assertNotIn("save-if", saver["with"])
         self.assertEqual("${{ github.workspace }}/target-seal", ci["jobs"]["check"]["env"]["CARGO_TARGET_DIR"])
         self.assertEqual(ci["jobs"]["check"]["env"]["CARGO_TARGET_DIR"], writer_job["env"]["CARGO_TARGET_DIR"])
         for name in ("CARGO_TERM_COLOR", "LASH_CI_FEATURES", "RUSTFLAGS"):
@@ -621,6 +625,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "fail_open": "false",
         }
         needs["workspace-tests"]["result"] = "skipped"
+        # Trusted events seal the API inside `bazel-tests`.
+        needs["check"]["result"] = "skipped"
         for job in dispatch_only:
             needs[job] = {"result": "skipped", "outputs": {}}
         needs["bazel-tests-tail"] = {"result": "skipped", "outputs": {}}
@@ -633,6 +639,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         }
         dispatch_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
         dispatch_needs["workspace-tests"]["result"] = "skipped"
+        dispatch_needs["check"]["result"] = "skipped"
         self.assertEqual(evaluate(dispatch_needs, "workflow_dispatch"), [])
         for job in ("worker-artifacts", "restate-postgres-workers", "restate-postgres-workers-summary"):
             needs[job] = {"result": "skipped", "outputs": {}}
@@ -664,7 +671,11 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # change reaches trunk without all three majors. The focused contract
         # tests in test_ci_plan.py evaluate per-role step selection.
         postgres = workflow_job_block(workflow, "postgres-store")
-        self.assertIn("include: ${{ fromJSON(needs.plan.outputs.postgres_matrix) }}", postgres)
+        self.assertIn("POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}", postgres)
+        self.assertIn(
+            "POSTGRES_COMPATIBILITY: ${{ needs.plan.outputs.postgres_compatibility }}",
+            postgres,
+        )
         for event, expected in (
             ("pull_request", [("16", "primary")]),
             ("merge_group", [("16", "primary")]),
@@ -2213,8 +2224,13 @@ derive_mutation_jobs() {{
         ):
             with self.subTest(step=step_name):
                 step = workflow_step_block(postgres_store_job, step_name)
+                major = (
+                    "${major}"
+                    if step_name == "Test PostgreSQL catalog compatibility"
+                    else "${POSTGRES_PRIMARY}"
+                )
                 self.assertIn(
-                    'bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" --',
+                    f'bash scripts/ci/with-service.sh "pg{major}" --',
                     step,
                 )
 
@@ -2239,7 +2255,8 @@ derive_mutation_jobs() {{
         runtime_scenarios = workflow_step_block(
             postgres_store_job, "Test runtime Postgres agent scenarios"
         )
-        self.assertIn("if: matrix.role == 'primary'", runtime_scenarios)
+        # The primary major's agent scenarios run on every event.
+        self.assertNotIn("if:", runtime_scenarios.split("run:", 1)[0])
         scenario_bazel, scenario_cargo = store_suite_branches(
             store_suite_for_step(runtime_scenarios)
         )
@@ -2623,19 +2640,23 @@ derive_mutation_jobs() {{
         check_job = workflow_job_block(workflow, "check")
         self.assertNotIn("cargo check --workspace --all-targets --locked", check_job)
         self.assertNotIn("--doc ", check_job)
-        # The trusted path is pure Bazel (FIG-3364): `ui__test` builds under
-        # the shared remote cache (which also proves the compile-pass modules
-        # still compile) and `ui_fixtures` runs every tests/ui/*.stderr
-        # fixture through the toolchain rustc directly, so the seal lane no
-        # longer pays trybuild's nested `cargo check` of the dependency graph.
-        # The Cargo command stays as the untrusted/fork leg, so both spellings
-        # are pinned here.
+        # The trusted path is pure Bazel (FIG-3364) and rides the core test
+        # invocation: `ui_fixtures` runs every tests/ui/*.stderr fixture
+        # through the toolchain rustc directly and, as its validation output,
+        # builds `ui__test` (which proves the compile-pass modules still
+        # compile), so the seal no longer pays trybuild's nested `cargo check`
+        # of the dependency graph or a Bazel client of its own. The Cargo
+        # command stays as the untrusted/fork leg, so both spellings are
+        # pinned here.
         self.assertIn(
             "cargo test --workspace --locked ${LASH_CI_FEATURES} --test ui",
             check_job,
         )
-        self.assertIn("//crates/lash:ui__test", check_job)
-        self.assertIn("//crates/lash:ui_fixtures", check_job)
+        self.assertNotIn("bazel ", check_job)
+        self.assertNotIn("bazel-shared-cache", check_job)
+        self.assertIn(
+            "//crates/lash:ui_fixtures", workflow_job_block(workflow, "bazel-tests")
+        )
         self.assertNotIn("run-seal-harness", check_job)
         self.assertNotIn("cargo fetch", check_job)
         for foreign in (

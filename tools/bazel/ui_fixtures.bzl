@@ -16,6 +16,13 @@ trailer dropped, execroot-relative paths mapped back to `src/` and
 `$WORKSPACE/crates/`) and diffed against the pin, so one `.stderr` file serves
 both runners: the trusted lane runs this test, untrusted runs keep
 `cargo test --test ui`.
+
+Building this test also builds the harness binary itself, as a `_validation`
+output rather than a runfile: `ui__test`'s compile-pass module fixtures are
+proved by that compile, so one `bazel test //crates/lash:ui_fixtures` is the
+whole seal, and CI's core test invocation carries it without a second Bazel
+client. The test action's inputs stay the rlib closure; the linked harness is
+never shipped to it.
 """
 
 # buildifier: disable=bzl-visibility
@@ -122,7 +129,10 @@ exec bash "$TEST_SRCDIR/_main/tools/bazel/ui_fixtures_runner.sh" "$@"
             dep_srcs,
         ]),
     )
-    return [DefaultInfo(executable = script, runfiles = runfiles)]
+    return [
+        DefaultInfo(executable = script, runfiles = runfiles),
+        OutputGroupInfo(_validation = ctx.attr.harness[DefaultInfo].files),
+    ]
 
 ui_fixtures_test = rule(
     implementation = _ui_fixtures_test_impl,
