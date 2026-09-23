@@ -70,6 +70,20 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .map_err(effect_store_error)
     }
 
+    async fn discard_reexecuted_row(
+        &self,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        sqlx::query(effect_sql().replay.delete_ungrouped_by_key.sql())
+            .bind(scope_id)
+            .bind(replay_key)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+            .map_err(effect_store_error)
+    }
+
     /// Writes the terminal and, for a grouped child, takes its final-commit
     /// position at the §4 point — in the normative order (N1), in one
     /// transaction.

@@ -852,6 +852,19 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         replay_key: &str,
     ) -> Result<bool, RuntimeEffectControllerError>;
 
+    /// Delete the ungrouped row at `(scope_id, replay_key)`, if there is one.
+    ///
+    /// Issued before every command that replays by re-execution (ADR 0103).
+    /// Such a command writes no row, so any row at its address was left by a
+    /// build that journaled it. Deleting it keeps an `in_progress` leftover
+    /// from a worker that crashed mid-command from holding the scope
+    /// non-quiescent forever. Never touches a grouped row.
+    async fn discard_reexecuted_row(
+        &self,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Result<(), RuntimeEffectControllerError>;
+
     /// Expire an ungrouped pending derivation claim without sealing an error.
     /// Match all five fence columns and the live lease at write time. Retain
     /// the canonical envelope and pending row; a subsequent claim rotates its
@@ -1808,7 +1821,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             .validate()
             .map_err(RuntimeEffectControllerError::from)?;
         if envelope.command.replays_by_reexecution() {
-            return self.reexecute_effect(envelope, local_executor).await;
+            return self.reexecute_effect(scope, envelope, local_executor).await;
         }
         let reconstructed_envelope = envelope.canonical_form()?;
         let replay_trace = local_executor.replay_validation_trace().cloned();
@@ -1929,30 +1942,6 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 },
             }
         }
-    }
-
-    /// Run a command that replays by re-execution (ADR 0103): no claim, no
-    /// row, no lease. The local executor runs on every pass, live or replay,
-    /// exactly as Restate's direct local call does, and the nested effects it
-    /// issues come back through this driver on their own replay keys, so they
-    /// are journaled on the first pass and served from the journal after.
-    ///
-    /// Strict replay mode does not apply: there is no row to find. A group
-    /// member is refused, because the group's envelope-hash fence lives on a
-    /// row this path never writes.
-    async fn reexecute_effect(
-        &self,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<EffectRun, RuntimeEffectControllerError> {
-        super::group::refuse_unhonored_group_membership(
-            envelope.group.as_deref(),
-            "re-executed on replay",
-        )?;
-        local_executor
-            .execute(envelope)
-            .await
-            .map(EffectRun::Terminal)
     }
 
     async fn prepare_effect(
@@ -2387,6 +2376,7 @@ mod groups;
 #[cfg(feature = "testing")]
 mod journal_faults;
 mod lease_renewal;
+mod reexecution;
 #[cfg(feature = "testing")]
 pub use journal_faults::{EffectJournalFaultPoint, EffectJournalFaults};
 

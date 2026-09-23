@@ -43,8 +43,9 @@ deterministically.
   `ExecCode` only.
 - `StoreEffectReplayDriver` answers such a command by calling the local
   executor directly: no claim, no row, no lease, and strict replay mode does not
-  apply because there is no row to find. The "serve the recorded `ExecResponse`
-  and skip the interpreter" path is gone.
+  apply because there is no row to find. Before the call it deletes any
+  ungrouped row already at the command's address (see Upgrade). The "serve the
+  recorded `ExecResponse` and skip the interpreter" path is gone.
 - Restate keeps `ExecCode` as `DirectLocal`. The journal-row driver refuses a
   grouped `ExecCode`: a group child settles through its row, and this path
   writes none.
@@ -61,31 +62,77 @@ Re-execution is only as sound as the cell is deterministic given its journaled
 inputs. The TypeScript dialect ([ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md))
 already enforces this for Restate: `Date.now()`, `new Date()` and
 `Math.random()` lower to journaled operations, and the lowering rejects
-`crypto.randomUUID` and locale- or timezone-dependent `Date` methods. Host tools
-reach the cell only through journaled tool attempts. Interpreter globals are
-ordered maps (`BTreeMap`), so the snapshot does not depend on insertion or hash
-order. The contract is now the same on every host, not a Restate-only
-obligation.
+`crypto.randomUUID` and locale- or timezone-dependent `Date` methods. Host tool call
+*results* reach the cell only through journaled tool attempts. Interpreter
+globals are ordered maps (`BTreeMap`), so the snapshot does not depend on
+insertion or hash order. The contract is now the same on every host, not a
+Restate-only obligation.
 
-One input is not journaled: the wall-clock bound on active VM time. A cell that
-exceeds it live stops at a point the replay does not reproduce exactly. The
-instruction and memory bounds are deterministic. This is the same exposure
-Restate has always had. It is limited to runaway cells, which already fail.
+Three inputs are not journaled, and each can make a re-run differ from the live
+pass:
+
+- **The wall-clock bound on active VM time.** A cell that ran close to the
+  limit live can exceed it on a redrive, which usually runs on a loaded or
+  recovering node, and the reverse can happen too. This affects borderline
+  cells, not only runaway ones. The instruction and memory bounds are
+  deterministic.
+- **The cell's link-time host environment.** The ambient tool surface a cell
+  binds and links against comes from the live registry when the cell re-runs,
+  not from the journal. If a tool source or manifest changes between the crash
+  and the redrive, the re-run can bind differently or fail to link. Its
+  `ExecResponse` then differs from the live one, and the next journaled
+  envelope conflicts: the turn fails closed and cannot recover.
+- **The compiler's call-site identities.** A nested effect's replay key embeds
+  the AST-path node id of its call site. Within one build those keys are
+  stable, so a re-run reaches the same keys in the same order. Across a deploy
+  that changes lowering or AST paths, the keys move: a redrive misses the
+  journal and, outside strict replay, issues those nested LLM and tool calls
+  again. Restate does not share this exposure, because Restate pins an
+  in-flight invocation to its deployment and the SQL hosts have no such pin.
+  Before this ADR the SQL hosts served a completed cell's recorded response,
+  so the window was only a crash mid-cell; it now covers any redrive of a turn
+  whose cells completed before the crash.
+
+Both are follow-up work: FIG-3586 makes a redrive across a compiler change
+refuse rather than re-issue a cell's nested effects, and FIG-3587 covers a
+redriven cell linking against a drifted live tool surface.
 
 ### Upgrade
 
-No persisted shape or journal vocabulary changes. An `exec_code` row written
-before this change stays in the journal until its scope retires, and nothing
-reads it. A pre-cutover in-flight turn redriven by this build re-runs its cell
-over the nested rows it already journaled, which is the recovery this ADR is
-for. The durable-read fixture pins this: its pre-cutover `exec_code` row is
-inert, and replaying the envelope re-runs the executor.
+No persisted shape or journal vocabulary changes. A pre-cutover in-flight turn
+redriven by this build re-runs its cell over the nested rows it already
+journaled, which is the recovery this ADR is for.
+
+An `exec_code` row written by an earlier build is not inert on its own. A
+*completed* one is never served. An *in-progress* one, left by an old-build
+worker that crashed mid-cell, would count against every quiescence read on its
+scope (the queue-drain end, `WhenQuiescent` retirement) forever, because
+nothing claims or finalizes an `ExecCode` row any more. So the re-executed
+command deletes any ungrouped row at its own address before it runs
+(`EffectReplayRowStore::discard_reexecuted_row`). The re-run that would have
+reclaimed the row under the old build is the one that removes it. Rows whose
+turn is never redriven again stay until their scope retires; a scope that is
+never redriven owes no quiescence read. The durable-read fixture pins the
+completed case: its pre-cutover `exec_code` row is never served, and replaying
+the envelope re-runs the executor.
+
+Rollback: an older binary replaying a journal this build wrote finds no
+`exec_code` row. In strict replay that is a missing-row refusal; outside strict
+replay it runs the cell live and journals it.
 
 ## Consequences
 
 - One replay model for code cells across Restate, SQLite and PostgreSQL. Any
   deployment that runs on the shared driver inherits it.
-- A redrive does the cell's local compute again. Nested effects are not re-issued.
+- A redrive does the cell's local compute again. Within one build, nested
+  effects are not re-issued; across a deploy that moves call-site identities
+  they can be (see the determinism contract).
+- Values the cell mints without journaling (an `await_handle` call id, measured
+  durations) are minted again on a re-run, so live stream events from a redrive
+  can carry ids and durations that differ from the live pass. They are not
+  committed state.
+- A running cell reads as quiescent between its nested effects. A stale worker
+  keeps running its cell until its next nested claim or its commit is fenced.
 - On the journal-row hosts, a code cell no longer holds a lease row while it
   runs. Two redrivers of the same turn could run the cell's local compute
   concurrently. Each nested effect is still claimed and fenced one at a time,

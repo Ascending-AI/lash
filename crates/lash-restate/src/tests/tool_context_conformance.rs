@@ -101,8 +101,21 @@ enum ControllerMode {
     Durable,
 }
 
+/// The `llm_query` direct completion's answer, as the provider returns it.
+const LLM_QUERY_ANSWER: &str = r#"{"kind":"value","value":{"answer":"covered"},"error":null}"#;
+
 impl ProductionToolCell {
     async fn new(mode: ControllerMode, tool_name: &str) -> Self {
+        let script = vec![
+            typescript_source_for(tool_name).to_string(),
+            LLM_QUERY_ANSWER.to_string(),
+        ];
+        Self::scripted(mode, tool_name, script).await
+    }
+
+    /// A cell whose provider answers call `n` with `script[n]` and refuses
+    /// any call past the script: a re-issued call on replay panics.
+    async fn scripted(mode: ControllerMode, tool_name: &str, script: Vec<String>) -> Self {
         let context_name = match mode {
             ControllerMode::Local => "local",
             ControllerMode::Durable => "restate-durable",
@@ -139,23 +152,20 @@ impl ProductionToolCell {
         let plugin_factories = vec![rlm_plugin, tool_plugin];
 
         let llm_provider_calls = Arc::new(AtomicUsize::new(0));
-        let source = typescript_source_for(tool_name).to_string();
+        let script = Arc::new(script);
         let provider = lash_core::testing::TestProvider::builder()
             .kind("stub")
             .complete({
                 let llm_provider_calls = Arc::clone(&llm_provider_calls);
                 move |_request| {
                     let llm_provider_calls = Arc::clone(&llm_provider_calls);
-                    let source = source.clone();
+                    let script = Arc::clone(&script);
                     async move {
                         let call = llm_provider_calls.fetch_add(1, Ordering::SeqCst);
-                        let text = match call {
-                            0 => source,
-                            1 => r#"{"kind":"value","value":{"answer":"covered"},"error":null}"#
-                                .to_string(),
-                            other => panic!(
-                                "live+replay must not execute an unjournaled provider call #{other}"
-                            ),
+                        let Some(text) = script.get(call).cloned() else {
+                            panic!(
+                                "live+replay must not execute an unjournaled provider call #{call}"
+                            );
                         };
                         Ok(lash_core::LlmResponse {
                             parts: vec![lash_core::LlmOutputPart::Text {
@@ -379,7 +389,18 @@ impl lash_core::store::RuntimePersistenceDecorator for CrashAtFinalCommit {
 impl ProductionToolCell {
     /// A cell on the SQLite effect host with its session bound, ready to run.
     async fn sqlite(tool_name: &str) -> (Self, Arc<lash_sqlite_store::SqliteEffectHost>) {
-        let mut cell = Self::new(ControllerMode::Local, tool_name).await;
+        let script = vec![
+            typescript_source_for(tool_name).to_string(),
+            LLM_QUERY_ANSWER.to_string(),
+        ];
+        Self::sqlite_scripted(tool_name, script).await
+    }
+
+    async fn sqlite_scripted(
+        tool_name: &str,
+        script: Vec<String>,
+    ) -> (Self, Arc<lash_sqlite_store::SqliteEffectHost>) {
+        let mut cell = Self::scripted(ControllerMode::Local, tool_name, script).await;
         cell.runtime_store
             .admit_and_bind_session(&lash_core::SessionBinding::root(cell.session_id.clone()))
             .await
@@ -437,12 +458,14 @@ impl ProductionToolCell {
 }
 
 /// FIG-3549: a crash between the last journaled effect and the turn-final
-/// commit, then a same-store redrive, commits the live pass's interpreter
-/// state. The redrive re-runs the code cell (ADR 0103); the cell's nested
-/// `llm_query` answers from the journal, so no provider call is re-issued.
-#[tokio::test]
-async fn redrive_after_a_crash_at_final_commit_commits_the_live_execution_state() {
-    let (control, control_host) = ProductionToolCell::sqlite("llm_query").await;
+/// commit, then a same-store redrive in strict replay, commits the live pass's
+/// interpreter state. The redrive re-runs every code cell (ADR 0103); each
+/// cell's nested calls answer from the journal on the same replay keys — a
+/// strict-replay miss would fail the turn — so no provider call is re-issued.
+async fn assert_crash_at_final_commit_redrive_commits_the_live_state(script: Vec<String>) {
+    let provider_calls = script.len();
+    let (control, control_host) =
+        ProductionToolCell::sqlite_scripted("llm_query", script.clone()).await;
     let mut control_runtime = control.runtime_on(Arc::clone(&control.runtime_store)).await;
     let control_turn = control
         .run_once(&mut control_runtime, control_host.as_ref())
@@ -453,10 +476,14 @@ async fn redrive_after_a_crash_at_final_commit_commits_the_live_execution_state(
         lash_core::facade_support::TurnOutcome::Finished(_)
     ));
     drop(control_runtime);
+    assert_eq!(
+        control.llm_provider_calls.load(Ordering::SeqCst),
+        provider_calls
+    );
     let live_head = control.committed_execution_state().await;
-    assert_binds_result_global(live_head.as_ref());
+    assert!(live_head.is_some(), "an RLM turn leaves execution state");
 
-    let (cell, host) = ProductionToolCell::sqlite("llm_query").await;
+    let (cell, host) = ProductionToolCell::sqlite_scripted("llm_query", script).await;
     let crashing: Arc<dyn lash_core::RuntimePersistence> = Arc::new(CrashAtFinalCommit {
         inner: Arc::clone(&cell.runtime_store),
         armed: AtomicBool::new(true),
@@ -481,8 +508,11 @@ async fn redrive_after_a_crash_at_final_commit_commits_the_live_execution_state(
         "the injected crash must stop the turn-final commit"
     );
     drop(crashed);
-    assert_eq!(cell.tool_executions.load(Ordering::SeqCst), 1);
-    assert_eq!(cell.llm_provider_calls.load(Ordering::SeqCst), 2);
+    let tool_executions = cell.tool_executions.load(Ordering::SeqCst);
+    assert_eq!(
+        cell.llm_provider_calls.load(Ordering::SeqCst),
+        provider_calls
+    );
 
     host.start_replay();
     let mut redrive = cell.runtime_on(Arc::clone(&cell.runtime_store)).await;
@@ -500,7 +530,7 @@ async fn redrive_after_a_crash_at_final_commit_commits_the_live_execution_state(
             .await
             .expect("snapshot redriven execution state"),
         live_head,
-        "the redrive re-runs the cell and holds the live interpreter state"
+        "the redrive re-runs the cells and holds the live interpreter state"
     );
     drop(redrive);
     assert_eq!(
@@ -510,12 +540,240 @@ async fn redrive_after_a_crash_at_final_commit_commits_the_live_execution_state(
     );
     assert_eq!(
         cell.tool_executions.load(Ordering::SeqCst),
-        1,
-        "the cell's ToolAttempt replays from the journal"
+        tool_executions,
+        "every ToolAttempt replays from the journal"
+    );
+    assert_eq!(
+        cell.llm_provider_calls.load(Ordering::SeqCst),
+        provider_calls,
+        "the redrive re-issues neither an outer generation nor a nested llm_query call"
+    );
+}
+
+#[tokio::test]
+async fn redrive_after_a_crash_at_final_commit_commits_the_live_execution_state() {
+    Box::pin(assert_crash_at_final_commit_redrive_commits_the_live_state(
+        vec![
+            typescript_source_for("llm_query").to_string(),
+            LLM_QUERY_ANSWER.to_string(),
+        ],
+    ))
+    .await;
+}
+
+/// A loop issuing several nested calls: each iteration's call is keyed by its
+/// call site and per-VM occurrence, so the re-run reaches the same keys in
+/// the same order.
+#[tokio::test]
+async fn redrive_re_runs_a_loop_of_nested_calls_on_stable_keys() {
+    let cell = r#"<typescript>
+let answers = "";
+for (let i = 0; i < 3; i++) {
+  const reply = await llm.query({
+    task: "Return the covered answer",
+    inputs: { answer: "covered" },
+    output: { answer: "str" }
+  });
+  answers = answers + reply.answer;
+}
+finish(answers);
+</typescript>"#;
+    Box::pin(assert_crash_at_final_commit_redrive_commits_the_live_state(
+        vec![
+            cell.to_string(),
+            LLM_QUERY_ANSWER.to_string(),
+            LLM_QUERY_ANSWER.to_string(),
+            LLM_QUERY_ANSWER.to_string(),
+        ],
+    ))
+    .await;
+}
+
+/// Two cells in one turn: the second cell reads the first cell's global, so
+/// the re-run must rebuild the first cell's state before the second runs, and
+/// each cell's nested call keeps its own key.
+#[tokio::test]
+async fn redrive_re_runs_two_cells_of_one_turn_on_stable_keys() {
+    let first = r#"<typescript>
+const first = await llm.query({
+  task: "Return the covered answer",
+  inputs: { answer: "covered" },
+  output: { answer: "str" }
+});
+print(first.answer);
+</typescript>"#;
+    let second = r#"<typescript>
+const second = await llm.query({
+  task: "Return the covered answer again",
+  inputs: { answer: first.answer },
+  output: { answer: "str" }
+});
+finish(second);
+</typescript>"#;
+    Box::pin(assert_crash_at_final_commit_redrive_commits_the_live_state(
+        vec![
+            first.to_string(),
+            LLM_QUERY_ANSWER.to_string(),
+            second.to_string(),
+            LLM_QUERY_ANSWER.to_string(),
+        ],
+    ))
+    .await;
+}
+
+/// Every `(scope_id, replay_key)` of a code cell the journal's rows name.
+/// The cell's own row is gone (ADR 0103), but each turn effect's key is
+/// `{turn prefix}{kind}:{ordinal}`, and the cell's nested rows extend the
+/// cell's key, so a row keyed `{turn prefix}exec_code:{n}:...` names cell `n`.
+fn journaled_exec_code_addresses(effects_db: &std::path::Path) -> Vec<(String, String)> {
+    let connection = rusqlite::Connection::open(effects_db).expect("open the effect journal");
+    let mut statement = connection
+        .prepare("SELECT scope_id, replay_key FROM runtime_effect_replay")
+        .expect("prepare the journal scan");
+    let rows: Vec<(String, String)> = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("scan the journal")
+        .map(|row| row.expect("journal row"))
+        .collect();
+    let turn_prefixes: std::collections::BTreeSet<(String, String)> = rows
+        .iter()
+        .filter_map(|(scope_id, key)| {
+            key.find("sync_execution_environment:")
+                .map(|at| (scope_id.clone(), key[..at].to_string()))
+        })
+        .collect();
+    let mut addresses = std::collections::BTreeSet::new();
+    for (scope_id, prefix) in &turn_prefixes {
+        let cell_prefix = format!("{prefix}exec_code:");
+        for (row_scope, key) in &rows {
+            let Some(rest) = key.strip_prefix(&cell_prefix) else {
+                continue;
+            };
+            if row_scope != scope_id {
+                continue;
+            }
+            let ordinal: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            addresses.insert((scope_id.clone(), format!("{cell_prefix}{ordinal}")));
+        }
+    }
+    addresses.into_iter().collect()
+}
+
+/// Seed the row a pre-ADR-0103 worker leaves when it crashes mid-cell: the
+/// cell's own journal row, claimed and never finalized, under a lease that
+/// has long expired. Nothing in this build claims an `ExecCode` row again.
+fn seed_abandoned_exec_code_row(effects_db: &std::path::Path, scope_id: &str, replay_key: &str) {
+    let connection = rusqlite::Connection::open(effects_db).expect("open the effect journal");
+    connection
+        .execute(
+            "INSERT INTO runtime_effect_replay (
+                 scope_id, session_id, replay_key, envelope_hash, envelope_json, status,
+                 lease_owner_id, lease_token, lease_expires_at_ms, commit_state,
+                 created_at_ms, updated_at_ms
+             ) SELECT scope_id, session_id, ?2, 'pre-cutover-exec-code', envelope_json,
+                      'in_progress', 'crashed-old-build-worker', 'crashed-lease', 1,
+                      'pending', 1, 1
+               FROM runtime_effect_replay WHERE scope_id = ?1 LIMIT 1",
+            rusqlite::params![scope_id, replay_key],
+        )
+        .expect("seed the crashed worker's exec_code row");
+}
+
+async fn drive_drain(
+    runtime: &mut lash_core::facade_support::LashRuntime,
+    host: &dyn EffectHost,
+    drain_scope: &lash_core::ExecutionScope,
+) -> Result<(), lash_core::RuntimeError> {
+    let scope = host
+        .scoped(durable_admission(drain_scope))
+        .expect("scope the drain");
+    runtime
+        .stream_next_queued_work(lash_core::facade_support::TurnOptions::new(
+            tokio_util::sync::CancellationToken::new(),
+            scope,
+        ))
+        .await
+        .map(|_| ())
+}
+
+/// FIG-3549 review F1: an `in_progress` `exec_code` row left by a pre-cutover
+/// worker that crashed mid-cell must not wedge the queue-drain end. The
+/// re-executed cell discards the row at its own address before it runs, so
+/// the drain's scope reads quiescent and the retried drain writes its end.
+#[tokio::test]
+async fn a_pre_cutover_in_progress_cell_row_does_not_wedge_the_drain_end() {
+    let (cell, host) = ProductionToolCell::sqlite("llm_query").await;
+    cell.runtime_store
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+            cell.session_id.clone(),
+            lash_core::TurnInputIngress::NextTurn,
+            replay_test_input(&cell.turn_id),
+        ))
+        .await
+        .expect("seed the drain's turn input");
+    let drain_id = "pre-cutover-cell-drain";
+    let drain_scope = lash_core::ExecutionScope::queue_drain(cell.session_id.clone(), drain_id);
+
+    // The worker dies at the drain run's turn-final commit: the cell and its
+    // nested effects are journaled, and the drain owns no end yet.
+    let crashing: Arc<dyn lash_core::RuntimePersistence> = Arc::new(CrashAtFinalCommit {
+        inner: Arc::clone(&cell.runtime_store),
+        armed: AtomicBool::new(true),
+    });
+    let mut crashed = cell.runtime_on(Arc::clone(&crashing)).await;
+    let _ = drive_drain(&mut crashed, host.as_ref(), &drain_scope).await;
+    drop(crashed);
+    assert!(
+        !lash_core::SessionCommitStore::drain_end_exists(cell.runtime_store.as_ref(), drain_id)
+            .await
+            .expect("read the drain-end receipt"),
+        "the crashed drain has not ended"
+    );
+
+    // What an old build would have left at the same point, had it crashed
+    // mid-cell: the cell's own row, `in_progress` forever.
+    let effects_db = cell._dir.path().join("effects.db");
+    let addresses = journaled_exec_code_addresses(&effects_db);
+    assert!(
+        !addresses.is_empty(),
+        "the crashed run journaled the cell's nested effects"
+    );
+    for (scope_id, replay_key) in &addresses {
+        seed_abandoned_exec_code_row(&effects_db, scope_id, replay_key);
+    }
+    let closing = host
+        .effect_group_closing()
+        .expect("the SQLite host has a closing seam");
+    assert!(
+        !closing
+            .scope_is_quiescent(&drain_scope)
+            .await
+            .expect("read quiescence"),
+        "the seeded row holds the drain scope non-quiescent"
+    );
+
+    // The retried drain re-runs the cell over its journaled nested effects,
+    // discards the leftover row, and ends.
+    let mut retried = cell.runtime_on(Arc::clone(&cell.runtime_store)).await;
+    drive_drain(&mut retried, host.as_ref(), &drain_scope)
+        .await
+        .expect("the retried drain runs");
+    assert!(
+        closing
+            .scope_is_quiescent(&drain_scope)
+            .await
+            .expect("read quiescence"),
+        "the re-executed cell removed the pre-cutover row"
+    );
+    assert!(
+        lash_core::SessionCommitStore::drain_end_exists(cell.runtime_store.as_ref(), drain_id)
+            .await
+            .expect("read the drain-end receipt"),
+        "the retried drain writes its end"
     );
     assert_eq!(
         cell.llm_provider_calls.load(Ordering::SeqCst),
         2,
-        "the redrive re-issues neither the outer generation nor the nested llm_query call"
+        "the retry re-issues no provider call"
     );
 }

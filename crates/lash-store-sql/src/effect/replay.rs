@@ -344,6 +344,17 @@ crate::statements! {
         select_settlement_seq = "SELECT settlement_seq FROM runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2";
 
+        /// Remove the ungrouped row at `?1` / `?2` (scope, replay key).
+        ///
+        /// The re-executed command's cleanup (ADR 0103): such a command writes
+        /// no row, so a row at its address was left by a build that journaled
+        /// it. A completed one is dead weight; an `in_progress` one left by a
+        /// worker that crashed mid-command would hold the scope non-quiescent
+        /// forever, because nothing reclaims or finalizes it any more. Grouped
+        /// rows are never touched: a group child settles through its row.
+        delete_ungrouped_by_key = "DELETE FROM runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key IS NULL";
+
         delete_by_session = "DELETE FROM runtime_effect_replay WHERE session_id = ?1";
 
         delete_by_scope = "DELETE FROM runtime_effect_replay WHERE scope_id = ?1";
