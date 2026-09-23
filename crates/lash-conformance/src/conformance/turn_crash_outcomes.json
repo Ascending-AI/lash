@@ -159,6 +159,17 @@
     "outcome": "The final commit settled the admission and ingress. The successor returns its receipt without repeating the committed turn.",
     "effect_executions_l1": 1
   },
+
+  {
+    "point": {"operation": {"seam": "store", "operation": {"kind": "commit_final_head", "settles_queue": false, "settles_turn_input": false, "releases_lease": false}}, "placement": "boundary"},
+    "outcome": "The final commit settled the admission and ingress; only the drain-end receipt is missing. The successor resumes the settled run and returns its receipt without executing another effect; this drain owns no children, so its replay has no end to write.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": {"operation": {"seam": "store", "operation": {"kind": "commit_final_head", "settles_queue": false, "settles_turn_input": false, "releases_lease": false}}, "placement": "inside_call"},
+    "outcome": "The drain-end receipt committed but its response was lost; the owner still holds the lane. After reclaiming it, the successor resumes the settled run and returns the terminal receipt without executing another effect.",
+    "effect_executions_l1": 1
+  },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "release_session_execution_lease"}}, "placement": "boundary"},
     "outcome": "The terminal receipt is durable but the owner still holds the lane. After reclaiming it, the successor returns the same receipt without executing another effect.",

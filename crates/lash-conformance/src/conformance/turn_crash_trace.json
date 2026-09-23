@@ -18,5 +18,6 @@
   {"seam": "turn_control", "operation": {"kind": "resolve_base"}},
   {"seam": "store", "operation": {"kind": "apply_turn_cancel_effects_and_consume"}},
   {"seam": "store", "operation": {"kind": "pending_queued_run"}},
+  {"seam": "store", "operation": {"kind": "commit_final_head", "settles_queue": false, "settles_turn_input": false, "releases_lease": false}},
   {"seam": "store", "operation": {"kind": "release_session_execution_lease"}}
 ]

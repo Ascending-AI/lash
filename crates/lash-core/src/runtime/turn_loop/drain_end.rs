@@ -182,39 +182,44 @@ impl LashRuntime {
             }
         };
         // The commit's claimed frame must equal the committed graph's nearest
-        // `FrameOpen` ancestor, and the runtime's live frame and leaf may be
-        // ones it minted itself and never committed — a drain whose run never
-        // opened a frame (an empty retry over a graph with no leaf) would
-        // otherwise claim graph facts the store cannot derive. The head meta
-        // already records the committed leaf and the derived frame, so claim
-        // exactly those.
-        match store.load_session_head_meta().await {
-            Ok(meta) => {
-                // A session whose head carries a minted-but-uncommitted frame
-                // (a bound session that never ran a turn) has no `FrameOpen`
-                // the store can derive — claim a frame only when the
-                // committed leaf exists to derive it from, and claim no leaf
-                // the head does not record.
-                let (frame, leaf) = meta
-                    .map(|meta| {
-                        (
-                            meta.current_frame_node_id
-                                .filter(|_| meta.leaf_node_id.is_some()),
-                            meta.leaf_node_id,
-                        )
-                    })
-                    .unwrap_or_default();
-                commit.current_frame_node_id = frame;
-                commit.graph_base_leaf_node_id = leaf;
-            }
-            Err(error) => {
-                tracing::warn!(
-                    session_id = %session_id,
-                    drain_id = %drain_id,
-                    error = %error,
-                    "queue drain end withheld: the session head could not be read",
-                );
-                return;
+        // `FrameOpen` ancestor. After a run (`ran`) this process has just
+        // committed the drain's final head under the lane it still holds, so
+        // the resident graph the builder derived frame and leaf from *is* the
+        // committed one. Without a run here, the resident state may carry a
+        // frame this process minted and never committed — a drain whose run
+        // never opened a frame (an empty retry over a graph with no leaf) would
+        // otherwise claim graph facts the store cannot derive — so the head
+        // meta, which records the committed leaf and the derived frame, is
+        // what the claim takes.
+        if !ran {
+            match store.load_session_head_meta().await {
+                Ok(meta) => {
+                    // A session whose head carries a minted-but-uncommitted frame
+                    // (a bound session that never ran a turn) has no `FrameOpen`
+                    // the store can derive — claim a frame only when the
+                    // committed leaf exists to derive it from, and claim no leaf
+                    // the head does not record.
+                    let (frame, leaf) = meta
+                        .map(|meta| {
+                            (
+                                meta.current_frame_node_id
+                                    .filter(|_| meta.leaf_node_id.is_some()),
+                                meta.leaf_node_id,
+                            )
+                        })
+                        .unwrap_or_default();
+                    commit.current_frame_node_id = frame;
+                    commit.graph_base_leaf_node_id = leaf;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        drain_id = %drain_id,
+                        error = %error,
+                        "queue drain end withheld: the session head could not be read",
+                    );
+                    return;
+                }
             }
         }
         let borrowed = session_execution_lease.borrowed_authority();
