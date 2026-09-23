@@ -892,9 +892,11 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
         candidate: Arc<lash_core::facade_support::ToolChildHost>,
     ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
         let installed = self.tool_children.get_or_init(|| candidate);
-        self.controller
-            .register_group_executors(Arc::clone(installed) as Arc<dyn lash_core::GroupExecutors>)
-            .ok()?;
+        lash_core::RuntimeEffectController::register_group_executors(
+            self.controller.as_ref(),
+            Arc::clone(installed) as Arc<dyn lash_core::GroupExecutors>,
+        )
+        .ok()?;
         Some(Arc::clone(installed))
     }
 }

@@ -520,11 +520,12 @@ fn continue_as_response() -> String {
 /// Admitted on the runtime's own host: a group child opened under a foreign
 /// controller resolves no opener/env on the host the turn runs on (ADR 0099).
 fn turn_scope(runtime: &LashRuntime, turn_id: &TurnId) -> ScopedEffectController<'static> {
-    let session_id = runtime
-        .read_view()
-        .expect("test runtime frame scope resolves")
-        .session_id()
-        .clone();
+    let session_id = lash_core::SessionId::from(
+        runtime
+            .read_view()
+            .expect("test runtime frame scope resolves")
+            .session_id(),
+    );
     lash_core::testing::runtime_helpers::host_turn_scope(&runtime.host.core, &session_id, turn_id)
 }
 

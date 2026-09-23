@@ -742,10 +742,7 @@ macro_rules! effect_host_await_event_tests {
     ($fixture:block) => {
         $crate::effect_host_await_event_tests!(@catalogue $fixture; [
             (effect_host_await_events, "effect-host-await-event"),
-            (
-                completion_routing_pairwise_refusal,
-                "completion-routing-pairwise"
-            ),
+            (completion_routing_pairwise_refusal, "completion-routing-pairwise"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -1973,10 +1970,7 @@ macro_rules! store_effect_group_drain_tests {
     ($fixture:block) => {
         $crate::store_effect_group_drain_tests!(@catalogue $fixture; [
             (store_effect_group_drain_conformance, "store-effect-group-drain"),
-            (
-                store_effect_group_crash_matrix_conformance,
-                "store-effect-group-crash-matrix"
-            ),
+            (store_effect_group_crash_matrix_conformance, "store-effect-group-crash-matrix"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -2000,22 +1994,10 @@ macro_rules! store_effect_group_drain_tests {
 macro_rules! store_effect_group_closing_tests {
     ($fixture:block) => {
         $crate::store_effect_group_closing_tests!(@catalogue $fixture; [
-            (
-                closing_is_recorded_before_any_cancel_is_issued,
-                "group-closing-before-cancel"
-            ),
-            (
-                a_crash_after_drain_resumes_at_outcome_commit,
-                "group-crash-outcome"
-            ),
-            (
-                a_crash_after_accounting_resumes_at_parent_end,
-                "group-crash-parent-end"
-            ),
-            (
-                a_drain_budget_expiry_leaves_closing_recorded,
-                "group-closing-pending"
-            ),
+            (closing_is_recorded_before_any_cancel_is_issued, "group-closing-before-cancel"),
+            (a_crash_after_drain_resumes_at_outcome_commit, "group-crash-outcome"),
+            (a_crash_after_accounting_resumes_at_parent_end, "group-crash-parent-end"),
+            (a_drain_budget_expiry_leaves_closing_recorded, "group-closing-pending"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -2136,26 +2118,14 @@ macro_rules! tool_child_invocation_tests {
     };
     (@catalogue [$($attr:tt)*] $fixture:block) => {
         $crate::tool_child_invocation_tests!(@expand [$($attr)*] $fixture; [
-            (
-                tool_children_run_through_the_invocation_driver,
-                "tool-child-invocation-driver"
-            ),
-            (
-                an_unregistered_opener_leaves_the_child_accepted,
-                "tool-child-unregistered-opener"
-            ),
-            (
-                a_foreign_opener_cannot_drive_another_openers_child,
-                "tool-child-foreign-opener"
-            ),
+            (tool_children_run_through_the_invocation_driver, "tool-child-invocation-driver"),
+            (an_unregistered_opener_leaves_the_child_accepted, "tool-child-unregistered-opener"),
+            (a_foreign_opener_cannot_drive_another_openers_child, "tool-child-foreign-opener"),
             (
                 a_same_name_process_incarnation_is_not_the_recorded_opener,
                 "tool-child-process-incarnation"
             ),
-            (
-                a_crashed_child_replays_its_committed_attempts_facts,
-                "tool-child-attempt-capture"
-            ),
+            (a_crashed_child_replays_its_committed_attempts_facts, "tool-child-attempt-capture"),
             (
                 every_billed_provider_attempt_is_conserved_once_on_its_opener,
                 "tool-child-usage-conservation"
@@ -2164,10 +2134,7 @@ macro_rules! tool_child_invocation_tests {
                 a_committed_childs_final_is_protected_and_its_drain_is_finished,
                 "tool-child-commit-boundary-crash"
             ),
-            (
-                drains_are_admitted_in_recorded_commit_order,
-                "tool-child-commit-order"
-            ),
+            (drains_are_admitted_in_recorded_commit_order, "tool-child-commit-order"),
             (
                 a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink,
                 "tool-child-admission-fence"
@@ -2184,10 +2151,7 @@ macro_rules! tool_child_invocation_tests {
                 a_changed_presentation_environment_on_replay_does_not_change_the_recorded_presentation,
                 "tool-child-presentation-recorded-env"
             ),
-            (
-                the_oracle_and_the_budget_plugin_coexist,
-                "tool-child-presentation-coexistence"
-            ),
+            (the_oracle_and_the_budget_plugin_coexist, "tool-child-presentation-coexistence"),
             (
                 a_retained_full_output_is_a_durable_artifact_not_a_path,
                 "tool-child-presentation-artifact"
