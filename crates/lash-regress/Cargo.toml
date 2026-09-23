@@ -8,7 +8,6 @@ description = "Lash's fuel-metered fork of the regress ECMAScript regular expres
 license = "MIT OR Apache-2.0"
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
 keywords = ["regex", "regexp"]
 edition.workspace = true
 rust-version.workspace = true

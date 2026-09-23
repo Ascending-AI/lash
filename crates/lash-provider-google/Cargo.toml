@@ -6,7 +6,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 description = "Google OAuth (Gemini via Code Assist) provider for lash."

@@ -6,7 +6,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 description = "Standard protocol (native provider tool calls) for the lash agent runtime."
