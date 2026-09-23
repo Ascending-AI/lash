@@ -1525,21 +1525,25 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
 
     // The recovery pass writes the owed end. The worker stays alive while it
     // does: the write runs on its own task, which the worker's shutdown ends.
+    // That task's last write is the ledger row, landing after the receipt in
+    // a separate store, so the wait is for the row: a receipt alone is the
+    // epilogue midway, and the pass itself writes no row for a drain it found
+    // without a receipt.
     let sweep = drain_sweep(&world);
     let _ = sweep
         .drive_pending_processes()
         .await
         .expect("the parent-end pass runs");
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        while !drain_ended(&world.store, &drain_id).await {
+        while drain_ledger_row(&world.registry, &drain_id).await.is_none() {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
     })
     .await
-    .expect("the settled drain's owed end is written once its closing work settles");
+    .expect("the owed end writes the ledger row once the closing work settles");
     assert!(
-        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
-        "the owed end writes the ledger row"
+        drain_ended(&world.store, &drain_id).await,
+        "the owed end's receipt precedes its ledger row"
     );
 
     let _ = sweep
