@@ -788,7 +788,11 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// port from the same database as the manifest that roots them. A pre-78
 /// database has no such table and, under the reject-and-recreate policy, is
 /// refused at open rather than midwifed one.
-pub(crate) const SCHEMA_VERSION: i32 = 78;
+/// Bumped to 79 for FIG-3532: the durable `RuntimeErrorCode` and `TurnOutcome`
+/// vocabularies queued-run terminals persist change (`turn_input_redrive_set_unavailable`
+/// removed, `accepted_turn_input_ceded` and `TurnOutcome::Queued` added). A
+/// pre-79 database is rejected at open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 79;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

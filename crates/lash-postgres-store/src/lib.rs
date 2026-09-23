@@ -458,7 +458,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Rust from the submitted payload, so no DDL arm can backfill them: this is
 // a destructive cutover again. The retained endpoint is 117 and no arm
 // targets 118, so every predecessor is rejected and recreated.
-const SCHEMA_VERSION: i32 = 118;
+// Version 119 (FIG-3532) changes the durable `RuntimeErrorCode` and
+// `TurnOutcome` vocabularies queued-run terminals persist:
+// `turn_input_redrive_set_unavailable` is removed, and
+// `accepted_turn_input_ceded` and `TurnOutcome::Queued` are added. No relation
+// changes. Component-118 catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 119;
 
 #[derive(Clone)]
 pub struct PostgresStorage {
