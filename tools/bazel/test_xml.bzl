@@ -2,8 +2,7 @@
 
 Bazel 9.1 follows every test that leaves `$XML_OUTPUT_FILE` unwritten with a
 second TestRunner spawn, `generate-xml.sh`. That spawn carries the test's own
-run request (`test.cpu_count` / `test.memory_kb`, 4-8 CPU and 4-8 GiB) for
-about 0.1 s of work and queues for a pool slot a second time. Bazel has no
+run request (`test.cpu_count` / `test.memory_kb`) for about 0.1 s of work and queues for a pool slot a second time. Bazel has no
 option to turn it off or resize it: the report must already exist when the
 test spawn returns.
 
