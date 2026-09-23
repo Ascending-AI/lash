@@ -6,6 +6,18 @@ Accepted. Ratified on FIG-1661; the four sections of the decision are the four
 rulings recorded there. Implemented separately by FIG-1671, which added
 section 5 — how an accepted input is settled by the turn that drove it.
 
+Strengthened 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) makes the Pending
+Turn Input row class the `input` kind of one Session Ingress item, beside
+process wakes and session commands, so "sole ingress" is literal: host, process
+and command admissions share one table, sequence and lifecycle (commands in a
+class-level lane applied at turn boundaries), and no commit writes ingress rows
+(the frame follow-on is a session-head fact). A row's delivery is immutable
+intent: final commits no longer re-defer addressed input, and an ended turn's
+items are next-turn items by rule. Sections 5 and 6 stand. Section 5(b)'s
+exemption does not let a lane-less turn commit ahead of a pending follow-on;
+such a turn backs off per section 5(d) (ADR 0101 §3). References below to ADR
+0010 read as ADR 0101.
+
 ## Context
 
 Lash has two ways to start a turn, and they disagree about what durably exists.

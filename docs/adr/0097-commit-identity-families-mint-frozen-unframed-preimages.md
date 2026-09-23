@@ -1,5 +1,12 @@
 # Commit-identity families mint frozen unframed preimages
 
+Amended 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) changes the
+`lash.intent` typed payload at its reject-and-recreate cutover. The two
+completed-claim lists become one, `enqueued_queue_batches` is removed, and the
+pending follow-on (a session-head field) takes its place; the config carries
+`config_revision`. The serializer, the unframed grammar and the domain label are
+unchanged, as in the append-message generation 5 cutover below.
+
 Lash has two coordinated durable-identity registries. `BLAKE3_DOMAINS`
 (`lash-sansio/core_support.rs`) reserves the `lash-*/vN` hash labels that
 `Blake3DomainHasher` mixes into every durable digest; it is append-only and

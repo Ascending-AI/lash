@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)
+(FIG-3540, 2026-09-23). See "What 0101 kept" at the end of this ADR.
 
 ## Context
 
@@ -25,3 +26,20 @@ Pending Turn Input is runtime admission evidence for submitted user `TurnInput`.
 ## Consequences
 
 Stores update pending-input rows to `Cancelled` or `Completed` instead of deleting them. Claim paths only claim pending states. Bulk and suffix cancellation must be atomic per store call because each result is evidence about one admission record at one point in runtime order. `vacuum()` is the bounded retention surface for terminal admission evidence and reports the removed tombstone count.
+
+## What 0101 kept
+
+ADR 0101 overturns this ADR's first rule: pending turn input *is* queued work.
+Host input, process wakes and session commands are kinds of one session ingress
+item in one table with one sequence; commands form a class-level lane applied
+at turn boundaries. What this ADR established for input now holds
+for every kind: the immutable source key (compared through a submission digest
+written once at admission), typed cancel outcomes, tombstones until `vacuum()`,
+`held` as a read projection rather than a state, suffix cancellation in
+`enqueue_seq` order, and no submission journal.
+
+0101 also tightens one rule here. The submitted ingress is now immutable: a
+row's turn addressing is never rewritten, the re-defer of active-turn input to
+the next turn on every final commit and in orphan repair is deleted, and an
+ended turn's items are next-turn items by rule. The replay comparison therefore
+always sees the submitted delivery.
