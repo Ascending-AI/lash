@@ -445,6 +445,8 @@ class BazelTestContractTests(unittest.TestCase):
         )["run"]
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("test --cache_test_results=yes", bazelrc)
+        # Every test writes its own JUnit report (tools/bazel/test_xml.bzl).
+        self.assertIn("test --run_under=//tools/bazel:test_xml_runner", bazelrc)
         self.assertIn("--remote_local_fallback=false", flags)
         self.assertIn("--cache_test_results=yes --test_output=errors", bazel_command)
         self.assertIn("${BAZEL_SHARED_CACHE_FLAGS}", bazel_command)

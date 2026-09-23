@@ -1,5 +1,8 @@
+load(":test_xml.bzl", "test_xml_runner")
+
 exports_files([
     "generate_build_files.py",
+    "junit_xml.py",
     "lash_rust.bzl",
     "target-inventory.json",
     "test_batch_runner.sh",
@@ -21,3 +24,11 @@ filegroup(
 exports_files(["patches/rules-rs-reachable-features.patch"])
 
 exports_files(["patches/rules-swift-no-toolchain-registration.patch"])
+
+# The `--run_under` prefix of every test action (`.bazelrc`): the test writes
+# its own JUnit report, so Bazel never schedules a `generate-xml.sh` spawn.
+test_xml_runner(
+    name = "test_xml_runner",
+    src = "test_xml_runner.sh",
+    data = ["junit_xml.py"],
+)
