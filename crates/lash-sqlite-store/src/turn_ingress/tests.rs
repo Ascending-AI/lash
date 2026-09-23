@@ -257,7 +257,7 @@ fn the_multi_batch_item_read_seeks_its_batch() {
 /// them.
 mod byte_identity {
     use super::{catalog, turn_ingress_sql};
-    use lash_core::store_backend_support as vocabulary;
+    use lash_core_execution::store_backend_support as vocabulary;
 
     #[test]
     fn a_state_token_renders_to_the_predicate_its_generator_spells() {
@@ -305,20 +305,20 @@ mod byte_identity {
             (
                 &sql.pending_inputs_sqlite
                     .claim_candidates_active_turn_after_work,
-                lash_core::CheckpointKind::AfterWork,
+                lash_core_execution::CheckpointKind::AfterWork,
             ),
             (
                 &sql.pending_inputs_sqlite
                     .claim_candidates_active_turn_before_completion,
-                lash_core::CheckpointKind::BeforeCompletion,
+                lash_core_execution::CheckpointKind::BeforeCompletion,
             ),
             (
                 &sql.family_sqlite.checkpoint_work_pending_after_work,
-                lash_core::CheckpointKind::AfterWork,
+                lash_core_execution::CheckpointKind::AfterWork,
             ),
             (
                 &sql.family_sqlite.checkpoint_work_pending_before_completion,
-                lash_core::CheckpointKind::BeforeCompletion,
+                lash_core_execution::CheckpointKind::BeforeCompletion,
             ),
         ] {
             let admitted = vocabulary::admitted_min_boundary_sql(expression, checkpoint);

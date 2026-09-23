@@ -10,8 +10,8 @@
 use super::*;
 use crate::postgres_test_support;
 
-use lash_core::ChildDrainOutcome;
-use lash_core::facade_support::effect_replay_driver::{
+use lash_core_execution::ChildDrainOutcome;
+use lash_core_execution::facade_support::effect_replay_driver::{
     EffectClaimObservation, EffectCommitState, EffectGroupChildCommitOutcome,
     EffectGroupChildCommitRequest, EffectGroupLifecycle, EffectGroupLifecyclePhase,
     MintingEffectRef,
@@ -28,7 +28,7 @@ fn stored_effect_corruption_is_non_retryable() {
     );
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::PostgresEffectReplayStore
+        lash_core_execution::RuntimeErrorCode::PostgresEffectReplayStore
     );
     assert!(!error.code.is_retryable());
 }
@@ -114,11 +114,12 @@ impl GroupFixture {
             group_key: self.group_key.clone(),
             scope_id: self.scope_id.clone(),
             session_id: Some(self.session_id.clone()),
-            wake: lash_core::GroupWakePolicy::All,
-            loser_disposition: lash_core::LoserPolicy::RunToCompletion,
+            wake: lash_core_execution::GroupWakePolicy::All,
+            loser_disposition: lash_core_execution::LoserPolicy::RunToCompletion,
             expected_children: 2,
             created_at_ms: 1_000,
-            lifecycle: lash_core::runtime::effect_replay_driver::EffectGroupLifecycle::Live,
+            lifecycle:
+                lash_core_execution::runtime::effect_replay_driver::EffectGroupLifecycle::Live,
         }
     }
 
@@ -646,7 +647,7 @@ async fn retirement_removes_a_group_and_its_children_together() {
             &fixture.group_key,
             &[EffectGroupLifecyclePhase::Live],
             &EffectGroupLifecycle::Settled {
-                disposition: lash_core::LoserPolicy::RunToCompletion,
+                disposition: lash_core_execution::LoserPolicy::RunToCompletion,
             },
         )
         .await
@@ -654,7 +655,7 @@ async fn retirement_removes_a_group_and_its_children_together() {
 
     let removed = fixture
         .store
-        .retire_journal(&lash_core::EffectJournalRetirement::Session {
+        .retire_journal(&lash_core_execution::EffectJournalRetirement::Session {
             session_id: fixture.session_id.clone(),
         })
         .await
@@ -847,7 +848,7 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
 
     let mut shrunk = recorded.clone();
     shrunk.expected_children = 1;
-    shrunk.loser_disposition = lash_core::LoserPolicy::Cancel;
+    shrunk.loser_disposition = lash_core_execution::LoserPolicy::Cancel;
     shrunk.created_at_ms = 9_999;
     let reopened = fixture
         .store
@@ -1162,7 +1163,7 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
     let drain = std::sync::Arc::new(build_effect_replay_driver(
         &fixture.storage,
         PostgresEffectReplayOptions::default(),
-        std::sync::Arc::new(lash_core::facade_support::SystemClock),
+        std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
     ))
     .into_group_drain();
     let report = drain

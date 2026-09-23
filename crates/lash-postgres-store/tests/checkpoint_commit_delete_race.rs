@@ -5,7 +5,7 @@
 use lash_sansio::SessionId;
 use std::time::Duration;
 
-use lash_core::{
+use lash_core_execution::{
     HydratedCheckpointComponent, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
 };
@@ -259,6 +259,6 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     }
 }

@@ -210,16 +210,19 @@ impl FenceLocations {
 
     /// The schema a fence for `scope` is written into: the registry's file
     /// for a process scope when a registry is bound, the journal otherwise.
-    pub(crate) fn fence_schema_for(self, scope: &lash_core::ExecutionScope) -> Schema {
+    pub(crate) fn fence_schema_for(self, scope: &lash_core_execution::ExecutionScope) -> Schema {
         match (scope, self.registry) {
-            (lash_core::ExecutionScope::Process { .. }, Some(registry)) => registry,
+            (lash_core_execution::ExecutionScope::Process { .. }, Some(registry)) => registry,
             _ => self.journal,
         }
     }
 
     /// Whether the fence for `scope` is written outside the journal file, so
     /// its insert commits on its own ahead of the journal purge.
-    pub(crate) fn fence_is_in_registry_file(self, scope: &lash_core::ExecutionScope) -> bool {
+    pub(crate) fn fence_is_in_registry_file(
+        self,
+        scope: &lash_core_execution::ExecutionScope,
+    ) -> bool {
         self.fence_schema_for(scope) != self.journal
     }
 
@@ -399,8 +402,8 @@ fn lift_journal_fences_of_registered_processes(
     };
     let mut lifted = 0;
     for scope_id in fenced {
-        let Some(lash_core::ExecutionScope::Process { process_id }) =
-            lash_core::ExecutionScope::from_journal_key(&scope_id)
+        let Some(lash_core_execution::ExecutionScope::Process { process_id }) =
+            lash_core_execution::ExecutionScope::from_journal_key(&scope_id)
         else {
             continue;
         };

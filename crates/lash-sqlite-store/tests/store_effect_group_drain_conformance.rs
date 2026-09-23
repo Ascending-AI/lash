@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_conformance::{DrainWorld, DrainWorldFactory, DrainWorldSpec};
-use lash_core::EffectHost;
+use lash_core_execution::EffectHost;
 use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
 
 /// A world over one database file.
@@ -29,11 +29,11 @@ use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
 async fn world(path: PathBuf, spec: DrainWorldSpec) -> DrainWorld {
     let ttl = Duration::from_millis(spec.lease_ttl_ms);
     let options = SqliteEffectReplayOptions {
-        lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
+        lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
             .expect("the suite asks for a ttl at least three renew intervals wide"),
         drain_budget: spec
             .drain_budget
-            .map(lash_core::EffectGroupDrainBudget::new)
+            .map(lash_core_execution::EffectGroupDrainBudget::new)
             .unwrap_or_default(),
     };
     let host = SqliteEffectHost::open_with_options(&path, options)

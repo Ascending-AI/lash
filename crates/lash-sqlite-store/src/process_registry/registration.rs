@@ -1,18 +1,22 @@
 use super::*;
 
 #[async_trait::async_trait]
-impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
+impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
     async fn register_process_reporting_disposition(
         &self,
         registration: ProcessRegistration,
         observers: &[SessionId],
-    ) -> Result<lash_core::ProcessRegistrationOutcome, lash_core::PluginError> {
+    ) -> Result<lash_core_execution::ProcessRegistrationOutcome, lash_core_execution::PluginError>
+    {
         let registration = prepare_process_registration(registration)?;
         let mut observers = observers.to_vec();
         observers.sort();
         observers.dedup();
         let registration_fingerprint =
-            lash_core::runtime::process_registration_fingerprint(&registration, &observers);
+            lash_core_execution::runtime::process_registration_fingerprint(
+                &registration,
+                &observers,
+            );
         let wake_session_id = registration.wake_session_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
@@ -22,9 +26,11 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                 Ok(tx_outcome((|| {
                     if let Some(existing) = Self::load_process_conn(tx, &registration.id)? {
                         if existing.registration_fingerprint == registration_fingerprint {
-                            return Ok(lash_core::ProcessRegistrationOutcome::existing(existing));
+                            return Ok(lash_core_execution::ProcessRegistrationOutcome::existing(
+                                existing,
+                            ));
                         }
-                        return Err(lash_core::durable_identity_conflict(format!(
+                        return Err(lash_core_execution::durable_identity_conflict(format!(
                             "process `{}` registration fingerprint conflict: existing {}, new {}",
                             registration.id,
                             existing.registration_fingerprint,
@@ -34,11 +40,15 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                     // Late-registration fencing: a `Cancel` child whose parent
                     // scope already has a ledger row can never be swept, so it
                     // is refused here rather than left to outlive its parent.
-                    if registration.lifecycle.on_parent_end == lash_core::OnParentEnd::Cancel
-                        && !matches!(registration.lifecycle.parent, lash_core::ParentScope::Host)
+                    if registration.lifecycle.on_parent_end
+                        == lash_core_execution::OnParentEnd::Cancel
+                        && !matches!(
+                            registration.lifecycle.parent,
+                            lash_core_execution::ParentScope::Host
+                        )
                         && super::parent_end::plan_exists_conn(tx, &registration.lifecycle.parent)?
                     {
-                        return Err(lash_core::PluginError::ParentEnded {
+                        return Err(lash_core_execution::PluginError::ParentEnded {
                             process_id: registration.id.clone(),
                             parent: registration.lifecycle.parent.clone(),
                         });
@@ -111,7 +121,9 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
                             wake_delivery_config,
                         )?;
                     }
-                    Ok(lash_core::ProcessRegistrationOutcome::created(record))
+                    Ok(lash_core_execution::ProcessRegistrationOutcome::created(
+                        record,
+                    ))
                 })()))
             })
             .await
@@ -126,10 +138,10 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
         Ok(outcome)
     }
 
-    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
         self.scope_fence_hosts.bind(
             effect_host,
-            lash_core::ProcessRegistryBinding {
+            lash_core_execution::ProcessRegistryBinding {
                 fence_database: self.path.clone(),
                 registrations: Arc::new(support::SqliteRegistrationProbe {
                     conn: self.conn.clone(),
@@ -142,7 +154,7 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         external_ref: ProcessExternalRef,
-    ) -> Result<ProcessRecord, lash_core::PluginError> {
+    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
@@ -151,7 +163,7 @@ impl lash_core::ProcessRegistrar for SqliteProcessRegistry {
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
-                    match lash_core::runtime::prepare_process_transition(
+                    match lash_core_execution::runtime::prepare_process_transition(
                         &record,
                         ProcessTransition::SetExternalRef(external_ref),
                     )? {

@@ -11,7 +11,7 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
-use lash_core::{StorePreflight, StoreSchemaOutcome, StoreSchemaVerdict};
+use lash_core_execution::{StorePreflight, StoreSchemaOutcome, StoreSchemaVerdict};
 use lash_postgres_store::{PostgresStorePreflight, SchemaCheck};
 
 #[allow(dead_code)]

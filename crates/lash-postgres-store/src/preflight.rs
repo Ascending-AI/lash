@@ -28,7 +28,7 @@
 //! cannot name the target is a smaller loss than one that leaks a password.
 
 use async_trait::async_trait;
-use lash_core::{
+use lash_core_execution::{
     DurableScan, DurableScanPage, StoreBackend, StoreError, StorePreflight, StoreSchemaDatabase,
     StoreSchemaStatus, StoreSchemaVerdict,
 };

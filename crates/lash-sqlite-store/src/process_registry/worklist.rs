@@ -4,7 +4,7 @@ const CURSOR_BACKEND: &str = "sqlite";
 
 pub(super) async fn count_non_terminal_processes(
     registry: &SqliteProcessRegistry,
-) -> Result<usize, lash_core::PluginError> {
+) -> Result<usize, lash_core_execution::PluginError> {
     registry
         .conn
         .call(|conn| {
@@ -17,7 +17,7 @@ pub(super) async fn count_non_terminal_processes(
                     )
                     .map_err(process_sqlite_error)?;
                 usize::try_from(count).map_err(|_| {
-                    lash_core::PluginError::Session(format!(
+                    lash_core_execution::PluginError::Session(format!(
                         "SQLite non-terminal process count {count} does not fit usize"
                     ))
                 })
@@ -29,7 +29,7 @@ pub(super) async fn count_non_terminal_processes(
 
 pub(super) async fn collect_non_terminal_records(
     registry: &SqliteProcessRegistry,
-) -> Result<Vec<ProcessRecord>, lash_core::PluginError> {
+) -> Result<Vec<ProcessRecord>, lash_core_execution::PluginError> {
     registry
         .conn
         .call(|conn| {
@@ -55,13 +55,13 @@ pub(super) async fn collect_non_terminal_records(
 pub(super) async fn list_non_terminal_page(
     registry: &SqliteProcessRegistry,
     limit: std::num::NonZeroUsize,
-    continuation: Option<lash_core::ProcessWorklistCursor>,
-) -> Result<lash_core::ProcessWorklistPage, lash_core::PluginError> {
+    continuation: Option<lash_core_execution::ProcessWorklistCursor>,
+) -> Result<lash_core_execution::ProcessWorklistPage, lash_core_execution::PluginError> {
     if let Some(cursor) = continuation.as_ref()
         && cursor.backend() != CURSOR_BACKEND
     {
         return Err(
-            lash_core::PluginError::ProcessWorklistCursorBackendMismatch {
+            lash_core_execution::PluginError::ProcessWorklistCursorBackendMismatch {
                 expected: CURSOR_BACKEND.to_string(),
                 actual: cursor.backend().to_string(),
             },
@@ -86,7 +86,7 @@ pub(super) async fn list_non_terminal_page(
                     {
                         Some(process_id) => process_id,
                         None => {
-                            return Ok(lash_core::ProcessWorklistPage {
+                            return Ok(lash_core_execution::ProcessWorklistPage {
                                 records: Vec::new(),
                                 continuation: None,
                             });
@@ -123,13 +123,13 @@ pub(super) async fn list_non_terminal_page(
                     reason = "`has_more` is only true when `records` held more than `limit` rows, so the truncated page is non-empty"
                 )]
                 let continuation = has_more.then(|| {
-                    lash_core::ProcessWorklistCursor::new(
+                    lash_core_execution::ProcessWorklistCursor::new(
                         CURSOR_BACKEND,
                         records.last().expect("non-empty bounded page").id.clone(),
                         through_process_id,
                     )
                 });
-                Ok(lash_core::ProcessWorklistPage {
+                Ok(lash_core_execution::ProcessWorklistPage {
                     records,
                     continuation,
                 })

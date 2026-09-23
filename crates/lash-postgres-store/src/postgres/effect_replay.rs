@@ -20,8 +20,8 @@ use crate::*;
 use lash_sansio::SessionId;
 use sha2::{Digest, Sha256};
 
-use lash_core::facade_support::effect_replay_driver;
-use lash_core::facade_support::effect_replay_driver::{
+use lash_core_execution::facade_support::effect_replay_driver;
+use lash_core_execution::facade_support::effect_replay_driver::{
     AcceptedGroupChild, CompletionKeys, EffectCancelOutcome, EffectCancelRequest,
     EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectCommitState,
     EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
@@ -33,7 +33,7 @@ use lash_core::facade_support::effect_replay_driver::{
     decide_effect_claim,
 };
 
-use lash_core::{GroupExecutors, StoreEffectGroupClosing, StoreEffectGroupDrain};
+use lash_core_execution::{GroupExecutors, StoreEffectGroupClosing, StoreEffectGroupDrain};
 
 use crate::await_event::{
     PostgresAwaitEventBackend, lock_scope, postgres_await_events, scope_is_retired, wait_sql,
@@ -313,12 +313,12 @@ pub struct PostgresEffectReplayOptions {
     /// Effect-replay lease timing capability. Hosts share the same
     /// [`LeaseTimings`] they configure on the runtime so effect leases expire
     /// on the same failover window as session and process leases.
-    pub lease_timings: lash_core::facade_support::LeaseTimings,
+    pub lease_timings: lash_core_execution::facade_support::LeaseTimings,
     /// How long a group's finalization waits on a cancel-decided child's
     /// attempt body after the decision commits (ADR 0099 §7). Construction-
     /// level like `lease_timings`: the bound is operational, never semantic —
     /// it changes how long the finalizer waits, never what it commits.
-    pub drain_budget: lash_core::EffectGroupDrainBudget,
+    pub drain_budget: lash_core_execution::EffectGroupDrainBudget,
 }
 
 #[derive(Clone)]
@@ -349,7 +349,7 @@ impl effect_replay_driver::StoreReplayAdapter for PostgresEffectHost {
     }
 }
 
-lash_core::impl_store_replay_await_event_resolver!(impl lash_core::AwaitEventResolver for PostgresEffectHost);
+lash_core_execution::impl_store_replay_await_event_resolver!(impl lash_core_execution::AwaitEventResolver for PostgresEffectHost);
 
 #[async_trait::async_trait]
 impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
@@ -365,13 +365,13 @@ impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
         let scope_id = scope.journal_identity()?.key().to_string();
         let scope_json = serde_json::to_string(scope).map_err(|error| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                lash_core_execution::RuntimeErrorCode::RecordEncodingFailed,
                 error.to_string(),
             )
         })?;
         let retirement_error = |error: sqlx::Error| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
                 error.to_string(),
             )
         };
@@ -387,7 +387,7 @@ impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
         if retired {
             tx.rollback().await.map_err(retirement_error)?;
             return Err(RuntimeError::new(
-                lash_core::RuntimeErrorCode::EffectScopeRetired,
+                lash_core_execution::RuntimeErrorCode::EffectScopeRetired,
                 format!(
                     "effect scope `{scope_id}` has been retired and cannot admit a cancellation-closure participant"
                 ),
@@ -416,7 +416,7 @@ impl effect_replay_driver::StoreReplayHost for PostgresEffectHost {
         let scope_id = scope.journal_identity()?.key().to_string();
         let retirement_error = |error: sqlx::Error| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
                 error.to_string(),
             )
         };
@@ -450,7 +450,7 @@ impl effect_replay_driver::StoreReplayAdapter for PostgresRuntimeEffectControlle
     }
 }
 
-lash_core::impl_store_replay_await_event_resolver!(impl lash_core::AwaitEventResolver for PostgresRuntimeEffectController);
+lash_core_execution::impl_store_replay_await_event_resolver!(impl lash_core_execution::AwaitEventResolver for PostgresRuntimeEffectController);
 
 impl effect_replay_driver::StoreReplayController for PostgresRuntimeEffectController {
     fn execution_scope(&self) -> &ExecutionScope {
@@ -467,14 +467,14 @@ impl PostgresEffectHost {
         Self::with_options_and_clock(
             storage,
             options,
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
         )
     }
 
     pub fn with_options_and_clock(
         storage: &PostgresStorage,
         options: PostgresEffectReplayOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> Self {
         Self {
             inner: Arc::new(build_effect_replay_driver(storage, options, clock)),
@@ -546,7 +546,7 @@ impl PostgresRuntimeEffectController {
             storage,
             scope,
             options,
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
         )
     }
 
@@ -556,7 +556,7 @@ impl PostgresRuntimeEffectController {
         storage: &PostgresStorage,
         scope: ExecutionScope,
         options: PostgresEffectReplayOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> Self {
         Self {
             inner: Arc::new(build_effect_replay_driver(storage, options, clock)),
@@ -584,7 +584,7 @@ impl PostgresRuntimeEffectController {
 fn build_effect_replay_driver(
     storage: &PostgresStorage,
     options: PostgresEffectReplayOptions,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
 ) -> PostgresEffectReplay {
     // The driver's clock only sleeps: `Sleep` effect due times, busy-retry
     // backoff, and the lease renewal interval. Every lease stamp and comparison

@@ -5,39 +5,39 @@ impl QueuedWorkStore for Store {
     async fn begin_or_resume_queued_run(
         &self,
         fence: &SessionExecutionLeaseAuthority,
-        request: lash_core::store::BeginQueuedRun,
-    ) -> Result<lash_core::store::QueuedRunAdmission, StoreError> {
+        request: lash_core_execution::store::BeginQueuedRun,
+    ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
         self.begin_run(fence, request).await
     }
     async fn select_queued_run(
         &self,
         fence: &SessionExecutionLeaseAuthority,
-        scope: &lash_core::ExecutionScope,
+        scope: &lash_core_execution::ExecutionScope,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
-        configuration: &lash_core::PersistedSessionConfig,
+        configuration: &lash_core_execution::PersistedSessionConfig,
         policy: QueuedWorkClaimPolicy,
-    ) -> Result<lash_core::store::SelectedQueuedRun, StoreError> {
+    ) -> Result<lash_core_execution::store::SelectedQueuedRun, StoreError> {
         self.select_run(fence, scope, owner, max_inputs, configuration, policy)
             .await
     }
     async fn pending_queued_run(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<lash_core::store::QueuedRunAdmission>, StoreError> {
+    ) -> Result<Option<lash_core_execution::store::QueuedRunAdmission>, StoreError> {
         self.pending_run(session_id).await
     }
     async fn queued_run(
         &self,
-        scope: &lash_core::ExecutionScope,
-    ) -> Result<Option<lash_core::store::QueuedRunAdmission>, StoreError> {
+        scope: &lash_core_execution::ExecutionScope,
+    ) -> Result<Option<lash_core_execution::store::QueuedRunAdmission>, StoreError> {
         self.run_by_scope(scope).await
     }
     async fn settle_queued_run(
         &self,
         fence: &SessionExecutionLeaseAuthority,
-        settlement: lash_core::store::QueuedRunCommit,
-    ) -> Result<lash_core::store::QueuedRunAdmission, StoreError> {
+        settlement: lash_core_execution::store::QueuedRunCommit,
+    ) -> Result<lash_core_execution::store::QueuedRunAdmission, StoreError> {
         self.settle_run(fence, settlement).await
     }
 
@@ -250,11 +250,17 @@ impl QueuedWorkStore for Store {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &lash_core::TurnId,
-        checkpoint: lash_core::CheckpointKind,
+        turn_id: &lash_core_execution::TurnId,
+        checkpoint: lash_core_execution::CheckpointKind,
         max_inputs: usize,
         policy: QueuedWorkClaimPolicy,
-    ) -> Result<(Option<lash_core::TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
+    ) -> Result<
+        (
+            Option<lash_core_execution::TurnInputClaim>,
+            Option<QueuedWorkClaim>,
+        ),
+        StoreError,
+    > {
         #[cfg(test)]
         self.checkpoint_probe_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -284,7 +290,10 @@ impl QueuedWorkStore for Store {
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<
-                    TxOutcome<(Option<lash_core::TurnInputClaim>, Option<QueuedWorkClaim>)>,
+                    TxOutcome<(
+                        Option<lash_core_execution::TurnInputClaim>,
+                        Option<QueuedWorkClaim>,
+                    )>,
                     StoreError,
                 > = (|| {
                     ensure_session_execution_lease_conn(
@@ -300,7 +309,7 @@ impl QueuedWorkStore for Store {
                         &session_execution_lease,
                         &owner,
                         max_inputs,
-                        lash_core::TurnInputClaimMode::ActiveTurn {
+                        lash_core_execution::TurnInputClaimMode::ActiveTurn {
                             turn_id: turn_id.clone(),
                             checkpoint,
                         },
@@ -350,7 +359,7 @@ impl QueuedWorkStore for Store {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         boundary: QueuedWorkClaimBoundary,
-        batch_ids: &[lash_core::BatchId],
+        batch_ids: &[lash_core_execution::BatchId],
         policy: QueuedWorkClaimPolicy,
     ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
         if batch_ids.is_empty() {
@@ -388,11 +397,13 @@ impl QueuedWorkStore for Store {
         let claim_id = claim.claim_id.clone();
         let lease_token = claim.lease_token.clone();
         let restore_claim_id =
-            lash_core::store_backend_support::queued_work_abandon_restore_claim_id(claim)
+            lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_id(claim)
                 .map(str::to_string);
         let restore_claim_token =
-            lash_core::store_backend_support::queued_work_abandon_restore_claim_token(claim)
-                .map(str::to_string);
+            lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_token(
+                claim,
+            )
+            .map(str::to_string);
         self.conn
             .write(move |tx| {
                 tx.execute(
@@ -435,10 +446,10 @@ impl QueuedWorkStore for Store {
                             claim.session_id.as_str(),
                             claim.claim_id.as_str(),
                             claim.lease_token,
-                            lash_core::store_backend_support::queued_work_abandon_restore_claim_id(
+                            lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_id(
                                 &claim,
                             ),
-                            lash_core::store_backend_support::queued_work_abandon_restore_claim_token(
+                            lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_token(
                                 &claim,
                             ),
                         ],
@@ -489,7 +500,9 @@ impl QueuedWorkStore for Store {
                     // fence lands with the removal, or a redelivery of the
                     // withdrawn wake would be admitted again (FIG-3545).
                     if let Some(wake) =
-                        lash_core::store::claim_plan::TerminalProcessWake::of_batch(&batch)
+                        lash_core_execution::store::claim_plan::TerminalProcessWake::of_batch(
+                            &batch,
+                        )
                     {
                         crate::queued_work::raise_wake_redelivery_fence_conn(
                             tx,
@@ -519,10 +532,11 @@ impl QueuedWorkStore for Store {
         batch_id: &str,
     ) -> Result<bool, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
-        let marker = lash_core::store_backend_support::session_command_batch_completion_key(
-            &session_id,
-            batch_id,
-        )?;
+        let marker =
+            lash_core_execution::store_backend_support::session_command_batch_completion_key(
+                &session_id,
+                batch_id,
+            )?;
         self.conn
             .call(move |conn| {
                 conn.query_row(
@@ -583,58 +597,51 @@ impl QueuedWorkStore for Store {
     async fn pending_session_work_ordering(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
+    ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let now = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {
-                let outcome: Result<lash_core::store::PendingSessionWorkOrdering, StoreError> =
-                    (|| {
-                        let (command_at, command_seq, input_at, input_seq): (
-                            Option<i64>,
-                            Option<i64>,
-                            Option<i64>,
-                            Option<i64>,
-                        ) = conn
-                            .query_row(
-                                crate::turn_ingress::turn_ingress_sql()
-                                    .family
-                                    .pending_session_work_ordering
-                                    .sql(),
-                                params![
-                                    session_id.as_str(),
-                                    now as i64,
-                                    QueuedWorkKind::Control.as_str()
-                                ],
-                                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-                            )
-                            .map_err(sqlite_error)?;
-                        let ordering_key =
-                            |kind: &'static str, at: Option<i64>, seq: Option<i64>| {
-                                at.zip(seq)
-                                    .map(|(at, seq)| {
-                                        Ok(lash_core::store::PendingWorkOrderingKey {
-                                            enqueued_at_ms: u64_from_sql(
-                                                kind,
-                                                "enqueued_at_ms",
-                                                at,
-                                            )
-                                            .map_err(sqlite_error)?,
-                                            enqueue_seq: u64_from_sql(kind, "enqueue_seq", seq)
-                                                .map_err(sqlite_error)?,
-                                        })
-                                    })
-                                    .transpose()
-                            };
-                        Ok(lash_core::store::PendingSessionWorkOrdering {
-                            session_command: ordering_key(
-                                "QueuedWorkBatch",
-                                command_at,
-                                command_seq,
-                            )?,
-                            turn_input: ordering_key("PendingTurnInput", input_at, input_seq)?,
-                        })
-                    })();
+                let outcome: Result<
+                    lash_core_execution::store::PendingSessionWorkOrdering,
+                    StoreError,
+                > = (|| {
+                    let (command_at, command_seq, input_at, input_seq): (
+                        Option<i64>,
+                        Option<i64>,
+                        Option<i64>,
+                        Option<i64>,
+                    ) = conn
+                        .query_row(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .family
+                                .pending_session_work_ordering
+                                .sql(),
+                            params![
+                                session_id.as_str(),
+                                now as i64,
+                                QueuedWorkKind::Control.as_str()
+                            ],
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                        )
+                        .map_err(sqlite_error)?;
+                    let ordering_key = |kind: &'static str, at: Option<i64>, seq: Option<i64>| {
+                        at.zip(seq)
+                            .map(|(at, seq)| {
+                                Ok(lash_core_execution::store::PendingWorkOrderingKey {
+                                    enqueued_at_ms: u64_from_sql(kind, "enqueued_at_ms", at)
+                                        .map_err(sqlite_error)?,
+                                    enqueue_seq: u64_from_sql(kind, "enqueue_seq", seq)
+                                        .map_err(sqlite_error)?,
+                                })
+                            })
+                            .transpose()
+                    };
+                    Ok(lash_core_execution::store::PendingSessionWorkOrdering {
+                        session_command: ordering_key("QueuedWorkBatch", command_at, command_seq)?,
+                        turn_input: ordering_key("PendingTurnInput", input_at, input_seq)?,
+                    })
+                })();
                 Ok(outcome)
             })
             .await

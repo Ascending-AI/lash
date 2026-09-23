@@ -7,7 +7,7 @@
 use lash_store_sql::turn_ingress::queued_runs::QueuedRunStatements;
 use std::sync::LazyLock;
 
-use lash_core::store_backend_support as vocabulary;
+use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
     TurnIngressStatements, cancel_requests::CancelRequestStatements,
     cancellation_bindings::CancellationBindingStatements,
@@ -45,7 +45,7 @@ pub(crate) use turn_cancel::{
 
 /// The `pending_turn_inputs.state` partitions this family's statements name.
 ///
-/// Every expansion is generated from `lash_core::TurnInputStateKind`, so adding
+/// Every expansion is generated from `lash_core_execution::runtime::TurnInputStateKind`, so adding
 /// a state is one edit in `lash-core-store` rather than one per statement. The
 /// term names are the domain's, and SQLite registers the same seven.
 const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[
@@ -171,7 +171,7 @@ pub(crate) fn turn_ingress_sql() -> &'static TurnIngressSql {
 /// production build it is a compile-time `None`.
 pub(crate) fn injected_lease_epoch_ms(
     #[cfg(any(test, feature = "testing"))] lease_clock: Option<
-        &std::sync::Arc<dyn lash_core::Clock>,
+        &std::sync::Arc<dyn lash_core_execution::Clock>,
     >,
 ) -> Option<i64> {
     #[cfg(any(test, feature = "testing"))]

@@ -49,20 +49,21 @@ async fn sqlite_persisted_record_decode_classification() {
         .bind_session(&head_session_id)
         .expect("bind head store");
     head_store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(head_session_id.as_str()))
+        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
+            head_session_id.as_str(),
+        ))
         .await
         .expect("admit head session");
-    let head_state = lash_core::RuntimeSessionState {
+    let head_state = lash_core_execution::RuntimeSessionState {
         session_id: head_session_id.clone(),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     head_store
-        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
-            &head_state,
-            &[],
-        ))
+        .commit_runtime_state(
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&head_state, &[]),
+        )
         .await
         .expect("seed head session");
 
@@ -72,22 +73,21 @@ async fn sqlite_persisted_record_decode_classification() {
         .bind_session(&checkpoint_session_id)
         .expect("bind checkpoint store");
     checkpoint_store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(
+        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
             checkpoint_session_id.as_str(),
         ))
         .await
         .expect("admit checkpoint session");
-    let checkpoint_state = lash_core::RuntimeSessionState {
+    let checkpoint_state = lash_core_execution::RuntimeSessionState {
         session_id: checkpoint_session_id.clone(),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     checkpoint_store
-        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
-            &checkpoint_state,
-            &[],
-        ))
+        .commit_runtime_state(
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&checkpoint_state, &[]),
+        )
         .await
         .expect("seed checkpoint session");
 
@@ -151,25 +151,25 @@ async fn seed_failure_evidence_session(session_id: &str, bad_result_json: &str) 
     store
         .bind_session(&SessionId::from(session_id))
         .expect("bind receipt store");
-    let state = lash_core::RuntimeSessionState {
+    let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
-    commit.failure_evidence = vec![lash_core::TurnFailureEvidence {
-        partial_output: Some(lash_core::TurnFailurePartialOutput::Complete {
+    commit.failure_evidence = vec![lash_core_execution::TurnFailureEvidence {
+        partial_output: Some(lash_core_execution::TurnFailurePartialOutput::Complete {
             text: "settled partial output".to_string(),
         }),
-        billed_usage: lash_core::llm::types::LlmUsage {
+        billed_usage: lash_core_execution::llm::types::LlmUsage {
             output_tokens: 3,
             ..Default::default()
         },
-        refusal: lash_core::ChargeSafetyRefusalEvidence {
+        refusal: lash_core_execution::ChargeSafetyRefusalEvidence {
             code: "unsafe_retry_after_output_started".to_string(),
-            denial_reason: lash_core::ChargeSafetyDenialReason::GuaranteeRequired,
-            protocol_position: lash_core::ProtocolPosition::OutputStarted,
+            denial_reason: lash_core_execution::ChargeSafetyDenialReason::GuaranteeRequired,
+            protocol_position: lash_core_execution::ProtocolPosition::OutputStarted,
             attempt_number: 1,
             attempt_count: 1,
         },
@@ -247,7 +247,7 @@ async fn turn_failure_reopen_refuses_a_preversioned_receipt() {
 #[tokio::test]
 async fn turn_failure_reopen_refuses_a_newer_receipt_version() {
     const SESSION_ID: &str = "failure-evidence-newer-receipt";
-    let newer = lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
+    let newer = lash_core_execution::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
     let bad_json = format!(r#"{{"schema_version":{newer},"failure_evidence":[{{}}]}}"#);
     let store = seed_failure_evidence_session(SESSION_ID, &bad_json).await;
 
@@ -263,7 +263,7 @@ async fn turn_failure_reopen_refuses_a_newer_receipt_version() {
                 actual,
                 expected,
             } if *actual == newer
-                && *expected == lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
+                && *expected == lash_core_execution::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
         ),
         "the newer-version receipt refusal must be the typed version error: {error:?}"
     );
@@ -319,13 +319,13 @@ async fn absent_rows_remain_honest_successful_outcomes() {
             .is_empty()
     );
     assert!(
-        lash_core::AttachmentManifest::list_uncommitted(&store, 0)
+        lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0)
             .await
             .expect("list uncommitted attachments")
             .is_empty()
     );
     assert!(
-        lash_core::AttachmentManifest::list_all_refs(&store)
+        lash_core_execution::AttachmentManifest::list_all_refs(&store)
             .await
             .expect("list attachment refs")
             .is_empty()
@@ -374,7 +374,7 @@ async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
     )
     .expect("insert unknown owner kind");
 
-    let error = lash_core::AttachmentManifest::list_uncommitted(&store, 0)
+    let error = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0)
         .await
         .expect_err("unknown SQLite attachment owner kind must refuse");
     assert!(
@@ -410,7 +410,7 @@ async fn bare_process_attachment_owner_refuses_with_canonical_typed_error() {
     )
     .expect("insert bare process owner");
 
-    let error = lash_core::AttachmentManifest::list_uncommitted(&store, 0)
+    let error = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0)
         .await
         .expect_err("bare SQLite process attachment owner must refuse");
     assert!(
@@ -447,7 +447,9 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         "INSERT INTO session_meta
          (session_id, relation_kind, session_state_version)
          VALUES ('corrupt', 'corrupt', ?1)",
-        [i64::from(lash_core::store::CURRENT_SESSION_STATE_VERSION)],
+        [i64::from(
+            lash_core_execution::store::CURRENT_SESSION_STATE_VERSION,
+        )],
     )
     .expect("insert malformed relation");
     raw.pragma_update(None, "ignore_check_constraints", false)
@@ -517,7 +519,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     )
     .expect("insert unknown owner kind");
     assert_corrupt(
-        lash_core::AttachmentManifest::list_uncommitted(&store, 0).await,
+        lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0).await,
         "AttachmentManifest owner kind",
     );
 
@@ -589,7 +591,7 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
             &SessionId::from(session_id),
             &owner,
             "read-failure-executor",
-            &lash_core::LeaseClaimNonce::new(),
+            &lash_core_execution::LeaseClaimNonce::new(),
             120_000,
         )
         .await
@@ -597,10 +599,10 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
         .acquired()
         .expect("session lease acquired");
     let batch = store
-        .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+        .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
             session_id,
-            lash_core::DeliveryPolicy::EarliestSafeBoundary,
-            lash_core::runtime::SessionCommand::RefreshToolCatalog {
+            lash_core_execution::DeliveryPolicy::EarliestSafeBoundary,
+            lash_core_execution::runtime::SessionCommand::RefreshToolCatalog {
                 reason: "fence test".to_string(),
             },
         ))
@@ -668,11 +670,11 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     );
     assert_storage_failure(
         "AttachmentManifest::list_uncommitted",
-        lash_core::AttachmentManifest::list_uncommitted(&store, 0).await,
+        lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0).await,
     );
     assert_storage_failure(
         "AttachmentManifest::list_all_refs",
-        lash_core::AttachmentManifest::list_all_refs(&store).await,
+        lash_core_execution::AttachmentManifest::list_all_refs(&store).await,
     );
 }
 
@@ -703,7 +705,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
         "publish_module_artifact",
         store
             .publish_module_artifact(
-                &lash_core::ArtifactOwner::host("readonly-test"),
+                &lash_core_execution::ArtifactOwner::host("readonly-test"),
                 &lashlang::ModuleArtifact::from_program({
                     use lashlang::testing::ast_builders as b;
 
@@ -714,10 +716,10 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
             .await,
     );
 
-    let state = lash_core::RuntimeSessionState {
+    let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from("readonly-session"),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     assert_storage_failure(
@@ -770,10 +772,10 @@ async fn queued_work_hydration_rejects_kind_payload_contradiction() {
     let path = dir.path().join("family-corrupt.db");
     let store = Store::open(&path).await.expect("open store");
     let batch = store
-        .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+        .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
             "family-corrupt",
-            lash_core::DeliveryPolicy::EarliestSafeBoundary,
-            lash_core::runtime::SessionCommand::RefreshToolCatalog {
+            lash_core_execution::DeliveryPolicy::EarliestSafeBoundary,
+            lash_core_execution::runtime::SessionCommand::RefreshToolCatalog {
                 reason: "family test".into(),
             },
         ))
@@ -818,7 +820,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
         Store::open_with_options_clock_and_process_registry(
             &path,
             StoreOptions::default(),
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
             None,
             None,
             Some(injector.clone()),
@@ -828,10 +830,10 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
     );
     let session_id = SessionId::from(session_id);
     let batch = store
-        .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+        .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
             session_id.as_str(),
-            lash_core::DeliveryPolicy::EarliestSafeBoundary,
-            lash_core::runtime::SessionCommand::RefreshToolCatalog {
+            lash_core_execution::DeliveryPolicy::EarliestSafeBoundary,
+            lash_core_execution::runtime::SessionCommand::RefreshToolCatalog {
                 reason: "snapshot test".into(),
             },
         ))

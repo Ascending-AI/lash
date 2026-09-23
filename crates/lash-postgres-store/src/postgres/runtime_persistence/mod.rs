@@ -1,6 +1,6 @@
 use crate::session_sql::session_sql;
 use crate::*;
-use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
+use lash_core_execution::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
@@ -291,7 +291,7 @@ async fn lock_process_wake_source_tx(
 async fn raise_wake_redelivery_fence_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    wake: &lash_core::store::claim_plan::TerminalProcessWake,
+    wake: &lash_core_execution::store::claim_plan::TerminalProcessWake,
 ) -> Result<(), StoreError> {
     // A validated wake batch always names its source key, so the advisory
     // lock is always taken; the `None` arm is a corrupt-row path that still
@@ -335,7 +335,7 @@ async fn read_session_state_version_tx(
         .await
         .map_err(store_sqlx_error)?;
     let Some(marker) = marker else {
-        return Ok(lash_core::store::CURRENT_SESSION_STATE_VERSION);
+        return Ok(lash_core_execution::store::CURRENT_SESSION_STATE_VERSION);
     };
     let marker = marker
         .map(|version| {
@@ -345,7 +345,7 @@ async fn read_session_state_version_tx(
             })
         })
         .transpose()?;
-    lash_core::store::resolve_session_state_version(marker)
+    lash_core_execution::store::resolve_session_state_version(marker)
 }
 
 mod claim_support;

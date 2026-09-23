@@ -27,7 +27,7 @@ impl SqliteBlobProbe {
 
 #[async_trait::async_trait]
 impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
-    async fn blob_exists(&self, blob_ref: &lash_core::BlobRef) -> bool {
+    async fn blob_exists(&self, blob_ref: &lash_core_execution::BlobRef) -> bool {
         rusqlite::Connection::open(&self.path)
             .expect("open SQLite blob probe")
             .query_row(
@@ -58,8 +58,8 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
 
     async fn checkpoint_component_edge_exists(
         &self,
-        checkpoint_ref: &lash_core::BlobRef,
-        blob_ref: &lash_core::BlobRef,
+        checkpoint_ref: &lash_core_execution::BlobRef,
+        blob_ref: &lash_core_execution::BlobRef,
     ) -> Option<bool> {
         Some(
             rusqlite::Connection::open(&self.path)
@@ -76,7 +76,7 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
         )
     }
 
-    async fn break_factory_gc_scope(&self, checkpoint_ref: &lash_core::BlobRef) -> bool {
+    async fn break_factory_gc_scope(&self, checkpoint_ref: &lash_core_execution::BlobRef) -> bool {
         let conn = rusqlite::Connection::open(&self.path).expect("open SQLite GC fault");
         assert_eq!(
             conn.execute(

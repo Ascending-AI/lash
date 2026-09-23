@@ -38,7 +38,7 @@
 //! failed on it would take the whole report down with it.
 
 use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
-use lash_core::{
+use lash_core_execution::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
     StoreError,
 };
@@ -417,7 +417,7 @@ fn execution_state_ref(manifest: &[u8]) -> Option<String> {
     let probe: ManifestProbe = rmp_serde::from_slice(manifest).ok()?;
     probe
         .components
-        .get(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+        .get(lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
         .map(|component| component.blob_ref.clone())
 }
 
@@ -769,7 +769,7 @@ mod tests {
         assert_eq!(execution_state_ref(&buf), None);
 
         components.insert(
-            lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
+            lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
             Component {
                 blob_ref: "bbbb".to_string(),
                 encoding_version: 2,

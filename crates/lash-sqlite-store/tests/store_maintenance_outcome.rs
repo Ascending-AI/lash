@@ -4,7 +4,7 @@ use lash_sansio::SessionId;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use lash_core::SessionStoreFactory;
+use lash_core_execution::SessionStoreFactory;
 use lash_sansio::sync::MutexExt;
 use lash_sqlite_store::SqliteSessionStoreFactory;
 

@@ -94,10 +94,10 @@ fn pending_cancel_query_seeks_the_partial_cancel_index() {
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
     let (sql, values) = list_processes_query(
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
+        &lash_core_execution::ProcessListFilter {
+            status: lash_core_execution::ProcessStatusFilter::Any,
             cancel_pending_before_ms: Some(1_700_000_000_000),
-            ..lash_core::ProcessListFilter::default()
+            ..lash_core_execution::ProcessListFilter::default()
         },
         None,
         None,
@@ -125,13 +125,13 @@ fn parent_scope_query_seeks_the_parent_scope_index() {
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
     let (sql, values) = list_processes_query(
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            parent_scope: Some(lash_core::ParentScope::turn(
+        &lash_core_execution::ProcessListFilter {
+            status: lash_core_execution::ProcessStatusFilter::Any,
+            parent_scope: Some(lash_core_execution::ParentScope::turn(
                 lash_sansio::SessionId::from("plan-session"),
-                lash_core::TurnId::from("plan-turn"),
+                lash_core_execution::TurnId::from("plan-turn"),
             )),
-            ..lash_core::ProcessListFilter::default()
+            ..lash_core_execution::ProcessListFilter::default()
         },
         None,
         None,
@@ -160,9 +160,9 @@ fn parent_scope_query_seeks_the_parent_scope_index() {
 #[test]
 fn an_absent_scope_filter_emits_no_scope_predicate() {
     let (sql, values) = list_processes_query(
-        &lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        &lash_core_execution::ProcessListFilter {
+            status: lash_core_execution::ProcessStatusFilter::Any,
+            ..lash_core_execution::ProcessListFilter::default()
         },
         None,
         None,
@@ -185,7 +185,9 @@ fn an_absent_scope_filter_emits_no_scope_predicate() {
 #[test]
 fn the_pending_cancel_index_predicate_is_the_generated_fragment() {
     let predicate =
-        lash_core::store_backend_support::nonterminal_process_status_predicate_sql("status");
+        lash_core_execution::store_backend_support::nonterminal_process_status_predicate_sql(
+            "status",
+        );
     assert_eq!(
         predicate,
         "status NOT IN ('completed', 'failed', 'cancelled', 'abandoned')"

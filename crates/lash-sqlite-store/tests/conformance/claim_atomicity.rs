@@ -1,4 +1,4 @@
-use lash_core::{RuntimePersistence, SessionStoreFactory};
+use lash_core_execution::{RuntimePersistence, SessionStoreFactory};
 use lash_sqlite_store::SqliteSessionStoreFactory;
 use std::sync::Arc;
 #[path = "../../../lash-core/tests/support/queued_claim_atomicity.rs"]
@@ -10,11 +10,13 @@ async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() 
         let dir = tempfile::tempdir().unwrap();
         let factory = SqliteSessionStoreFactory::new(dir.path());
         let store = factory
-            .create_store(&lash_core::SessionStoreCreateRequest {
+            .create_store(&lash_core_execution::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: "root".into(),
-                relation: lash_core::SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                relation: lash_core_execution::SessionRelation::Root,
+                policy: lash_core_execution::SessionPolicy::new(
+                    lash_core_execution::TurnBudget::Unbounded,
+                ),
             })
             .await
             .unwrap();
@@ -49,11 +51,13 @@ async fn sqlite_queued_work_claimability_verdict_holds_over_a_displaced_generati
     let dir = tempfile::tempdir().unwrap();
     let factory = SqliteSessionStoreFactory::new(dir.path());
     let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: "root".into(),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .unwrap();

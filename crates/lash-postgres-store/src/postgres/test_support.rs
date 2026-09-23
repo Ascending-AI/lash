@@ -3,7 +3,9 @@
 //! production store traits carry none.
 
 use crate::*;
-use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport};
+use lash_core_execution::store::{
+    ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
+};
 
 #[async_trait::async_trait]
 impl StoreTestSupport for PostgresSessionStore {
@@ -112,7 +114,10 @@ impl ConformanceSessionStoreFactory for PostgresSessionStoreFactory {
 
 impl PostgresSessionStoreFactory {
     /// Drive transaction admission time independently of record timestamps.
-    pub fn with_lease_clock_for_testing(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+    pub fn with_lease_clock_for_testing(
+        mut self,
+        clock: Arc<dyn lash_core_execution::Clock>,
+    ) -> Self {
         self.lease_clock_for_testing = Some(clock);
         self
     }
@@ -120,7 +125,10 @@ impl PostgresSessionStoreFactory {
 
 impl PostgresSessionStore {
     /// Drive transaction admission time independently of record timestamps.
-    pub fn with_lease_clock_for_testing(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+    pub fn with_lease_clock_for_testing(
+        mut self,
+        clock: Arc<dyn lash_core_execution::Clock>,
+    ) -> Self {
         self.lease_clock_for_testing = Some(clock);
         self
     }
@@ -128,7 +136,7 @@ impl PostgresSessionStore {
 
 pub(crate) async fn set_transaction_lease_clock_for_testing(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    clock: Option<&Arc<dyn lash_core::Clock>>,
+    clock: Option<&Arc<dyn lash_core_execution::Clock>>,
 ) -> Result<(), StoreError> {
     if let Some(clock) = clock {
         sqlx::query("SELECT set_config('lash.test_lease_epoch_ms', $1, true)")

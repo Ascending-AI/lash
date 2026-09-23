@@ -19,7 +19,7 @@
 use lash_store_sql::turn_ingress::queued_runs::QueuedRunStatements;
 use std::sync::LazyLock;
 
-use lash_core::store_backend_support as vocabulary;
+use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
     TurnIngressStatements, cancel_requests::CancelRequestStatements,
     cancellation_bindings::CancellationBindingStatements,
@@ -51,7 +51,7 @@ pub(crate) use turn_cancel::{
 /// The `pending_turn_inputs.state` partitions this family's statements name.
 ///
 /// Every expansion is generated from
-/// [`TurnInputStateKind`](lash_core::TurnInputStateKind), so adding a state is
+/// [`TurnInputStateKind`](lash_core_execution::runtime::TurnInputStateKind), so adding a state is
 /// one edit in `lash-core-store` rather than one per statement. The term names
 /// are the domain's, and PostgreSQL registers the same seven.
 const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[

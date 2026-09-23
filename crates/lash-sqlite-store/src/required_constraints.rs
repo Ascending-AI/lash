@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use lash_core::StoreError;
-use lash_core::store_backend_support::required_constraints::{
+use lash_core_execution::StoreError;
+use lash_core_execution::store_backend_support::required_constraints::{
     EXPECTED_CONSTRAINTS, EXPECTED_FOREIGN_KEYS, InspectedConstraint, InspectedForeignKey,
     RequiredConstraintReport, SqliteConstraintDatabase, compare_required_constraints,
     compare_required_foreign_keys, extract_foreign_key_clauses, extract_named_check_expressions,
@@ -25,7 +25,7 @@ use crate::{SqliteDatabase, conn::SqliteConnection, sqlite_error};
 /// openability, unregistered checks, or existing row integrity.
 ///
 /// ```no_run
-/// # async fn inspect(path: &std::path::Path) -> Result<(), lash_core::StoreError> {
+/// # async fn inspect(path: &std::path::Path) -> Result<(), lash_core_execution::StoreError> {
 /// let report = lash_sqlite_store::inspect_required_constraints_at(
 ///     path,
 ///     lash_sqlite_store::SqliteDatabase::DurableCore,

@@ -17,7 +17,7 @@ use std::time::Duration;
 use lash_conformance::{
     ToolChildDeferrableRouting, ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec,
 };
-use lash_core::EffectHost;
+use lash_core_execution::EffectHost;
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
 use crate::support::{SharedDatabaseLock, database_url, reset};
@@ -33,7 +33,7 @@ async fn world(database_url: String, spec: ToolChildWorldSpec) -> ToolChildWorld
         .expect("PostgreSQL tool-child host storage");
     let ttl = Duration::from_millis(spec.lease_ttl_ms);
     let options = PostgresEffectReplayOptions {
-        lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
+        lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
             .expect("the law asks for a ttl at least three renew intervals wide"),
         drain_budget: Default::default(),
     };
@@ -81,7 +81,7 @@ lash_conformance::tool_child_invocation_tests!({
             let storage = PostgresStorage::connect(&url)
                 .await
                 .expect("PostgreSQL tool-child process registry storage");
-            Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessRegistry>
+            Arc::new(storage.process_registry()) as Arc<dyn lash_core_execution::ProcessRegistry>
         })
     });
     (
@@ -124,7 +124,7 @@ lash_conformance::tool_batch_group_tests!({
             let storage = PostgresStorage::connect(&url)
                 .await
                 .expect("PostgreSQL tool-batch-group process registry storage");
-            Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessRegistry>
+            Arc::new(storage.process_registry()) as Arc<dyn lash_core_execution::ProcessRegistry>
         })
     });
     (

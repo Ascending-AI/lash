@@ -13,24 +13,24 @@
 //! host, and both the attempt and its nested effect replay their recorded
 //! terminals byte-for-byte without re-executing either body.
 
-use lash_core::ProcessLifecycle as _;
+use lash_core_execution::ProcessLifecycle as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::Arc;
 
 fn registry_local_executor(
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-) -> lash_core::RuntimeEffectLocalExecutor<'static> {
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
-        &registry,
-    )));
-    lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work)
+    registry: Arc<dyn lash_core_execution::ProcessRegistry>,
+) -> lash_core_execution::RuntimeEffectLocalExecutor<'static> {
+    let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
+        Arc::clone(&registry),
+    ));
+    lash_core_execution::RuntimeEffectLocalExecutor::processes(registry, process_work)
 }
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::{
+use lash_core_execution::{
     EffectHost, ExecutionScope, RuntimeEffectCommand, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
@@ -46,7 +46,7 @@ const ATTEMPT_KEY: &str = "pg-attempt-atomicity:attempt";
 const NESTED_KEY: &str = "pg-attempt-atomicity:attempt:nested";
 
 struct CrossingController {
-    inner: Arc<dyn lash_core::RuntimeEffectController>,
+    inner: Arc<dyn lash_core_execution::RuntimeEffectController>,
     signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
     crash_after: Option<CrashAfter>,
     fired: Arc<std::sync::atomic::AtomicBool>,
@@ -76,7 +76,7 @@ struct CrossingEffectHost {
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for CrossingEffectHost {
+impl lash_core_execution::AwaitEventResolver for CrossingEffectHost {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         Some(self.inner.turn_control_binding_id())
     }
@@ -84,9 +84,10 @@ impl lash_core::AwaitEventResolver for CrossingEffectHost {
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
+        wait: lash_core_execution::AwaitEventWaitIdentity,
         may_defer: bool,
-    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+    ) -> Result<lash_core_execution::CompletionKeyPreparation, lash_core_execution::RuntimeError>
+    {
         self.inner
             .prepare_completion_key(scope, wait, may_defer)
             .await
@@ -94,41 +95,41 @@ impl lash_core::AwaitEventResolver for CrossingEffectHost {
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        wait: lash_core_execution::AwaitEventWaitIdentity,
+    ) -> Result<lash_core_execution::AwaitEventKey, lash_core_execution::RuntimeError> {
         self.inner.await_event_key(scope, wait).await
     }
     async fn resolve_await_event(
         &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        key: &lash_core_execution::AwaitEventKey,
+        resolution: lash_core_execution::Resolution,
+    ) -> Result<lash_core_execution::ResolveOutcome, lash_core_execution::RuntimeError> {
         self.inner.resolve_await_event(key, resolution).await
     }
     async fn peek_await_event(
         &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        key: &lash_core_execution::AwaitEventKey,
+    ) -> Result<Option<lash_core_execution::Resolution>, lash_core_execution::RuntimeError> {
         self.inner.peek_await_event(key).await
     }
     async fn await_await_event(
         &self,
-        key: &lash_core::AwaitEventKey,
+        key: &lash_core_execution::AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
-    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+    ) -> Result<lash_core_execution::Resolution, lash_core_execution::RuntimeError> {
         self.inner.await_await_event(key, cancel, deadline).await
     }
     async fn revoke_await_events_for_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
+    ) -> Result<(), lash_core_execution::RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
     async fn cancel_await_events_for_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
+    ) -> Result<(), lash_core_execution::RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
 }
@@ -139,33 +140,34 @@ impl EffectHost for CrossingEffectHost {
         self.inner.turn_control_binding_id()
     }
 
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+    fn await_event_resolver(&self) -> &dyn lash_core_execution::AwaitEventResolver {
         self
     }
 
     async fn turn_control_binding<'a>(
         &'a self,
-        scoped: &'a lash_core::ScopedEffectController<'_>,
-    ) -> Result<lash_core::TurnControlBinding<'a>, lash_core::RuntimeError> {
+        scoped: &'a lash_core_execution::ScopedEffectController<'_>,
+    ) -> Result<lash_core_execution::TurnControlBinding<'a>, lash_core_execution::RuntimeError>
+    {
         self.inner.turn_control_binding(scoped).await
     }
 
     async fn prepare_tool_intent(
         &self,
-        sink: &dyn lash_core::ToolIntentOutcomeSink,
-        identity: &lash_core::ToolIntentIdentity,
-        intent: lash_core::ToolIntent,
-    ) -> Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
+        sink: &dyn lash_core_execution::ToolIntentOutcomeSink,
+        identity: &lash_core_execution::ToolIntentIdentity,
+        intent: lash_core_execution::ToolIntent,
+    ) -> Result<lash_core_execution::ToolIntentPreparation, lash_core_execution::RuntimeError> {
         self.inner.prepare_tool_intent(sink, identity, intent).await
     }
 
     async fn record_tool_intent_outcome(
         &self,
-        sink: &dyn lash_core::ToolIntentOutcomeSink,
-        identity: &lash_core::ToolIntentIdentity,
-        submitted: lash_core::ToolIntent,
-        outcome: lash_core::ToolIntentExecutionOutcome,
-    ) -> Result<(), lash_core::RuntimeError> {
+        sink: &dyn lash_core_execution::ToolIntentOutcomeSink,
+        identity: &lash_core_execution::ToolIntentIdentity,
+        submitted: lash_core_execution::ToolIntent,
+        outcome: lash_core_execution::ToolIntentExecutionOutcome,
+    ) -> Result<(), lash_core_execution::RuntimeError> {
         self.inner
             .record_tool_intent_outcome(sink, identity, submitted, outcome)
             .await
@@ -173,13 +175,14 @@ impl EffectHost for CrossingEffectHost {
 
     fn scoped<'run>(
         &'run self,
-        admitted: lash_core::AdmittedScope,
-    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        admitted: lash_core_execution::AdmittedScope,
+    ) -> Result<lash_core_execution::ScopedEffectController<'run>, lash_core_execution::RuntimeError>
+    {
         let inner = self
             .inner
             .scoped_static(admitted.clone())?
             .expect("PostgreSQL exposes static scopes");
-        lash_core::ScopedEffectController::shared(
+        lash_core_execution::ScopedEffectController::shared(
             Arc::new(CrossingController {
                 inner: Arc::new(ScopedControllerAdapter(inner)),
                 signal_frames: Arc::clone(&self.signal_frames),
@@ -191,13 +194,16 @@ impl EffectHost for CrossingEffectHost {
     }
     fn scoped_static(
         &self,
-        admitted: lash_core::AdmittedScope,
-    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        admitted: lash_core_execution::AdmittedScope,
+    ) -> Result<
+        Option<lash_core_execution::ScopedEffectController<'static>>,
+        lash_core_execution::RuntimeError,
+    > {
         let inner = self
             .inner
             .scoped_static(admitted.clone())?
             .expect("PostgreSQL exposes static scopes");
-        lash_core::ScopedEffectController::shared(
+        lash_core_execution::ScopedEffectController::shared(
             Arc::new(CrossingController {
                 inner: Arc::new(ScopedControllerAdapter(inner)),
                 signal_frames: Arc::clone(&self.signal_frames),
@@ -213,21 +219,24 @@ impl EffectHost for CrossingEffectHost {
     /// where this wrapper's group operations land.
     fn install_tool_child_host(
         &self,
-        candidate: Arc<lash_core::facade_support::ToolChildHost>,
-    ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
+        candidate: Arc<lash_core_execution::facade_support::ToolChildHost>,
+    ) -> Option<Arc<lash_core_execution::facade_support::ToolChildHost>> {
         self.inner.install_tool_child_host(candidate)
     }
 
     fn scoped_for_group_child(
         &self,
-        admitted: lash_core::AdmittedScope,
-        binding: lash_core::GroupChildBinding,
-    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        admitted: lash_core_execution::AdmittedScope,
+        binding: lash_core_execution::GroupChildBinding,
+    ) -> Result<
+        Option<lash_core_execution::ScopedEffectController<'static>>,
+        lash_core_execution::RuntimeError,
+    > {
         let inner = self
             .inner
             .scoped_for_group_child(admitted.clone(), binding)?
             .expect("PostgreSQL exposes static scopes");
-        lash_core::ScopedEffectController::shared(
+        lash_core_execution::ScopedEffectController::shared(
             Arc::new(CrossingController {
                 inner: Arc::new(ScopedControllerAdapter(inner)),
                 signal_frames: Arc::clone(&self.signal_frames),
@@ -240,10 +249,10 @@ impl EffectHost for CrossingEffectHost {
     }
 }
 
-struct ScopedControllerAdapter(lash_core::ScopedEffectController<'static>);
+struct ScopedControllerAdapter(lash_core_execution::ScopedEffectController<'static>);
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
+impl lash_core_execution::AwaitEventResolver for ScopedControllerAdapter {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         self.0.controller().await_event_authority_binding_id()
     }
@@ -251,9 +260,10 @@ impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
+        wait: lash_core_execution::AwaitEventWaitIdentity,
         may_defer: bool,
-    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+    ) -> Result<lash_core_execution::CompletionKeyPreparation, lash_core_execution::RuntimeError>
+    {
         self.0
             .controller()
             .prepare_completion_key(scope, wait, may_defer)
@@ -262,15 +272,15 @@ impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        wait: lash_core_execution::AwaitEventWaitIdentity,
+    ) -> Result<lash_core_execution::AwaitEventKey, lash_core_execution::RuntimeError> {
         self.0.controller().await_event_key(scope, wait).await
     }
     async fn resolve_await_event(
         &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        key: &lash_core_execution::AwaitEventKey,
+        resolution: lash_core_execution::Resolution,
+    ) -> Result<lash_core_execution::ResolveOutcome, lash_core_execution::RuntimeError> {
         self.0
             .controller()
             .resolve_await_event(key, resolution)
@@ -278,16 +288,16 @@ impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
     }
     async fn peek_await_event(
         &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        key: &lash_core_execution::AwaitEventKey,
+    ) -> Result<Option<lash_core_execution::Resolution>, lash_core_execution::RuntimeError> {
         self.0.controller().peek_await_event(key).await
     }
     async fn await_await_event(
         &self,
-        key: &lash_core::AwaitEventKey,
+        key: &lash_core_execution::AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
-    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+    ) -> Result<lash_core_execution::Resolution, lash_core_execution::RuntimeError> {
         self.0
             .controller()
             .await_await_event(key, cancel, deadline)
@@ -296,7 +306,7 @@ impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
     async fn revoke_await_events_for_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
+    ) -> Result<(), lash_core_execution::RuntimeError> {
         self.0
             .controller()
             .revoke_await_events_for_session(session_id)
@@ -305,7 +315,7 @@ impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
     async fn cancel_await_events_for_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
+    ) -> Result<(), lash_core_execution::RuntimeError> {
         self.0
             .controller()
             .cancel_await_events_for_session(session_id)
@@ -314,15 +324,15 @@ impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
 }
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+impl lash_core_execution::RuntimeEffectController for ScopedControllerAdapter {
+    fn effect_journaling(&self) -> lash_core_execution::EffectJournaling {
         self.0.controller().effect_journaling()
     }
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+    ) -> Result<RuntimeEffectOutcome, lash_core_execution::RuntimeEffectControllerError> {
         self.0
             .controller()
             .execute_effect(envelope, local_executor)
@@ -331,15 +341,18 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
 
     async fn open_effect_group(
         &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        group: lash_core_execution::RuntimeEffectGroup,
+    ) -> Result<
+        lash_core_execution::EffectGroupHandle,
+        lash_core_execution::RuntimeEffectControllerError,
+    > {
         self.0.controller().open_effect_group(group).await
     }
 
     fn register_group_executors(
         &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        executors: Arc<dyn lash_core_execution::GroupExecutors>,
+    ) -> Result<(), lash_core_execution::RuntimeEffectControllerError> {
         self.0.controller().register_group_executors(executors)
     }
 
@@ -349,9 +362,12 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
 
     fn group_child_scoped_controller(
         &self,
-        admitted: lash_core::AdmittedScope,
-        binding: lash_core::GroupChildBinding,
-    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        admitted: lash_core_execution::AdmittedScope,
+        binding: lash_core_execution::GroupChildBinding,
+    ) -> Result<
+        Option<lash_core_execution::ScopedEffectController<'static>>,
+        lash_core_execution::RuntimeError,
+    > {
         self.0
             .controller()
             .group_child_scoped_controller(admitted, binding)
@@ -359,9 +375,12 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
 
     async fn await_next_settlement(
         &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        handle: &mut lash_core_execution::EffectGroupHandle,
+        cancel: lash_core_execution::CancellationToken,
+    ) -> Result<
+        lash_core_execution::GroupSettlement,
+        lash_core_execution::RuntimeEffectControllerError,
+    > {
         self.0
             .controller()
             .await_next_settlement(handle, cancel)
@@ -370,9 +389,9 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
 
     async fn close_effect_group(
         &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        handle: lash_core_execution::EffectGroupHandle,
+        disposition: lash_core_execution::LoserPolicy,
+    ) -> Result<(), lash_core_execution::RuntimeEffectControllerError> {
         self.0
             .controller()
             .close_effect_group(handle, disposition)
@@ -380,10 +399,10 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
     }
     async fn commit_group_child_final(
         &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core_execution::facade_support::effect_replay_driver::GroupChildFinalCommit,
     ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
+        lash_core_execution::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core_execution::RuntimeEffectControllerError,
     > {
         self.0.controller().commit_group_child_final(commit).await
     }
@@ -392,7 +411,7 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+    ) -> Result<bool, lash_core_execution::RuntimeEffectControllerError> {
         self.0
             .controller()
             .group_child_drain_blocked(group_key, commit_seq)
@@ -401,7 +420,7 @@ impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for CrossingController {
+impl lash_core_execution::AwaitEventResolver for CrossingController {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         self.inner.await_event_authority_binding_id()
     }
@@ -409,9 +428,10 @@ impl lash_core::AwaitEventResolver for CrossingController {
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
+        wait: lash_core_execution::AwaitEventWaitIdentity,
         may_defer: bool,
-    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+    ) -> Result<lash_core_execution::CompletionKeyPreparation, lash_core_execution::RuntimeError>
+    {
         self.inner
             .prepare_completion_key(scope, wait, may_defer)
             .await
@@ -420,53 +440,53 @@ impl lash_core::AwaitEventResolver for CrossingController {
     async fn await_event_key(
         &self,
         scope: &ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        wait: lash_core_execution::AwaitEventWaitIdentity,
+    ) -> Result<lash_core_execution::AwaitEventKey, lash_core_execution::RuntimeError> {
         self.inner.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
         &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        key: &lash_core_execution::AwaitEventKey,
+        resolution: lash_core_execution::Resolution,
+    ) -> Result<lash_core_execution::ResolveOutcome, lash_core_execution::RuntimeError> {
         self.inner.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        key: &lash_core_execution::AwaitEventKey,
+    ) -> Result<Option<lash_core_execution::Resolution>, lash_core_execution::RuntimeError> {
         self.inner.peek_await_event(key).await
     }
 
     async fn await_await_event(
         &self,
-        key: &lash_core::AwaitEventKey,
+        key: &lash_core_execution::AwaitEventKey,
         cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
-    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+    ) -> Result<lash_core_execution::Resolution, lash_core_execution::RuntimeError> {
         self.inner.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
+    ) -> Result<(), lash_core_execution::RuntimeError> {
         self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
+    ) -> Result<(), lash_core_execution::RuntimeError> {
         self.inner.cancel_await_events_for_session(session_id).await
     }
 }
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for CrossingController {
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+impl lash_core_execution::RuntimeEffectController for CrossingController {
+    fn effect_journaling(&self) -> lash_core_execution::EffectJournaling {
         self.inner.effect_journaling()
     }
 
@@ -474,14 +494,14 @@ impl lash_core::RuntimeEffectController for CrossingController {
         &self,
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+    ) -> Result<RuntimeEffectOutcome, lash_core_execution::RuntimeEffectControllerError> {
         let crash_here = match self.crash_after {
             Some(CrashAfter::SpawnAgentStart) => matches!(
                 &envelope.command,
                 RuntimeEffectCommand::Process { command }
                     if matches!(
                         command.as_ref(),
-                        lash_core::ProcessCommand::Start { registration, .. }
+                        lash_core_execution::ProcessCommand::Start { registration, .. }
                             if registration.id == "process:subagent:fig1293-spawn-agent"
                     )
             ),
@@ -502,7 +522,7 @@ impl lash_core::RuntimeEffectController for CrossingController {
         if matches!(
             &envelope.command,
             RuntimeEffectCommand::Process { command }
-                if matches!(command.as_ref(), lash_core::ProcessCommand::Signal { .. })
+                if matches!(command.as_ref(), lash_core_execution::ProcessCommand::Signal { .. })
         ) {
             self.signal_frames
                 .lock()
@@ -519,15 +539,18 @@ impl lash_core::RuntimeEffectController for CrossingController {
 
     async fn open_effect_group(
         &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        group: lash_core_execution::RuntimeEffectGroup,
+    ) -> Result<
+        lash_core_execution::EffectGroupHandle,
+        lash_core_execution::RuntimeEffectControllerError,
+    > {
         self.inner.open_effect_group(group).await
     }
 
     fn register_group_executors(
         &self,
-        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        executors: std::sync::Arc<dyn lash_core_execution::GroupExecutors>,
+    ) -> Result<(), lash_core_execution::RuntimeEffectControllerError> {
         self.inner.register_group_executors(executors)
     }
 
@@ -540,9 +563,12 @@ impl lash_core::RuntimeEffectController for CrossingController {
     /// its signal commands land in the same captured frames.
     fn group_child_scoped_controller(
         &self,
-        admitted: lash_core::AdmittedScope,
-        binding: lash_core::GroupChildBinding,
-    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        admitted: lash_core_execution::AdmittedScope,
+        binding: lash_core_execution::GroupChildBinding,
+    ) -> Result<
+        Option<lash_core_execution::ScopedEffectController<'static>>,
+        lash_core_execution::RuntimeError,
+    > {
         let Some(bound) = self
             .inner
             .group_child_scoped_controller(admitted, binding)?
@@ -550,7 +576,7 @@ impl lash_core::RuntimeEffectController for CrossingController {
             return Ok(None);
         };
         let admitted = bound.admitted_scope().clone();
-        lash_core::ScopedEffectController::shared(
+        lash_core_execution::ScopedEffectController::shared(
             Arc::new(CrossingController {
                 inner: Arc::new(ScopedControllerAdapter(bound)),
                 signal_frames: Arc::clone(&self.signal_frames),
@@ -564,9 +590,12 @@ impl lash_core::RuntimeEffectController for CrossingController {
 
     async fn await_next_settlement(
         &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        handle: &mut lash_core_execution::EffectGroupHandle,
+        cancel: lash_core_execution::CancellationToken,
+    ) -> Result<
+        lash_core_execution::GroupSettlement,
+        lash_core_execution::RuntimeEffectControllerError,
+    > {
         self.inner.await_next_settlement(handle, cancel).await
     }
     async fn read_group_settlement(
@@ -574,25 +603,25 @@ impl lash_core::RuntimeEffectController for CrossingController {
         group_key: &str,
         rank: u64,
     ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
+        Option<lash_core_execution::runtime::effect::RankedGroupSettlement>,
+        lash_core_execution::RuntimeEffectControllerError,
     > {
         self.inner.read_group_settlement(group_key, rank).await
     }
 
     async fn close_effect_group(
         &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        handle: lash_core_execution::EffectGroupHandle,
+        disposition: lash_core_execution::LoserPolicy,
+    ) -> Result<(), lash_core_execution::RuntimeEffectControllerError> {
         self.inner.close_effect_group(handle, disposition).await
     }
     async fn commit_group_child_final(
         &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core_execution::facade_support::effect_replay_driver::GroupChildFinalCommit,
     ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
+        lash_core_execution::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core_execution::RuntimeEffectControllerError,
     > {
         self.inner.commit_group_child_final(commit).await
     }
@@ -601,7 +630,7 @@ impl lash_core::RuntimeEffectController for CrossingController {
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+    ) -> Result<bool, lash_core_execution::RuntimeEffectControllerError> {
         self.inner
             .group_child_drain_blocked(group_key, commit_seq)
             .await
@@ -619,27 +648,30 @@ enum PublicIntentKind {
     ParentEnd,
 }
 
-fn public_signal_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn public_signal_tool() -> lash_core_execution::ToolDefinition {
+    lash_core_execution::ToolDefinition::raw(
         "tool:pg_public_signal_intent",
         "pg_public_signal_intent",
         "Signal a process through the recorded intent protocol.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_core_execution::ToolDefinition::default_input_schema(),
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
 }
 
 #[async_trait::async_trait]
-impl lash_core::ToolProvider for PublicSignalIntentProvider {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+impl lash_core_execution::ToolProvider for PublicSignalIntentProvider {
+    fn tool_manifests(&self) -> Vec<lash_core_execution::ToolManifest> {
         vec![public_signal_tool().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core_execution::ToolContract>> {
         (name == "pg_public_signal_intent").then(|| Arc::new(public_signal_tool().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    async fn execute(
+        &self,
+        call: lash_core_execution::ToolCall<'_>,
+    ) -> lash_core_execution::ToolAttemptOutcome {
         let parent_scope = call
             .context
             .child_process_parent_scope()
@@ -647,43 +679,45 @@ impl lash_core::ToolProvider for PublicSignalIntentProvider {
 
         self.calls.fetch_add(1, Ordering::SeqCst);
         let intent = match self.kind {
-            PublicIntentKind::Signal => {
-                lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
-                    session_id: lash_core::SessionId::from(call.context.session_id()),
+            PublicIntentKind::Signal => lash_core_execution::ToolIntent::SignalProcess(
+                lash_core_execution::SignalProcessIntent {
+                    session_id: lash_core_execution::SessionId::from(call.context.session_id()),
                     process_id: ProcessId::from("pg-public-intent-target"),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"source": "postgres-public-caller"}),
-                })
-            }
-            PublicIntentKind::ParentEnd => {
-                lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
-                    session_id: lash_core::SessionId::from(call.context.session_id()),
-                    declaration: lash_core::ProcessStartDeclaration::external(
-                        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
-                            lash_core::SessionId::from(call.context.session_id()),
-                        )),
+                },
+            ),
+            PublicIntentKind::ParentEnd => lash_core_execution::ToolIntent::StartProcess(Box::new(
+                lash_core_execution::StartProcessIntent {
+                    session_id: lash_core_execution::SessionId::from(call.context.session_id()),
+                    declaration: lash_core_execution::ProcessStartDeclaration::external(
+                        lash_core_execution::ProcessOriginator::session(
+                            lash_core_execution::SessionScope::new(
+                                lash_core_execution::SessionId::from(call.context.session_id()),
+                            ),
+                        ),
                         serde_json::json!({"source": "parent-end"}),
-                        lash_core::ProcessLifecyclePolicy::new(
+                        lash_core_execution::ProcessLifecyclePolicy::new(
                             parent_scope.clone(),
-                            lash_core::OnParentEnd::Cancel,
+                            lash_core_execution::OnParentEnd::Cancel,
                         ),
                     ),
-                }))
-            }
+                },
+            )),
         };
-        lash_core::ToolAttemptOutcome::done(
-            lash_core::ToolOutcomeDone::ok(serde_json::json!({"signal": "recorded"})),
-            lash_core::ToolIntents::v3(vec![intent]),
+        lash_core_execution::ToolAttemptOutcome::done(
+            lash_core_execution::ToolOutcomeDone::ok(serde_json::json!({"signal": "recorded"})),
+            lash_core_execution::ToolIntents::v3(vec![intent]),
         )
     }
 }
 
 struct PanicAtParentEnd;
 
-impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAtParentEnd {
-    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+impl lash_core_execution::runtime::RuntimeTurnPhaseProbe for PanicAtParentEnd {
+    fn begin(&self, _phase: lash_core_execution::runtime::RuntimeTurnPhase) {}
 
-    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+    fn end(&self, _phase: lash_core_execution::runtime::RuntimeTurnPhase) {}
 
     fn begin_named(&self, phase: &str) {
         if phase == "turn.parent_end" {
@@ -697,11 +731,11 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAtParentEnd {
 /// for.
 struct PanicBeforeTurnCommit;
 
-impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
-    fn begin(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
+impl lash_core_execution::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
+    fn begin(&self, _phase: lash_core_execution::runtime::RuntimeTurnPhase) {}
 
-    fn end(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
-        if phase == lash_core::runtime::RuntimeTurnPhase::EffectLoop {
+    fn end(&self, phase: lash_core_execution::runtime::RuntimeTurnPhase) {
+        if phase == lash_core_execution::runtime::RuntimeTurnPhase::EffectLoop {
             panic!("injected crash after the tool group settled and before the turn commit");
         }
     }
@@ -709,24 +743,26 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
     fn begin_named(&self, _phase: &str) {}
 }
 
-fn public_runtime_policy() -> lash_core::SessionPolicy {
-    let mut policy = lash_core::testing::mock_session_policy();
+fn public_runtime_policy() -> lash_core_execution::SessionPolicy {
+    let mut policy = lash_core_execution::testing::mock_session_policy();
     policy.session_id = Some(SessionId::from(SESSION.to_string()));
     policy
 }
 
-fn public_runtime_state(policy: &lash_core::SessionPolicy) -> lash_core::RuntimeSessionState {
-    lash_core::RuntimeSessionState {
+fn public_runtime_state(
+    policy: &lash_core_execution::SessionPolicy,
+) -> lash_core_execution::RuntimeSessionState {
+    lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from(SESSION.to_string()),
         policy: policy.clone(),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     }
 }
 
-fn public_runtime_input() -> lash_core::TurnInput {
-    let mut input = lash_core::TurnInput::text("run PostgreSQL signal intent");
+fn public_runtime_input() -> lash_core_execution::TurnInput {
+    let mut input = lash_core_execution::TurnInput::text("run PostgreSQL signal intent");
     input.trace_turn_id = Some(TurnId::from(TURN.to_string()));
     input
 }
@@ -738,15 +774,15 @@ fn public_runtime_input() -> lash_core::TurnInput {
 fn postgres_public_turn_scope(
     effect_host: &dyn EffectHost,
     signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
-) -> lash_core::ScopedEffectController<'static> {
-    let scope = lash_core::AdmittedScope::turn(SESSION, TURN);
-    let inner: Arc<dyn lash_core::RuntimeEffectController> = effect_host
+) -> lash_core_execution::ScopedEffectController<'static> {
+    let scope = lash_core_execution::AdmittedScope::turn(SESSION, TURN);
+    let inner: Arc<dyn lash_core_execution::RuntimeEffectController> = effect_host
         .scoped_static(scope.clone())
         .expect("scope PostgreSQL public turn on its host")
         .expect("the PostgreSQL host lends a 'static controller")
         .owned_controller()
         .expect("the PostgreSQL host's scoped controller is shared");
-    lash_core::ScopedEffectController::shared(
+    lash_core_execution::ScopedEffectController::shared(
         Arc::new(CrossingController {
             inner,
             signal_frames,
@@ -760,43 +796,45 @@ fn postgres_public_turn_scope(
 
 async fn public_signal_runtime(
     effect_host: Arc<dyn EffectHost>,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
+    registry: Arc<dyn lash_core_execution::ProcessRegistry>,
     provider_calls: Arc<AtomicUsize>,
     model_calls: Arc<AtomicUsize>,
     kind: PublicIntentKind,
 ) -> lash_core::facade_support::LashRuntime {
-    let tool_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(PublicSignalIntentProvider {
-        calls: provider_calls,
-        kind,
-    });
-    let tool_plugin: Arc<dyn lash_core::facade_support::PluginFactory> =
-        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+    let tool_provider: Arc<dyn lash_core_execution::ToolProvider> =
+        Arc::new(PublicSignalIntentProvider {
+            calls: provider_calls,
+            kind,
+        });
+    let tool_plugin: Arc<dyn lash_core_execution::facade_support::PluginFactory> =
+        Arc::new(lash_core_execution::plugin::StaticPluginFactory::new(
             "pg-public-signal-intent",
-            lash_core::facade_support::PluginSpec::new().with_tool_provider(tool_provider),
+            lash_core_execution::facade_support::PluginSpec::new()
+                .with_tool_provider(tool_provider),
         ));
-    let model = lash_core::testing::TestProvider::builder()
+    let model = lash_core_execution::testing::TestProvider::builder()
         .kind("stub")
         .complete(move |_| {
             let model_calls = Arc::clone(&model_calls);
             async move {
                 Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
-                    0 => lash_core::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::ToolCall {
+                    0 => lash_core_execution::LlmResponse {
+                        parts: vec![lash_core_execution::LlmOutputPart::ToolCall {
                             call_id: "pg-public-signal-call".to_string(),
                             tool_name: "pg_public_signal_intent".to_string(),
                             input_json: "{}".to_string(),
                             replay: None,
                         }],
                         response_metadata: Default::default(),
-                        ..lash_core::LlmResponse::default()
+                        ..lash_core_execution::LlmResponse::default()
                     },
-                    1 => lash_core::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::Text {
+                    1 => lash_core_execution::LlmResponse {
+                        parts: vec![lash_core_execution::LlmOutputPart::Text {
                             text: "signal intent complete".to_string(),
                             response_meta: None,
                         }],
                         response_metadata: Default::default(),
-                        ..lash_core::LlmResponse::default()
+                        ..lash_core_execution::LlmResponse::default()
                     },
                     index => panic!("unexpected PostgreSQL model call {index}"),
                 })
@@ -804,52 +842,56 @@ async fn public_signal_runtime(
         })
         .build()
         .into_handle();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
+    let mut host = lash_core_execution::facade_support::RuntimeHostConfig::in_memory(
+        lash_core_execution::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core_execution::QueuedWorkBatchingConfig::new(1),
     );
     host = host.with_effect_host(effect_host);
-    host.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(model),
-    );
+    host.providers.provider_resolver =
+        Arc::new(lash_core_execution::facade_support::SingleProviderResolver::new(model));
     let policy = public_runtime_policy();
-    let store: Arc<dyn lash_core::RuntimePersistence> =
-        Arc::new(lash_core::facade_support::InMemorySessionStore::new());
-    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let store: Arc<dyn lash_core_execution::RuntimePersistence> =
+        Arc::new(lash_core_execution::facade_support::InMemorySessionStore::new());
+    let watched = lash_core_execution::facade_support::watch_process_registry(registry);
     let registry = Arc::clone(watched.registry());
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-            lash_core::testing::runtime_lease_owner(),
+            lash_core_execution::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core_execution::QueuedWorkBatchingConfig::new(1),
+            lash_core_execution::testing::runtime_lease_owner(),
         )
         .with_session_id(SESSION)
         .with_policy(policy.clone())
         .with_initial_state(public_runtime_state(&policy))
         .with_runtime_host(host)
         .with_plugin_factories(
-            lash_core::testing::test_standard_protocol_factories()
+            lash_core_execution::testing::test_standard_protocol_factories()
                 .into_iter()
                 .chain([tool_plugin])
                 .collect(),
         )
         .with_store(store)
-        .with_process_work(lash_core::ProcessWorkWiring::new(
+        .with_process_work(lash_core_execution::ProcessWorkWiring::new(
             watched,
-            Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+            Arc::new(lash_core_execution::NativeProcessWork::for_registry(
+                registry,
+            )),
         ))
-        .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+        .with_queued_work(Arc::new(lash_core_execution::NoQueuedWork::new()))
         .build(),
     )
     .await
     .expect("build PostgreSQL public-caller runtime")
 }
 
-fn attempt_invocation() -> lash_core::RuntimeEffectInvocation {
-    lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(lash_core::ExecutionScope::turn(SESSION, TURN), ATTEMPT_KEY)
-            .expect("valid attempt address"),
-        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
+fn attempt_invocation() -> lash_core_execution::RuntimeEffectInvocation {
+    lash_core_execution::RuntimeEffectInvocation::new(
+        lash_core_execution::EffectAddress::new(
+            lash_core_execution::ExecutionScope::turn(SESSION, TURN),
+            ATTEMPT_KEY,
+        )
+        .expect("valid attempt address"),
+        lash_core_execution::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "pg-attempt-atomicity-attempt",
     )
 }
@@ -857,11 +899,14 @@ fn attempt_invocation() -> lash_core::RuntimeEffectInvocation {
 /// The nested effect the attempt body emits. It carries its own replay key,
 /// derived from the attempt's key exactly as `process_effect_invocation` derives
 /// a nested process command's key in production.
-fn nested_invocation() -> lash_core::RuntimeEffectInvocation {
-    lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(lash_core::ExecutionScope::turn(SESSION, TURN), NESTED_KEY)
-            .expect("valid nested attempt address"),
-        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
+fn nested_invocation() -> lash_core_execution::RuntimeEffectInvocation {
+    lash_core_execution::RuntimeEffectInvocation::new(
+        lash_core_execution::EffectAddress::new(
+            lash_core_execution::ExecutionScope::turn(SESSION, TURN),
+            NESTED_KEY,
+        )
+        .expect("valid nested attempt address"),
+        lash_core_execution::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "pg-attempt-atomicity-nested",
     )
 }
@@ -870,15 +915,15 @@ fn nested_invocation() -> lash_core::RuntimeEffectInvocation {
 /// redrive. Both the outer attempt and the nested command it emits are journaled
 /// as attempts here so each one's body execution is observable.
 fn attempt_envelope(
-    invocation: lash_core::RuntimeEffectInvocation,
+    invocation: lash_core_execution::RuntimeEffectInvocation,
     call_id: &str,
 ) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         invocation,
         RuntimeEffectCommand::ToolAttempt {
-            call: lash_core::PreparedToolCall {
+            call: lash_core_execution::PreparedToolCall {
                 call_id: call_id.to_string(),
-                tool_id: lash_core::ToolId::from("tool:pg_attempt_atomicity".to_string()),
+                tool_id: lash_core_execution::ToolId::from("tool:pg_attempt_atomicity".to_string()),
                 tool_name: "pg_attempt_atomicity".to_string(),
                 args: serde_json::Value::Null,
                 replay: None,
@@ -893,27 +938,31 @@ fn attempt_envelope(
 
 fn attempt_outcome(call_id: &str, value: &str) -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::ToolAttempt {
-        launch: Box::new(lash_core::ToolAttemptLaunch::Done {
-            record: Box::new(lash_core::ToolCallRecord {
+        launch: Box::new(lash_core_execution::ToolAttemptLaunch::Done {
+            record: Box::new(lash_core_execution::ToolCallRecord {
                 call_id: Some(call_id.to_string()),
                 tool: "pg_attempt_atomicity".to_string(),
                 args: serde_json::Value::Null,
-                output: lash_core::ToolCallOutput::success(serde_json::json!(value)),
+                output: lash_core_execution::ToolCallOutput::success(serde_json::json!(value)),
                 duration_ms: 0,
             }),
-            intents: lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(
-                Box::new(lash_core::StartProcessIntent {
-                    session_id: SessionId::from(SESSION.to_string()),
-                    declaration: lash_core::ProcessStartDeclaration::external(
-                        lash_core::ProcessOriginator::host_scoped("pg-attempt-atomicity"),
-                        serde_json::json!({"value": value}),
-                        lash_core::ProcessLifecyclePolicy::new(
-                            lash_core::ParentScope::Host,
-                            lash_core::OnParentEnd::Abandon,
+            intents: lash_core_execution::ToolIntents::v3(vec![
+                lash_core_execution::ToolIntent::StartProcess(Box::new(
+                    lash_core_execution::StartProcessIntent {
+                        session_id: SessionId::from(SESSION.to_string()),
+                        declaration: lash_core_execution::ProcessStartDeclaration::external(
+                            lash_core_execution::ProcessOriginator::host_scoped(
+                                "pg-attempt-atomicity",
+                            ),
+                            serde_json::json!({"value": value}),
+                            lash_core_execution::ProcessLifecyclePolicy::new(
+                                lash_core_execution::ParentScope::Host,
+                                lash_core_execution::OnParentEnd::Abandon,
+                            ),
                         ),
-                    ),
-                }),
-            )]),
+                    },
+                )),
+            ]),
         }),
         triggers: Vec::new(),
         capture: None,
@@ -924,7 +973,7 @@ fn projected_output(outcome: &RuntimeEffectOutcome) -> String {
     let RuntimeEffectOutcome::ToolAttempt { launch, .. } = outcome else {
         panic!("expected a tool-attempt outcome");
     };
-    let lash_core::ToolAttemptLaunch::Done { record, .. } = launch.as_ref() else {
+    let lash_core_execution::ToolAttemptLaunch::Done { record, .. } = launch.as_ref() else {
         panic!("expected a completed tool attempt");
     };
     record.output.value_for_projection().to_string()
@@ -957,7 +1006,7 @@ async fn reset(storage: &PostgresStorage) {
 /// nested journal command through the *same* controller.
 async fn run_attempt_with_nested_command(host: &PostgresEffectHost) -> (usize, usize, String) {
     let scoped = host
-        .scoped(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .scoped(lash_core_execution::AdmittedScope::turn(SESSION, TURN))
         .expect("scoped PostgreSQL effect controller");
     let attempt_body_runs = Arc::new(AtomicUsize::new(0));
     let nested_body_runs = Arc::new(AtomicUsize::new(0));
@@ -1098,40 +1147,40 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
         .await
         .expect("connect first PostgreSQL intent host");
     reset(&first_storage).await;
-    let identity = lash_core::derive_tool_intent_identity(
+    let identity = lash_core_execution::derive_tool_intent_identity(
         &SessionId::from(SESSION),
         TURN,
         Some("pg-journal-first-call"),
         0,
     )
     .expect("literal PostgreSQL intent identity");
-    let invocation = lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::turn(SESSION, TURN),
+    let invocation = lash_core_execution::RuntimeEffectInvocation::new(
+        lash_core_execution::EffectAddress::new(
+            lash_core_execution::ExecutionScope::turn(SESSION, TURN),
             identity.replay_key.clone(),
         )
         .expect("valid recorded intent address"),
-        lash_core::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
+        lash_core_execution::RuntimeAttribution::for_turn(SESSION, TURN, 0, 0),
         "pg-recorded-intent-start",
     )
-    .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
+    .with_replay_attribution(lash_core_execution::RuntimeReplayAttribution::ToolIntent(
         identity.clone(),
     ));
-    let registration = lash_core::ProcessRegistration::new(
+    let registration = lash_core_execution::ProcessRegistration::new(
         identity.replay_key.clone(),
-        lash_core::ProcessInput::External {
+        lash_core_execution::ProcessInput::External {
             metadata: serde_json::json!({"source": "postgres-recorded-intent"}),
         },
-        lash_core::RecoveryContract::ExternallyOwned,
-        lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
+        lash_core_execution::RecoveryContract::ExternallyOwned,
+        lash_core_execution::ProcessProvenance::host(),
+        lash_core_execution::ProcessLifecyclePolicy::new(
+            lash_core_execution::ParentScope::Host,
+            lash_core_execution::OnParentEnd::Abandon,
         ),
     );
     let envelope = RuntimeEffectEnvelope::new(
         invocation,
-        RuntimeEffectCommand::process(lash_core::ProcessCommand::Start {
+        RuntimeEffectCommand::process(lash_core_execution::ProcessCommand::Start {
             registration,
             observers: vec![SessionId::from(SESSION.to_string())],
             env_spec: None,
@@ -1142,7 +1191,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
     let registry = Arc::new(first_storage.process_registry());
     let first_host = first_storage.effect_host();
     let first_scoped = first_host
-        .scoped(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .scoped(lash_core_execution::AdmittedScope::turn(SESSION, TURN))
         .expect("scope first PostgreSQL intent host");
     let first = first_scoped
         .controller()
@@ -1152,10 +1201,12 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
     registry
         .complete_process(
             &ProcessId::from(identity.replay_key),
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::json!("terminal after the recorded drain"),
-            )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core_execution::ProcessAwaitOutput::from_tool_output(
+                lash_core_execution::ToolCallOutput::success(serde_json::json!(
+                    "terminal after the recorded drain"
+                )),
+            ),
+            lash_core_execution::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("terminalize the recorded intent target");
@@ -1170,7 +1221,7 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
     let second_host = second_storage.effect_host();
     second_host.start_replay();
     let second_scoped = second_host
-        .scoped(lash_core::AdmittedScope::turn(SESSION, TURN))
+        .scoped(lash_core_execution::AdmittedScope::turn(SESSION, TURN))
         .expect("scope redriving PostgreSQL intent host");
     assert_eq!(
         envelope
@@ -1209,25 +1260,26 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
         .await
         .expect("connect PostgreSQL public signal-intent host");
     reset(&storage).await;
-    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    let registry: Arc<dyn lash_core_execution::ProcessRegistry> =
+        Arc::new(storage.process_registry());
     registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
+            lash_core_execution::ProcessRegistration::new(
                 "pg-public-intent-target",
-                lash_core::ProcessInput::External {
+                lash_core_execution::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::RecoveryContract::ExternallyOwned,
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             )
-            .with_extra_event_types([lash_core::ProcessEventType {
+            .with_extra_event_types([lash_core_execution::ProcessEventType {
                 name: "signal.resume".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                payload_schema: lash_core_execution::LashSchema::any(),
+                semantics: lash_core_execution::ProcessEventSemanticsSpec::default(),
             }]),
             &[SessionId::from(SESSION.to_string())],
         )
@@ -1235,13 +1287,13 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
         .expect("register PostgreSQL public signal target");
 
     let first_host = Arc::new(storage.effect_host());
-    let wait_controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
+    let wait_controller: Arc<dyn lash_core_execution::RuntimeEffectController> = Arc::new(
         storage.runtime_effect_controller(ExecutionScope::process("pg-public-intent-target")),
     );
     let wake_key = wait_controller
         .await_event_key(
             &ExecutionScope::process("pg-public-intent-target"),
-            lash_core::AwaitEventWaitIdentity::process_signal(
+            lash_core_execution::AwaitEventWaitIdentity::process_signal(
                 "pg-public-intent-target",
                 "resume",
                 1,
@@ -1295,7 +1347,7 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
         .expect("run first PostgreSQL public signal-intent turn");
     assert!(matches!(
         first_turn.outcome,
-        lash_core::facade_support::TurnOutcome::Finished(_)
+        lash_core_execution::facade_support::TurnOutcome::Finished(_)
     ));
     assert_eq!(
         tokio::time::timeout(std::time::Duration::from_secs(2), wake)
@@ -1303,7 +1355,7 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
             .expect("PostgreSQL SignalProcess intent must wake the parked wait")
             .expect("PostgreSQL wake task")
             .expect("PostgreSQL wake resolution"),
-        lash_core::Resolution::Ok(serde_json::json!({
+        lash_core_execution::Resolution::Ok(serde_json::json!({
             "source": "postgres-public-caller"
         }))
     );
@@ -1331,10 +1383,12 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
     registry
         .complete_process(
             &ProcessId::from("pg-public-intent-target"),
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::json!("terminal after public intent drain"),
-            )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core_execution::ProcessAwaitOutput::from_tool_output(
+                lash_core_execution::ToolCallOutput::success(serde_json::json!(
+                    "terminal after public intent drain"
+                )),
+            ),
+            lash_core_execution::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("terminalize PostgreSQL signal target before redrive");
@@ -1364,7 +1418,7 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
         .expect("redrive PostgreSQL public signal-intent turn");
     assert!(matches!(
         replay_turn.outcome,
-        lash_core::facade_support::TurnOutcome::Finished(_)
+        lash_core_execution::facade_support::TurnOutcome::Finished(_)
     ));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
     assert_eq!(model_calls.load(Ordering::SeqCst), 2);
@@ -1417,25 +1471,26 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
         .await
         .expect("connect PostgreSQL public parent-end host");
     reset(&storage).await;
-    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    let registry: Arc<dyn lash_core_execution::ProcessRegistry> =
+        Arc::new(storage.process_registry());
     registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
+            lash_core_execution::ProcessRegistration::new(
                 "pg-public-intent-target",
-                lash_core::ProcessInput::External {
+                lash_core_execution::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::RecoveryContract::ExternallyOwned,
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             )
-            .with_extra_event_types([lash_core::ProcessEventType {
+            .with_extra_event_types([lash_core_execution::ProcessEventType {
                 name: "signal.resume".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                payload_schema: lash_core_execution::LashSchema::any(),
+                semantics: lash_core_execution::ProcessEventSemanticsSpec::default(),
             }]),
             &[SessionId::from(SESSION.to_string())],
         )
@@ -1470,7 +1525,7 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
     .expect_err("the phase probe crashes after the turn commit and before the ledger row");
     assert!(crashed.is_panic());
 
-    let parent = lash_core::ParentScope::turn(
+    let parent = lash_core_execution::ParentScope::turn(
         SessionId::from(SESSION.to_string()),
         TurnId::from(TURN.to_string()),
     );
@@ -1488,9 +1543,9 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
         "the crash preempts the turn-exit ledger write"
     );
     let processes = registry
-        .list_processes(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
+        .list_processes(&lash_core_execution::ProcessListFilter {
+            status: lash_core_execution::ProcessStatusFilter::Any,
+            ..lash_core_execution::ProcessListFilter::default()
         })
         .await
         .expect("list PostgreSQL public parent-end processes");
@@ -1499,7 +1554,7 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
         .find(|record| {
             matches!(
                 record.input.as_ref(),
-                lash_core::ProcessInput::External { metadata }
+                lash_core_execution::ProcessInput::External { metadata }
                     if metadata == &serde_json::json!({"source": "parent-end"})
             )
         })

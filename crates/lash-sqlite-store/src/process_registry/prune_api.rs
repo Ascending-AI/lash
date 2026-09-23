@@ -7,12 +7,12 @@ pub(super) async fn prunable_terminal_processes(
     registry: &SqliteProcessRegistry,
     cutoff_epoch_ms: u64,
     filter: Option<ProcessListFilter>,
-    watermark: lash_core::ProjectionWatermark,
-) -> Result<Vec<ProcessId>, lash_core::PluginError> {
+    watermark: lash_core_execution::ProjectionWatermark,
+) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let max_change_seq = match watermark {
-        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
-        lash_core::ProjectionWatermark::NoProjector => None,
+        lash_core_execution::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
+        lash_core_execution::ProjectionWatermark::NoProjector => None,
     };
     registry
         .conn
@@ -37,13 +37,13 @@ pub(super) async fn prune_terminal_processes(
     registry: &SqliteProcessRegistry,
     cutoff_epoch_ms: u64,
     filter: Option<ProcessListFilter>,
-    watermark: lash_core::ProjectionWatermark,
-) -> Result<ProcessPruneReport, lash_core::PluginError> {
+    watermark: lash_core_execution::ProjectionWatermark,
+) -> Result<ProcessPruneReport, lash_core_execution::PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let pruned_at_ms = registry.clock.timestamp_ms() as i64;
     let max_change_seq = match watermark {
-        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
-        lash_core::ProjectionWatermark::NoProjector => None,
+        lash_core_execution::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
+        lash_core_execution::ProjectionWatermark::NoProjector => None,
     };
     if let Some(root) = registry.process_session_store_root.as_ref() {
         let selection_filter = filter.clone();
@@ -71,7 +71,9 @@ pub(super) async fn prune_terminal_processes(
             for session_id in facade_support::process_runtime_session_ids(&process_id) {
                 delete_session_from_catalog(root, &session_id, SqliteConnectionPolicy::default())
                     .await
-                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+                    .map_err(|error| {
+                        lash_core_execution::PluginError::Session(error.to_string())
+                    })?;
             }
         }
     }
@@ -93,10 +95,11 @@ pub(super) async fn prune_terminal_processes(
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessRetention for SqliteProcessRegistry {
+impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
     async fn pending_process_artifact_cleanup(
         &self,
-    ) -> Result<Vec<lash_core::ProcessArtifactCleanup>, lash_core::PluginError> {
+    ) -> Result<Vec<lash_core_execution::ProcessArtifactCleanup>, lash_core_execution::PluginError>
+    {
         self.conn
             .call(|conn| {
                 let mut statement = conn.prepare(process_sql().cleanup.list_pending.sql())?;
@@ -121,8 +124,9 @@ impl lash_core::ProcessRetention for SqliteProcessRegistry {
     async fn complete_process_artifact_cleanup(
         &self,
         process_id: &ProcessId,
-        incarnation: lash_core::ProcessIncarnation,
-    ) -> Result<lash_core::ProcessArtifactCleanupAck, lash_core::PluginError> {
+        incarnation: lash_core_execution::ProcessIncarnation,
+    ) -> Result<lash_core_execution::ProcessArtifactCleanupAck, lash_core_execution::PluginError>
+    {
         let process_id = process_id.clone();
         self.conn
             .write(move |tx| {
@@ -140,27 +144,31 @@ impl lash_core::ProcessRetention for SqliteProcessRegistry {
                         incarnation.registration_sequence() as i64
                     ],
                 )?;
-                let process_ref = lash_core::ProcessRef::new(process_id.clone(), incarnation);
+                let process_ref =
+                    lash_core_execution::ProcessRef::new(process_id.clone(), incarnation);
                 Ok(match current_incarnation {
                     Some(found) => {
-                        let found = lash_core::ProcessIncarnation::from_registration_sequence(
-                            u64_from_sql("ProcessRecord", "incarnation", found)?,
-                        );
+                        let found =
+                            lash_core_execution::ProcessIncarnation::from_registration_sequence(
+                                u64_from_sql("ProcessRecord", "incarnation", found)?,
+                            );
                         if found != incarnation {
-                            lash_core::ProcessArtifactCleanupAck::StaleIncarnation {
+                            lash_core_execution::ProcessArtifactCleanupAck::StaleIncarnation {
                                 expected: process_ref,
-                                found: lash_core::ProcessRef::new(process_id, found),
+                                found: lash_core_execution::ProcessRef::new(process_id, found),
                             }
                         } else if removed == 1 {
-                            lash_core::ProcessArtifactCleanupAck::Acknowledged { process_ref }
+                            lash_core_execution::ProcessArtifactCleanupAck::Acknowledged {
+                                process_ref,
+                            }
                         } else {
-                            lash_core::ProcessArtifactCleanupAck::Unknown { process_ref }
+                            lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_ref }
                         }
                     }
                     None if removed == 1 => {
-                        lash_core::ProcessArtifactCleanupAck::Acknowledged { process_ref }
+                        lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_ref }
                     }
-                    None => lash_core::ProcessArtifactCleanupAck::Unknown { process_ref },
+                    None => lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_ref },
                 })
             })
             .await
@@ -170,9 +178,9 @@ impl lash_core::ProcessRetention for SqliteProcessRegistry {
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,
-        watermark: lash_core::ProjectionWatermark,
-        trigger_store: Option<&dyn lash_core::TriggerStore>,
-    ) -> Result<usize, lash_core::PluginError> {
+        watermark: lash_core_execution::ProjectionWatermark,
+        trigger_store: Option<&dyn lash_core_execution::TriggerStore>,
+    ) -> Result<usize, lash_core_execution::PluginError> {
         let max_change_seq = crate::process_registry_change::max_change_sequence(watermark);
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         let outstanding_trigger_delivery_process_ids = match trigger_store {
@@ -198,8 +206,8 @@ impl lash_core::ProcessRetention for SqliteProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
-        watermark: lash_core::ProjectionWatermark,
-    ) -> Result<ProcessPruneReport, lash_core::PluginError> {
+        watermark: lash_core_execution::ProjectionWatermark,
+    ) -> Result<ProcessPruneReport, lash_core_execution::PluginError> {
         prune_api::prune_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
 
@@ -207,8 +215,8 @@ impl lash_core::ProcessRetention for SqliteProcessRegistry {
         &self,
         cutoff_epoch_ms: u64,
         filter: Option<ProcessListFilter>,
-        watermark: lash_core::ProjectionWatermark,
-    ) -> Result<Vec<ProcessId>, lash_core::PluginError> {
+        watermark: lash_core_execution::ProjectionWatermark,
+    ) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
         prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
 }

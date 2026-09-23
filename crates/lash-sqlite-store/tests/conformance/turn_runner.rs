@@ -8,7 +8,7 @@ type SqliteTurnRunnerFixture = (
     &'static str,
     Arc<dyn EffectHost>,
     Arc<dyn ProcessRegistry>,
-    Arc<dyn lash_core::ProcessWorkSubstrate>,
+    Arc<dyn lash_core_execution::ProcessWorkSubstrate>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
     fn(&'static str) -> std::future::Ready<()>,
 );
@@ -28,9 +28,9 @@ async fn sqlite_turn_runner_fixture() -> SqliteTurnRunnerFixture {
         .await
         .expect("open SQLite turn-runner process registry"),
     ) as Arc<dyn ProcessRegistry>;
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
-        &registry,
-    ))) as Arc<dyn lash_core::ProcessWorkSubstrate>;
+    let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
+        Arc::clone(&registry),
+    )) as Arc<dyn lash_core_execution::ProcessWorkSubstrate>;
     let turn_runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&effect_host));
     (
         dir,

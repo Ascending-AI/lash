@@ -4,7 +4,7 @@ use lash_sansio::ProcessId;
 pub(super) async fn filter_unregistered_process_ids(
     registry: &SqliteProcessRegistry,
     process_ids: &[ProcessId],
-) -> Result<Vec<ProcessId>, lash_core::PluginError> {
+) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
     if process_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -36,7 +36,7 @@ pub(super) async fn filter_unregistered_process_ids(
 pub(super) async fn filter_tombstoned_process_ids(
     registry: &SqliteProcessRegistry,
     process_ids: &[ProcessId],
-) -> Result<Vec<ProcessId>, lash_core::PluginError> {
+) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
     if process_ids.is_empty() {
         return Ok(Vec::new());
     }

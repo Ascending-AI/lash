@@ -17,8 +17,8 @@ pub(super) async fn complete_process(
     registry: &SqliteProcessRegistry,
     process_id: &ProcessId,
     await_output: ProcessAwaitOutput,
-    authority: lash_core::ProcessCompletionAuthority,
-) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
+    authority: lash_core_execution::ProcessCompletionAuthority,
+) -> Result<lash_core_execution::ProcessCompletionOutcome, lash_core_execution::PluginError> {
     let process_id = ProcessId::from(process_id.to_string());
     let now = registry.clock.timestamp_ms();
     let wake_delivery_config = registry.wake_delivery_config;
@@ -34,7 +34,7 @@ pub(super) async fn complete_process(
                         .map(|request| request.origin),
                 );
                 if record.is_terminal() {
-                    return Ok(lash_core::ProcessCompletionOutcome::from_stored(
+                    return Ok(lash_core_execution::ProcessCompletionOutcome::from_stored(
                         record,
                         &await_output,
                     ));
@@ -44,7 +44,7 @@ pub(super) async fn complete_process(
                 // complete→prune→re-register with a different disposition cannot
                 // slip between the check and the append.
                 authority.validate(&process_id, record.disposition, &await_output)?;
-                let request = lash_core::facade_support::terminal_append_request(
+                let request = lash_core_execution::facade_support::terminal_append_request(
                     &process_id,
                     &await_output,
                     Some(&authority),
@@ -59,10 +59,12 @@ pub(super) async fn complete_process(
                 )?;
                 Ok(match arm {
                     ProcessEventAppendArm::Replayed { .. } => {
-                        lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record }
+                        lash_core_execution::ProcessCompletionOutcome::AlreadyApplied {
+                            stored: record,
+                        }
                     }
                     ProcessEventAppendArm::Inserted => {
-                        lash_core::ProcessCompletionOutcome::Committed(record)
+                        lash_core_execution::ProcessCompletionOutcome::Committed(record)
                     }
                 })
             })()))
@@ -75,7 +77,7 @@ pub(super) async fn complete_process_with_lease(
     registry: &SqliteProcessRegistry,
     lease: &ProcessLease,
     await_output: ProcessAwaitOutput,
-) -> Result<lash_core::ProcessCompletionOutcome, lash_core::PluginError> {
+) -> Result<lash_core_execution::ProcessCompletionOutcome, lash_core_execution::PluginError> {
     let lease = lease.clone();
     let now = registry.clock.timestamp_ms();
     let wake_delivery_config = registry.wake_delivery_config;
@@ -93,12 +95,12 @@ pub(super) async fn complete_process_with_lease(
                         .map(|request| request.origin),
                 );
                 if record.is_terminal() {
-                    return Ok(lash_core::ProcessCompletionOutcome::from_stored(
+                    return Ok(lash_core_execution::ProcessCompletionOutcome::from_stored(
                         record,
                         &await_output,
                     ));
                 }
-                let request = lash_core::facade_support::terminal_append_request(
+                let request = lash_core_execution::facade_support::terminal_append_request(
                     &ProcessId::from(process_id),
                     &await_output,
                     None,
@@ -116,9 +118,11 @@ pub(super) async fn complete_process_with_lease(
                     ProcessEventWriteAuthorization::Lease(&lease),
                 )?;
                 if matches!(arm, ProcessEventAppendArm::Replayed { .. }) {
-                    return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied {
-                        stored: record,
-                    });
+                    return Ok(
+                        lash_core_execution::ProcessCompletionOutcome::AlreadyApplied {
+                            stored: record,
+                        },
+                    );
                 }
                 // The verdict inside the append sequence authorized this
                 // release; the statement's predicate is the backstop and
@@ -133,16 +137,18 @@ pub(super) async fn complete_process_with_lease(
                         params![process_id, lease.lease_token, lease.fencing_token as i64],
                     )
                     .map_err(process_sqlite_error)? as u64;
-                lash_core::store_backend_support::require_fenced_write_applied(
-                    lash_core::store_backend_support::FencedWrite::ProcessLeaseRelease,
+                lash_core_execution::store_backend_support::require_fenced_write_applied(
+                    lash_core_execution::store_backend_support::FencedWrite::ProcessLeaseRelease,
                     crate::SQLITE_BACKEND,
                     process_id,
                     released,
-                    || lash_core::PluginError::ProcessLeaseSuperseded {
+                    || lash_core_execution::PluginError::ProcessLeaseSuperseded {
                         process_id: ProcessId::from(process_id),
                     },
                 )?;
-                Ok(lash_core::ProcessCompletionOutcome::Committed(record))
+                Ok(lash_core_execution::ProcessCompletionOutcome::Committed(
+                    record,
+                ))
             })()))
         })
         .await

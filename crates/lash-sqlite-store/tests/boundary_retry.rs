@@ -3,7 +3,7 @@
 //! replay rebuilt same-request retries and refuse differing canonical content.
 //! Exercise real SQLite receipt adjudication with an intervening committed head.
 
-use lash_core::{
+use lash_core_execution::{
     ExecutionScope, OperationId, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
     SessionPolicy, StoreError, TurnBudget,
 };
@@ -49,7 +49,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
         .commit_runtime_state(first.clone())
         .await
         .expect("first commit");
-    let mut advanced_state = lash_core::store::load_persisted_session_state(&store)
+    let mut advanced_state = lash_core_execution::store::load_persisted_session_state(&store)
         .await
         .expect("load initial state")
         .expect("initial state");
@@ -69,7 +69,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     assert_eq!(replay.checkpoint_ref, original.checkpoint_ref);
     // FIG-2480: a rebuilt same-request retry at the advanced head is answered
     // from durable receipt evidence, not refused for its moved commit hash.
-    let loaded = lash_core::store::load_persisted_session_state(&store)
+    let loaded = lash_core_execution::store::load_persisted_session_state(&store)
         .await
         .expect("load advanced state")
         .expect("advanced state");
@@ -128,15 +128,15 @@ async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
     let directory = tempfile::tempdir().expect("database directory");
     let path = directory.path().join("session.db");
     let store = Store::open(&path).await.expect("SQLite store");
-    let entry = |source: &str| lash_core::TokenLedgerEntry {
+    let entry = |source: &str| lash_core_execution::TokenLedgerEntry {
         source: source.into(),
         model: "ledger-model".into(),
-        usage: lash_core::TokenUsage::default(),
+        usage: lash_core_execution::TokenUsage::default(),
         usage_disposition: Default::default(),
     };
     let usage_commit = |state: &RuntimeSessionState, source: &str| {
         let mut commit = commit_state("child-turn", "usage-ledger", state);
-        commit.usage_deltas = lash_core::store::RuntimeUsageDelta::for_operation(
+        commit.usage_deltas = lash_core_execution::store::RuntimeUsageDelta::for_operation(
             &commit.turn_commit.operation,
             &[entry(source)],
         )
@@ -155,7 +155,7 @@ async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
         .commit_runtime_state(first.clone())
         .await
         .expect("first usage flush");
-    let mut advanced_state = lash_core::store::load_persisted_session_state(&store)
+    let mut advanced_state = lash_core_execution::store::load_persisted_session_state(&store)
         .await
         .expect("load initial state")
         .expect("initial state");
@@ -166,7 +166,7 @@ async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
         .expect("advance head");
     // FIG-2480: a rebuilt retry carrying the same staged usage is answered from
     // durable receipt evidence and publishes no second ledger row.
-    let loaded = lash_core::store::load_persisted_session_state(&store)
+    let loaded = lash_core_execution::store::load_persisted_session_state(&store)
         .await
         .expect("load advanced state")
         .expect("advanced state");
@@ -278,20 +278,20 @@ async fn append_identity_replays_after_head_advance() {
         session_id: "root".into(),
         ..RuntimeSessionState::new(SessionPolicy::new(TurnBudget::Unbounded))
     };
-    let nodes = vec![lash_core::SessionAppendNode::plugin(
+    let nodes = vec![lash_core_execution::SessionAppendNode::plugin(
         "audit",
         serde_json::json!({"value": 1}),
     )];
-    let first = lash_core::store::append_request_commit_with_clock_for_testing(
+    let first = lash_core_execution::store::append_request_commit_with_clock_for_testing(
         &mut state,
         "append-audit",
         &nodes,
         None,
-        &lash_core::facade_support::SystemClock,
+        &lash_core_execution::facade_support::SystemClock,
     )
     .expect("append identity");
     let original = store.commit_runtime_state(first).await.expect("append");
-    let mut advanced = lash_core::store::load_persisted_session_state(&store)
+    let mut advanced = lash_core_execution::store::load_persisted_session_state(&store)
         .await
         .expect("load")
         .expect("state");
@@ -300,16 +300,16 @@ async fn append_identity_replays_after_head_advance() {
         .commit_runtime_state(commit_state("intervening", "advance", &advanced))
         .await
         .expect("advance head");
-    let mut loaded = lash_core::store::load_persisted_session_state(&store)
+    let mut loaded = lash_core_execution::store::load_persisted_session_state(&store)
         .await
         .expect("reload")
         .expect("state");
-    let retry = lash_core::store::append_request_commit_with_clock_for_testing(
+    let retry = lash_core_execution::store::append_request_commit_with_clock_for_testing(
         &mut loaded,
         "append-audit",
         &nodes,
         None,
-        &lash_core::facade_support::SystemClock,
+        &lash_core_execution::facade_support::SystemClock,
     )
     .expect("retry identity");
     let replay = store
@@ -346,12 +346,13 @@ async fn non_append_operations_refuse_append_identity_metadata() {
         "usage-ledger",
     ] {
         let mut attempted = commit("identity-adoption", key, 0);
-        attempted.turn_commit.append_request_identity = lash_core::AppendRequestIdentity::Append {
-            encoding_version: 1,
-            request_hash: "non-append-semantic-request".into(),
-            requested_node_count: 0,
-            requested_ancestor_node_id: None,
-        };
+        attempted.turn_commit.append_request_identity =
+            lash_core_execution::AppendRequestIdentity::Append {
+                encoding_version: 1,
+                request_hash: "non-append-semantic-request".into(),
+                requested_node_count: 0,
+                requested_ancestor_node_id: None,
+            };
         let error = store
             .commit_runtime_state(attempted)
             .await

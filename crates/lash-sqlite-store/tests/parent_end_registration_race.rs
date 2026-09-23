@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use lash_core::ProcessRegistry;
+use lash_core_execution::ProcessRegistry;
 use lash_sqlite_store::SqliteProcessRegistry;
 
 /// One race per scope, enough of them that the ordering is exercised rather
@@ -21,30 +21,38 @@ fn session_name(index: usize) -> String {
     format!("sqlite-parent-end-race-session-{index:02}")
 }
 
-fn turn_scope(index: usize) -> lash_core::ParentScope {
-    lash_core::ParentScope::turn(
+fn turn_scope(index: usize) -> lash_core_execution::ParentScope {
+    lash_core_execution::ParentScope::turn(
         lash_sansio::SessionId::from(session_name(index)),
-        lash_core::TurnId::from(format!("sqlite-parent-end-race-turn-{index:02}")),
+        lash_core_execution::TurnId::from(format!("sqlite-parent-end-race-turn-{index:02}")),
     )
 }
 
 /// A `Cancel` child of one turn scope. Registration requires the child's
 /// originator session to be the turn's own session, so both come from `index`.
-fn cancel_child(index: usize, parent: lash_core::ParentScope) -> lash_core::ProcessRegistration {
-    lash_core::ProcessRegistration::new(
+fn cancel_child(
+    index: usize,
+    parent: lash_core_execution::ParentScope,
+) -> lash_core_execution::ProcessRegistration {
+    lash_core_execution::ProcessRegistration::new(
         format!("sqlite-parent-end-race-child-{index:02}"),
-        lash_core::ProcessInput::External {
+        lash_core_execution::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::RecoveryContract::Rerunnable,
-        lash_core::ProcessProvenance::session(lash_core::SessionScope::new(session_name(index))),
-        lash_core::ProcessLifecyclePolicy::new(parent, lash_core::OnParentEnd::Cancel),
+        lash_core_execution::RecoveryContract::Rerunnable,
+        lash_core_execution::ProcessProvenance::session(lash_core_execution::SessionScope::new(
+            session_name(index),
+        )),
+        lash_core_execution::ProcessLifecyclePolicy::new(
+            parent,
+            lash_core_execution::OnParentEnd::Cancel,
+        ),
     )
 }
 
 /// The worker's settle, written out here so the race runs against the same
 /// registry calls the sweep makes.
-async fn settle(registry: &Arc<dyn ProcessRegistry>, parent: &lash_core::ParentScope) {
+async fn settle(registry: &Arc<dyn ProcessRegistry>, parent: &lash_core_execution::ParentScope) {
     let page = std::num::NonZeroUsize::new(64).expect("page bound");
     let mut after: Option<lash_sansio::ProcessId> = None;
     loop {
@@ -57,8 +65,8 @@ async fn settle(registry: &Arc<dyn ProcessRegistry>, parent: &lash_core::ParentS
         for child in &children {
             registry
                 .request_process_cancel(
-                    &lash_core::ProcessRef::from_record(child),
-                    lash_core::CancelOrigin::ParentEnded,
+                    &lash_core_execution::ProcessRef::from_record(child),
+                    lash_core_execution::CancelOrigin::ParentEnded,
                     "sqlite-parent-end-race".to_string(),
                     None,
                 )
@@ -117,7 +125,7 @@ async fn a_child_registering_as_its_parent_scope_ends_is_refused_or_swept() {
         ending.await.expect("parent-end task");
         match registration {
             Err(error) => assert!(
-                matches!(error, lash_core::PluginError::ParentEnded { .. }),
+                matches!(error, lash_core_execution::PluginError::ParentEnded { .. }),
                 "a child racing its parent's end is refused with ParentEnded, not {error:?}"
             ),
             Ok(record) => {
@@ -133,7 +141,7 @@ async fn a_child_registering_as_its_parent_scope_ends_is_refused_or_swept() {
                 );
                 assert_eq!(
                     observed.cancel_request.map(|request| request.origin),
-                    Some(lash_core::CancelOrigin::ParentEnded)
+                    Some(lash_core_execution::CancelOrigin::ParentEnded)
                 );
             }
         }

@@ -12,7 +12,7 @@ use lash_sansio::sync::MutexExt;
 use std::num::NonZeroU64;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use lash_core::StoreError;
+use lash_core_execution::StoreError;
 use serde::{Deserialize, Serialize};
 
 /// Transaction boundary at which one armed fault is injected.

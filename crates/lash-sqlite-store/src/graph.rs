@@ -51,7 +51,7 @@ impl Store {
         conn: &Connection,
         session_id: &SessionId,
         leaf_node_id: Option<String>,
-    ) -> Result<lash_core::SessionGraph, StoreError> {
+    ) -> Result<lash_core_execution::SessionGraph, StoreError> {
         Self::load_readable_graph_from_conn(conn, session_id, leaf_node_id, false)
     }
 
@@ -59,9 +59,9 @@ impl Store {
         conn: &Connection,
         session_id: &SessionId,
         leaf_node_id: Option<String>,
-    ) -> Result<lash_core::SessionGraph, StoreError> {
+    ) -> Result<lash_core_execution::SessionGraph, StoreError> {
         let Some(leaf_node_id) = leaf_node_id else {
-            return Ok(lash_core::SessionGraph::default());
+            return Ok(lash_core_execution::SessionGraph::default());
         };
         Self::load_readable_graph_from_conn(conn, session_id, Some(leaf_node_id), true)
     }
@@ -71,7 +71,7 @@ impl Store {
         session_id: &SessionId,
         leaf_node_id: Option<String>,
         active_path_only: bool,
-    ) -> Result<lash_core::SessionGraph, StoreError> {
+    ) -> Result<lash_core_execution::SessionGraph, StoreError> {
         let leaf_generation = match leaf_node_id.as_deref() {
             Some(leaf_node_id) => {
                 let row = conn
@@ -140,7 +140,7 @@ impl Store {
                     ),
                 ));
             }
-            let node = lash_core::SessionNodeRecord::decode_storage_body(
+            let node = lash_core_execution::SessionNodeRecord::decode_storage_body(
                 node_id.clone(),
                 parent_node_id,
                 &node_json,
@@ -148,7 +148,7 @@ impl Store {
             .map_err(|error| stored_data_corrupt("SessionGraph node", error))?;
             if matches!(
                 node.payload,
-                lash_core::SessionNodePayload::FrameOpen { .. }
+                lash_core_execution::SessionNodePayload::FrameOpen { .. }
             ) {
                 expected_frame_node_id = Some(node_id.clone());
             }
@@ -172,11 +172,16 @@ impl Store {
                 format!("readable path does not end at leaf `{leaf_node_id}`"),
             ));
         }
-        lash_core::SessionGraph::from_nodes(nodes, leaf_node_id.map(lash_core::NodeId::from))
-            .map_err(|error| stored_data_corrupt("SessionGraph", error))
+        lash_core_execution::SessionGraph::from_nodes(
+            nodes,
+            leaf_node_id.map(lash_core_execution::NodeId::from),
+        )
+        .map_err(|error| stored_data_corrupt("SessionGraph", error))
     }
 
-    pub async fn load_session_graph(&self) -> Result<lash_core::SessionGraph, StoreError> {
+    pub async fn load_session_graph(
+        &self,
+    ) -> Result<lash_core_execution::SessionGraph, StoreError> {
         let session_id = self.selected_session_id()?;
         self.conn
             .call(move |conn| {
@@ -202,7 +207,7 @@ impl Store {
     /// failure rolls every delete back and the partial report is empty *because
     /// no work survived* — never because the failure was absorbed into a clean
     /// zero report.
-    pub async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<GcReport> {
+    pub async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
         self.conn
             .write(|tx| {
                 Self::gc_unreachable_in_tx(tx).map_err(|err| {
@@ -212,7 +217,9 @@ impl Store {
                 })
             })
             .await
-            .map_err(|err| lash_core::MaintenanceFailure::failed_before_any_work(sqlite_error(err)))
+            .map_err(|err| {
+                lash_core_execution::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
+            })
     }
 
     /// Collect the checkpoint-manifest roots that must survive GC.
@@ -428,25 +435,24 @@ mod tests {
             .await
             .expect("open healthy whole-graph store");
         let session_id = "healthy-leafless-whole-graph";
-        let mut state = lash_core::RuntimeSessionState {
+        let mut state = lash_core_execution::RuntimeSessionState {
             session_id: SessionId::from(session_id.to_string()),
-            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-            ))
+            ..lash_core_execution::RuntimeSessionState::new(
+                lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+            )
         };
         state.ensure_agent_frame_initialized();
         state
             .session_graph
             .append_plugin("healthy-whole-graph", serde_json::json!({"second": true}));
         store
-            .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
+            .admit_and_bind_session(&lash_core_execution::SessionBinding::root(session_id))
             .await
             .expect("bind healthy whole-graph session");
         store
-            .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
-                &state,
-                &[],
-            ))
+            .commit_runtime_state(
+                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+            )
             .await
             .expect("seed healthy whole-graph session");
 

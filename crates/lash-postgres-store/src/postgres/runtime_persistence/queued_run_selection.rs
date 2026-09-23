@@ -7,9 +7,9 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
-    batch_ids: &[lash_core::BatchId],
+    batch_ids: &[lash_core_execution::BatchId],
     policy: QueuedWorkClaimPolicy,
-) -> Result<lash_core::SelectedQueuedWorkClaimOutcome, StoreError> {
+) -> Result<lash_core_execution::SelectedQueuedWorkClaimOutcome, StoreError> {
     ensure_session_execution_lease_tx(tx, session_id, session_execution_lease).await?;
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(tx).await?;
@@ -37,7 +37,7 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
         .cloned()
         .collect::<Vec<_>>();
     if present_ids.is_empty() {
-        return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+        return Ok(lash_core_execution::SelectedQueuedWorkClaimOutcome::new(
             None,
             already_satisfied_batch_ids,
         ));
@@ -54,7 +54,7 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
         .map(queued_batch_row)
         .collect::<Result<Vec<_>, _>>()?;
     if requested_rows.len() != present_ids.len() {
-        return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+        return Ok(lash_core_execution::SelectedQueuedWorkClaimOutcome::new(
             None,
             already_satisfied_batch_ids,
         ));
@@ -87,13 +87,13 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
         .iter()
         .map(|row| {
             (
-                lash_core::BatchId::from(row.batch_id.clone()),
+                lash_core_execution::BatchId::from(row.batch_id.clone()),
                 row.claim_id.clone(),
             )
         })
         .collect::<Vec<_>>();
     let interrupted_positions =
-        lash_core::store::queued_work::select_interrupted_exact_claim_indices(
+        lash_core_execution::store::queued_work::select_interrupted_exact_claim_indices(
             &validation_batch_claims,
             batch_ids,
         )
@@ -101,7 +101,7 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
             StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
                 required_batch_ids: required_batch_ids
                     .into_iter()
-                    .map(lash_core::BatchId::into_inner)
+                    .map(lash_core_execution::BatchId::into_inner)
                     .collect(),
             }
         })?;
@@ -121,8 +121,8 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
         let mut requested_batches = std::collections::BTreeMap::new();
         for row in &requested_rows {
             let batch = queued_work_batch_from_row(tx, row.clone()).await?;
-            if batch.work_class() != lash_core::store::QueuedWorkClass::TurnWork {
-                return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+            if batch.work_class() != lash_core_execution::store::QueuedWorkClass::TurnWork {
+                return Ok(lash_core_execution::SelectedQueuedWorkClaimOutcome::new(
                     None,
                     already_satisfied_batch_ids,
                 ));
@@ -155,7 +155,7 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
             .iter()
             .position(|row| requested_ids.contains(row.batch_id.as_str()))
         else {
-            return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+            return Ok(lash_core_execution::SelectedQueuedWorkClaimOutcome::new(
                 None,
                 already_satisfied_batch_ids,
             ));
@@ -189,7 +189,7 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
         match select_exact_turn_work_claim_prefix(&candidates, boundary, &policy, now)? {
             TurnWorkClaimPrefix::Selected { len } => len,
             TurnWorkClaimPrefix::Refused { .. } => {
-                return Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
+                return Ok(lash_core_execution::SelectedQueuedWorkClaimOutcome::new(
                     None,
                     already_satisfied_batch_ids,
                 ));
@@ -209,12 +209,17 @@ pub(super) async fn claim_selected_queued_work_postgres_tx(
     )
     .await?
     {
-        ClaimTransactionOutcome::Commit(claim) => Ok(
-            lash_core::SelectedQueuedWorkClaimOutcome::new(claim, already_satisfied_batch_ids),
-        ),
-        ClaimTransactionOutcome::Rollback(_) => Ok(lash_core::SelectedQueuedWorkClaimOutcome::new(
-            None,
-            already_satisfied_batch_ids,
-        )),
+        ClaimTransactionOutcome::Commit(claim) => {
+            Ok(lash_core_execution::SelectedQueuedWorkClaimOutcome::new(
+                claim,
+                already_satisfied_batch_ids,
+            ))
+        }
+        ClaimTransactionOutcome::Rollback(_) => {
+            Ok(lash_core_execution::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ))
+        }
     }
 }

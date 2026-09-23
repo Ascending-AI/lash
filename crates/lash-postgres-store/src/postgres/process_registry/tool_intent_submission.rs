@@ -1,4 +1,4 @@
-use lash_core::{
+use lash_core_execution::{
     PluginError, ToolIntentExecutionOutcome, ToolIntentSubmissionAdmission,
     ToolIntentSubmissionRecord,
 };

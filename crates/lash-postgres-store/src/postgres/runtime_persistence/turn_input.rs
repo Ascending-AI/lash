@@ -4,17 +4,18 @@ use super::*;
 impl TurnInputStore for PostgresSessionStore {
     fn turn_cancellation_authority(
         &self,
-    ) -> Option<std::sync::Arc<dyn lash_core::store::StoreTurnCancellationAuthority>> {
+    ) -> Option<std::sync::Arc<dyn lash_core_execution::store::StoreTurnCancellationAuthority>>
+    {
         let resolver = crate::await_event::postgres_await_events(
             self.pool.clone(),
             Arc::clone(&self.await_event_signing_secret),
             Arc::clone(&self.clock),
         );
         Some(
-            lash_core::TurnCancellationAuthority::new(
+            lash_core_execution::TurnCancellationAuthority::new(
                 "postgres:lash_await_event",
                 Arc::new(
-                    lash_core::facade_support::await_event_coordinator::DirectAwaitEventResolver(
+                    lash_core_execution::facade_support::await_event_coordinator::DirectAwaitEventResolver(
                         resolver,
                     ),
                 ),
@@ -123,8 +124,8 @@ impl TurnInputStore for PostgresSessionStore {
     async fn authorize_turn_cancel_closure(
         &self,
         session_execution_lease: &SessionExecutionLeaseAuthority,
-        authorization: &lash_core::TurnCancelClosureAuthorization,
-    ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, StoreError> {
+        authorization: &lash_core_execution::TurnCancelClosureAuthorization,
+    ) -> Result<lash_core_execution::TurnCancelClosureAuthorizationOutcome, StoreError> {
         authorization
             .validate()
             .map_err(|error| StoreError::StoredDataCorrupt {
@@ -227,7 +228,7 @@ impl TurnInputStore for PostgresSessionStore {
         .map_err(store_sqlx_error)?;
         let outcome = match existing {
             Some(existing) if existing == encoded => {
-                lash_core::TurnCancelClosureAuthorizationOutcome::AdoptedExact
+                lash_core_execution::TurnCancelClosureAuthorizationOutcome::AdoptedExact
             }
             Some(_) => {
                 return Err(StoreError::TurnCancelClosureConflict {
@@ -261,7 +262,7 @@ impl TurnInputStore for PostgresSessionStore {
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
-                lash_core::TurnCancelClosureAuthorizationOutcome::Authorized
+                lash_core_execution::TurnCancelClosureAuthorizationOutcome::Authorized
             }
         };
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -274,7 +275,7 @@ impl TurnInputStore for PostgresSessionStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
         admitted_scope: &ExecutionScope,
-    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
         self.validate_turn_cancellation_binding(
             session_id,
             session_execution_lease,
@@ -305,7 +306,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn pending_turn_cancel_closure_pins(
         &self,
-    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
         let rows: Vec<String> = sqlx::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .closures
@@ -328,10 +329,10 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn turn_is_committed(
         &self,
-        address: &lash_core::facade_support::TurnAddress,
+        address: &lash_core_execution::facade_support::TurnAddress,
     ) -> Result<bool, StoreError> {
         let operation_key =
-            lash_core::OperationId::turn(&address.session_id, &address.turn_id, "final")
+            lash_core_execution::OperationId::turn(&address.session_id, &address.turn_id, "final")
                 .storage_key()?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         sqlx::query_scalar(
@@ -349,8 +350,8 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn record_turn_cancel_request(
         &self,
-        request: lash_core::facade_support::TurnCancelRequest,
-    ) -> Result<lash_core::TurnCancelRequestRecord, StoreError> {
+        request: lash_core_execution::facade_support::TurnCancelRequest,
+    ) -> Result<lash_core_execution::TurnCancelRequestRecord, StoreError> {
         let session_id = &request.address.session_id;
         let turn_id = &request.address.turn_id;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -360,7 +361,7 @@ impl TurnInputStore for PostgresSessionStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         let operation_key =
-            lash_core::OperationId::turn(session_id, turn_id, "final").storage_key()?;
+            lash_core_execution::OperationId::turn(session_id, turn_id, "final").storage_key()?;
         let committed: bool = sqlx::query_scalar(
             crate::session_sql::session_sql()
                 .turn_commits
@@ -374,7 +375,7 @@ impl TurnInputStore for PostgresSessionStore {
         .map_err(store_sqlx_error)?;
         if committed {
             tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(lash_core::TurnCancelRequestRecord {
+            return Ok(lash_core_execution::TurnCancelRequestRecord {
                 request,
                 outcome: None,
             });
@@ -391,13 +392,13 @@ impl TurnInputStore for PostgresSessionStore {
                 )
                 .await?
                 {
-                    lash_core::TurnCancelIntentSnapshot::Present { revision, .. } => {
+                    lash_core_execution::TurnCancelIntentSnapshot::Present { revision, .. } => {
                         StoreError::checked_monotonic_increment(
                             "turn_cancel_intent_revision",
                             revision,
                         )?
                     }
-                    lash_core::TurnCancelIntentSnapshot::Absent => {
+                    lash_core_execution::TurnCancelIntentSnapshot::Absent => {
                         return Err(StoreError::Backend(
                             "turn cancel request disappeared during escalation".to_string(),
                         ));
@@ -455,23 +456,23 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn turn_cancel_request(
         &self,
-        address: &lash_core::facade_support::TurnAddress,
-    ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+        address: &lash_core_execution::facade_support::TurnAddress,
+    ) -> Result<Option<lash_core_execution::TurnCancelRequestRecord>, StoreError> {
         load_turn_cancel_request_pg(&self.pool, &address.session_id, &address.turn_id).await
     }
 
     async fn turn_cancel_request_intent(
         &self,
-        address: &lash_core::facade_support::TurnAddress,
-    ) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+        address: &lash_core_execution::facade_support::TurnAddress,
+    ) -> Result<lash_core_execution::TurnCancelIntentSnapshot, StoreError> {
         load_turn_cancel_intent_snapshot_pg(&self.pool, &address.session_id, &address.turn_id).await
     }
 
     async fn reconcile_turn_cancel_winner(
         &self,
-        address: &lash_core::facade_support::TurnAddress,
-        observed: &lash_core::TurnCancelIntentSnapshot,
-        evidence: &lash_core::facade_support::TurnCancellationEvidence,
+        address: &lash_core_execution::facade_support::TurnAddress,
+        observed: &lash_core_execution::TurnCancelIntentSnapshot,
+        evidence: &lash_core_execution::facade_support::TurnCancellationEvidence,
     ) -> Result<bool, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
@@ -490,8 +491,8 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn enqueue_pending_turn_input(
         &self,
-        draft: lash_core::PendingTurnInputDraft,
-    ) -> Result<lash_core::PendingTurnInput, StoreError> {
+        draft: lash_core_execution::PendingTurnInputDraft,
+    ) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -510,14 +511,14 @@ impl TurnInputStore for PostgresSessionStore {
         .map_err(store_sqlx_error)?;
         let enqueue_seq_u64 = u64_from_sql("PendingTurnInput", "enqueue_seq", enqueue_seq)?;
         let input_id = draft.input_id.clone().unwrap_or_else(|| {
-            lash_core::store_backend_support::derive_pending_turn_input_id(
+            lash_core_execution::store_backend_support::derive_pending_turn_input_id(
                 &draft.session_id,
                 draft.source_key.as_deref(),
                 now,
                 enqueue_seq_u64,
             )
         });
-        let state = lash_core::TurnInputState::open(draft.ingress.clone());
+        let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
         let submission_digest = draft.submission_digest().map_err(|err| {
             StoreError::Backend(format!(
                 "failed to digest pending turn input submission: {err}"
@@ -587,7 +588,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::PendingTurnInputRead>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -616,7 +617,7 @@ impl TurnInputStore for PostgresSessionStore {
     async fn list_turn_input_applications(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let rows = sqlx::query(
             crate::session_sql::session_sql()
@@ -632,7 +633,7 @@ impl TurnInputStore for PostgresSessionStore {
         for row in rows {
             let turn_id = row.get::<String, _>(0);
             let result_json: String = row.get(1);
-            let result = lash_core::store::decode_runtime_commit_receipt(
+            let result = lash_core_execution::store::decode_runtime_commit_receipt(
                 session_id,
                 &turn_id,
                 &result_json,
@@ -653,8 +654,8 @@ impl TurnInputStore for PostgresSessionStore {
     async fn cancel_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-        targets: &[lash_core::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> {
+        targets: &[lash_core_execution::PendingTurnInputCancelTarget],
+    ) -> Result<Vec<lash_core_execution::PendingTurnInputCancelReceipt>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -669,9 +670,9 @@ impl TurnInputStore for PostgresSessionStore {
                     .await?
                 {
                     Some(row) => cancel_pending_turn_input_row_tx(&mut tx, row, now).await?,
-                    None => lash_core::PendingTurnInputCancelOutcome::NotFound,
+                    None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
                 };
-            results.push(lash_core::PendingTurnInputCancelReceipt { target, outcome });
+            results.push(lash_core_execution::PendingTurnInputCancelReceipt { target, outcome });
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(results)
@@ -680,8 +681,8 @@ impl TurnInputStore for PostgresSessionStore {
     async fn cancel_pending_turn_input_suffix(
         &self,
         session_id: &SessionId,
-        anchor: &lash_core::PendingTurnInputCancelTarget,
-    ) -> Result<lash_core::PendingTurnInputSuffixCancelOutcome, StoreError> {
+        anchor: &lash_core_execution::PendingTurnInputCancelTarget,
+    ) -> Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -693,7 +694,9 @@ impl TurnInputStore for PostgresSessionStore {
             load_pending_turn_input_row_by_target_tx(&mut tx, session_id, &anchor, true).await?
         else {
             tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor });
+            return Ok(
+                lash_core_execution::PendingTurnInputSuffixCancelOutcome::AnchorNotFound { anchor },
+            );
         };
         let rows = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
@@ -714,7 +717,7 @@ impl TurnInputStore for PostgresSessionStore {
             );
         }
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })
+        Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })
     }
 
     async fn claim_active_turn_inputs(
@@ -722,10 +725,10 @@ impl TurnInputStore for PostgresSessionStore {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &lash_core::TurnId,
-        checkpoint: lash_core::CheckpointKind,
+        turn_id: &lash_core_execution::TurnId,
+        checkpoint: lash_core_execution::CheckpointKind,
         max_inputs: usize,
-    ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
+    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
         claim_pending_turn_inputs_postgres(
             &self.pool,
             #[cfg(any(test, feature = "testing"))]
@@ -734,7 +737,7 @@ impl TurnInputStore for PostgresSessionStore {
             session_execution_lease,
             owner,
             max_inputs,
-            lash_core::TurnInputClaimMode::ActiveTurn {
+            lash_core_execution::TurnInputClaimMode::ActiveTurn {
                 turn_id: turn_id.clone(),
                 checkpoint,
             },
@@ -748,7 +751,7 @@ impl TurnInputStore for PostgresSessionStore {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
-    ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
+    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
         claim_pending_turn_inputs_postgres(
             &self.pool,
             #[cfg(any(test, feature = "testing"))]
@@ -757,14 +760,14 @@ impl TurnInputStore for PostgresSessionStore {
             session_execution_lease,
             owner,
             max_inputs,
-            lash_core::TurnInputClaimMode::NextTurn,
+            lash_core_execution::TurnInputClaimMode::NextTurn,
         )
         .await
     }
 
     async fn abandon_turn_input_claim(
         &self,
-        claim: &lash_core::TurnInputClaim,
+        claim: &lash_core_execution::TurnInputClaim,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         sqlx::query(
@@ -776,8 +779,8 @@ impl TurnInputStore for PostgresSessionStore {
         .bind(claim.session_id.as_str())
         .bind(&claim.claim_id)
         .bind(&claim.lease_token)
-        .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
-        .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
+        .bind(lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str())
+        .bind(lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str())
         .execute(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
@@ -786,7 +789,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn abandon_turn_input_claims(
         &self,
-        claims: &[lash_core::TurnInputClaim],
+        claims: &[lash_core_execution::TurnInputClaim],
     ) -> Result<(), StoreError> {
         if claims.is_empty() {
             return Ok(());
@@ -828,8 +831,8 @@ impl TurnInputStore for PostgresSessionStore {
             .bind(&session_ids)
             .bind(&claim_ids)
             .bind(&claim_tokens)
-            .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
-            .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
+            .bind(lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str())
+            .bind(lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str())
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -842,8 +845,8 @@ impl TurnInputStore for PostgresSessionStore {
         &self,
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
-        scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> Result<Vec<lash_core::TurnId>, StoreError> {
+        scope: lash_core_execution::OrphanedTurnInputScope<'_>,
+    ) -> Result<Vec<lash_core_execution::TurnId>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -868,10 +871,10 @@ impl TurnInputStore for PostgresSessionStore {
         &self,
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
-        turn_id: &lash_core::TurnId,
-        observed: &lash_core::TurnCancelIntentSnapshot,
-        settlement: Option<&lash_core::TurnCancelClosureSettlement>,
-    ) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
+        turn_id: &lash_core_execution::TurnId,
+        observed: &lash_core_execution::TurnCancelIntentSnapshot,
+        settlement: Option<&lash_core_execution::TurnCancelClosureSettlement>,
+    ) -> Result<lash_core_execution::TurnCancelRepairResult, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -879,7 +882,8 @@ impl TurnInputStore for PostgresSessionStore {
             .await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
-        let closure = settlement.map(lash_core::TurnCancelClosureSettlement::authorization);
+        let closure =
+            settlement.map(lash_core_execution::TurnCancelClosureSettlement::authorization);
         let stored: Option<String> = sqlx::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .closures_postgres
@@ -891,8 +895,11 @@ impl TurnInputStore for PostgresSessionStore {
         .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        let closure_required =
-            stored.is_some() || !matches!(observed, lash_core::TurnCancelIntentSnapshot::Absent);
+        let closure_required = stored.is_some()
+            || !matches!(
+                observed,
+                lash_core_execution::TurnCancelIntentSnapshot::Absent
+            );
         if closure_required != settlement.is_some()
             || closure.is_some_and(|authorization| {
                 authorization.session_id() != session_id || authorization.turn_id() != turn_id
@@ -926,7 +933,11 @@ impl TurnInputStore for PostgresSessionStore {
             settlement,
         )
         .await?;
-        if settlement.is_some() && matches!(repaired, lash_core::TurnCancelRepairResult::Applied(_))
+        if settlement.is_some()
+            && matches!(
+                repaired,
+                lash_core_execution::TurnCancelRepairResult::Applied(_)
+            )
         {
             sqlx::query(
                 crate::turn_ingress::turn_ingress_sql()

@@ -189,7 +189,7 @@ fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
             "lash_turn_cancellation_bindings",
             "admitted_scope_json",
         ),
-        PayloadRegistration::of::<lash_core::ExecutionScope>(),
+        PayloadRegistration::of::<lash_core_execution::ExecutionScope>(),
     );
     payloads.insert(
         PayloadCarrier::new(
@@ -197,20 +197,20 @@ fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
             "lash_turn_cancel_closure_participants",
             "scope_json",
         ),
-        PayloadRegistration::of::<lash_core::ExecutionScope>(),
+        PayloadRegistration::of::<lash_core_execution::ExecutionScope>(),
     );
     // FIG-3537: the turn-commit receipt is one serialized type on both SQL
     // backends, so the PostgreSQL block carries the SQLite column's projection
     // and the SQLite carrier registers its own fingerprint. A receipt shape
     // change then owes both component versions.
-    let mut receipt = PayloadRegistration::of::<lash_core::store::RuntimeCommitReceipt>();
+    let mut receipt = PayloadRegistration::of::<lash_core_execution::store::RuntimeCommitReceipt>();
     receipt.include_persisted_projection(
         PayloadCarrier::new(
             PayloadBackend::Sqlite,
             "runtime_turn_commits",
             "result_json",
         ),
-        PayloadShape::of::<lash_core::store::RuntimeCommitReceipt>(),
+        PayloadShape::of::<lash_core_execution::store::RuntimeCommitReceipt>(),
     );
     payloads.insert(
         PayloadCarrier::new(
@@ -226,7 +226,7 @@ fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
             "runtime_turn_commits",
             "result_json",
         ),
-        PayloadRegistration::of::<lash_core::store::RuntimeCommitReceipt>(),
+        PayloadRegistration::of::<lash_core_execution::store::RuntimeCommitReceipt>(),
     );
     payloads
 }
@@ -742,11 +742,11 @@ fn json_value_type(value: &Value) -> &'static str {
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod tests {
     use super::*;
-    use lash_core::TurnId;
+    use lash_core_execution::TurnId;
 
     #[test]
     fn session_meta_shape_comes_from_all_fields_even_without_a_sample() {
-        let shape = PayloadShape::of::<lash_core::SessionMeta>();
+        let shape = PayloadShape::of::<lash_core_execution::SessionMeta>();
         assert_eq!(shape.rust_type, "SessionMeta");
         assert_eq!(
             shape.entries.get("/properties/session_id/type"),
@@ -789,8 +789,8 @@ mod tests {
 
         let sqlite_carrier =
             PayloadCarrier::new(PayloadBackend::Sqlite, "session_meta", "relation_json");
-        let sqlite_projection = PayloadShape::of::<lash_core::SessionRelation>();
-        let mut registration = PayloadRegistration::of::<lash_core::SessionMeta>();
+        let sqlite_projection = PayloadShape::of::<lash_core_execution::SessionRelation>();
+        let mut registration = PayloadRegistration::of::<lash_core_execution::SessionMeta>();
         registration.include_persisted_projection(sqlite_carrier, sqlite_projection);
         assert_eq!(
             registration
@@ -815,7 +815,7 @@ mod tests {
         assert!(rendered.contains("present"));
         assert!(rendered.contains("optional"));
         assert_eq!(
-            PayloadShape::of::<lash_core::SessionMeta>()
+            PayloadShape::of::<lash_core_execution::SessionMeta>()
                 .entries
                 .get(
                     "/definitions/SessionRelation/oneOf/tag:kind=string:%22root%22/properties/kind/enum-values"

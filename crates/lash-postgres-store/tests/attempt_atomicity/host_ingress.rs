@@ -1,5 +1,7 @@
 use super::*;
-use lash_core::{ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRegistrar as _};
+use lash_core_execution::{
+    ProcessEventLogTestSupport as _, ProcessQuery as _, ProcessRegistrar as _,
+};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -33,9 +35,9 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
                 },
                 lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             )
             .with_extra_event_types([lash::process::ProcessEventType {
@@ -129,16 +131,16 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
     let other_process_id = ProcessId::from(format!("pg-tool-intent-ingress-alternate-{suffix}"));
     let alternate = registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
+            lash_core_execution::ProcessRegistration::new(
                 &other_process_id,
-                lash_core::ProcessInput::External {
+                lash_core_execution::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::RecoveryContract::ExternallyOwned,
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             ),
             std::slice::from_ref(&session_id),
@@ -190,7 +192,7 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
     let lash::tools::ToolIntentIngressOutcome::Refused {
         refusal:
             lash::tools::ToolIntentIngressRefusal::DuplicateIdentity {
-                kind: lash_core::ToolIntentKind::CancelProcess,
+                kind: lash_core_execution::ToolIntentKind::CancelProcess,
             },
     } = conflicting_cancel
     else {
@@ -207,9 +209,12 @@ async fn host_ingress_duplicate_replays_the_same_outcome_once_on_postgres() {
         .filter(|event| event.event_type == "process.cancel_requested")
         .collect::<Vec<_>>();
     assert_eq!(cancel_events.len(), 1);
-    let standing: lash_core::CancelRequest =
+    let standing: lash_core_execution::CancelRequest =
         serde_json::from_value(cancel_events[0].payload.clone()).expect("typed cancel fact");
-    assert_eq!(standing.origin, lash_core::CancelOrigin::ModelRequested);
+    assert_eq!(
+        standing.origin,
+        lash_core_execution::CancelOrigin::ModelRequested
+    );
     assert_eq!(
         standing.requester, cancel_identity.replay_key,
         "the first admitted causal requester remains authoritative"

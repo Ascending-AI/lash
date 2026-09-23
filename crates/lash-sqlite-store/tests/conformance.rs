@@ -44,11 +44,13 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
     let factory = SqliteSessionStoreFactory::new(dir.path());
     let session_id = SessionId::from("condemnation-corruption");
     factory
-        .create_store(&lash_core::testing::store_fixtures::session_store_request(
-            &session_id,
-            "condemnation-corruption",
-            lash_core::SessionRelation::Root,
-        ))
+        .create_store(
+            &lash_core_execution::testing::store_fixtures::session_store_request(
+                &session_id,
+                "condemnation-corruption",
+                lash_core_execution::SessionRelation::Root,
+            ),
+        )
         .await
         .expect("materialize catalog");
     let connection = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
@@ -61,8 +63,8 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         )
         .expect("inject unknown persisted phase");
     assert!(matches!(
-        lash_core::AttachmentRootSet::list_condemnations(&factory).await,
-        Err(lash_core::StoreError::StoredDataCorrupt { .. })
+        lash_core_execution::AttachmentRootSet::list_condemnations(&factory).await,
+        Err(lash_core_execution::StoreError::StoredDataCorrupt { .. })
     ));
     connection
         .execute_batch(
@@ -73,8 +75,8 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         )
         .expect("inject inconsistent persisted provenance");
     assert!(matches!(
-        lash_core::AttachmentRootSet::list_condemnations(&factory).await,
-        Err(lash_core::StoreError::StoredDataCorrupt { .. })
+        lash_core_execution::AttachmentRootSet::list_condemnations(&factory).await,
+        Err(lash_core_execution::StoreError::StoredDataCorrupt { .. })
     ));
 }
 
@@ -120,8 +122,8 @@ use lash_conformance::{
     ReopenableTriggerStore, SessionExecutionLeaseRenewalZeroRowHandles,
     SessionExecutionLeaseRenewalZeroRowInjector,
 };
-use lash_core::store::ConformanceSessionStoreFactory;
-use lash_core::{
+use lash_core_execution::store::ConformanceSessionStoreFactory;
+use lash_core_execution::{
     AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     ProcessCompletionAuthority, ProcessEventAppendRequest, ProcessEventLog as _,
     ProcessExecutionEnvStore, ProcessIdentity, ProcessInput, ProcessLifecycle as _,
@@ -141,7 +143,7 @@ use tempfile::TempDir;
 #[cfg(feature = "testing")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
-    use lash_core::ProcessRetention as _;
+    use lash_core_execution::ProcessRetention as _;
 
     let dir = tempfile::tempdir().expect("process-event snapshot tempdir");
     let path = dir.path().join("process-event-snapshot.db");
@@ -171,15 +173,15 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             )
-            .with_extra_event_types([lash_core::ProcessEventType {
+            .with_extra_event_types([lash_core_execution::ProcessEventType {
                 name: "snapshot.tail".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                payload_schema: lash_core_execution::LashSchema::any(),
+                semantics: lash_core_execution::ProcessEventSemanticsSpec::default(),
             }]),
         )
         .await
@@ -199,9 +201,9 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     let terminal = reader
         .complete_process(
             &process_id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
+            lash_core_execution::ProcessAwaitOutput::from_tool_output(
+                lash_core_execution::ToolCallOutput::success(serde_json::Value::Null),
+            ),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
@@ -210,15 +212,15 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
         .event_page(
             &process_id,
             std::num::NonZeroUsize::MIN,
-            lash_core::ProcessEventQueryMode::Full,
+            lash_core_execution::ProcessEventQueryMode::Full,
             None,
         )
         .await
         .expect("read first event page");
-    let lash_core::ProcessEventReadOutcome::Retained(first) = first else {
+    let lash_core_execution::ProcessEventReadOutcome::Retained(first) = first else {
         panic!("new process history must be retained");
     };
-    let lash_core::ProcessEventPageMore::More { continuation } = first.more else {
+    let lash_core_execution::ProcessEventPageMore::More { continuation } = first.more else {
         panic!("fixture must leave a nonempty unread tail");
     };
 
@@ -231,7 +233,7 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
                 .event_page(
                     &process_id,
                     std::num::NonZeroUsize::new(16).expect("non-zero page size"),
-                    lash_core::ProcessEventQueryMode::Full,
+                    lash_core_execution::ProcessEventQueryMode::Full,
                     Some(continuation),
                 )
                 .await
@@ -242,7 +244,7 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
         .prune_terminal_processes(
             terminal.updated_at_ms.saturating_add(1),
             None,
-            lash_core::ProjectionWatermark::NoProjector,
+            lash_core_execution::ProjectionWatermark::NoProjector,
         )
         .await
         .expect("prune process through competing connection");
@@ -256,9 +258,9 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     assert!(
         !matches!(
             outcome,
-            lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
-                events: lash_core::ProcessEventPageEvents::Full(ref events),
-                more: lash_core::ProcessEventPageMore::Complete,
+            lash_core_execution::ProcessEventReadOutcome::Retained(lash_core_execution::ProcessEventPage {
+                events: lash_core_execution::ProcessEventPageEvents::Full(ref events),
+                more: lash_core_execution::ProcessEventPageMore::Complete,
             }) if events.is_empty()
         ),
         "a prune between identity lookup and page fetch must not become false empty completion: {outcome:?}"
@@ -359,14 +361,14 @@ where
     .expect("runtime thread")
 }
 
-fn open_registry(path: &Path) -> Arc<dyn lash_core::ConformanceProcessRegistry> {
+fn open_registry(path: &Path) -> Arc<dyn lash_core_execution::ConformanceProcessRegistry> {
     let path = path.to_path_buf();
     let sessions = path.with_extension("sessions");
     Arc::new(sync_await(async move {
         SqliteProcessRegistry::open(&path, sessions)
             .await
             .expect("file registry")
-    })) as Arc<dyn lash_core::ConformanceProcessRegistry>
+    })) as Arc<dyn lash_core_execution::ConformanceProcessRegistry>
 }
 
 fn open_store(path: &Path) -> Arc<dyn RuntimePersistence> {
@@ -378,7 +380,7 @@ fn open_store(path: &Path) -> Arc<dyn RuntimePersistence> {
 
 fn open_store_with_clock(
     path: &Path,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
 ) -> Arc<dyn RuntimePersistence> {
     let path = path.to_path_buf();
     Arc::new(sync_await(async move {
@@ -761,7 +763,7 @@ impl GraphIntegrityInjector for SqliteGraphIntegrityInjector {
     async fn load_whole_graph(
         &self,
         _session_id: &SessionId,
-    ) -> Result<lash_core::SessionGraph, lash_core::StoreError> {
+    ) -> Result<lash_core_execution::SessionGraph, lash_core_execution::StoreError> {
         self.runtime.load_session_graph().await
     }
 }
@@ -794,10 +796,10 @@ async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
             .expect("open healthy SQLite graph store"),
     );
     let session_id = "healthy-whole-session-graph";
-    let mut state = lash_core::RuntimeSessionState {
+    let mut state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     state.ensure_agent_frame_initialized();
@@ -805,14 +807,13 @@ async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
         .session_graph
         .append_plugin("healthy-whole-graph", serde_json::json!({"second": true}));
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
+        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(session_id))
         .await
         .expect("bind healthy SQLite graph session");
     store
-        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
-            &state,
-            &[],
-        ))
+        .commit_runtime_state(
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+        )
         .await
         .expect("seed healthy SQLite graph session");
 
@@ -851,13 +852,14 @@ lash_conformance::artifact_store_reopenable_tests!({
 
 fn exec_envelope(
     scope: ExecutionScope,
-    attribution: lash_core::RuntimeAttribution,
+    attribution: lash_core_execution::RuntimeAttribution,
     replay_key: &str,
     code: &str,
 ) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope, replay_key).expect("valid SQLite effect address"),
+            lash_core_execution::EffectAddress::new(scope, replay_key)
+                .expect("valid SQLite effect address"),
             attribution,
             replay_key,
         ),
@@ -870,7 +872,7 @@ fn exec_envelope(
 
 fn exec_outcome(marker: &str) -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::ExecCode {
-        result: Box::new(Ok(lash_core::ExecResponse {
+        result: Box::new(Ok(lash_core_execution::ExecResponse {
             observations: Vec::new(),
             calls: Vec::new(),
             printed_images: Vec::new(),
@@ -939,31 +941,33 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             )
-            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                ProcessIdentity::new("recent-pushdown-kind"),
-            )),
+            .with_admitted_identity(
+                lash_core_execution::AdmittedProcessIdentity::for_testing(ProcessIdentity::new(
+                    "recent-pushdown-kind",
+                )),
+            ),
         )
         .await
         .expect("register recently retired pushdown fixture");
     let terminal = registry
         .complete_process(
             &ProcessId::from("recent-pushdown"),
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::json!({}),
-            )),
+            lash_core_execution::ProcessAwaitOutput::from_tool_output(
+                lash_core_execution::ToolCallOutput::success(serde_json::json!({})),
+            ),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete recently retired pushdown fixture");
     let terminal = match terminal {
-        lash_core::ProcessCompletionOutcome::Committed(record)
-        | lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record }
-        | lash_core::ProcessCompletionOutcome::Superseded { stored: record } => record,
+        lash_core_execution::ProcessCompletionOutcome::Committed(record)
+        | lash_core_execution::ProcessCompletionOutcome::AlreadyApplied { stored: record }
+        | lash_core_execution::ProcessCompletionOutcome::Superseded { stored: record } => record,
     };
 
     let conn = rusqlite::Connection::open(&path).expect("open pushdown corruption connection");
@@ -1017,7 +1021,7 @@ lash_conformance::process_projection_repair_tests!({
     (
         dir,
         registry as Arc<dyn ProcessRegistry>,
-        move |stale: lash_core::ProcessRecord| async move {
+        move |stale: lash_core_execution::ProcessRecord| async move {
             let conn = rusqlite::Connection::open(corruption_path)
                 .expect("open projection corruption connection");
             let changed = conn
@@ -1104,15 +1108,15 @@ lash_conformance::process_continuation_store_tests!({
             .await
             .expect("open continuation store"),
     );
-    let registry = Arc::clone(&storage) as Arc<dyn lash_core::ProcessRegistry>;
-    let store = storage as Arc<dyn lash_core::ProcessContinuationStore>;
+    let registry = Arc::clone(&storage) as Arc<dyn lash_core_execution::ProcessRegistry>;
+    let store = storage as Arc<dyn lash_core_execution::ProcessContinuationStore>;
     ((), registry, store)
 });
 
 lash_conformance::session_store_factory_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
     let unbound = Store::memory().await.expect("unbound durable-core store");
-    let unbound = Some(Arc::new(unbound) as Arc<dyn lash_core::StoreMaintenance>);
+    let unbound = Some(Arc::new(unbound) as Arc<dyn lash_core_execution::StoreMaintenance>);
     let make_dirs = Arc::clone(&dirs);
     let make = move || {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1147,7 +1151,7 @@ lash_conformance::session_graph_append_tests!({
 
 lash_conformance::attachment_owner_cold_replay_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
-    let clock = Arc::new(lash_core::testing::TestClock::new(
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
         current_epoch_ms_for_test().saturating_sub(100_000),
     ));
     let process_path = dir.path().join("processes.db");
@@ -1201,7 +1205,9 @@ lash_conformance::attachment_owner_cold_replay_tests!({
         lash_conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
-            attachment_store: Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            attachment_store: Arc::new(
+                lash_core_execution::facade_support::InMemoryAttachmentStore::new(),
+            ),
             first_effect_controller: Some(first),
             reopen_effect_controller,
             clock,
@@ -1227,7 +1233,7 @@ lash_conformance::process_prune_session_store_tests!({
 });
 
 lash_conformance::runtime_persistence_clock_tests!({
-    let clock = Arc::new(lash_core::testing::TestClock::new(20_000));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(20_000));
     let advance_clock = Arc::clone(&clock);
     let verify_clock = Arc::clone(&clock);
     let store = Arc::new(
@@ -1246,7 +1252,7 @@ lash_conformance::runtime_persistence_clock_tests!({
                 .expect("read SQLite session-lease diagnostics");
             assert_eq!(
                 observation.observed_at_epoch_ms,
-                lash_core::ClockWallTime::timestamp_ms(verify_clock.as_ref()),
+                lash_core_execution::ClockWallTime::timestamp_ms(verify_clock.as_ref()),
                 "SQLite diagnostics must return the same injected clock that authors lease timestamps"
             );
         },
@@ -1340,26 +1346,28 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("malformed-trigger.db");
     let source_type = "ui.button.pressed";
-    let source_key =
-        lash_core::facade_support::empty_trigger_source_key(source_type).expect("source key");
+    let source_key = lash_core_execution::facade_support::empty_trigger_source_key(source_type)
+        .expect("source key");
     let store = SqliteTriggerStore::open(&path)
         .await
         .expect("open trigger store");
-    let register = |owner: &str, key: &str| lash_core::TriggerCommand::Register {
-        owner_scope: lash_core::TriggerOwnerScope::session(owner),
-        actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(owner)),
-        draft: lash_core::TriggerSubscriptionDraft::for_process(
+    let register = |owner: &str, key: &str| lash_core_execution::TriggerCommand::Register {
+        owner_scope: lash_core_execution::TriggerOwnerScope::session(owner),
+        actor: lash_core_execution::ProcessOriginator::session(
+            lash_core_execution::SessionScope::new(owner),
+        ),
+        draft: lash_core_execution::TriggerSubscriptionDraft::for_process(
             key,
-            lash_core::ProcessExecutionEnvRef::new(format!("process-env:{owner}")),
+            lash_core_execution::ProcessExecutionEnvRef::new(format!("process-env:{owner}")),
             source_type,
             source_key.clone(),
-            lash_core::ProcessInput::Engine {
+            lash_core_execution::ProcessInput::Engine {
                 kind: "test".to_string(),
                 payload: serde_json::json!({ "owner": owner }),
             },
-            lash_core::ProcessIdentity::new("test"),
+            lash_core_execution::ProcessIdentity::new("test"),
         )
-        .with_payload_schema(lash_core::LashSchema::any()),
+        .with_payload_schema(lash_core_execution::LashSchema::any()),
     };
     let malformed = store
         .execute_command("register-malformed", register("malformed", "malformed-key"))
@@ -1371,10 +1379,11 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
         .await
         .expect("execute current registration")
         .expect("register current row");
-    let lash_core::TriggerCommandOutcome::Mutation { receipt: malformed } = malformed else {
+    let lash_core_execution::TriggerCommandOutcome::Mutation { receipt: malformed } = malformed
+    else {
         panic!("expected malformed registration receipt")
     };
-    let lash_core::TriggerCommandOutcome::Mutation { receipt: current } = current else {
+    let lash_core_execution::TriggerCommandOutcome::Mutation { receipt: current } = current else {
         panic!("expected current registration receipt")
     };
     drop(store);
@@ -1391,7 +1400,7 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
         .await
         .expect("reopen trigger store");
     let ingress = reopened
-        .ingest_occurrence(lash_core::TriggerOccurrenceRequest::new(
+        .ingest_occurrence(lash_core_execution::TriggerOccurrenceRequest::new(
             source_type,
             source_key,
             serde_json::json!({ "button": "Blue" }),
@@ -1408,7 +1417,7 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
 
 lash_conformance::runtime_persistence_reopenable_tests!({
     let dirs = Arc::new(Mutex::new(Vec::new()));
-    let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
     (
         Arc::clone(&dirs),
@@ -1419,12 +1428,14 @@ lash_conformance::runtime_persistence_reopenable_tests!({
             let clock = store_clock.clone();
             let (open, reopen) = sync_await(async move {
                 let factory = SqliteSessionStoreFactory::new(factory_dir)
-                    .with_clock(clock as Arc<dyn lash_core::Clock>);
-                let request = lash_core::SessionStoreCreateRequest {
+                    .with_clock(clock as Arc<dyn lash_core_execution::Clock>);
+                let request = lash_core_execution::SessionStoreCreateRequest {
                     pending_observer_intents: Vec::new(),
                     session_id,
-                    relation: lash_core::SessionRelation::Root,
-                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                    relation: lash_core_execution::SessionRelation::Root,
+                    policy: lash_core_execution::SessionPolicy::new(
+                        lash_core_execution::TurnBudget::Unbounded,
+                    ),
                 };
                 let open = factory
                     .create_store(&request)
@@ -1467,14 +1478,14 @@ lash_conformance::unbound_session_read_tests!({
 
 lash_conformance::store_recovery_tests!({
     let dir = tempfile::tempdir().expect("store-recovery tempdir");
-    let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
     (
         (),
         move |scenario: &str| {
             open_store_with_clock(
                 &dir.path().join(format!("store-recovery-{scenario}.db")),
-                Arc::clone(&store_clock) as Arc<dyn lash_core::Clock>,
+                Arc::clone(&store_clock) as Arc<dyn lash_core_execution::Clock>,
             )
         },
         lash_conformance::StoreRecoveryLeaseTiming::controlled(move |duration_ms| {
@@ -1498,7 +1509,7 @@ lash_conformance::turn_crash_matrix_tests!({
             let controller = sync_await(SqliteRuntimeEffectController::memory_with_options(
                 scope.clone(),
                 SqliteEffectReplayOptions {
-                    lease_timings: lash_core::facade_support::LeaseTimings::new(
+                    lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
                         std::time::Duration::from_secs(60),
                         std::time::Duration::from_millis(50),
                     )
@@ -1539,7 +1550,7 @@ lash_conformance::append_head_switch_tests!({
     (
         dir,
         store as Arc<dyn RuntimePersistence>,
-        move |leaf_node_id: lash_core::NodeId| async move {
+        move |leaf_node_id: lash_core_execution::NodeId| async move {
             let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
             conn.execute(
                 "UPDATE session_head
@@ -1560,7 +1571,7 @@ lash_conformance::append_tombstone_tests!({
     (
         dir,
         store as Arc<dyn RuntimePersistence>,
-        move |node_id: lash_core::NodeId| async move {
+        move |node_id: lash_core_execution::NodeId| async move {
             let conn = rusqlite::Connection::open(mutation_path).expect("open raw sqlite");
             conn.execute(
                 "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
@@ -1594,11 +1605,13 @@ mod cancelled_queued_append {
         let factory =
             SqliteSessionStoreFactory::new(dir.path()).with_fault_injector(injector.clone());
         let store = factory
-            .create_store(&lash_core::SessionStoreCreateRequest {
+            .create_store(&lash_core_execution::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("root"),
-                relation: lash_core::SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                relation: lash_core_execution::SessionRelation::Root,
+                policy: lash_core_execution::SessionPolicy::new(
+                    lash_core_execution::TurnBudget::Unbounded,
+                ),
             })
             .await
             .expect("create cancellation store");
@@ -1827,12 +1840,12 @@ async fn sqlite_completion_key_preparation_tracks_backing() {
         memory
             .prepare_completion_key(
                 &memory_scope,
-                lash_core::AwaitEventWaitIdentity::tool_completion("memory-call"),
+                lash_core_execution::AwaitEventWaitIdentity::tool_completion("memory-call"),
                 true,
             )
             .await
             .expect("memory preparation"),
-        lash_core::CompletionKeyPreparation::Unsupported
+        lash_core_execution::CompletionKeyPreparation::Unsupported
     ));
 
     let file_scope = durable_turn_scope("file-session", "file-turn");
@@ -1840,12 +1853,12 @@ async fn sqlite_completion_key_preparation_tracks_backing() {
     assert!(matches!(
         file.prepare_completion_key(
             &file_scope,
-            lash_core::AwaitEventWaitIdentity::tool_completion("file-call"),
+            lash_core_execution::AwaitEventWaitIdentity::tool_completion("file-call"),
             true,
         )
         .await
         .expect("file preparation"),
-        lash_core::CompletionKeyPreparation::Issued(_)
+        lash_core_execution::CompletionKeyPreparation::Issued(_)
     ));
 }
 
@@ -1857,9 +1870,10 @@ lash_conformance::effect_host_cold_await_event_tests!({
     // test policy preserves that semantic wait without spending the
     // production-default 30 seconds; the derived renewal interval also starts
     // after the vector's 250ms proof that the original owner remains parked.
-    let lease_timings =
-        lash_core::facade_support::LeaseTimings::from_ttl(std::time::Duration::from_secs(1))
-            .expect("cold-instance conformance lease timings");
+    let lease_timings = lash_core_execution::facade_support::LeaseTimings::from_ttl(
+        std::time::Duration::from_secs(1),
+    )
+    .expect("cold-instance conformance lease timings");
     (dir, move || {
         let path = path.clone();
         let options = SqliteEffectReplayOptions {
@@ -2000,11 +2014,13 @@ async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
     const INJECTED_MS: u64 = 1_234_567_890_000;
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("injected-clock-await-event.db");
-    let clock = Arc::new(lash_core::testing::TestClock::new(INJECTED_MS));
-    let host =
-        SqliteEffectHost::open_with_clock(&path, Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-            .await
-            .expect("SQLite effect host on an injected clock");
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(INJECTED_MS));
+    let host = SqliteEffectHost::open_with_clock(
+        &path,
+        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+    )
+    .await
+    .expect("SQLite effect host on an injected clock");
     let key = host
         .await_event_key(
             &durable_turn_scope("injected-clock-session", "injected-clock-turn"),
@@ -2043,14 +2059,14 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
     const INJECTED_MS: u64 = 1_234_567_890_000;
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("injected-clock-effect-replay.db");
-    let clock = Arc::new(lash_core::testing::TestClock::new(INJECTED_MS));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(INJECTED_MS));
     let controller = SqliteRuntimeEffectController::open_with_clock(
         &path,
         durable_turn_scope(
             "injected-clock-effect-session",
             "injected-clock-effect-turn",
         ),
-        Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
     .await
     .expect("SQLite effect controller on an injected clock");
@@ -2068,7 +2084,7 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
                             "injected-clock-effect-session",
                             "injected-clock-effect-turn",
                         ),
-                        lash_core::RuntimeAttribution::for_turn(
+                        lash_core_execution::RuntimeAttribution::for_turn(
                             "injected-clock-effect-session",
                             "injected-clock-effect-turn",
                             1,
@@ -2108,7 +2124,8 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
     );
     assert_eq!(
         lease_expires_at_ms,
-        (INJECTED_MS + lash_core::facade_support::LeaseTimings::default().ttl_ms()) as i64,
+        (INJECTED_MS + lash_core_execution::facade_support::LeaseTimings::default().ttl_ms())
+            as i64,
         "the lease expiry must be derived from the injected claim instant"
     );
 
@@ -2251,7 +2268,7 @@ async fn sqlite_effect_controller_replays_without_local_executor() {
     let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
     let envelope = exec_envelope(
         scope,
-        lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
+        lash_core_execution::RuntimeAttribution::for_turn("session", "turn", 1, 0),
         "exec-replay",
         "first",
     );
@@ -2276,9 +2293,12 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
     let scope = durable_turn_scope("sqlite-intent-session", "sqlite-intent-turn");
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope.clone(), "sqlite-recorded-intent-attempt")
-                .expect("valid SQLite intent address"),
-            lash_core::RuntimeAttribution::for_turn(
+            lash_core_execution::EffectAddress::new(
+                scope.clone(),
+                "sqlite-recorded-intent-attempt",
+            )
+            .expect("valid SQLite intent address"),
+            lash_core_execution::RuntimeAttribution::for_turn(
                 "sqlite-intent-session",
                 "sqlite-intent-turn",
                 0,
@@ -2287,7 +2307,7 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
             "sqlite-recorded-intent-attempt",
         ),
         RuntimeEffectCommand::ToolAttempt {
-            call: lash_core::PreparedToolCall::from_parts(
+            call: lash_core_execution::PreparedToolCall::from_parts(
                 "sqlite-intent-call",
                 "tool:sqlite_intent_leaf",
                 "sqlite_intent_leaf",
@@ -2301,24 +2321,26 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
         },
     );
     let expected = RuntimeEffectOutcome::ToolAttempt {
-        launch: Box::new(lash_core::ToolAttemptLaunch::Done {
-            record: Box::new(lash_core::ToolCallRecord {
+        launch: Box::new(lash_core_execution::ToolAttemptLaunch::Done {
+            record: Box::new(lash_core_execution::ToolCallRecord {
                 call_id: Some("sqlite-intent-call".to_string()),
                 tool: "sqlite_intent_leaf".to_string(),
                 args: serde_json::json!({"value": "record"}),
-                output: lash_core::ToolCallOutput::success(serde_json::json!({
+                output: lash_core_execution::ToolCallOutput::success(serde_json::json!({
                     "provider": "done"
                 })),
                 duration_ms: 7,
             }),
-            intents: lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::EmitProcessEvent(
-                lash_core::EmitProcessEventIntent {
-                    session_id: SessionId::from("sqlite-intent-session"),
-                    process_id: ProcessId::from("sqlite-intent-target"),
-                    event_type: "sqlite.intent.recorded".to_string(),
-                    payload: serde_json::json!({"literal": true}),
-                },
-            )]),
+            intents: lash_core_execution::ToolIntents::v3(vec![
+                lash_core_execution::ToolIntent::EmitProcessEvent(
+                    lash_core_execution::EmitProcessEventIntent {
+                        session_id: SessionId::from("sqlite-intent-session"),
+                        process_id: ProcessId::from("sqlite-intent-target"),
+                        event_type: "sqlite.intent.recorded".to_string(),
+                        payload: serde_json::json!({"literal": true}),
+                    },
+                ),
+            ]),
         }),
         triggers: Vec::new(),
         capture: None,
@@ -2400,8 +2422,9 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                         &path,
                         durable_turn_scope("session", "turn"),
                         SqliteEffectReplayOptions {
-                            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(ttl)
-                                .expect("conformance lease timings"),
+                            lease_timings:
+                                lash_core_execution::facade_support::LeaseTimings::from_ttl(ttl)
+                                    .expect("conformance lease timings"),
                             drain_budget: Default::default(),
                         },
                         clock,

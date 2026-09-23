@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use lash_core::StoreError;
-use lash_core::store_backend_support::required_constraints::{
+use lash_core_execution::StoreError;
+use lash_core_execution::store_backend_support::required_constraints::{
     EXPECTED_CONSTRAINTS, EXPECTED_FOREIGN_KEYS, InspectedConstraint, InspectedForeignKey,
     RenderedConstraint, RenderedForeignKey, RequiredConstraintReport, compare_required_constraints,
     compare_required_foreign_keys,

@@ -13,8 +13,8 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::sync::Arc;
 
-use lash_core::AwaitEventResolver as _;
-use lash_core::{AwaitEventWaitIdentity, ExecutionScope};
+use lash_core_execution::AwaitEventResolver as _;
+use lash_core_execution::{AwaitEventWaitIdentity, ExecutionScope};
 use lash_postgres_store::{
     PostgresEffectReplayOptions, PostgresRuntimeEffectController, PostgresStorage,
 };
@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if args.next().is_some() {
             return Err("unexpected helper arguments".into());
         }
-        let clock = Arc::new(lash_core::testing::TestClock::new(
+        let clock = Arc::new(lash_core_execution::testing::TestClock::new(
             if action == "queued_recover" {
                 1_000_000
             } else {
@@ -149,12 +149,12 @@ async fn run_turn_action(
         .expect("cold-process turn scope carries a session id")
         .to_string();
     let store = Arc::new(storage.session_store(session_id.clone()))
-        as Arc<dyn lash_core::RuntimePersistence>;
+        as Arc<dyn lash_core_execution::RuntimePersistence>;
     let controller = Arc::new(PostgresRuntimeEffectController::with_options(
         &storage,
         scope,
         PostgresEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::new(
+            lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
                 cold_process_effect_driver::RECOVERY_TTL,
                 cold_process_effect_driver::RECOVERY_RENEW,
             )?,
@@ -178,7 +178,7 @@ async fn run_effect_action(
         &storage,
         ExecutionScope::turn(&session_id, &turn_id),
         PostgresEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::new(
+            lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
                 cold_process_effect_driver::RECOVERY_TTL,
                 cold_process_effect_driver::RECOVERY_RENEW,
             )?,

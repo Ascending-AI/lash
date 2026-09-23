@@ -2,7 +2,7 @@ use super::*;
 
 fn decode_binding_scope(
     encoded: Option<&str>,
-) -> Result<Option<lash_core::ExecutionScope>, StoreError> {
+) -> Result<Option<lash_core_execution::ExecutionScope>, StoreError> {
     encoded
         .map(|encoded| {
             serde_json::from_str(encoded).map_err(|error| StoreError::StoredDataCorrupt {
@@ -17,10 +17,11 @@ fn decode_binding_scope(
 impl TurnInputStore for Store {
     fn turn_cancellation_authority(
         &self,
-    ) -> Option<std::sync::Arc<dyn lash_core::store::StoreTurnCancellationAuthority>> {
+    ) -> Option<std::sync::Arc<dyn lash_core_execution::store::StoreTurnCancellationAuthority>>
+    {
         self.turn_cancellation_authority
             .clone()
-            .map(lash_core::TurnCancellationAuthority::into_store_authority)
+            .map(lash_core_execution::TurnCancellationAuthority::into_store_authority)
     }
 
     async fn validate_turn_cancellation_binding(
@@ -28,7 +29,7 @@ impl TurnInputStore for Store {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
-        admitted_scope: &lash_core::ExecutionScope,
+        admitted_scope: &lash_core_execution::ExecutionScope,
     ) -> Result<(), StoreError> {
         admitted_scope
             .validate()
@@ -97,8 +98,8 @@ impl TurnInputStore for Store {
     async fn authorize_turn_cancel_closure(
         &self,
         session_execution_lease: &SessionExecutionLeaseAuthority,
-        authorization: &lash_core::TurnCancelClosureAuthorization,
-    ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, StoreError> {
+        authorization: &lash_core_execution::TurnCancelClosureAuthorization,
+    ) -> Result<lash_core_execution::TurnCancelClosureAuthorizationOutcome, StoreError> {
         authorization
             .validate()
             .map_err(|error| StoreError::StoredDataCorrupt {
@@ -117,7 +118,7 @@ impl TurnInputStore for Store {
         let authorization = authorization.clone();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<lash_core::TurnCancelClosureAuthorizationOutcome, StoreError> =
+                let outcome: Result<lash_core_execution::TurnCancelClosureAuthorizationOutcome, StoreError> =
                     (|| {
                         let sql = crate::turn_ingress::turn_ingress_sql();
                         ensure_session_not_deleted_conn(tx, authorization.session_id())?;
@@ -190,7 +191,7 @@ impl TurnInputStore for Store {
                             .map_err(sqlite_error)?;
                         match existing {
                             Some(existing) if existing == encoded => {
-                                Ok(lash_core::TurnCancelClosureAuthorizationOutcome::AdoptedExact)
+                                Ok(lash_core_execution::TurnCancelClosureAuthorizationOutcome::AdoptedExact)
                             }
                             Some(_) => Err(StoreError::TurnCancelClosureConflict {
                                 session_id: authorization.session_id().clone(),
@@ -217,7 +218,7 @@ impl TurnInputStore for Store {
                                     ],
                                 )
                                 .map_err(sqlite_error)?;
-                                Ok(lash_core::TurnCancelClosureAuthorizationOutcome::Authorized)
+                                Ok(lash_core_execution::TurnCancelClosureAuthorizationOutcome::Authorized)
                             }
                         }
                     })();
@@ -235,8 +236,8 @@ impl TurnInputStore for Store {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         binding_id: &str,
-        admitted_scope: &lash_core::ExecutionScope,
-    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+        admitted_scope: &lash_core_execution::ExecutionScope,
+    ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
         self.validate_turn_cancellation_binding(
             session_id,
             session_execution_lease,
@@ -273,7 +274,7 @@ impl TurnInputStore for Store {
 
     async fn pending_turn_cancel_closure_pins(
         &self,
-    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
         let session_id =
             self.session_id
                 .get()
@@ -309,11 +310,11 @@ impl TurnInputStore for Store {
 
     async fn turn_is_committed(
         &self,
-        address: &lash_core::facade_support::TurnAddress,
+        address: &lash_core_execution::facade_support::TurnAddress,
     ) -> Result<bool, StoreError> {
         let session_id = address.session_id.clone();
         let operation_key =
-            lash_core::OperationId::turn(&address.session_id, &address.turn_id, "final")
+            lash_core_execution::OperationId::turn(&address.session_id, &address.turn_id, "final")
                 .storage_key()?;
         self.conn
             .call(move |conn| {
@@ -332,8 +333,8 @@ impl TurnInputStore for Store {
 
     async fn record_turn_cancel_request(
         &self,
-        request: lash_core::facade_support::TurnCancelRequest,
-    ) -> Result<lash_core::TurnCancelRequestRecord, StoreError> {
+        request: lash_core_execution::facade_support::TurnCancelRequest,
+    ) -> Result<lash_core_execution::TurnCancelRequestRecord, StoreError> {
         let session_id = request.address.session_id.clone();
         let turn_id = request.address.turn_id.clone();
         self.conn
@@ -341,7 +342,7 @@ impl TurnInputStore for Store {
                 let outcome = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
                     let operation_key =
-                        lash_core::OperationId::turn(&session_id, &turn_id, "final")
+                        lash_core_execution::OperationId::turn(&session_id, &turn_id, "final")
                             .storage_key()?;
                     let committed = tx
                         .query_row(
@@ -354,7 +355,7 @@ impl TurnInputStore for Store {
                         )
                         .map_err(sqlite_error)?;
                     if committed {
-                        return Ok(lash_core::TurnCancelRequestRecord {
+                        return Ok(lash_core_execution::TurnCancelRequestRecord {
                             request,
                             outcome: None,
                         });
@@ -374,13 +375,14 @@ impl TurnInputStore for Store {
                                 &session_id,
                                 &turn_id,
                             )? {
-                                lash_core::TurnCancelIntentSnapshot::Present {
-                                    revision, ..
+                                lash_core_execution::TurnCancelIntentSnapshot::Present {
+                                    revision,
+                                    ..
                                 } => StoreError::checked_monotonic_increment(
                                     "turn_cancel_intent_revision",
                                     revision,
                                 )?,
-                                lash_core::TurnCancelIntentSnapshot::Absent => {
+                                lash_core_execution::TurnCancelIntentSnapshot::Absent => {
                                     return Err(StoreError::Backend(
                                         "turn cancel request disappeared during escalation"
                                             .to_string(),
@@ -403,7 +405,7 @@ impl TurnInputStore for Store {
                         }
                         return Ok(existing);
                     }
-                    let record = lash_core::TurnCancelRequestRecord {
+                    let record = lash_core_execution::TurnCancelRequestRecord {
                         request,
                         outcome: None,
                     };
@@ -430,8 +432,8 @@ impl TurnInputStore for Store {
 
     async fn turn_cancel_request(
         &self,
-        address: &lash_core::facade_support::TurnAddress,
-    ) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+        address: &lash_core_execution::facade_support::TurnAddress,
+    ) -> Result<Option<lash_core_execution::TurnCancelRequestRecord>, StoreError> {
         let session_id = address.session_id.clone();
         let turn_id = address.turn_id.clone();
         self.conn
@@ -442,8 +444,8 @@ impl TurnInputStore for Store {
 
     async fn turn_cancel_request_intent(
         &self,
-        address: &lash_core::facade_support::TurnAddress,
-    ) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+        address: &lash_core_execution::facade_support::TurnAddress,
+    ) -> Result<lash_core_execution::TurnCancelIntentSnapshot, StoreError> {
         let session_id = address.session_id.clone();
         let turn_id = address.turn_id.clone();
         self.conn
@@ -460,9 +462,9 @@ impl TurnInputStore for Store {
 
     async fn reconcile_turn_cancel_winner(
         &self,
-        address: &lash_core::facade_support::TurnAddress,
-        observed: &lash_core::TurnCancelIntentSnapshot,
-        evidence: &lash_core::facade_support::TurnCancellationEvidence,
+        address: &lash_core_execution::facade_support::TurnAddress,
+        observed: &lash_core_execution::TurnCancelIntentSnapshot,
+        evidence: &lash_core_execution::facade_support::TurnCancellationEvidence,
     ) -> Result<bool, StoreError> {
         let session_id = address.session_id.clone();
         let turn_id = address.turn_id.clone();
@@ -491,13 +493,13 @@ impl TurnInputStore for Store {
 
     async fn enqueue_pending_turn_input(
         &self,
-        draft: lash_core::PendingTurnInputDraft,
-    ) -> Result<lash_core::PendingTurnInput, StoreError> {
+        draft: lash_core_execution::PendingTurnInputDraft,
+    ) -> Result<lash_core_execution::PendingTurnInput, StoreError> {
         let nonce = self.commit_count.fetch_add(1, AtomicOrdering::Relaxed);
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<lash_core::PendingTurnInput, StoreError> = (|| {
+                let outcome: Result<lash_core_execution::PendingTurnInput, StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &draft.session_id)?;
                     let submission_digest = draft.submission_digest().map_err(|err| {
                         StoreError::Backend(format!(
@@ -537,14 +539,14 @@ impl TurnInputStore for Store {
                         }
                     }
                     let input_id = draft.input_id.clone().unwrap_or_else(|| {
-                        lash_core::store_backend_support::derive_pending_turn_input_id(
+                        lash_core_execution::store_backend_support::derive_pending_turn_input_id(
                             &draft.session_id,
                             draft.source_key.as_deref(),
                             now,
                             nonce,
                         )
                     });
-                    let state = lash_core::TurnInputState::open(draft.ingress.clone());
+                    let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
                     tx.execute(
                         crate::turn_ingress::turn_ingress_sql()
                             .pending_inputs_sqlite
@@ -572,7 +574,8 @@ impl TurnInputStore for Store {
                         .ok_or_else(|| {
                             StoreError::Backend("pending turn input insert disappeared".to_string())
                         })
-                })();
+                })(
+                );
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
@@ -585,36 +588,36 @@ impl TurnInputStore for Store {
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::PendingTurnInputRead>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let now = self.clock.timestamp_ms();
         self.conn
             .call(move |conn| {
-                let outcome: Result<Vec<lash_core::PendingTurnInputRead>, StoreError> = (|| {
-                    let rows = {
-                        let mut stmt = conn
-                            .prepare(
-                                crate::turn_ingress::turn_ingress_sql()
-                                    .pending_inputs
-                                    .list_undelivered
-                                    .sql(),
-                            )
-                            .map_err(sqlite_error)?;
-                        let rows = stmt
-                            .query_map(
-                                params![session_id.as_str(), now as i64],
-                                pending_turn_input_read_row_from_sql,
-                            )
-                            .map_err(sqlite_error)?;
-                        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
-                    };
-                    rows.into_iter()
-                        .map(|(row, lease_expires_at_ms)| {
-                            pending_turn_input_read_from_row(row, lease_expires_at_ms)
-                        })
-                        .collect()
-                })(
-                );
+                let outcome: Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> =
+                    (|| {
+                        let rows = {
+                            let mut stmt = conn
+                                .prepare(
+                                    crate::turn_ingress::turn_ingress_sql()
+                                        .pending_inputs
+                                        .list_undelivered
+                                        .sql(),
+                                )
+                                .map_err(sqlite_error)?;
+                            let rows = stmt
+                                .query_map(
+                                    params![session_id.as_str(), now as i64],
+                                    pending_turn_input_read_row_from_sql,
+                                )
+                                .map_err(sqlite_error)?;
+                            rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
+                        };
+                        rows.into_iter()
+                            .map(|(row, lease_expires_at_ms)| {
+                                pending_turn_input_read_from_row(row, lease_expires_at_ms)
+                            })
+                            .collect()
+                    })();
                 Ok(outcome)
             })
             .await
@@ -624,7 +627,7 @@ impl TurnInputStore for Store {
     async fn list_turn_input_applications(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::TurnInputApplication>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         self.conn
             .call(move |conn| {
@@ -645,7 +648,7 @@ impl TurnInputStore for Store {
                     let mut commits = Vec::new();
                     for row in rows {
                         let (turn_id, result_json) = row.map_err(sqlite_error)?;
-                        let result = lash_core::store::decode_runtime_commit_receipt(
+                        let result = lash_core_execution::store::decode_runtime_commit_receipt(
                             &session_id,
                             &turn_id,
                             &result_json,
@@ -673,30 +676,34 @@ impl TurnInputStore for Store {
     async fn cancel_pending_turn_inputs(
         &self,
         session_id: &SessionId,
-        targets: &[lash_core::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> {
+        targets: &[lash_core_execution::PendingTurnInputCancelTarget],
+    ) -> Result<Vec<lash_core_execution::PendingTurnInputCancelReceipt>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let targets = targets.to_vec();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<Vec<lash_core::PendingTurnInputCancelReceipt>, StoreError> =
-                    (|| {
-                        let mut results = Vec::with_capacity(targets.len());
-                        for target in targets {
-                            let outcome = match load_pending_turn_input_row_by_target_conn(
-                                tx,
-                                &session_id,
-                                &target,
-                            )? {
-                                Some(row) => cancel_pending_turn_input_row_conn(tx, row, now)?,
-                                None => lash_core::PendingTurnInputCancelOutcome::NotFound,
-                            };
-                            results
-                                .push(lash_core::PendingTurnInputCancelReceipt { target, outcome });
-                        }
-                        Ok(results)
-                    })();
+                let outcome: Result<
+                    Vec<lash_core_execution::PendingTurnInputCancelReceipt>,
+                    StoreError,
+                > = (|| {
+                    let mut results = Vec::with_capacity(targets.len());
+                    for target in targets {
+                        let outcome = match load_pending_turn_input_row_by_target_conn(
+                            tx,
+                            &session_id,
+                            &target,
+                        )? {
+                            Some(row) => cancel_pending_turn_input_row_conn(tx, row, now)?,
+                            None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
+                        };
+                        results.push(lash_core_execution::PendingTurnInputCancelReceipt {
+                            target,
+                            outcome,
+                        });
+                    }
+                    Ok(results)
+                })();
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
@@ -709,20 +716,20 @@ impl TurnInputStore for Store {
     async fn cancel_pending_turn_input_suffix(
         &self,
         session_id: &SessionId,
-        anchor: &lash_core::PendingTurnInputCancelTarget,
-    ) -> Result<lash_core::PendingTurnInputSuffixCancelOutcome, StoreError> {
+        anchor: &lash_core_execution::PendingTurnInputCancelTarget,
+    ) -> Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let anchor = anchor.clone();
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<lash_core::PendingTurnInputSuffixCancelOutcome, StoreError> =
+                let outcome: Result<lash_core_execution::PendingTurnInputSuffixCancelOutcome, StoreError> =
                     (|| {
                         let Some(anchor_row) =
                             load_pending_turn_input_row_by_target_conn(tx, &session_id, &anchor)?
                         else {
                             return Ok(
-                                lash_core::PendingTurnInputSuffixCancelOutcome::AnchorNotFound {
+                                lash_core_execution::PendingTurnInputSuffixCancelOutcome::AnchorNotFound {
                                     anchor,
                                 },
                             );
@@ -748,7 +755,7 @@ impl TurnInputStore for Store {
                         for row in rows {
                             outcomes.push(cancel_pending_turn_input_row_conn(tx, row, now)?);
                         }
-                        Ok(lash_core::PendingTurnInputSuffixCancelOutcome::Outcomes {
+                        Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes {
                             anchor,
                             outcomes,
                         })
@@ -767,10 +774,10 @@ impl TurnInputStore for Store {
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
-        turn_id: &lash_core::TurnId,
-        checkpoint: lash_core::CheckpointKind,
+        turn_id: &lash_core_execution::TurnId,
+        checkpoint: lash_core_execution::CheckpointKind,
         max_inputs: usize,
-    ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
+    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
         claim_pending_turn_inputs_sqlite(
             &self.conn,
             self.clock.timestamp_ms(),
@@ -778,7 +785,7 @@ impl TurnInputStore for Store {
             session_execution_lease,
             owner,
             max_inputs,
-            lash_core::TurnInputClaimMode::ActiveTurn {
+            lash_core_execution::TurnInputClaimMode::ActiveTurn {
                 turn_id: turn_id.clone(),
                 checkpoint,
             },
@@ -792,7 +799,7 @@ impl TurnInputStore for Store {
         session_execution_lease: &SessionExecutionLeaseAuthority,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
-    ) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
+    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
         claim_pending_turn_inputs_sqlite(
             &self.conn,
             self.clock.timestamp_ms(),
@@ -800,14 +807,14 @@ impl TurnInputStore for Store {
             session_execution_lease,
             owner,
             max_inputs,
-            lash_core::TurnInputClaimMode::NextTurn,
+            lash_core_execution::TurnInputClaimMode::NextTurn,
         )
         .await
     }
 
     async fn abandon_turn_input_claim(
         &self,
-        claim: &lash_core::TurnInputClaim,
+        claim: &lash_core_execution::TurnInputClaim,
     ) -> Result<(), StoreError> {
         let session_id = claim.session_id.clone();
         let claim_id = claim.claim_id.clone();
@@ -823,8 +830,8 @@ impl TurnInputStore for Store {
                         session_id.as_str(),
                         claim_id.as_str(),
                         lease_token,
-                        lash_core::TurnInputStateKind::PendingActive.as_str(),
-                        lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
+                        lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str(),
+                        lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str(),
                     ],
                 )
             })
@@ -837,15 +844,15 @@ impl TurnInputStore for Store {
         &self,
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
-        scope: lash_core::OrphanedTurnInputScope<'_>,
-    ) -> Result<Vec<lash_core::TurnId>, StoreError> {
+        scope: lash_core_execution::OrphanedTurnInputScope<'_>,
+    ) -> Result<Vec<lash_core_execution::TurnId>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let session_execution_lease = session_execution_lease.clone();
         let scope = OwnedOrphanedScope::from(scope);
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let outcome: Result<Vec<lash_core::TurnId>, StoreError> = (|| {
+                let outcome: Result<Vec<lash_core_execution::TurnId>, StoreError> = (|| {
                     ensure_session_execution_lease_conn(
                         tx,
                         &session_id,
@@ -858,7 +865,8 @@ impl TurnInputStore for Store {
                         session_execution_lease.fencing_token,
                         scope.borrow(),
                     )
-                })();
+                })(
+                );
                 Ok(match outcome {
                     Ok(repaired) => TxOutcome::Commit(Ok(repaired)),
                     Err(err) => TxOutcome::Rollback(Err(err)),
@@ -872,10 +880,10 @@ impl TurnInputStore for Store {
         &self,
         session_id: &SessionId,
         session_execution_lease: &SessionExecutionLeaseAuthority,
-        turn_id: &lash_core::TurnId,
-        observed: &lash_core::TurnCancelIntentSnapshot,
-        settlement: Option<&lash_core::TurnCancelClosureSettlement>,
-    ) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
+        turn_id: &lash_core_execution::TurnId,
+        observed: &lash_core_execution::TurnCancelIntentSnapshot,
+        settlement: Option<&lash_core_execution::TurnCancelClosureSettlement>,
+    ) -> Result<lash_core_execution::TurnCancelRepairResult, StoreError> {
         let session_id = session_id.clone();
         let session_execution_lease = session_execution_lease.clone();
         let turn_id = turn_id.clone();
@@ -893,7 +901,7 @@ impl TurnInputStore for Store {
                     )?;
                     let closure = settlement
                         .as_ref()
-                        .map(lash_core::TurnCancelClosureSettlement::authorization);
+                        .map(lash_core_execution::TurnCancelClosureSettlement::authorization);
                     let stored = tx
                         .query_row(
                             crate::turn_ingress::turn_ingress_sql()
@@ -906,7 +914,10 @@ impl TurnInputStore for Store {
                         .optional()
                         .map_err(sqlite_error)?;
                     let closure_required = stored.is_some()
-                        || !matches!(observed, lash_core::TurnCancelIntentSnapshot::Absent);
+                        || !matches!(
+                            observed,
+                            lash_core_execution::TurnCancelIntentSnapshot::Absent
+                        );
                     if closure_required != settlement.is_some()
                         || closure.is_some_and(|authorization| {
                             authorization.session_id() != session_id
@@ -935,7 +946,10 @@ impl TurnInputStore for Store {
                         settlement.as_ref(),
                     )?;
                     if settlement.is_some()
-                        && matches!(repaired, lash_core::TurnCancelRepairResult::Applied(_))
+                        && matches!(
+                            repaired,
+                            lash_core_execution::TurnCancelRepairResult::Applied(_)
+                        )
                     {
                         tx.execute(
                             crate::turn_ingress::turn_ingress_sql()
@@ -959,7 +973,7 @@ impl TurnInputStore for Store {
 
     async fn abandon_turn_input_claims(
         &self,
-        claims: &[lash_core::TurnInputClaim],
+        claims: &[lash_core_execution::TurnInputClaim],
     ) -> Result<(), StoreError> {
         if claims.is_empty() {
             return Ok(());
@@ -993,8 +1007,8 @@ impl TurnInputStore for Store {
                         .sql(),
                     params![
                         triples,
-                        lash_core::TurnInputStateKind::PendingActive.as_str(),
-                        lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
+                        lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str(),
+                        lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str(),
                     ],
                 )
             })

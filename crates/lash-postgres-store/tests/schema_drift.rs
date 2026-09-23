@@ -17,8 +17,10 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary, TurnWorkPayload};
-use lash_core::{
+use lash_core_execution::runtime::{
+    QueuedWorkBatchDraft, QueuedWorkClaimBoundary, TurnWorkPayload,
+};
+use lash_core_execution::{
     DeliveryPolicy, LeaseOwnerIdentity, QueuedWorkStore, SessionExecutionLeaseStore, StoreError,
 };
 use lash_postgres_store::{
@@ -2130,7 +2132,7 @@ async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls
                     &session_id,
                     DeliveryPolicy::EarliestSafeBoundary,
                     TurnWorkPayload::agent_frame_task(
-                        lash_core::session_graph::frame_node_id(
+                        lash_core_execution::session_graph::frame_node_id(
                             &session_id,
                             &format!("frame:{case}"),
                         ),
@@ -2172,7 +2174,7 @@ async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls
                 &lease.fence(),
                 &owner,
                 QueuedWorkClaimBoundary::Idle,
-                lash_core::testing::queued_work_claim_policy(1),
+                lash_core_execution::testing::queued_work_claim_policy(1),
             )
             .await;
 

@@ -7,7 +7,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
-        claim_nonce: &lash_core::LeaseClaimNonce,
+        claim_nonce: &lash_core_execution::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let lease_token = claim_nonce.as_str();
@@ -91,7 +91,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         });
         let lease = acquire_session_execution_lease_tx(
             &mut tx,
-            lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {
+            lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity {
                 session_id,
                 owner,
                 executor_id,
@@ -143,13 +143,14 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         let now = postgres_transaction_epoch_ms(&mut tx).await?;
         let observed = load_session_execution_lease_tx(&mut tx, &fence.session_id).await?;
         // The shared verdict is the decision; the row above is already locked.
-        let current = lash_core::store_backend_support::require_renewable_session_execution_lease(
-            observed.as_ref(),
-            fence,
-            now,
-            lash_core::store_backend_support::FenceTimeAuthority::DatabaseTransaction,
-            "postgres_locked_transaction",
-        )?;
+        let current =
+            lash_core_execution::store_backend_support::require_renewable_session_execution_lease(
+                observed.as_ref(),
+                fence,
+                now,
+                lash_core_execution::store_backend_support::FenceTimeAuthority::DatabaseTransaction,
+                "postgres_locked_transaction",
+            )?;
         let expires_at = now.saturating_add(lease_ttl_ms);
         let sql_expires_at =
             sql_counter_value("session_execution_lease_expires_at_ms", expires_at)?;
@@ -168,8 +169,8 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         // Backstop: the five-column predicate stays on the statement, but the
         // row is locked and the verdict already authorized the write, so any
         // row count other than one is a defect, never a race.
-        lash_core::store_backend_support::require_fenced_write_applied(
-            lash_core::store_backend_support::FencedWrite::SessionExecutionLeaseRenewal,
+        lash_core_execution::store_backend_support::require_fenced_write_applied(
+            lash_core_execution::store_backend_support::FencedWrite::SessionExecutionLeaseRenewal,
             POSTGRES_BACKEND,
             fence.session_id.as_str(),
             renewed.rows_affected(),
@@ -204,15 +205,15 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
         // read the row only after a failed write, which made rows-affected the
         // verdict and the read a diagnostic afterthought.
         let observed = load_session_execution_lease_tx(&mut tx, &completion.session_id).await?;
-        lash_core::store_backend_support::require_releasable_session_execution_lease(
+        lash_core_execution::store_backend_support::require_releasable_session_execution_lease(
             observed.as_ref(),
             completion,
             "postgres_locked_transaction",
         )?;
         let released = release_session_execution_lease_tx(&mut tx, completion).await?;
         // Backstop: the five-column predicate stays and must agree.
-        lash_core::store_backend_support::require_fenced_write_applied(
-            lash_core::store_backend_support::FencedWrite::SessionExecutionLeaseRelease,
+        lash_core_execution::store_backend_support::require_fenced_write_applied(
+            lash_core_execution::store_backend_support::FencedWrite::SessionExecutionLeaseRelease,
             POSTGRES_BACKEND,
             completion.session_id.as_str(),
             u64::from(released),
@@ -227,7 +228,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
     async fn get_session_execution_lease(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core::SessionExecutionLeaseObservation, StoreError> {
+    ) -> Result<lash_core_execution::SessionExecutionLeaseObservation, StoreError> {
         // Non-locking on purpose: observation must never be able to delay the
         // lane it observes. See `read_session_execution_lease_unlocked`.
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -244,7 +245,7 @@ impl SessionExecutionLeaseStore for PostgresSessionStore {
             .filter(|lease| lease.owner.is_some() && lease.lease_token.is_some())
             .map(|row| row_to_session_execution_lease(session_id, row))
             .transpose()?;
-        Ok(lash_core::SessionExecutionLeaseObservation {
+        Ok(lash_core_execution::SessionExecutionLeaseObservation {
             observed_at_epoch_ms,
             lease,
         })

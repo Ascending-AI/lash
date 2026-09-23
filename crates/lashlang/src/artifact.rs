@@ -485,12 +485,14 @@ pub enum ArtifactStoreError {
     Backend(String),
 }
 
-impl From<lash_core::StoreError> for ArtifactStoreError {
-    fn from(error: lash_core::StoreError) -> Self {
+impl From<lash_core_execution::StoreError> for ArtifactStoreError {
+    fn from(error: lash_core_execution::StoreError) -> Self {
         match error {
-            lash_core::StoreError::ArtifactOwnerRetired => Self::OwnerRetired,
-            lash_core::StoreError::ArtifactDestinationOwnerRetired => Self::DestinationOwnerRetired,
-            lash_core::StoreError::ArtifactStagingEdgeMissing { artifact } => {
+            lash_core_execution::StoreError::ArtifactOwnerRetired => Self::OwnerRetired,
+            lash_core_execution::StoreError::ArtifactDestinationOwnerRetired => {
+                Self::DestinationOwnerRetired
+            }
+            lash_core_execution::StoreError::ArtifactStagingEdgeMissing { artifact } => {
                 Self::StagingEdgeMissing { artifact }
             }
             other => Self::Backend(other.to_string()),
@@ -498,17 +500,19 @@ impl From<lash_core::StoreError> for ArtifactStoreError {
     }
 }
 
-impl From<ArtifactStoreError> for lash_core::PluginError {
+impl From<ArtifactStoreError> for lash_core_execution::PluginError {
     fn from(error: ArtifactStoreError) -> Self {
         match error {
-            ArtifactStoreError::OwnerRetired => lash_core::artifact_owner_retired_error(),
+            ArtifactStoreError::OwnerRetired => {
+                lash_core_execution::runtime::process::artifact_owner_retired_error()
+            }
             ArtifactStoreError::DestinationOwnerRetired => {
-                lash_core::artifact_destination_owner_retired_error()
+                lash_core_execution::runtime::process::artifact_destination_owner_retired_error()
             }
             ArtifactStoreError::StagingEdgeMissing { artifact } => {
-                lash_core::artifact_staging_edge_missing_error(artifact)
+                lash_core_execution::runtime::process::artifact_staging_edge_missing_error(artifact)
             }
-            other => lash_core::PluginError::Session(other.to_string()),
+            other => lash_core_execution::PluginError::Session(other.to_string()),
         }
     }
 }
@@ -550,28 +554,28 @@ pub trait LashlangArtifactStore: Send + Sync {
     /// Publish an immutable module and retain it for one exact owner.
     async fn publish_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         artifact: &ModuleArtifact,
     ) -> Result<(), ArtifactStoreError>;
 
     async fn retain_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         module_ref: &ModuleRef,
     ) -> Result<(), ArtifactStoreError>;
 
     /// Atomically add `to` and sever `from` for one module artifact.
     async fn transfer_module_artifact(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
+        from: &lash_core_execution::ArtifactOwner,
+        to: &lash_core_execution::ArtifactOwner,
         module_ref: &ModuleRef,
     ) -> Result<(), ArtifactStoreError>;
 
     /// Sever one exact owner edge and reclaim the module when it was the last.
     async fn release_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         module_ref: &ModuleRef,
     ) -> Result<(), ArtifactStoreError>;
 
@@ -579,7 +583,7 @@ pub trait LashlangArtifactStore: Send + Sync {
     /// every module edge it still owns.
     async fn retire_module_artifact_owner(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
     ) -> Result<(), ArtifactStoreError>;
 
     async fn get_module_artifact(
@@ -637,8 +641,8 @@ pub struct InMemoryLashlangArtifactStore {
 #[derive(Default)]
 struct InMemoryArtifactState {
     modules: BTreeMap<ModuleRef, Arc<ModuleArtifact>>,
-    owners: HashSet<(ModuleRef, lash_core::ArtifactOwner)>,
-    retired_owners: HashSet<lash_core::ArtifactOwner>,
+    owners: HashSet<(ModuleRef, lash_core_execution::ArtifactOwner)>,
+    retired_owners: HashSet<lash_core_execution::ArtifactOwner>,
 }
 
 impl InMemoryLashlangArtifactStore {
@@ -664,7 +668,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
 
     async fn publish_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         artifact: &ModuleArtifact,
     ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
@@ -701,7 +705,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
 
     async fn retain_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         module_ref: &ModuleRef,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
@@ -719,8 +723,8 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
 
     async fn transfer_module_artifact(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
+        from: &lash_core_execution::ArtifactOwner,
+        to: &lash_core_execution::ArtifactOwner,
         module_ref: &ModuleRef,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
@@ -743,7 +747,7 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
 
     async fn release_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         module_ref: &ModuleRef,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
@@ -760,9 +764,9 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
 
     async fn retire_module_artifact_owner(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
     ) -> Result<(), ArtifactStoreError> {
-        if !matches!(owner, lash_core::ArtifactOwner::Execution(_)) {
+        if !matches!(owner, lash_core_execution::ArtifactOwner::Execution(_)) {
             return Err(ArtifactStoreError::Backend(
                 "only execution artifact owners can be retired".to_string(),
             ));

@@ -2,7 +2,7 @@ use crate::{SessionId, StoreError, store_sqlx_error};
 
 pub(crate) async fn retire_scope(
     pool: &sqlx::PgPool,
-    scope: &lash_core::ExecutionScope,
+    scope: &lash_core_execution::ExecutionScope,
 ) -> Result<(), StoreError> {
     let scope_id = scope
         .journal_identity()
@@ -23,7 +23,7 @@ pub(crate) async fn retire_scope(
     .await
     .map_err(store_sqlx_error)?;
     for (session_id, encoded) in rows {
-        let authorization: lash_core::TurnCancelClosureAuthorization =
+        let authorization: lash_core_execution::TurnCancelClosureAuthorization =
             serde_json::from_str(&encoded).map_err(|error| StoreError::StoredDataCorrupt {
                 record_kind: "TurnCancelClosureAuthorization",
                 message: error.to_string(),

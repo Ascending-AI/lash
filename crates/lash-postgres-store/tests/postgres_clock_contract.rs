@@ -1,13 +1,13 @@
 //! Live behavioral checks for the PostgreSQL/server-clock boundary.
 
-use lash_core::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
+use lash_core_execution::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
-use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary};
-use lash_core::testing::TestClock;
-use lash_core::{
+use lash_core_execution::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary};
+use lash_core_execution::testing::TestClock;
+use lash_core_execution::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
     ProcessAwaitOutput, ProcessCompletionOutcome, ProcessInput, ProcessLeaseClaimOutcome,
@@ -97,7 +97,8 @@ lash_conformance::backend_clock_queued_work_tests!({
     }
     (
         _lock,
-        Arc::new(storage.session_store(session_id)) as Arc<dyn lash_core::RuntimePersistence>,
+        Arc::new(storage.session_store(session_id))
+            as Arc<dyn lash_core_execution::RuntimePersistence>,
         lash_conformance::RuntimePersistenceLeaseTiming::Realtime,
     )
 });
@@ -233,7 +234,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         // The PostgreSQL process-lease atoms. They read and write
         // `lease_claimed_at_ms`/`lease_expires_at_ms` and compare a stored lease
         // against `now`, so the server clock must reach all of them. The shared
-        // transition table (`lash_core::facade_support::registry_transitions`)
+        // transition table (`lash_core_execution::facade_support::registry_transitions`)
         // takes `now_ms` as an input and cannot verify which clock produced it;
         // this fence is what fails if a host clock ever supplies it.
         // `process_lease_now_epoch_ms_tx` — the one sanctioned clock read — is
@@ -389,7 +390,9 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create skewed-clock session store");
@@ -425,8 +428,8 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             &session_id,
             DeliveryPolicy::EarliestSafeBoundary,
-            lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                lash_core::facade_support::frame_node_id(
+            lash_core_execution::runtime::TurnWorkPayload::agent_frame_task(
+                lash_core_execution::facade_support::frame_node_id(
                     &SessionId::from(session_id.clone()),
                     "clock-contract-frame",
                 ),
@@ -503,7 +506,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
-            lash_core::testing::queued_work_claim_policy(1),
+            lash_core_execution::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("queue claim must validate against PostgreSQL time")
@@ -516,7 +519,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
             &SessionId::from(session_id.clone()),
             &lease.fence(),
             &owner,
-            &lash_core::TurnId::from("clock-contract-turn"),
+            &lash_core_execution::TurnId::from("clock-contract-turn"),
             CheckpointKind::AfterWork,
             1,
         )
@@ -605,9 +608,9 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
+            lash_core_execution::ProcessLifecyclePolicy::new(
+                lash_core_execution::ParentScope::Host,
+                lash_core_execution::OnParentEnd::Abandon,
             ),
         ))
         .await
@@ -653,7 +656,7 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
     let completion = registry
         .complete_process_with_lease(
             &renewed,
-            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+            ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
                 serde_json::json!({"clock": "postgres"}),
             )),
         )
@@ -679,14 +682,16 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create final-commit session store");
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.clone()),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     store
@@ -735,7 +740,9 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create the session store");

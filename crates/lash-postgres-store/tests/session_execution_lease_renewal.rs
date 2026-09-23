@@ -4,7 +4,7 @@ use std::sync::Arc;
 use lash_conformance::{
     SessionExecutionLeaseRenewalZeroRowHandles, SessionExecutionLeaseRenewalZeroRowInjector,
 };
-use lash_core::RuntimePersistence;
+use lash_core_execution::RuntimePersistence;
 use lash_postgres_store::PostgresStorage;
 
 use crate::support::{SharedDatabaseLock, database_url};

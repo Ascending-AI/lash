@@ -102,10 +102,10 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     let Some((head_json, head_revision, leaf_node_id, checkpoint_ref)) = row else {
         return Ok(None);
     };
-    let payload: SessionHeadPayload = lash_core::store::decode_versioned_json_record(
+    let payload: SessionHeadPayload = lash_core_execution::store::decode_versioned_json_record(
         &head_json,
         "SessionHeadMeta",
-        lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
     )
     .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
     Ok(Some(SessionHeadMeta::assemble(
@@ -118,17 +118,17 @@ pub(crate) fn try_load_session_head_meta_from_conn(
             )
         })?,
         checkpoint_ref.map(Into::into),
-        leaf_node_id.map(lash_core::NodeId::from),
+        leaf_node_id.map(lash_core_execution::NodeId::from),
     )?))
 }
 
 pub(crate) fn decode_checkpoint(bytes: &[u8]) -> Result<SessionCheckpoint, StoreError> {
     let value: serde_json::Value = rmp_serde::from_slice(bytes)
         .map_err(|err| stored_data_corrupt("SessionCheckpoint", err))?;
-    lash_core::store::ensure_supported_record_schema_version(
+    lash_core_execution::store::ensure_supported_record_schema_version(
         "SessionCheckpoint",
         &value,
-        lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
+        lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
     )?;
     rmp_serde::from_slice(bytes).map_err(|err| stored_data_corrupt("SessionCheckpoint", err))
 }

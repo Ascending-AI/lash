@@ -12,7 +12,7 @@ pub(super) async fn checkpoint_work_pending_postgres(
     session_id: &SessionId,
     generation: u64,
     turn_id: &TurnId,
-    checkpoint: lash_core::CheckpointKind,
+    checkpoint: lash_core_execution::CheckpointKind,
     max_inputs: usize,
     max_batches: usize,
 ) -> Result<bool, StoreError> {
@@ -25,8 +25,10 @@ pub(super) async fn checkpoint_work_pending_postgres(
     // predicate over a bound boundary cannot seek an index.
     let family = &crate::turn_ingress::turn_ingress_sql().family_postgres;
     let sql = match checkpoint {
-        lash_core::CheckpointKind::AfterWork => family.checkpoint_work_pending_after_work.sql(),
-        lash_core::CheckpointKind::BeforeCompletion => {
+        lash_core_execution::CheckpointKind::AfterWork => {
+            family.checkpoint_work_pending_after_work.sql()
+        }
+        lash_core_execution::CheckpointKind::BeforeCompletion => {
             family.checkpoint_work_pending_before_completion.sql()
         }
     };
@@ -84,7 +86,7 @@ pub(super) async fn postgres_refusal_for_empty_scan(
             .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-    lash_core::store::claim_plan::classify_empty_claim_scan(
+    lash_core_execution::store::claim_plan::classify_empty_claim_scan(
         &head_candidates,
         deferred_row_pending,
         boundary,
@@ -120,7 +122,7 @@ pub(super) async fn claim_queued_work_rows_postgres(
         .enumerate()
         .map(|(index, (row, batch))| {
             debug_assert_eq!(row.batch_id.as_str(), &*batch.batch_id);
-            lash_core::store::claim_plan::QueuedWorkClaimRow {
+            lash_core_execution::store::claim_plan::QueuedWorkClaimRow {
                 candidate: candidates[index].clone(),
                 batch,
                 claim_token: row.claim_token.clone(),
@@ -128,8 +130,8 @@ pub(super) async fn claim_queued_work_rows_postgres(
             }
         })
         .collect::<Vec<_>>();
-    let plan = match lash_core::store::claim_plan::plan_queued_work_claim(
-        lash_core::store::queued_work::ClaimIdDialect::QueuedWork,
+    let plan = match lash_core_execution::store::claim_plan::plan_queued_work_claim(
+        lash_core_execution::store::queued_work::ClaimIdDialect::QueuedWork,
         session_id,
         owner,
         generation,
@@ -139,13 +141,13 @@ pub(super) async fn claim_queued_work_rows_postgres(
     )? {
         // Empty commits and Defer rolls back: the claim transaction carries
         // the same meaning the hand-written loop did (FIG-1065).
-        lash_core::store::claim_plan::ClaimPlanDecision::Empty => {
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Empty => {
             return Ok(ClaimTransactionOutcome::Commit(None));
         }
-        lash_core::store::claim_plan::ClaimPlanDecision::Defer => {
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Defer => {
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
-        lash_core::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
     };
     for write in plan.writes() {
         let changed = sqlx::query(
@@ -174,8 +176,8 @@ pub(super) async fn claim_queued_work_rows_postgres(
         // disagreement is recorded as evidence and then fails closed exactly as
         // this site always did — the claim transaction rolls back and no claim
         // is reported.
-        if !lash_core::store_backend_support::fenced_write_applied(
-            lash_core::store_backend_support::FencedWrite::QueuedWorkClaimAcquisition,
+        if !lash_core_execution::store_backend_support::fenced_write_applied(
+            lash_core_execution::store_backend_support::FencedWrite::QueuedWorkClaimAcquisition,
             crate::POSTGRES_BACKEND,
             write.batch_id.as_str(),
             changed,
@@ -215,7 +217,7 @@ pub(super) async fn scan_queued_work_candidates_postgres(
     let mut selected = Vec::new();
     for row in rows {
         let row = queued_batch_row(row)?;
-        if lash_core::store_backend_support::queued_work_batch_claimability(
+        if lash_core_execution::store_backend_support::queued_work_batch_claimability(
             row.claim_facts(),
             generation,
         )
@@ -286,7 +288,7 @@ pub(super) async fn load_turn_cancel_request_pg(
     pool: &sqlx::PgPool,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+) -> Result<Option<lash_core_execution::TurnCancelRequestRecord>, StoreError> {
     let mut connection = acquire_runtime_connection(pool).await?;
     let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
     let record = load_turn_cancel_request_in_tx(&mut tx, session_id, turn_id, false).await?;
@@ -300,7 +302,7 @@ pub(super) async fn load_turn_cancel_intent_snapshot_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+) -> Result<lash_core_execution::TurnCancelIntentSnapshot, StoreError> {
     let row: Option<TurnCancelIntentRow> = sqlx::query_as(
         crate::turn_ingress::turn_ingress_sql()
             .cancel_requests_postgres
@@ -319,9 +321,9 @@ fn turn_cancel_snapshot_from_row(
     session_id: &SessionId,
     turn_id: &TurnId,
     row: Option<TurnCancelIntentRow>,
-) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+) -> Result<lash_core_execution::TurnCancelIntentSnapshot, StoreError> {
     let Some((request_id, origin, reason, disposition, mode, revision)) = row else {
-        return Ok(lash_core::TurnCancelIntentSnapshot::Absent);
+        return Ok(lash_core_execution::TurnCancelIntentSnapshot::Absent);
     };
     let revision = u64::try_from(revision).map_err(|_| StoreError::StoredDataCorrupt {
         record_kind: "TurnCancelRequest",
@@ -333,9 +335,9 @@ fn turn_cancel_snapshot_from_row(
             message: "intent revision is zero".to_string(),
         });
     }
-    Ok(lash_core::TurnCancelIntentSnapshot::Present {
-        request: lash_core::facade_support::TurnCancelRequest {
-            address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
+    Ok(lash_core_execution::TurnCancelIntentSnapshot::Present {
+        request: lash_core_execution::facade_support::TurnCancelRequest {
+            address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
             request_id,
             origin,
             reason,
@@ -350,7 +352,7 @@ pub(super) async fn load_turn_cancel_intent_snapshot_pg(
     pool: &sqlx::PgPool,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+) -> Result<lash_core_execution::TurnCancelIntentSnapshot, StoreError> {
     let mut connection = acquire_runtime_connection(pool).await?;
     let row = sqlx::query_as(
         crate::turn_ingress::turn_ingress_sql()
@@ -371,7 +373,7 @@ async fn load_turn_cancel_request_in_tx(
     session_id: &SessionId,
     turn_id: &TurnId,
     lock_request: bool,
-) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+) -> Result<Option<lash_core_execution::TurnCancelRequestRecord>, StoreError> {
     let statements = &crate::turn_ingress::turn_ingress_sql().cancel_requests_postgres;
     let metadata_sql = if lock_request {
         statements.select_request_for_update.sql()
@@ -405,7 +407,7 @@ pub(super) async fn load_turn_cancel_request_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+) -> Result<Option<lash_core_execution::TurnCancelRequestRecord>, StoreError> {
     load_turn_cancel_request_in_tx(tx, session_id, turn_id, true).await
 }
 
@@ -418,19 +420,19 @@ pub(super) fn turn_cancel_record_from_rows(
     turn_id: &TurnId,
     row: TurnCancelRequestRow,
     affected_rows: Vec<(String, String, String)>,
-) -> Result<lash_core::TurnCancelRequestRecord, StoreError> {
+) -> Result<lash_core_execution::TurnCancelRequestRecord, StoreError> {
     let (request_id, origin, reason, disposition, mode) = row;
     let mut affected_inputs = Vec::with_capacity(affected_rows.len());
     for (input_id, input_json, applied_disposition) in affected_rows {
-        affected_inputs.push(lash_core::TurnCancelAffectedInput {
+        affected_inputs.push(lash_core_execution::TurnCancelAffectedInput {
             input_id: input_id.into(),
             payload: store_decode_json(&input_json, "turn input")?,
             disposition: turn_cancel_disposition_from_wire(&applied_disposition)?,
         });
     }
-    Ok(lash_core::TurnCancelRequestRecord {
-        request: lash_core::facade_support::TurnCancelRequest {
-            address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
+    Ok(lash_core_execution::TurnCancelRequestRecord {
+        request: lash_core_execution::facade_support::TurnCancelRequest {
+            address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
             request_id,
             origin,
             reason,
@@ -438,25 +440,25 @@ pub(super) fn turn_cancel_record_from_rows(
             mode: turn_cancel_mode_from_wire(&mode)?,
         },
         outcome: (!affected_inputs.is_empty())
-            .then_some(lash_core::TurnCancelInputOutcome { affected_inputs }),
+            .then_some(lash_core_execution::TurnCancelInputOutcome { affected_inputs }),
     })
 }
 
 pub(super) fn turn_cancel_mode_wire(
-    mode: lash_core::facade_support::TurnCancelMode,
+    mode: lash_core_execution::facade_support::TurnCancelMode,
 ) -> &'static str {
     match mode {
-        lash_core::facade_support::TurnCancelMode::Immediate => "immediate",
-        lash_core::facade_support::TurnCancelMode::AfterStep => "after_step",
+        lash_core_execution::facade_support::TurnCancelMode::Immediate => "immediate",
+        lash_core_execution::facade_support::TurnCancelMode::AfterStep => "after_step",
     }
 }
 
 pub(super) fn turn_cancel_mode_from_wire(
     mode: &str,
-) -> Result<lash_core::facade_support::TurnCancelMode, StoreError> {
+) -> Result<lash_core_execution::facade_support::TurnCancelMode, StoreError> {
     match mode {
-        "immediate" => Ok(lash_core::facade_support::TurnCancelMode::Immediate),
-        "after_step" => Ok(lash_core::facade_support::TurnCancelMode::AfterStep),
+        "immediate" => Ok(lash_core_execution::facade_support::TurnCancelMode::Immediate),
+        "after_step" => Ok(lash_core_execution::facade_support::TurnCancelMode::AfterStep),
         other => Err(StoreError::Backend(format!(
             "unknown turn cancel mode `{other}`"
         ))),
@@ -465,10 +467,10 @@ pub(super) fn turn_cancel_mode_from_wire(
 
 pub(super) fn turn_cancel_disposition_from_wire(
     disposition: &str,
-) -> Result<lash_core::TurnCancelDisposition, StoreError> {
+) -> Result<lash_core_execution::TurnCancelDisposition, StoreError> {
     match disposition {
-        "defer" => Ok(lash_core::TurnCancelDisposition::Defer),
-        "drop" => Ok(lash_core::TurnCancelDisposition::Drop),
+        "defer" => Ok(lash_core_execution::TurnCancelDisposition::Defer),
+        "drop" => Ok(lash_core_execution::TurnCancelDisposition::Drop),
         other => Err(StoreError::Backend(format!(
             "unknown turn cancel disposition `{other}`"
         ))),
@@ -476,11 +478,11 @@ pub(super) fn turn_cancel_disposition_from_wire(
 }
 
 pub(super) fn turn_cancel_disposition_wire(
-    disposition: lash_core::TurnCancelDisposition,
+    disposition: lash_core_execution::TurnCancelDisposition,
 ) -> &'static str {
     match disposition {
-        lash_core::TurnCancelDisposition::Defer => "defer",
-        lash_core::TurnCancelDisposition::Drop => "drop",
+        lash_core_execution::TurnCancelDisposition::Defer => "defer",
+        lash_core_execution::TurnCancelDisposition::Drop => "drop",
     }
 }
 
@@ -488,7 +490,7 @@ pub(super) async fn append_turn_cancel_outcome_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     turn_id: &TurnId,
-    affected: lash_core::TurnCancelAffectedInput,
+    affected: lash_core_execution::TurnCancelAffectedInput,
 ) -> Result<(), StoreError> {
     // Lock the request row so concurrent appends serialize on the ordinal
     // next-val; a missing request leaves no evidence to attach to.
@@ -527,15 +529,15 @@ pub(super) async fn reconcile_turn_cancel_winner_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     turn_id: &TurnId,
-    observed: &lash_core::TurnCancelIntentSnapshot,
-    evidence: &lash_core::facade_support::TurnCancellationEvidence,
+    observed: &lash_core_execution::TurnCancelIntentSnapshot,
+    evidence: &lash_core_execution::facade_support::TurnCancellationEvidence,
 ) -> Result<bool, StoreError> {
     let actual = load_turn_cancel_intent_snapshot_tx(tx, session_id, turn_id).await?;
     if actual != *observed {
         return Ok(false);
     }
-    let request = lash_core::facade_support::TurnCancelRequest {
-        address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
+    let request = lash_core_execution::facade_support::TurnCancelRequest {
+        address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
         request_id: evidence.request_id.clone(),
         origin: evidence.origin.clone(),
         reason: evidence.reason.clone(),
@@ -543,12 +545,12 @@ pub(super) async fn reconcile_turn_cancel_winner_tx(
         mode: evidence.mode,
     };
     let revision = match actual {
-        lash_core::TurnCancelIntentSnapshot::Absent => 1,
-        lash_core::TurnCancelIntentSnapshot::Present {
+        lash_core_execution::TurnCancelIntentSnapshot::Absent => 1,
+        lash_core_execution::TurnCancelIntentSnapshot::Present {
             request: ref prior,
             revision,
         } if prior == &request => revision,
-        lash_core::TurnCancelIntentSnapshot::Present { revision, .. } => {
+        lash_core_execution::TurnCancelIntentSnapshot::Present { revision, .. } => {
             StoreError::checked_monotonic_increment("turn_cancel_intent_revision", revision)?
         }
     };
@@ -579,7 +581,7 @@ pub(super) async fn orphaned_active_turn_ids_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     live_generation: u64,
-    scope: lash_core::OrphanedTurnInputScope<'_>,
+    scope: lash_core_execution::OrphanedTurnInputScope<'_>,
 ) -> Result<Vec<TurnId>, StoreError> {
     let rows: Vec<(String, String, Option<String>, i64)> = sqlx::query_as(
         crate::turn_ingress::turn_ingress_sql()
@@ -593,10 +595,10 @@ pub(super) async fn orphaned_active_turn_ids_tx(
     .map_err(store_sqlx_error)?;
     let mut turn_ids = std::collections::BTreeSet::new();
     for (state, ingress_json, claim_token, claim_generation) in rows {
-        let ingress: lash_core::TurnInputIngress =
+        let ingress: lash_core_execution::TurnInputIngress =
             store_decode_json(&ingress_json, "turn-input ingress")?;
-        let state =
-            lash_core::TurnInputState::from_persisted(&state, ingress).ok_or_else(|| {
+        let state = lash_core_execution::TurnInputState::from_persisted(&state, ingress)
+            .ok_or_else(|| {
                 StoreError::Backend(format!(
                     "unknown or scope-illegal turn-input state `{state}`"
                 ))
@@ -606,7 +608,7 @@ pub(super) async fn orphaned_active_turn_ids_tx(
             "claim_session_lease_generation",
             claim_generation,
         )?;
-        if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
+        if lash_core_execution::store_backend_support::orphaned_active_turn_input_is_repairable(
             scope,
             live_generation,
             &state,
@@ -627,17 +629,17 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
     session_id: &SessionId,
     live_generation: u64,
     turn_id: &TurnId,
-    observed: &lash_core::TurnCancelIntentSnapshot,
-    settlement: Option<&lash_core::TurnCancelClosureSettlement>,
-) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
+    observed: &lash_core_execution::TurnCancelIntentSnapshot,
+    settlement: Option<&lash_core_execution::TurnCancelClosureSettlement>,
+) -> Result<lash_core_execution::TurnCancelRepairResult, StoreError> {
     if load_turn_cancel_intent_snapshot_tx(tx, session_id, turn_id).await? != *observed {
-        return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
+        return Ok(lash_core_execution::TurnCancelRepairResult::IntentChanged);
     }
     if let Some(evidence) =
-        settlement.and_then(lash_core::TurnCancelClosureSettlement::base_cancellation)
+        settlement.and_then(lash_core_execution::TurnCancelClosureSettlement::base_cancellation)
         && !reconcile_turn_cancel_winner_tx(tx, session_id, turn_id, observed, evidence).await?
     {
-        return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
+        return Ok(lash_core_execution::TurnCancelRepairResult::IntentChanged);
     }
     let sql = crate::turn_ingress::turn_ingress_sql();
     let rows = sqlx::query(sql.pending_inputs_postgres.select_active_turn_rows.sql())
@@ -645,15 +647,17 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
         .fetch_all(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    let scope = lash_core::OrphanedTurnInputScope::Turn(turn_id);
-    let effective =
-        settlement.and_then(lash_core::TurnCancelClosureSettlement::effective_cancellation);
-    let disposition = effective.map_or(lash_core::TurnCancelDisposition::Defer, |e| e.undelivered);
+    let scope = lash_core_execution::OrphanedTurnInputScope::Turn(turn_id);
+    let effective = settlement
+        .and_then(lash_core_execution::TurnCancelClosureSettlement::effective_cancellation);
+    let disposition = effective.map_or(lash_core_execution::TurnCancelDisposition::Defer, |e| {
+        e.undelivered
+    });
     let mut repairable = Vec::new();
     for row in rows {
         let input_json: String = row.get("input_json");
         let row = pending_turn_input_row(row)?;
-        if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
+        if lash_core_execution::store_backend_support::orphaned_active_turn_input_is_repairable(
             scope,
             live_generation,
             row.state(),
@@ -667,35 +671,37 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
         }
     }
     if repairable.is_empty() {
-        return Ok(lash_core::TurnCancelRepairResult::Applied(
+        return Ok(lash_core_execution::TurnCancelRepairResult::Applied(
             Default::default(),
         ));
     }
-    let deferred = lash_core::TurnInputState::DeferredNextTurn;
+    let deferred = lash_core_execution::TurnInputState::DeferredNextTurn;
     let deferred_ingress = encode_json(&deferred.ingress())?;
-    let mut outcome = lash_core::TurnCancelInputOutcome::default();
+    let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
     for (input_id, payload) in repairable {
         // Two dispositions, two named statements: deferring rewrites the
         // ingress so the row stops naming a turn that is over (FIG-1573),
         // dropping is the cancel this table already has. An optional
         // `COALESCE($N, ingress_json)` assignment carried both before.
         match disposition {
-            lash_core::TurnCancelDisposition::Defer => {
+            lash_core_execution::TurnCancelDisposition::Defer => {
                 sqlx::query(sql.pending_inputs.defer_to_next_turn.sql())
                     .bind(session_id.as_str())
                     .bind(&input_id)
                     .bind(deferred.as_str())
                     .bind(deferred_ingress.as_str())
             }
-            lash_core::TurnCancelDisposition::Drop => sqlx::query(sql.pending_inputs.cancel.sql())
-                .bind(session_id.as_str())
-                .bind(&input_id)
-                .bind(lash_core::TurnInputStateKind::Cancelled.as_str()),
+            lash_core_execution::TurnCancelDisposition::Drop => {
+                sqlx::query(sql.pending_inputs.cancel.sql())
+                    .bind(session_id.as_str())
+                    .bind(&input_id)
+                    .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+            }
         }
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-        let affected = lash_core::TurnCancelAffectedInput {
+        let affected = lash_core_execution::TurnCancelAffectedInput {
             input_id: input_id.into(),
             payload,
             disposition,
@@ -705,7 +711,9 @@ pub(super) async fn repair_orphaned_active_turn_inputs_tx(
         }
         outcome.affected_inputs.push(affected);
     }
-    Ok(lash_core::TurnCancelRepairResult::Applied(outcome))
+    Ok(lash_core_execution::TurnCancelRepairResult::Applied(
+        outcome,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -715,8 +723,8 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
-    mode: lash_core::TurnInputClaimMode,
-) -> Result<ClaimTransactionOutcome<Option<lash_core::TurnInputClaim>>, StoreError> {
+    mode: lash_core_execution::TurnInputClaimMode,
+) -> Result<ClaimTransactionOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> {
     if max_inputs == 0 {
         return Ok(ClaimTransactionOutcome::Commit(None));
     }
@@ -729,25 +737,27 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     // predicate, neither of which a planner can seek.
     let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs_postgres;
     let mut query = match &mode {
-        lash_core::TurnInputClaimMode::NextTurn => {
+        lash_core_execution::TurnInputClaimMode::NextTurn => {
             sqlx::query(statements.claim_candidates_next_turn.sql())
         }
-        lash_core::TurnInputClaimMode::ActiveTurn { checkpoint, .. } => match checkpoint {
-            lash_core::CheckpointKind::AfterWork => {
-                sqlx::query(statements.claim_candidates_active_turn_after_work.sql())
+        lash_core_execution::TurnInputClaimMode::ActiveTurn { checkpoint, .. } => {
+            match checkpoint {
+                lash_core_execution::CheckpointKind::AfterWork => {
+                    sqlx::query(statements.claim_candidates_active_turn_after_work.sql())
+                }
+                lash_core_execution::CheckpointKind::BeforeCompletion => sqlx::query(
+                    statements
+                        .claim_candidates_active_turn_before_completion
+                        .sql(),
+                ),
             }
-            lash_core::CheckpointKind::BeforeCompletion => sqlx::query(
-                statements
-                    .claim_candidates_active_turn_before_completion
-                    .sql(),
-            ),
-        },
+        }
     };
     query = query
         .bind(session_id.as_str())
         .bind(sql_session_lease_generation(generation)?)
         .bind(i64::try_from(max_inputs).unwrap_or(i64::MAX));
-    if let lash_core::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode {
+    if let lash_core_execution::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode {
         query = query.bind(turn_id.to_string());
     }
     let rows = query.fetch_all(&mut **tx).await.map_err(store_sqlx_error)?;
@@ -778,14 +788,14 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
     session_id: &SessionId,
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
-    mode: lash_core::TurnInputClaimMode,
-    selected: Vec<(PendingTurnInputRow, lash_core::PendingTurnInput)>,
-) -> Result<ClaimTransactionOutcome<Option<lash_core::TurnInputClaim>>, StoreError> {
+    mode: lash_core_execution::TurnInputClaimMode,
+    selected: Vec<(PendingTurnInputRow, lash_core_execution::PendingTurnInput)>,
+) -> Result<ClaimTransactionOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> {
     let generation = session_execution_lease.fencing_token;
     let observations = selected
         .into_iter()
         .map(
-            |(row, input)| lash_core::store::claim_plan::TurnInputClaimRow {
+            |(row, input)| lash_core_execution::store::claim_plan::TurnInputClaimRow {
                 input,
                 enqueue_seq: row.enqueue_seq,
                 claim_fencing_token: row.claim_fencing_token,
@@ -794,8 +804,8 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
             },
         )
         .collect();
-    let plan = match lash_core::store::claim_plan::plan_turn_input_claim(
-        lash_core::store::queued_work::ClaimIdDialect::TurnInput,
+    let plan = match lash_core_execution::store::claim_plan::plan_turn_input_claim(
+        lash_core_execution::store::queued_work::ClaimIdDialect::TurnInput,
         session_id,
         owner,
         generation,
@@ -805,13 +815,13 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
     )? {
         // Empty commits and Defer rolls back: the claim transaction carries
         // the same meaning the hand-written loop did (FIG-1065).
-        lash_core::store::claim_plan::ClaimPlanDecision::Empty => {
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Empty => {
             return Ok(ClaimTransactionOutcome::Commit(None));
         }
-        lash_core::store::claim_plan::ClaimPlanDecision::Defer => {
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Defer => {
             return Ok(ClaimTransactionOutcome::Rollback(None));
         }
-        lash_core::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
     };
     for write in plan.writes() {
         let changed = sqlx::query(
@@ -843,8 +853,8 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
         // disagreement is recorded as evidence and then fails closed exactly
         // as this site always did — the whole claim transaction rolls back and
         // no claim is reported.
-        if !lash_core::store_backend_support::fenced_write_applied(
-            lash_core::store_backend_support::FencedWrite::TurnInputClaimAcquisition,
+        if !lash_core_execution::store_backend_support::fenced_write_applied(
+            lash_core_execution::store_backend_support::FencedWrite::TurnInputClaimAcquisition,
             crate::POSTGRES_BACKEND,
             write.input_id.as_str(),
             changed,
@@ -857,13 +867,15 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
 
 pub(super) async fn claim_pending_turn_inputs_postgres(
     pool: &PgPool,
-    #[cfg(any(test, feature = "testing"))] lease_clock: Option<&Arc<dyn lash_core::Clock>>,
+    #[cfg(any(test, feature = "testing"))] lease_clock: Option<
+        &Arc<dyn lash_core_execution::Clock>,
+    >,
     session_id: &SessionId,
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
-    mode: lash_core::TurnInputClaimMode,
-) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
+    mode: lash_core_execution::TurnInputClaimMode,
+) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
     if max_inputs == 0 {
         return Ok(None);
     }
@@ -883,7 +895,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres(
     .await?
     {
         ClaimTransactionOutcome::Commit(value) => {
-            if let lash_core::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode {
+            if let lash_core_execution::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode {
                 super::queued_run_assignment::assign_checkpoint_members_tx(
                     &mut tx,
                     session_id,
@@ -991,12 +1003,12 @@ pub(super) async fn lock_session_execution_lease_tx(
 
 pub(super) async fn acquire_session_execution_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    claim: lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity<'_>,
+    claim: lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity<'_>,
     previous_fencing_token: u64,
     now: u64,
     lease_ttl_ms: u64,
 ) -> Result<SessionExecutionLease, StoreError> {
-    let lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {
+    let lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity {
         session_id,
         owner,
         executor_id,
@@ -1046,10 +1058,10 @@ pub(super) async fn ensure_session_execution_lease_tx(
 ) -> Result<(), StoreError> {
     let now = postgres_transaction_epoch_ms(tx).await?;
     let current = load_session_execution_lease_tx(tx, session_id).await?;
-    lash_core::store_backend_support::require_current_session_execution_lease(
+    lash_core_execution::store_backend_support::require_current_session_execution_lease(
         session_id,
         current.as_ref().map(|current| {
-            lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {
+            lash_core_execution::store_backend_support::SessionExecutionLeaseFenceFacts {
                 owner: current.owner.as_ref(),
                 executor_id: current.executor_id.as_deref(),
                 lease_token: current.lease_token.as_deref(),
@@ -1078,27 +1090,29 @@ pub(super) async fn release_session_execution_lease_tx(
     Ok(released.rows_affected() == 1)
 }
 
-pub(super) fn requested_append_ancestor(stamp: &lash_core::RuntimeTurnCommitStamp) -> Option<&str> {
+pub(super) fn requested_append_ancestor(
+    stamp: &lash_core_execution::RuntimeTurnCommitStamp,
+) -> Option<&str> {
     match &stamp.append_request_identity {
-        lash_core::AppendRequestIdentity::Append {
+        lash_core_execution::AppendRequestIdentity::Append {
             requested_ancestor_node_id,
             ..
         } => requested_ancestor_node_id.as_deref(),
-        lash_core::AppendRequestIdentity::PlainCommit
-        | lash_core::AppendRequestIdentity::SemanticBoundary { .. } => None,
+        lash_core_execution::AppendRequestIdentity::PlainCommit
+        | lash_core_execution::AppendRequestIdentity::SemanticBoundary { .. } => None,
     }
 }
 
 pub(super) type AppendIdentityColumns<'a> = (Option<&'a str>, Option<i64>, Option<i32>);
 
 pub(super) fn append_identity_columns(
-    identity: &lash_core::AppendRequestIdentity,
+    identity: &lash_core_execution::AppendRequestIdentity,
 ) -> Result<AppendIdentityColumns<'_>, StoreError> {
     // A semantic-boundary identity persists without a node count; the NULL
     // count is what distinguishes its family on decode (FIG-2480).
     let (encoding_version, request_hash, requested_node_count) = match identity {
-        lash_core::AppendRequestIdentity::PlainCommit => return Ok((None, None, None)),
-        lash_core::AppendRequestIdentity::Append {
+        lash_core_execution::AppendRequestIdentity::PlainCommit => return Ok((None, None, None)),
+        lash_core_execution::AppendRequestIdentity::Append {
             encoding_version,
             request_hash,
             requested_node_count,
@@ -1108,7 +1122,7 @@ pub(super) fn append_identity_columns(
             request_hash.as_str(),
             Some(*requested_node_count as i64),
         ),
-        lash_core::AppendRequestIdentity::SemanticBoundary {
+        lash_core_execution::AppendRequestIdentity::SemanticBoundary {
             operation: _,
             encoding_version,
             request_hash,
@@ -1135,7 +1149,7 @@ mod tests {
 
     #[test]
     fn append_identity_columns_refuse_encoding_versions_that_do_not_fit_postgres_integer() {
-        let identity = lash_core::AppendRequestIdentity::Append {
+        let identity = lash_core_execution::AppendRequestIdentity::Append {
             encoding_version: i32::MAX as u32 + 1,
             request_hash: "request-hash".to_string(),
             requested_node_count: 1,

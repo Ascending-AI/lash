@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use lash_core::ProcessRegistry;
+use lash_core_execution::ProcessRegistry;
 use lash_sqlite_store::SqliteProcessRegistry;
 
 lash_conformance::process_change_horizon_tests!({

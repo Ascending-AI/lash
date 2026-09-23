@@ -11,23 +11,25 @@ async fn assert_waiting_process_is_live_not_prunable(
     process_id: &ProcessId,
 ) {
     registry
-        .register_process(lash_core::ProcessRegistration::new(
+        .register_process(lash_core_execution::ProcessRegistration::new(
             process_id,
-            lash_core::ProcessInput::External {
+            lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::Rerunnable,
-            lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
+            lash_core_execution::RecoveryContract::Rerunnable,
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::ProcessLifecyclePolicy::new(
+                lash_core_execution::ParentScope::Host,
+                lash_core_execution::OnParentEnd::Abandon,
             ),
         ))
         .await
         .expect("register waiting retention process");
-    let authority =
-        lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "waiting-retention-run")
-            .bind_attempt(1);
+    let authority = lash_core_execution::ProcessExecutionWriteAuthority::invocation(
+        process_id,
+        "waiting-retention-run",
+    )
+    .bind_attempt(1);
     let started = authority
         .invocation_started()
         .expect("invocation authority carries its start fact");
@@ -38,9 +40,9 @@ async fn assert_waiting_process_is_live_not_prunable(
     let waiting = registry
         .set_process_wait_with_authority(
             process_id,
-            lash_core::WaitState {
+            lash_core_execution::WaitState {
                 since_ms: 1,
-                kind: lash_core::WaitKind::Signal {
+                kind: lash_core_execution::WaitKind::Signal {
                     name: "retention".to_string(),
                     event_type: "retention.signal".to_string(),
                     key: format!("{process_id}:wait"),
@@ -72,7 +74,11 @@ async fn assert_waiting_process_is_live_not_prunable(
     );
 
     let report = registry
-        .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .prune_terminal_processes(
+            u64::MAX,
+            None,
+            lash_core_execution::ProjectionWatermark::NoProjector,
+        )
         .await
         .expect("prune terminal processes");
     assert_eq!(
@@ -126,9 +132,10 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
                 .join(", ")
         )
     };
-    let live_labels = lash_core::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS;
+    let live_labels =
+        lash_core_execution::facade_support::registry_transitions::LIVE_PROCESS_STATUS_LABELS;
     let retired_labels =
-        lash_core::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
+        lash_core_execution::facade_support::registry_transitions::RETIRED_PROCESS_STATUS_LABELS;
     let live = render(&live_labels);
     let vocabulary = render(
         &live_labels
@@ -165,7 +172,9 @@ fn postgres_status_list_literals_derive_from_the_shared_constant() {
     // cancel. Its literal is generated, so the expectation here is the
     // generator's own output rather than a second spelling of it.
     let nonterminal =
-        lash_core::store_backend_support::nonterminal_process_status_predicate_sql("status");
+        lash_core_execution::store_backend_support::nonterminal_process_status_predicate_sql(
+            "status",
+        );
     let terminal = nonterminal
         .strip_prefix("status NOT IN ")
         .expect("the nonterminal predicate is spelled as a NOT IN list")

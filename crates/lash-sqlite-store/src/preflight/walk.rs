@@ -45,7 +45,7 @@
 use lash_sansio::{ProcessId, SessionId};
 use std::path::Path;
 
-use lash_core::{
+use lash_core_execution::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
     StoreError,
 };
@@ -465,7 +465,7 @@ fn execution_state_blob_ref(manifest: &[u8]) -> Option<String> {
     let probe: ManifestProbe = rmp_serde::from_slice(manifest).ok()?;
     probe
         .components
-        .get(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+        .get(lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
         .map(|component| component.blob_ref.clone())
 }
 

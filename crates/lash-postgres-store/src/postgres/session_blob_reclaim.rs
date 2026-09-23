@@ -53,7 +53,7 @@ pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     candidates: std::collections::BTreeSet<String>,
     checkpoint_refs: &std::collections::BTreeSet<String>,
-    report: &mut lash_core::SessionBlobReclaimReport,
+    report: &mut lash_core_execution::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
     if !checkpoint_refs.is_empty() {
         let checkpoint_ref_vec = checkpoint_refs.iter().cloned().collect::<Vec<_>>();

@@ -2,7 +2,7 @@
 //! snapshot on `lash_turn_cancel_affected_inputs`, so vacuuming the pending
 //! rows cannot split request metadata from the payloads it reports.
 
-use lash_core::{
+use lash_core_execution::{
     PendingTurnInputDraft, StoreMaintenance, TurnCancelDisposition, TurnInput,
     TurnInputCheckpointBoundary, TurnInputIngress, TurnInputStore,
     facade_support::{TurnAddress, TurnCancelRequest},
@@ -55,7 +55,10 @@ async fn seed_cancelled_inputs(
     storage: &PostgresStorage,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> (lash_core::PendingTurnInput, lash_core::PendingTurnInput) {
+) -> (
+    lash_core_execution::PendingTurnInput,
+    lash_core_execution::PendingTurnInput,
+) {
     let store = storage.session_store(session_id.clone());
     let first = store
         .enqueue_pending_turn_input(
@@ -99,7 +102,7 @@ async fn seed_cancelled_inputs(
          WHERE session_id = $1",
     )
     .bind(session_id.as_str())
-    .bind(lash_core::TurnInputStateKind::Cancelled.as_str())
+    .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
     .execute(storage.pool())
     .await
     .expect("make affected inputs vacuum eligible");

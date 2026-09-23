@@ -12,12 +12,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::process_registry::sql::process_sql;
-use lash_core::process_registry::ProcessDefinitionRegistrationRefusal;
-use lash_core::process_registry::{
+use lash_core_execution::process_registry::ProcessDefinitionRegistrationRefusal;
+use lash_core_execution::process_registry::{
     ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
     ProcessDefinitionRegistration, validate_process_definition_name,
 };
-use lash_core::{Clock, PluginError, ProcessDefinitionRef, TriggerOwnerScope};
+use lash_core_execution::{Clock, PluginError, ProcessDefinitionRef, TriggerOwnerScope};
 use rusqlite::OptionalExtension;
 
 use super::apply_pragmas;
@@ -59,7 +59,11 @@ pub struct SqliteProcessDefinitionRegistry {
 
 impl SqliteProcessDefinitionRegistry {
     pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_clock(path, Arc::new(lash_core::facade_support::SystemClock)).await
+        Self::open_with_clock(
+            path,
+            Arc::new(lash_core_execution::facade_support::SystemClock),
+        )
+        .await
     }
 
     pub async fn open_with_clock(
@@ -73,7 +77,7 @@ impl SqliteProcessDefinitionRegistry {
     }
 
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_clock(Arc::new(lash_core::facade_support::SystemClock)).await
+        Self::memory_with_clock(Arc::new(lash_core_execution::facade_support::SystemClock)).await
     }
 
     pub async fn memory_with_clock(clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
@@ -85,7 +89,7 @@ impl SqliteProcessDefinitionRegistry {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessDefinitionRegistry for SqliteProcessDefinitionRegistry {
+impl lash_core_execution::ProcessDefinitionRegistry for SqliteProcessDefinitionRegistry {
     async fn register_definition(
         &self,
         operation_id: &str,

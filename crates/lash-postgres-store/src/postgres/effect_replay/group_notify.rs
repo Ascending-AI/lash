@@ -19,7 +19,7 @@ use sqlx::{PgPool, Postgres};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use lash_core::RuntimeEffectControllerError;
+use lash_core_execution::RuntimeEffectControllerError;
 
 use super::effect_store_message;
 

@@ -9,11 +9,11 @@
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
-use lash_core::facade_support::await_event_coordinator::{
+use lash_core_execution::facade_support::await_event_coordinator::{
     AwaitEventBackend, AwaitEventCoordinator, AwaitEventRowIdentity, AwaitEventVocabulary,
     PersistedPromise, RegisteredAwaitEvent, TerminalCas,
 };
-use lash_core::{RuntimeError, RuntimeErrorCode};
+use lash_core_execution::{RuntimeError, RuntimeErrorCode};
 use lash_store_sql::Dialect;
 use lash_store_sql::wait::revoked_sessions::RevokedSessionStatements;
 use lash_store_sql::wait::waits::{WaitRow, WaitStatements};
@@ -141,7 +141,7 @@ pub(crate) type PostgresAwaitEvents = AwaitEventCoordinator<PostgresAwaitEventBa
 pub(crate) fn postgres_await_events(
     pool: PgPool,
     signing_secret: Arc<[u8]>,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
 ) -> PostgresAwaitEvents {
     AwaitEventCoordinator::new(PostgresAwaitEventBackend { pool }, signing_secret, clock)
 }
@@ -245,7 +245,7 @@ impl AwaitEventBackend for PostgresAwaitEventBackend {
                         Some(terminal_json) => TerminalCas::AlreadyResolved { terminal_json },
                         None => {
                             return Err(RuntimeError::new(
-                                lash_core::RuntimeErrorCode::PostgresAwaitEventStore,
+                                lash_core_execution::RuntimeErrorCode::PostgresAwaitEventStore,
                                 "await-event CAS lost without a winning terminal",
                             ));
                         }
@@ -485,14 +485,14 @@ async fn lock_session(
 
 fn store_error(err: sqlx::Error) -> RuntimeError {
     RuntimeError::new(
-        lash_core::RuntimeErrorCode::PostgresAwaitEventStore,
+        lash_core_execution::RuntimeErrorCode::PostgresAwaitEventStore,
         err.to_string(),
     )
 }
 
 fn store_error_message(message: String) -> RuntimeError {
     RuntimeError::new(
-        lash_core::RuntimeErrorCode::PostgresAwaitEventStore,
+        lash_core_execution::RuntimeErrorCode::PostgresAwaitEventStore,
         message,
     )
 }

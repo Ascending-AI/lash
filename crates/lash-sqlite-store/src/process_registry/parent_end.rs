@@ -7,7 +7,7 @@
 
 use std::num::NonZeroUsize;
 
-use lash_core::{ParentEndPlan, ParentScope, PluginError, ProcessRecord};
+use lash_core_execution::{ParentEndPlan, ParentScope, PluginError, ProcessRecord};
 use lash_sansio::ProcessId;
 use rusqlite::{Connection, OptionalExtension, params};
 

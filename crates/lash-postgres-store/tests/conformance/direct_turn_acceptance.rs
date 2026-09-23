@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use lash_core::store::RuntimePersistence;
+use lash_core_execution::store::RuntimePersistence;
 
 use super::{reset, storage};
 

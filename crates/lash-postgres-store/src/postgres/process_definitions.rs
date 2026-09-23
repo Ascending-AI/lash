@@ -10,14 +10,14 @@
 
 use crate::process_sql::process_sql;
 use crate::*;
-use lash_core::process_registry::{
+use lash_core_execution::process_registry::{
     ProcessDefinitionExpectation, ProcessDefinitionLifecycle, ProcessDefinitionRecord,
     ProcessDefinitionRegistration, validate_process_definition_name,
 };
-use lash_core::process_registry::{
+use lash_core_execution::process_registry::{
     ProcessDefinitionRegistrationRefusal, ProcessDefinitionRegistry,
 };
-use lash_core::{Clock, ProcessDefinitionRef, TriggerOwnerScope};
+use lash_core_execution::{Clock, ProcessDefinitionRef, TriggerOwnerScope};
 
 fn conflict(
     scope: &str,
@@ -48,7 +48,7 @@ impl PostgresProcessDefinitionRegistry {
     pub fn with_pool(pool: PgPool) -> Self {
         Self {
             pool,
-            clock: std::sync::Arc::new(lash_core::facade_support::SystemClock),
+            clock: std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
         }
     }
 

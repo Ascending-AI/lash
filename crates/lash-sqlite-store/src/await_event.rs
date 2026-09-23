@@ -10,11 +10,11 @@
 use lash_sansio::SessionId;
 use std::sync::{Arc, LazyLock};
 
-use lash_core::facade_support::await_event_coordinator::{
+use lash_core_execution::facade_support::await_event_coordinator::{
     AwaitEventBackend, AwaitEventCoordinator, AwaitEventRowIdentity, AwaitEventVocabulary,
     PersistedPromise, RegisteredAwaitEvent, TerminalCas,
 };
-use lash_core::{RuntimeError, RuntimeErrorCode};
+use lash_core_execution::{RuntimeError, RuntimeErrorCode};
 use lash_store_sql::wait::revoked_sessions::RevokedSessionStatements;
 use lash_store_sql::wait::waits::{WaitRow, WaitStatements};
 use rusqlite::{OptionalExtension, params};
@@ -124,7 +124,7 @@ pub(crate) fn sqlite_await_events(
     conn: SqliteConnection,
     registry: Arc<RegistryAttachment>,
     signing_secret: Vec<u8>,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
 ) -> SqliteAwaitEvents {
     AwaitEventCoordinator::new(
         SqliteAwaitEventBackend { conn, registry },
@@ -437,7 +437,7 @@ fn session_is_revoked(
 
 fn store_error(err: rusqlite::Error) -> RuntimeError {
     RuntimeError::new(
-        lash_core::RuntimeErrorCode::SqliteAwaitEventStore,
+        lash_core_execution::RuntimeErrorCode::SqliteAwaitEventStore,
         err.to_string(),
     )
 }

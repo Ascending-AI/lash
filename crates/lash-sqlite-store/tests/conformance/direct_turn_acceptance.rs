@@ -6,19 +6,21 @@
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
-use lash_core::SessionStoreFactory as _;
-use lash_core::store::RuntimePersistence;
+use lash_core_execution::SessionStoreFactory as _;
+use lash_core_execution::store::RuntimePersistence;
 use lash_sqlite_store::SqliteSessionStoreFactory;
 use tempfile::TempDir;
 
 async fn sqlite_direct_turn_store(dir: &TempDir) -> Arc<dyn RuntimePersistence> {
     let factory = SqliteSessionStoreFactory::new(dir.path().to_path_buf());
     factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create the SQLite direct-turn acceptance store")

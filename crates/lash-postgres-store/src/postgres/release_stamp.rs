@@ -9,7 +9,7 @@
 //!
 //! **Update rule.** Written on the first open of an unstamped database and
 //! advanced only by a strictly newer release
-//! ([`lash_core::release_stamp_advances`]). A reopen under the same release
+//! ([`lash_core_execution::release_stamp_advances`]). A reopen under the same release
 //! leaves the row alone, so `written_at_epoch_ms` stays the instant this release
 //! took the database over; an older build never downgrades the stamp; and a pair
 //! this build cannot order leaves the existing row for an operator to read.
@@ -17,7 +17,7 @@
 //! The instant is the PostgreSQL server's, not the opening host's: two hosts
 //! opening one database would otherwise stamp it from two unrelated clocks.
 
-use lash_core::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
+use lash_core_execution::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::session_sql::session_sql;
@@ -64,7 +64,7 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
             .fetch_optional(&mut **tx)
             .await?;
     if let Some(existing) = existing
-        && !lash_core::release_stamp_advances(&existing, BUILD_RELEASE)
+        && !lash_core_execution::release_stamp_advances(&existing, BUILD_RELEASE)
     {
         return Ok(());
     }

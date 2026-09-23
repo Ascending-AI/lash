@@ -3,11 +3,14 @@ use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
 impl SessionCommitStore for Store {
-    async fn committed_turn_exists(&self, turn_id: &lash_core::TurnId) -> Result<bool, StoreError> {
+    async fn committed_turn_exists(
+        &self,
+        turn_id: &lash_core_execution::TurnId,
+    ) -> Result<bool, StoreError> {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(false);
         };
-        let key = lash_core::store_backend_support::turn_commit_receipt_storage_key(
+        let key = lash_core_execution::store_backend_support::turn_commit_receipt_storage_key(
             &session_id,
             turn_id,
         )?;
@@ -28,8 +31,10 @@ impl SessionCommitStore for Store {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(false);
         };
-        let key =
-            lash_core::store_backend_support::drain_end_receipt_storage_key(&session_id, drain_id)?;
+        let key = lash_core_execution::store_backend_support::drain_end_receipt_storage_key(
+            &session_id,
+            drain_id,
+        )?;
         self.conn
             .call(move |conn| {
                 let exists: bool = conn.query_row(
@@ -45,7 +50,7 @@ impl SessionCommitStore for Store {
 
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
-            return Ok(lash_core::store::OLDEST_SUPPORTED_SESSION_STATE_VERSION);
+            return Ok(lash_core_execution::store::OLDEST_SUPPORTED_SESSION_STATE_VERSION);
         };
         self.conn
             .call(move |conn| Ok(read_session_state_version_conn(conn, &session_id)))
@@ -56,7 +61,7 @@ impl SessionCommitStore for Store {
     async fn admit_session_state(
         &self,
         lease: &SessionExecutionLeaseAuthority,
-    ) -> Result<lash_core::store::SessionStateAdmission, StoreError> {
+    ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let lease = lease.clone();
         let now = self.clock.timestamp_ms();
         self.conn
@@ -64,7 +69,7 @@ impl SessionCommitStore for Store {
                 let outcome = (|| {
                     ensure_session_execution_lease_conn(tx, &lease.session_id, &lease, now)?;
                     let version = read_session_state_version_conn(tx, &lease.session_id)?;
-                    Ok(lash_core::store::SessionStateAdmission {
+                    Ok(lash_core_execution::store::SessionStateAdmission {
                         session_id: lease.session_id.clone(),
                         version,
                         lease_fencing_token: lease.fencing_token,
@@ -94,7 +99,9 @@ impl SessionCommitStore for Store {
                     let graph = Self::load_active_path_session_graph_from_conn(
                         &tx,
                         &session_id,
-                        meta.leaf_node_id.clone().map(lash_core::NodeId::into_inner),
+                        meta.leaf_node_id
+                            .clone()
+                            .map(lash_core_execution::NodeId::into_inner),
                     )?;
                     let checkpoint = match meta.checkpoint_ref.as_ref() {
                         Some(blob_ref) => {
@@ -115,9 +122,10 @@ impl SessionCommitStore for Store {
                         graph,
                         checkpoint_ref: meta.checkpoint_ref,
                         checkpoint,
-                        token_ledger: lash_core::store::merge_token_ledger_entries_checked(
-                            Self::load_usage_deltas_conn(&tx, &session_id)?,
-                        )?,
+                        token_ledger:
+                            lash_core_execution::store::merge_token_ledger_entries_checked(
+                                Self::load_usage_deltas_conn(&tx, &session_id)?,
+                            )?,
                         turn_failure_settlements: load_turn_failure_settlements_conn(
                             &tx,
                             &session_id,
@@ -141,7 +149,7 @@ impl SessionCommitStore for Store {
     async fn load_node(
         &self,
         node_id: &str,
-    ) -> Result<Option<lash_core::SessionNodeRecord>, StoreError> {
+    ) -> Result<Option<lash_core_execution::SessionNodeRecord>, StoreError> {
         let session_id = self.selected_session_id()?;
         let node_id = node_id.to_string();
         let row: Option<(String, Option<String>, String)> = self
@@ -263,8 +271,12 @@ impl SessionCommitStore for Store {
             .await
             .map_err(sqlite_error)?;
         row.map(|(node_id, parent_node_id, node_json)| {
-            lash_core::SessionNodeRecord::decode_storage_body(node_id, parent_node_id, &node_json)
-                .map_err(|error| stored_data_corrupt("SessionGraph node", error))
+            lash_core_execution::SessionNodeRecord::decode_storage_body(
+                node_id,
+                parent_node_id,
+                &node_json,
+            )
+            .map_err(|error| stored_data_corrupt("SessionGraph node", error))
         })
         .transpose()
     }
@@ -273,7 +285,7 @@ impl SessionCommitStore for Store {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        let planner = lash_core::store::RuntimeCommitPlanner::prepare(commit)?;
+        let planner = lash_core_execution::store::RuntimeCommitPlanner::prepare(commit)?;
         self.bind_session(&planner.commit().session_id)?;
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
@@ -303,7 +315,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         tx,
                         &SessionMeta {
                             session_id: commit.session_id.clone(),
-                            relation: lash_core::SessionRelation::Root,
+                            relation: lash_core_execution::SessionRelation::Root,
                             pending_observer_intents: Vec::new(),
                         },
                         crate::session_meta::SessionMetaWrite::Insert,
@@ -344,18 +356,18 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                             // One codec owns the unit-shape and integer-range checks.
                             // The ancestor stays write-only because the request hash binds it.
                             let append_request_identity =
-                                lash_core::store_backend_support::decode_append_request_identity(
+                                lash_core_execution::store_backend_support::decode_append_request_identity(
                                     &commit.turn_commit.operation.key,
                                     stored_identity,
                                     stored_version,
                                     stored_requested_node_count,
                                 )?;
-                            let result = lash_core::store::decode_runtime_commit_receipt(
+                            let result = lash_core_execution::store::decode_runtime_commit_receipt(
                                 &commit.session_id,
                                 planner.operation_key(),
                                 &result_json,
                             )?;
-                            let prior = lash_core::store::RuntimeCommitReceiptRecord {
+                            let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
                                 turn_commit_hash: stored_hash,
                                 result,
                                 append_request_identity,
@@ -391,7 +403,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                             turn_id: commit
                                 .interrupted_turn_input_turn_id
                                 .clone()
-                                .unwrap_or_else(|| lash_core::TurnId::from("missing-turn-id")),
+                                .unwrap_or_else(|| lash_core_execution::TurnId::from("missing-turn-id")),
                         });
                     }
                     if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
@@ -425,7 +437,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                             ).map_err(sqlite_error)?;
                             if retired { return Err(StoreError::TurnCancelClosureScopeRetired { scope_id }); }
                         }
-                        let final_key = lash_core::OperationId::turn(closure.session_id(), closure.turn_id(), "final").storage_key()?;
+                        let final_key = lash_core_execution::OperationId::turn(closure.session_id(), closure.turn_id(), "final").storage_key()?;
                         let committed = tx.query_row(
                             session_sql().turn_commits.exists_for_turn.sql(),
                             params![closure.session_id().as_str(), final_key], |row| row.get::<_, bool>(0),
@@ -483,7 +495,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                             .optional()
                             .map_err(sqlite_error)?
                             .map(|(generation, frame_node_id)| {
-                                Ok(lash_core::store::ParentNodeFacts {
+                                Ok(lash_core_execution::store::ParentNodeFacts {
                                     node_id: leaf_node_id.to_string().into(),
                                     generation: u64::try_from(generation).map_err(|_| {
                                         stored_data_corrupt(
@@ -518,10 +530,10 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                     };
                     let occupied_node_ids = occupied_node_ids_conn(tx, commit.graph.nodes())?;
                     let published_leaf = match old_leaf_node_id {
-                        None => lash_core::store::PublishedLeafFacts::Absent,
+                        None => lash_core_execution::store::PublishedLeafFacts::Absent,
                         Some(node_id) => match parent_node_facts {
-                            Some(parent) => lash_core::store::PublishedLeafFacts::Live(parent),
-                            None => lash_core::store::PublishedLeafFacts::Retired { node_id },
+                            Some(parent) => lash_core_execution::store::PublishedLeafFacts::Live(parent),
+                            None => lash_core_execution::store::PublishedLeafFacts::Retired { node_id },
                         },
                     };
                     if let Some(pending) = load_run_conn(tx, &commit.session_id, None)? {
@@ -539,7 +551,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         validate_run_members_conn(tx, fence, progress)?;
                         Some(admission)
                     } else { None };
-                    let plan = planner.plan(lash_core::store::FreshRuntimeCommitFacts {
+                    let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
                         actual_head_revision: actual_revision,
                         published_leaf,
                         requested_ancestor_is_active,
@@ -586,7 +598,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                             let facts = observed
                                 .map(|(claim_id, claim_token, generation, state)| {
                                     Ok(
-                                        lash_core::store::claim_plan::TurnInputSettlementRowFacts {
+                                        lash_core_execution::store::claim_plan::TurnInputSettlementRowFacts {
                                             claim_id,
                                             claim_token,
                                             claim_session_lease_generation: u64::try_from(
@@ -605,7 +617,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                     )
                                 })
                                 .transpose()?;
-                            rows.push(lash_core::store::claim_plan::TurnInputSettlementRow {
+                            rows.push(lash_core_execution::store::claim_plan::TurnInputSettlementRow {
                                 input_id: input_id.clone(),
                                 facts,
                             });
@@ -614,7 +626,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         // predicate, two regimes: the claim fields only
                         // strengthen it (ADR 0069 section 5).
                         turn_input_plans.push(
-                            lash_core::store::claim_plan::plan_turn_input_settlement(
+                            lash_core_execution::store::claim_plan::plan_turn_input_settlement(
                                 completed, rows,
                             )
                             .into_result()?,
@@ -673,7 +685,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                     // head read is ever moved out of the write transaction,
                     // this refuses the publication instead of publishing over
                     // a revision nobody held.
-                    lash_core::store_backend_support::require_single_writer_head_publication(
+                    lash_core_execution::store_backend_support::require_single_writer_head_publication(
                         &commit.session_id,
                         crate::SQLITE_BACKEND,
                         !tx.is_autocommit(),
@@ -699,12 +711,12 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         .transpose()
                         .map_err(sqlite_error)?
                         .unwrap_or(0);
-                    match lash_core::store_backend_support::head_publication_verdict(
+                    match lash_core_execution::store_backend_support::head_publication_verdict(
                         plan.actual_head_revision(),
                         published_revision,
                     ) {
-                        lash_core::store_backend_support::HeadPublicationVerdict::Publish => {}
-                        lash_core::store_backend_support::HeadPublicationVerdict::HeadMoved {
+                        lash_core_execution::store_backend_support::HeadPublicationVerdict::Publish => {}
+                        lash_core_execution::store_backend_support::HeadPublicationVerdict::HeadMoved {
                             observed_head_revision,
                             ..
                         } => {
@@ -744,14 +756,14 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                     // leaves: a crash between the two would
                                     // replay a wake the session already
                                     // consumed (FIG-1065).
-                                    lash_core::store::claim_plan::QueuedWorkSettlementWrite::FenceWakeRedelivery { wake, .. } => {
+                                    lash_core_execution::store::claim_plan::QueuedWorkSettlementWrite::FenceWakeRedelivery { wake, .. } => {
                                         crate::queued_work::raise_wake_redelivery_fence_conn(
                                             tx,
                                             settlement_plan.session_id(),
                                             wake,
                                         )?;
                                     }
-                                    lash_core::store::claim_plan::QueuedWorkSettlementWrite::SettleClaimedBatch { batch_id } => {
+                                    lash_core_execution::store::claim_plan::QueuedWorkSettlementWrite::SettleClaimedBatch { batch_id } => {
                                         let settled = tx
                                             .execute(
                                                 turn_ingress.queued_batches.settle_claimed.sql(),
@@ -769,8 +781,8 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                         // cannot legitimately miss. A miss is recorded as
                                         // evidence and then fails closed with the same
                                         // supersession this site has always returned.
-                                        lash_core::store_backend_support::require_fenced_write_applied(
-                                            lash_core::store_backend_support::FencedWrite::QueuedWorkClaimSettlement,
+                                        lash_core_execution::store_backend_support::require_fenced_write_applied(
+                                            lash_core_execution::store_backend_support::FencedWrite::QueuedWorkClaimSettlement,
                                             crate::SQLITE_BACKEND,
                                             batch_id.as_str(),
                                             u64::try_from(settled).unwrap_or(u64::MAX),
@@ -793,7 +805,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                 // section 5).
                                 let settled = match (step.regime, settlement_plan.claim()) {
                                     (
-                                        lash_core::store::claim_plan::TurnInputSettlementRegime::Claimed,
+                                        lash_core_execution::store::claim_plan::TurnInputSettlementRegime::Claimed,
                                         Some(claim),
                                     ) => tx.execute(
                                         pending_inputs.settle_claimed.sql(),
@@ -806,7 +818,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                         ],
                                     ),
                                     (
-                                        lash_core::store::claim_plan::TurnInputSettlementRegime::Claimed,
+                                        lash_core_execution::store::claim_plan::TurnInputSettlementRegime::Claimed,
                                         None,
                                     ) => {
                                         return Err(StoreError::Backend(
@@ -815,7 +827,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                         ));
                                     }
                                     (
-                                        lash_core::store::claim_plan::TurnInputSettlementRegime::Unclaimed,
+                                        lash_core_execution::store::claim_plan::TurnInputSettlementRegime::Unclaimed,
                                         _,
                                     ) => tx.execute(
                                         pending_inputs.settle_unclaimed.sql(),
@@ -833,8 +845,8 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                 // miss is recorded as evidence and then fails
                                 // closed with the same supersession this site has
                                 // always returned.
-                                lash_core::store_backend_support::require_fenced_write_applied(
-                                    lash_core::store::claim_plan::TurnInputSettlementPlan::fenced_write(step),
+                                lash_core_execution::store_backend_support::require_fenced_write_applied(
+                                    lash_core_execution::store::claim_plan::TurnInputSettlementPlan::fenced_write(step),
                                     crate::SQLITE_BACKEND,
                                     step.input_id.as_str(),
                                     u64::try_from(settled).unwrap_or(u64::MAX),
@@ -843,17 +855,17 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                             }
                         }
                     }
-                    let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
+                    let mut turn_cancel_input_outcome = lash_core_execution::TurnCancelInputOutcome::default();
                     if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
                         let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
                         let disposition = cancellation.map_or(
-                            lash_core::TurnCancelDisposition::Defer,
+                            lash_core_execution::TurnCancelDisposition::Defer,
                             |evidence| evidence.undelivered,
                         );
                         if let Some(evidence) = commit
                             .turn_cancel_closure_settlement
                             .as_ref()
-                            .and_then(lash_core::TurnCancelClosureSettlement::base_cancellation)
+                            .and_then(lash_core_execution::TurnCancelClosureSettlement::base_cancellation)
                         {
                             let observed = commit.interrupted_turn_cancel_intent.as_ref().ok_or_else(|| {
                                 StoreError::Backend("interrupted turn commit omitted cancellation intent predicate".to_string())
@@ -899,7 +911,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                             }
                             input_ids
                         };
-                        let deferred = lash_core::TurnInputState::DeferredNextTurn;
+                        let deferred = lash_core_execution::TurnInputState::DeferredNextTurn;
                         let deferred_ingress = encode_json(&deferred.ingress())?;
                         let pending_inputs =
                             &crate::turn_ingress::turn_ingress_sql().pending_inputs;
@@ -909,7 +921,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                             // turn that is over, dropping is the cancel this
                             // table already has.
                             match disposition {
-                                lash_core::TurnCancelDisposition::Defer => tx.execute(
+                                lash_core_execution::TurnCancelDisposition::Defer => tx.execute(
                                     pending_inputs.defer_to_next_turn.sql(),
                                     params![
                                         commit.session_id.as_str(),
@@ -918,17 +930,17 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                         deferred_ingress.as_str(),
                                     ],
                                 ),
-                                lash_core::TurnCancelDisposition::Drop => tx.execute(
+                                lash_core_execution::TurnCancelDisposition::Drop => tx.execute(
                                     pending_inputs.cancel.sql(),
                                     params![
                                         commit.session_id.as_str(),
                                         input_id,
-                                        lash_core::TurnInputStateKind::Cancelled.as_str(),
+                                        lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
                                     ],
                                 ),
                             }
                             .map_err(sqlite_error)?;
-                            let affected = lash_core::TurnCancelAffectedInput { input_id: input_id.into(), payload, disposition };
+                            let affected = lash_core_execution::TurnCancelAffectedInput { input_id: input_id.into(), payload, disposition };
                             if cancellation.is_some() {
                                 append_turn_cancel_outcome_conn(tx, &commit.session_id, turn_id, affected.clone())?;
                                 turn_cancel_input_outcome.affected_inputs.push(affected);
@@ -969,7 +981,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         )?);
                     }
                     if let (Some(admission), Some(progress)) = (&queued_admission, &commit.queued_run) {
-                        if matches!(progress.progress, lash_core::store::QueuedRunProgress::Settle { .. }) {
+                        if matches!(progress.progress, lash_core_execution::store::QueuedRunProgress::Settle { .. }) {
                     let fence = commit.session_execution_lease_fence.as_ref().ok_or_else(|| StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() })?;
                     settle_run_members_conn(tx, fence, &progress.scope)?;
                 }
@@ -1005,7 +1017,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                 .iter()
                                 .flat_map(|completion| &completion.batch_ids)
                             {
-                                let marker = lash_core::store_backend_support::session_command_batch_completion_key(
+                                let marker = lash_core_execution::store_backend_support::session_command_batch_completion_key(
                                     &commit.session_id,
                                     batch_id,
                                 )?;
@@ -1057,8 +1069,8 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
 
     async fn admit_and_bind_session(
         &self,
-        binding: &lash_core::SessionBinding,
-    ) -> Result<lash_core::SessionAdmission, StoreError> {
+        binding: &lash_core_execution::SessionBinding,
+    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
         binding.validate()?;
         let session_id = binding.session_id.clone();
         // The tombstone outranks the handle's own binding: a bound handle
@@ -1080,7 +1092,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
         let admission = self
             .conn
             .write_flow(move |tx| {
-                let outcome: Result<lash_core::SessionAdmission, StoreError> = (|| {
+                let outcome: Result<lash_core_execution::SessionAdmission, StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
                     crate::bind_session_lock(&bound, &session_id)?;
                     let inserted = crate::session_meta::write_session_meta(
@@ -1090,19 +1102,20 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         created_at_ms,
                     )?;
                     if inserted {
-                        return Ok(lash_core::SessionAdmission::Created);
+                        return Ok(lash_core_execution::SessionAdmission::Created);
                     }
                     let recorded = crate::session_meta::load_recorded_lineage(tx, &session_id)?
                         .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
                             session_id: session_id.clone(),
                         })?;
-                    lash_core::store_backend_support::guard_rebind_lineage(
+                    lash_core_execution::store_backend_support::guard_rebind_lineage(
                         &session_id,
                         &recorded,
                         &meta.relation,
                     )?;
-                    Ok(lash_core::SessionAdmission::Rebound)
-                })();
+                    Ok(lash_core_execution::SessionAdmission::Rebound)
+                })(
+                );
                 Ok(match outcome {
                     Ok(admission) => TxOutcome::Commit(Ok(admission)),
                     Err(err) => TxOutcome::Rollback(Err(err)),
@@ -1131,8 +1144,8 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
 /// ref batches use, so the scalar-parameter ceiling is never in play.
 fn occupied_node_ids_conn(
     tx: &rusqlite::Connection,
-    nodes: &[lash_core::SessionNodeRecord],
-) -> Result<std::collections::HashSet<lash_core::NodeId>, StoreError> {
+    nodes: &[lash_core_execution::SessionNodeRecord],
+) -> Result<std::collections::HashSet<lash_core_execution::NodeId>, StoreError> {
     let mut occupied = std::collections::HashSet::new();
     if nodes.is_empty() {
         return Ok(occupied);
@@ -1152,7 +1165,7 @@ fn occupied_node_ids_conn(
             .query_map(params![encoded], |row| row.get::<_, String>(0))
             .map_err(sqlite_error)?;
         for node_id in rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)? {
-            occupied.insert(lash_core::NodeId::from(node_id));
+            occupied.insert(lash_core_execution::NodeId::from(node_id));
         }
     }
     Ok(occupied)
@@ -1176,8 +1189,8 @@ const OCCUPIED_NODE_ID_CHUNK_SIZE: usize = 16_384;
 fn insert_graph_nodes_conn(
     tx: &rusqlite::Connection,
     session_id: &SessionId,
-    nodes: &[lash_core::SessionNodeRecord],
-    facts: &[lash_core::store::PlannedNodeFacts],
+    nodes: &[lash_core_execution::SessionNodeRecord],
+    facts: &[lash_core_execution::store::PlannedNodeFacts],
 ) -> Result<(), StoreError> {
     for (nodes, facts) in nodes
         .chunks(GRAPH_NODE_INSERT_CHUNK_SIZE)
@@ -1229,8 +1242,8 @@ const GRAPH_NODE_INSERT_CHUNK_SIZE: usize = 512;
 fn insert_graph_nodes_one_at_a_time(
     tx: &rusqlite::Connection,
     session_id: &SessionId,
-    nodes: &[lash_core::SessionNodeRecord],
-    facts: &[lash_core::store::PlannedNodeFacts],
+    nodes: &[lash_core_execution::SessionNodeRecord],
+    facts: &[lash_core_execution::store::PlannedNodeFacts],
 ) -> Result<(), StoreError> {
     for (node, facts) in nodes.iter().zip(facts) {
         let node_json = node.encode_storage_body().map_err(|err| {

@@ -9,16 +9,16 @@
 
 use std::sync::Arc;
 
-use lash_core::ProcessRegistry;
+use lash_core_execution::ProcessRegistry;
 use lash_postgres_store::PostgresStorage;
 use sqlx::PgPool;
 
 use crate::support::{SharedDatabaseLock, database_url};
 
-fn turn_scope(session: &str, turn: &str) -> lash_core::ParentScope {
-    lash_core::ParentScope::turn(
+fn turn_scope(session: &str, turn: &str) -> lash_core_execution::ParentScope {
+    lash_core_execution::ParentScope::turn(
         lash_sansio::SessionId::from(session),
-        lash_core::TurnId::from(turn),
+        lash_core_execution::TurnId::from(turn),
     )
 }
 
@@ -72,24 +72,25 @@ async fn a_ledger_row_decodes_its_typed_payload() {
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
 
     let process_parent = registry
-        .register_process(lash_core::ProcessRegistration::new(
+        .register_process(lash_core_execution::ProcessRegistration::new(
             "pg-payload-parent",
-            lash_core::ProcessInput::External {
+            lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::Rerunnable,
-            lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
-                "pg-payload-session",
-            )),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
+            lash_core_execution::RecoveryContract::Rerunnable,
+            lash_core_execution::ProcessProvenance::session(
+                lash_core_execution::SessionScope::new("pg-payload-session"),
+            ),
+            lash_core_execution::ProcessLifecyclePolicy::new(
+                lash_core_execution::ParentScope::Host,
+                lash_core_execution::OnParentEnd::Abandon,
             ),
         ))
         .await
         .expect("register the process parent");
-    let scope =
-        lash_core::ParentScope::process(lash_core::ProcessRef::from_record(&process_parent));
+    let scope = lash_core_execution::ParentScope::process(
+        lash_core_execution::ProcessRef::from_record(&process_parent),
+    );
     registry
         .record_parent_end(&scope)
         .await
@@ -153,7 +154,7 @@ async fn an_unsupported_payload_version_is_refused() {
 
     let scope = turn_scope("pg-version-session", "pg-version-turn");
     let payload = serde_json::json!({
-        "version": lash_core::PARENT_SCOPE_STORAGE_PAYLOAD_VERSION + 1,
+        "version": lash_core_execution::PARENT_SCOPE_STORAGE_PAYLOAD_VERSION + 1,
         "scope": serde_json::to_value(&scope).expect("scope json"),
     })
     .to_string();

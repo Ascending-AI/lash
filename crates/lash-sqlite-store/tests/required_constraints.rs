@@ -3,7 +3,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core::StoreError;
+use lash_core_execution::StoreError;
 use lash_sqlite_store::{
     RequiredConstraintFinding, SqliteDatabase, Store, inspect_required_constraints_at,
 };
@@ -41,7 +41,7 @@ async fn fig2837_sqlite_missing_database_is_an_error_and_is_not_created() {
 
 #[test]
 fn fig2837_every_sqlite_registry_entry_names_an_inspectable_component() {
-    use lash_core::store_backend_support::required_constraints::{
+    use lash_core_execution::store_backend_support::required_constraints::{
         EXPECTED_CONSTRAINTS, SqliteConstraintDatabase,
     };
 

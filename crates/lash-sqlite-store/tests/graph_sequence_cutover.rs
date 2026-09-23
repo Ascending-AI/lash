@@ -1,4 +1,4 @@
-use lash_core::{StorePreflight, StoreSchemaVerdict};
+use lash_core_execution::{StorePreflight, StoreSchemaVerdict};
 use lash_sqlite_store::{SESSION_SCHEMA_VERSION, SqliteStorePreflight, Store};
 
 const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 70;
@@ -33,7 +33,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
         content: b"pre-cutover payload",
     })
     .expect("encode the pre-cutover envelope shape");
-    let blob_ref = lash_core::BlobRef::for_content(b"pre-cutover payload");
+    let blob_ref = lash_core_execution::BlobRef::for_content(b"pre-cutover payload");
     connection
         .execute(
             "INSERT INTO blobs (hash, content) VALUES (?1, ?2)",

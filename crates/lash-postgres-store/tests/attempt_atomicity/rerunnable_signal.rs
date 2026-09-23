@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::ProcessEventLogTestSupport as _;
+use lash_core_execution::ProcessEventLogTestSupport as _;
 
 /// Race-free control geometry for the FIG-1293 signal path: the target is
 /// worker-owned (`Rerunnable`), but this focused host deliberately installs no
@@ -19,38 +19,39 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
         .await
         .expect("connect PostgreSQL Rerunnable signal host");
     reset(&storage).await;
-    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    let registry: Arc<dyn lash_core_execution::ProcessRegistry> =
+        Arc::new(storage.process_registry());
     registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
+            lash_core_execution::ProcessRegistration::new(
                 "pg-public-intent-target",
-                lash_core::ProcessInput::External {
+                lash_core_execution::ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "fig1293-rerunnable-control"}),
                 },
-                lash_core::RecoveryContract::Rerunnable,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::RecoveryContract::Rerunnable,
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             )
-            .with_extra_event_types([lash_core::ProcessEventType {
+            .with_extra_event_types([lash_core_execution::ProcessEventType {
                 name: "signal.resume".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                payload_schema: lash_core_execution::LashSchema::any(),
+                semantics: lash_core_execution::ProcessEventSemanticsSpec::default(),
             }]),
             &[SessionId::from(SESSION.to_string())],
         )
         .await
         .expect("register PostgreSQL Rerunnable signal target");
 
-    let wait_controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
+    let wait_controller: Arc<dyn lash_core_execution::RuntimeEffectController> = Arc::new(
         storage.runtime_effect_controller(ExecutionScope::process("pg-public-intent-target")),
     );
     let wake_key = wait_controller
         .await_event_key(
             &ExecutionScope::process("pg-public-intent-target"),
-            lash_core::AwaitEventWaitIdentity::process_signal(
+            lash_core_execution::AwaitEventWaitIdentity::process_signal(
                 "pg-public-intent-target",
                 "resume",
                 1,
@@ -88,7 +89,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
         .expect("run Rerunnable signal-intent turn");
     assert!(matches!(
         turn.outcome,
-        lash_core::facade_support::TurnOutcome::Finished(_)
+        lash_core_execution::facade_support::TurnOutcome::Finished(_)
     ));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
     assert_eq!(model_calls.load(Ordering::SeqCst), 2);
@@ -98,7 +99,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
             .expect("Rerunnable signal must wake")
             .expect("Rerunnable wake task")
             .expect("Rerunnable wake resolution"),
-        lash_core::Resolution::Ok(serde_json::json!({
+        lash_core_execution::Resolution::Ok(serde_json::json!({
             "source": "postgres-public-caller"
         }))
     );
@@ -108,7 +109,10 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
         .await
         .expect("read Rerunnable target")
         .expect("Rerunnable target exists");
-    assert_eq!(record.disposition, lash_core::RecoveryContract::Rerunnable);
+    assert_eq!(
+        record.disposition,
+        lash_core_execution::RecoveryContract::Rerunnable
+    );
     assert!(
         record.first_started.is_none(),
         "the focused law installs no worker, so scheduler timing cannot alter the event sequence"

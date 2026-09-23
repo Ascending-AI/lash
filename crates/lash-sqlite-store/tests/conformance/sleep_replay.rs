@@ -6,13 +6,16 @@ async fn sqlite_sleep_replay_returns_after_recorded_due_time() {
         open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(durable_turn_scope("session", "turn"), "sleep-key")
-                .expect("valid sleep effect address"),
-            lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
+            lash_core_execution::EffectAddress::new(
+                durable_turn_scope("session", "turn"),
+                "sleep-key",
+            )
+            .expect("valid sleep effect address"),
+            lash_core_execution::RuntimeAttribution::for_turn("session", "turn", 1, 0),
             "sleep",
         ),
         RuntimeEffectCommand::Sleep {
-            spec: lash_core::SleepSpec::For { duration_ms: 120 },
+            spec: lash_core_execution::SleepSpec::For { duration_ms: 120 },
         },
     );
 
@@ -49,13 +52,16 @@ async fn sqlite_sleep_until_replay_does_not_mismatch_its_recorded_deadline() {
         + 120;
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(durable_turn_scope("session", "turn"), "sleep-until-key")
-                .expect("valid sleep-until effect address"),
-            lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
+            lash_core_execution::EffectAddress::new(
+                durable_turn_scope("session", "turn"),
+                "sleep-until-key",
+            )
+            .expect("valid sleep-until effect address"),
+            lash_core_execution::RuntimeAttribution::for_turn("session", "turn", 1, 0),
             "sleep-until",
         ),
         RuntimeEffectCommand::Sleep {
-            spec: lash_core::SleepSpec::Until { deadline_ms },
+            spec: lash_core_execution::SleepSpec::Until { deadline_ms },
         },
     );
 

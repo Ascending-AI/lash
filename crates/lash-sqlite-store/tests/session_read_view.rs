@@ -7,15 +7,17 @@ use lash_sansio::SessionId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core::SessionStoreFactory as _;
+use lash_core_execution::SessionStoreFactory as _;
 use lash_sqlite_store::SqliteSessionStoreFactory;
 
 lash_conformance::session_read_view_tests!({
     let dir = tempfile::tempdir().expect("read-view tempdir");
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
+        1_800_000_000_000,
+    ));
     let factory = Arc::new(
         SqliteSessionStoreFactory::new(dir.path())
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
     );
     (dir, factory, move || clock.advance(1))
 });
@@ -42,28 +44,28 @@ async fn committed_catalog(
     session_id: &SessionId,
 ) -> (
     SqliteSessionStoreFactory,
-    Arc<dyn lash_core::RuntimePersistence>,
-    lash_core::SessionReadView,
+    Arc<dyn lash_core_execution::RuntimePersistence>,
+    lash_core_execution::SessionReadView,
 ) {
     let factory = SqliteSessionStoreFactory::new(root);
-    let request = lash_core::SessionStoreCreateRequest {
+    let request = lash_core_execution::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
-        relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let writer = factory
         .create_store(&request)
         .await
         .expect("create no-write proof session");
-    let mut state = lash_core::RuntimeSessionState {
+    let mut state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
-        ..lash_core::RuntimeSessionState::new(request.policy)
+        ..lash_core_execution::RuntimeSessionState::new(request.policy)
     };
-    state.append_active_conversation_messages(&[lash_core::Message {
+    state.append_active_conversation_messages(&[lash_core_execution::Message {
         id: format!("{session_id}-message"),
-        role: lash_core::MessageRole::User,
-        parts: vec![lash_core::Part::text(
+        role: lash_core_execution::MessageRole::User,
+        parts: vec![lash_core_execution::Part::text(
             format!("{session_id}-message.p0"),
             "read without changing durable state".to_string(),
             None,
@@ -72,13 +74,12 @@ async fn committed_catalog(
         origin: None,
     }]);
     writer
-        .commit_runtime_state(lash_core::RuntimeCommit::persisted_state_for_test(
-            &state,
-            &[],
-        ))
+        .commit_runtime_state(
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+        )
         .await
         .expect("commit no-write proof session");
-    let expected = lash_core::store::load_persisted_session_state(writer.as_ref())
+    let expected = lash_core_execution::store::load_persisted_session_state(writer.as_ref())
         .await
         .expect("reload committed no-write proof session")
         .expect("committed no-write proof session exists")
@@ -224,7 +225,7 @@ async fn sqlite_session_read_view_reports_cold_read_only_media_as_backend_error(
         .await
         .expect_err("cold WAL catalog on read-only media must fail");
     match error {
-        lash_core::StoreError::Backend(message) => assert!(
+        lash_core_execution::StoreError::Backend(message) => assert!(
             message.to_ascii_lowercase().contains("readonly"),
             "SQLite read-only-media failure must retain its backend reason: {message}"
         ),

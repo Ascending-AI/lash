@@ -7,7 +7,7 @@
 use std::future::Future as _;
 use std::sync::Arc;
 
-use lash_core::{ArtifactOwner, ExecutionScope};
+use lash_core_execution::{ArtifactOwner, ExecutionScope};
 
 use crate::testing::ast_builders as builders;
 use crate::{DurabilityTier, LashlangArtifactStore, ModuleArtifact, TypeExpr};
@@ -163,9 +163,9 @@ pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
 pub async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
     let artifact = sample_module_artifact("beta");
     let staged = execution_owner("module-transfer");
-    let process = ArtifactOwner::process(lash_core::ProcessRef::new(
+    let process = ArtifactOwner::process(lash_core_execution::ProcessRef::new(
         "process-beta",
-        lash_core::ProcessIncarnation::from_registration_sequence(1),
+        lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
     ));
     store
         .publish_module_artifact(&staged, &artifact)

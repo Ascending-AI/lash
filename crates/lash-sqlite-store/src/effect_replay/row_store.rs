@@ -777,7 +777,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                                 Some(EffectCommitState::Pending) => {
                                     return Ok(TxOutcome::Rollback(Err(
                                 RuntimeEffectControllerError::new(
-                                    lash_core::RuntimeErrorCode::SqliteEffectReplayLeaseLost,
+                                    lash_core_execution::RuntimeErrorCode::SqliteEffectReplayLeaseLost,
                                     format!(
                                         "final commit for child `{}` of group {group_key} \
                                          lost its lease fence: the row is still pending \
@@ -1123,7 +1123,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     async fn scope_is_quiescent(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
         let read_error = |error: String| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
                 error,
             )
         };
@@ -1247,7 +1247,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         let now_ms = self.clock.timestamp_ms();
         let retirement_error = |error: rusqlite::Error| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
                 error.to_string(),
             )
         };
@@ -1281,7 +1281,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                             .collect::<rusqlite::Result<Vec<_>>>()?;
                         if let Some((first_key, _)) = pins.first() {
                             return Ok(Err(RuntimeError::new(
-                                lash_core::RuntimeErrorCode::EffectGroupLifecyclePinned,
+                                lash_core_execution::RuntimeErrorCode::EffectGroupLifecyclePinned,
                                 format!(
                                     "session `{session_id}` still owns {} effect group(s) that are live or closing (first: `{first_key}`); session deletion is refused until they settle",
                                     pins.len()
@@ -1403,7 +1403,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
                     error.to_string(),
                 )
             })?;
@@ -1412,7 +1412,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
                     error.to_string(),
                 )
             })
@@ -1445,7 +1445,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
                     error.to_string(),
                 )
             })
@@ -1467,7 +1467,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
                     error.to_string(),
                 )
             })

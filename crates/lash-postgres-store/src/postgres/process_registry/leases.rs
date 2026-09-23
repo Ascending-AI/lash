@@ -1,16 +1,16 @@
-//! The [`lash_core::ProcessLeases`] concern for the Postgres registry.
+//! The [`lash_core_execution::ProcessLeases`] concern for the Postgres registry.
 
 use super::*;
 use lash_sansio::ProcessId;
 
 #[async_trait::async_trait]
-impl lash_core::ProcessLeases for PostgresProcessRegistry {
+impl lash_core_execution::ProcessLeases for PostgresProcessRegistry {
     async fn claim_process_lease(
         &self,
         process_id: &ProcessId,
         owner: &LeaseOwnerIdentity,
         lease_ttl_ms: u64,
-    ) -> Result<lash_core::ProcessLeaseClaimOutcome, PluginError> {
+    ) -> Result<lash_core_execution::ProcessLeaseClaimOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         require_process_tx(&mut tx, process_id).await?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
@@ -31,11 +31,13 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
                     .await
                     .map_err(plugin_sqlx_error)?;
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease));
+                return Ok(lash_core_execution::ProcessLeaseClaimOutcome::Acquired(
+                    lease,
+                ));
             }
             registry_transitions::ProcessLeaseClaimDecision::ReportBusy { holder } => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder });
+                return Ok(lash_core_execution::ProcessLeaseClaimOutcome::Busy { holder });
             }
             registry_transitions::ProcessLeaseClaimDecision::AcquireOnRetainedFence => {
                 registry_transitions::next_process_lease_fencing_token(
@@ -47,7 +49,9 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
             acquire_process_lease_tx(&mut tx, process_id, owner, fencing_token, now, lease_ttl_ms)
                 .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease))
+        Ok(lash_core_execution::ProcessLeaseClaimOutcome::Acquired(
+            lease,
+        ))
     }
 
     async fn reclaim_process_lease(
@@ -56,7 +60,7 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
         owner: &LeaseOwnerIdentity,
         _observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
-    ) -> Result<lash_core::ProcessLeaseClaimOutcome, PluginError> {
+    ) -> Result<lash_core_execution::ProcessLeaseClaimOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         require_process_tx(&mut tx, process_id).await?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
@@ -75,14 +79,16 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
                 }
                 registry_transitions::ProcessLeaseReclaimDecision::ReportBusy { holder } => {
                     tx.commit().await.map_err(plugin_sqlx_error)?;
-                    return Ok(lash_core::ProcessLeaseClaimOutcome::Busy { holder });
+                    return Ok(lash_core_execution::ProcessLeaseClaimOutcome::Busy { holder });
                 }
             };
         let lease =
             acquire_process_lease_tx(&mut tx, process_id, owner, fencing_token, now, lease_ttl_ms)
                 .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core::ProcessLeaseClaimOutcome::Acquired(lease))
+        Ok(lash_core_execution::ProcessLeaseClaimOutcome::Acquired(
+            lease,
+        ))
     }
 
     async fn renew_process_lease(
@@ -172,11 +178,11 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         let current = load_process_lease_row_tx(&mut tx, &completion.process_id).await?;
-        let verdict = lash_core::store_backend_support::process_lease_verdict(
+        let verdict = lash_core_execution::store_backend_support::process_lease_verdict(
             current
                 .as_ref()
                 .map(registry_transitions::ProcessLeaseRow::facts),
-            lash_core::store_backend_support::ProcessLeaseAuthority {
+            lash_core_execution::store_backend_support::ProcessLeaseAuthority {
                 lease_token: &completion.lease_token,
                 fencing_token: completion.fencing_token,
             },
@@ -184,8 +190,8 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
         );
         if matches!(
             verdict,
-            lash_core::store_backend_support::ProcessLeaseVerdict::Current
-                | lash_core::store_backend_support::ProcessLeaseVerdict::Expired
+            lash_core_execution::store_backend_support::ProcessLeaseVerdict::Current
+                | lash_core_execution::store_backend_support::ProcessLeaseVerdict::Expired
         ) {
             // An expired lease still clears: the holder fields belong to the
             // lapsed claim and the retained fencing token is what a re-claim
@@ -198,8 +204,8 @@ impl lash_core::ProcessLeases for PostgresProcessRegistry {
                 .await
                 .map_err(plugin_sqlx_error)?
                 .rows_affected();
-            lash_core::store_backend_support::require_fenced_write_applied(
-                lash_core::store_backend_support::FencedWrite::ProcessLeaseRelease,
+            lash_core_execution::store_backend_support::require_fenced_write_applied(
+                lash_core_execution::store_backend_support::FencedWrite::ProcessLeaseRelease,
                 crate::POSTGRES_BACKEND,
                 completion.process_id.as_str(),
                 released,

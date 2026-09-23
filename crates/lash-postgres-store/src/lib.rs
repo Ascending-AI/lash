@@ -41,24 +41,24 @@ mod turn_cancel_closure;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core::runtime::{
+use lash_core_execution::runtime::{
     QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
     QueuedWorkItem, QueuedWorkKind,
 };
-use lash_core::store::queued_work::{
+use lash_core_execution::store::queued_work::{
     ClaimCandidate, MAX_SESSION_COMMAND_BATCHES_PER_CLAIM, QueuedWorkClaimOutcome,
     QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_exact_turn_work_claim_prefix,
     select_leading_session_command, select_turn_work_claim_prefix,
 };
-use lash_core::store::{
+use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
-use lash_core::store_backend_support::{
+use lash_core_execution::store_backend_support::{
     SessionExecutionLeaseRow, lease_owner_from_columns, row_to_session_execution_lease,
 };
-use lash_core::{
+use lash_core_execution::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport, LeaseOwnerIdentity,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
@@ -75,7 +75,7 @@ use lash_core::{
     facade_support::ProcessStartPlan, facade_support::ProcessTransition,
     facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
 };
-use lash_core::{
+use lash_core_execution::{
     PluginError, TriggerDeliveryReservation, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
     TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionRecord,
 };
@@ -88,18 +88,18 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// Backend name this store reports in shared fencing diagnostics.
 ///
 /// Every fenced write names its backend so
-/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core::StoreError::FencedWriteVerdictDisagreed)
+/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core_execution::StoreError::FencedWriteVerdictDisagreed)
 /// says which store's locked read and backstop predicate disagreed.
 pub(crate) const POSTGRES_BACKEND: &str = "postgres";
 
 async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Postgres>, StoreError> {
     #[cfg(feature = "perf-witness")]
     let perf_started_at = std::time::Instant::now();
-    let metrics_started_at =
-        lash_core::facade_support::RUNTIME_TUNING_METRICS_ENABLED.then(std::time::Instant::now);
+    let metrics_started_at = lash_core_execution::facade_support::RUNTIME_TUNING_METRICS_ENABLED
+        .then(std::time::Instant::now);
     let connection = pool.acquire().await;
     if let Some(started_at) = metrics_started_at {
-        lash_core::facade_support::record_postgres_pool_acquire_wait(
+        lash_core_execution::facade_support::record_postgres_pool_acquire_wait(
             started_at.elapsed(),
             if connection.is_ok() {
                 "success"
@@ -110,7 +110,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
     }
     #[cfg(feature = "perf-witness")]
     if connection.is_ok() {
-        lash_core::perf_witness::record_pool_checkout_wait(perf_started_at.elapsed());
+        lash_core_execution::perf_witness::record_pool_checkout_wait(perf_started_at.elapsed());
     }
     connection.map_err(store_sqlx_error)
 }
@@ -467,37 +467,38 @@ pub struct PostgresStorage {
 }
 
 type BoundArtifactStores = (
-    Arc<dyn lash_core::ProcessExecutionEnvStore>,
-    lash_core::ProcessEngineRegistry,
+    Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
+    lash_core_execution::ProcessEngineRegistry,
 );
 type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
 
 #[derive(Clone)]
 pub struct PostgresSessionStoreFactory {
     #[cfg(any(test, feature = "testing"))]
-    lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
+    lease_clock_for_testing: Option<Arc<dyn lash_core_execution::Clock>>,
     #[cfg(feature = "testing")]
     fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
     await_event_signing_secret: Arc<[u8]>,
     process_registry_shared: bool,
-    clock: Arc<dyn lash_core::Clock>,
-    turn_cancel_closure_owner: Arc<std::sync::Mutex<Option<Arc<dyn lash_core::EffectHost>>>>,
-    effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core::EffectHost>>>>,
+    clock: Arc<dyn lash_core_execution::Clock>,
+    turn_cancel_closure_owner:
+        Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
+    effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
     artifact_stores: SharedArtifactStores,
 }
 
 #[derive(Clone)]
 pub struct PostgresSessionStore {
     #[cfg(any(test, feature = "testing"))]
-    lease_clock_for_testing: Option<Arc<dyn lash_core::Clock>>,
+    lease_clock_for_testing: Option<Arc<dyn lash_core_execution::Clock>>,
     #[cfg(feature = "testing")]
     fault_injector: Option<testing::PostgresFaultInjector>,
     pool: PgPool,
     await_event_signing_secret: Arc<[u8]>,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
     session_id: SessionId,
-    turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
+    turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
     #[cfg(test)]
     checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
@@ -507,16 +508,16 @@ pub struct PostgresSessionStore {
 #[derive(Clone)]
 pub struct PostgresProcessRegistry {
     pool: PgPool,
-    wake_delivery_config: lash_core::WakeDeliveryConfig,
-    clock: Arc<dyn lash_core::Clock>,
+    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+    clock: Arc<dyn lash_core_execution::Clock>,
     /// Effect hosts whose scope fence registration lifts (ADR 0049). The
     /// PostgreSQL journal's own fence rows share the pool and are cleared in
     /// the registration transaction itself.
-    scope_fence_hosts: lash_core::ProcessScopeFenceHosts,
+    scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
 }
 
 impl PostgresProcessRegistry {
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
         self.clock = clock;
         self
     }
@@ -525,12 +526,12 @@ impl PostgresProcessRegistry {
 #[derive(Clone)]
 pub struct PostgresTriggerStore {
     pool: PgPool,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
     fixed_incarnation: Option<String>,
 }
 
 impl PostgresTriggerStore {
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
         self.clock = clock;
         self
     }
@@ -880,7 +881,7 @@ impl PostgresStorage {
     /// compatibility, openability, every database constraint, or row integrity.
     ///
     /// ```no_run
-    /// # async fn inspect(pool: sqlx::PgPool) -> Result<(), lash_core::StoreError> {
+    /// # async fn inspect(pool: sqlx::PgPool) -> Result<(), lash_core_execution::StoreError> {
     /// let report = lash_postgres_store::PostgresStorage::inspect_required_constraints_for(
     ///     &pool,
     /// ).await?;
@@ -942,7 +943,7 @@ impl PostgresStorage {
             lease_clock_for_testing: None,
             #[cfg(feature = "testing")]
             fault_injector: None,
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
@@ -962,7 +963,7 @@ impl PostgresStorage {
             lease_clock_for_testing: None,
             #[cfg(feature = "testing")]
             fault_injector: None,
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
@@ -976,13 +977,13 @@ impl PostgresStorage {
     /// Consequently, a mistyped id produces a valid absent handle that can subsequently create
     /// the mistyped session.
     /// Call
-    /// [`SessionStoreFactory::open_existing_store`](lash_core::SessionStoreFactory::open_existing_store)
+    /// [`SessionStoreFactory::open_existing_store`](lash_core_execution::SessionStoreFactory::open_existing_store)
     /// through [`Self::session_store_factory`] when existence must be checked.
     pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
             await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             session_id: session_id.into(),
             turn_cancel_closure_owner: None,
             #[cfg(any(test, feature = "testing"))]
@@ -999,28 +1000,28 @@ impl PostgresStorage {
     pub fn process_registry(&self) -> PostgresProcessRegistry {
         PostgresProcessRegistry {
             pool: self.pool.clone(),
-            wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
-            clock: Arc::new(lash_core::facade_support::SystemClock),
-            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
         }
     }
 
     pub fn process_registry_with_wake_delivery_config(
         &self,
-        wake_delivery_config: lash_core::WakeDeliveryConfig,
+        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     ) -> PostgresProcessRegistry {
         PostgresProcessRegistry {
             pool: self.pool.clone(),
             wake_delivery_config,
-            clock: Arc::new(lash_core::facade_support::SystemClock),
-            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
         }
     }
 
     pub fn trigger_store(&self) -> PostgresTriggerStore {
         PostgresTriggerStore {
             pool: self.pool.clone(),
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             fixed_incarnation: None,
         }
     }
@@ -1062,7 +1063,7 @@ impl PostgresSessionStoreFactory {
         storage.session_store_factory_with_shared_process_registry()
     }
 
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
         self.clock = clock;
         self
     }
@@ -1090,7 +1091,7 @@ fn warn_postgres_process_registry_not_wired(path: &'static str) {
 
 impl PostgresSessionStore {
     /// Bind this handle to an explicit clock for deterministic embedding and tests.
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
         self.clock = clock;
         self
     }
@@ -1215,7 +1216,7 @@ mod turn_input_settlement;
 pub use effect_replay::{
     PostgresEffectHost, PostgresEffectReplayOptions, PostgresRuntimeEffectController,
 };
-pub use lash_core::store_backend_support::required_constraints::{
+pub use lash_core_execution::store_backend_support::required_constraints::{
     RequiredConstraintFinding, RequiredConstraintReport,
 };
 pub use preflight::PostgresStorePreflight;

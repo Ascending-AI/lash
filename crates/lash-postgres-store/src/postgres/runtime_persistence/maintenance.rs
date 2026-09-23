@@ -3,10 +3,10 @@ use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
 impl StoreMaintenance for PostgresSessionStore {
-    async fn vacuum(&self) -> lash_core::MaintenanceResult<VacuumReport> {
+    async fn vacuum(&self) -> lash_core_execution::MaintenanceResult<VacuumReport> {
         self.vacuum_tombstones()
             .await
-            .map_err(lash_core::MaintenanceFailure::failed_before_any_work)
+            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)
     }
 
     /// Checkpoint-rooted mark/sweep over `lash_blobs`, mirroring the SQLite
@@ -16,12 +16,12 @@ impl StoreMaintenance for PostgresSessionStore {
     /// in a separate, upsert-in-place table (`lash_lashlang_artifacts`).
     /// Those artifact rows are retained service roots, so GC does not touch
     /// this table.
-    async fn gc_unreachable(&self) -> lash_core::MaintenanceResult<GcReport> {
+    async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
         // One transaction: a failure rolls every delete back, so no work
         // survived to report.
         self.gc_unreachable_blobs()
             .await
-            .map_err(lash_core::MaintenanceFailure::failed_before_any_work)
+            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)
     }
 }
 
@@ -108,7 +108,7 @@ impl PostgresSessionStore {
             let manifest: SessionCheckpoint = decode_versioned_msgpack_record(
                 &bytes,
                 "SessionCheckpoint",
-                lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
+                lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
             )?;
             // GC interprets only the root's ref graph, never component bodies.
             // Retain refs even when a newer writer used an unknown component

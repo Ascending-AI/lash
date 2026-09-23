@@ -68,7 +68,8 @@ lash_conformance::tool_batch_parallelism_tests!({
                     Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
                 ],
                 Arc::new(move || {
-                    Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessRegistry>
+                    Arc::new(storage.process_registry())
+                        as Arc<dyn lash_core_execution::ProcessRegistry>
                 }),
             ),
         ],
@@ -80,7 +81,9 @@ lash_conformance::tool_batch_parallelism_tests!({
 /// contributes. `process_lifecycle` is this deployment's honest answer to "can
 /// a cell start a process here", and it differs between the cell-bridge and
 /// process-bridge producers.
-fn rlm_factory(process_lifecycle: bool) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+fn rlm_factory(
+    process_lifecycle: bool,
+) -> Arc<dyn lash_core_execution::facade_support::PluginFactory> {
     Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -276,7 +279,7 @@ type PostgresTurnRunnerFixture = (
     &'static str,
     Arc<dyn EffectHost>,
     Arc<dyn ProcessRegistry>,
-    Arc<dyn lash_core::ProcessWorkSubstrate>,
+    Arc<dyn lash_core_execution::ProcessWorkSubstrate>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
     fn(&'static str) -> std::future::Ready<()>,
 );
@@ -286,9 +289,9 @@ async fn postgres_turn_runner_fixture() -> Option<PostgresTurnRunnerFixture> {
     reset(storage.pool()).await;
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
-        &registry,
-    ))) as Arc<dyn lash_core::ProcessWorkSubstrate>;
+    let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
+        Arc::clone(&registry),
+    )) as Arc<dyn lash_core_execution::ProcessWorkSubstrate>;
     let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
     Some((
         database_lock,
@@ -335,13 +338,13 @@ lash_conformance::migrated_tools_redrive_tests!({
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
-    let orchestration: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
+    let orchestration: Vec<Arc<dyn lash_core_execution::facade_support::PluginFactory>> = vec![
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
         Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
             lash_subagents::CapabilityRegistry::new().with(Arc::new(
                 lash_subagents::StaticCapability::new(
                     "default",
-                    lash_core::facade_support::SessionSpec::inherit(),
+                    lash_core_execution::facade_support::SessionSpec::inherit(),
                 ),
             )),
         ))),

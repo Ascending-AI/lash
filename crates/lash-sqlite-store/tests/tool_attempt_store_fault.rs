@@ -14,13 +14,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use lash_core::runtime::effect::effect_replay_driver::{
+use lash_core_execution::runtime::effect::effect_replay_driver::{
     EffectJournalFaultPoint, StoreReplayAdapter,
 };
-use lash_core::sansio::PendingToolCall;
-use lash_core::testing::TestExecutionContextBuilder;
-use lash_core::tool_dispatch::ToolCallLaunch;
-use lash_core::{
+use lash_core_execution::sansio::PendingToolCall;
+use lash_core_execution::testing::TestExecutionContextBuilder;
+use lash_core_execution::tool_dispatch::ToolCallLaunch;
+use lash_core_execution::{
     ExecutionScope, PreparedToolCall, SessionId, ToolCall, ToolCatalog, ToolContext, ToolContract,
     ToolDefinition, ToolId, ToolManifest, ToolOutcome, ToolProvider,
 };
@@ -40,9 +40,9 @@ const CALL_ID: &str = "fault-probe-call";
 /// the abandoned claim stays in seconds.
 fn short_lease_options() -> SqliteEffectReplayOptions {
     SqliteEffectReplayOptions {
-        lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(Duration::from_millis(
-            2_000,
-        ))
+        lease_timings: lash_core_execution::facade_support::LeaseTimings::from_ttl(
+            Duration::from_millis(2_000),
+        )
         .expect("a 2s ttl satisfies the three-renew-interval minimum"),
         drain_budget: Default::default(),
     }
@@ -93,7 +93,7 @@ impl ToolProvider for ProbeTools {
         (name == TOOL_NAME).then(|| Arc::new(probe_definition().contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core_execution::ToolAttemptOutcome {
         assert_eq!(call.name(), TOOL_NAME);
         self.calls.fetch_add(1, Ordering::SeqCst);
         match self.answer {
@@ -141,7 +141,7 @@ fn attempt_replay_key(attempt: u32) -> String {
 async fn faulted_world(
     answer: ProbeAnswer,
 ) -> (
-    lash_core::tool_dispatch::ToolDispatchContext<'static>,
+    lash_core_execution::tool_dispatch::ToolDispatchContext<'static>,
     SqliteRuntimeEffectController,
     Arc<AtomicUsize>,
 ) {
@@ -164,12 +164,14 @@ async fn faulted_world(
     ((*built.dispatch).clone(), controller, calls)
 }
 
-async fn drive(context: &lash_core::tool_dispatch::ToolDispatchContext<'_>) -> ToolCallLaunch {
+async fn drive(
+    context: &lash_core_execution::tool_dispatch::ToolDispatchContext<'_>,
+) -> ToolCallLaunch {
     let prepared = prepared_call();
     let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
         .build();
-    lash_core::tool_dispatch::coordinate_prepared_tool_call_launch_with_execution_context(
+    lash_core_execution::tool_dispatch::coordinate_prepared_tool_call_launch_with_execution_context(
         context,
         prepared,
         None,
@@ -186,7 +188,7 @@ fn assert_store_abort(launch: &ToolCallLaunch) {
     };
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::SqliteEffectReplayStore,
+        lash_core_execution::RuntimeErrorCode::SqliteEffectReplayStore,
         "the abort must carry the typed store error the journal returned: {error:?}"
     );
 }
@@ -286,7 +288,8 @@ async fn tool_attempt_renew_store_error_aborts_turn() {
     let ToolCallLaunch::Done(outcome) = launch else {
         panic!("a recorded `Failed` terminal replays as a tool result: {launch:?}");
     };
-    let lash_core::ToolCallOutcome::Failure(failure) = &outcome.record.output.outcome else {
+    let lash_core_execution::ToolCallOutcome::Failure(failure) = &outcome.record.output.outcome
+    else {
         panic!("the journaled failure replays as a failure record: {outcome:?}");
     };
     assert_eq!(failure.code, "tool_attempt_failed");

@@ -8,7 +8,7 @@
 //! in one process share that notifier because the registry keys on the
 //! canonical path rather than the connection.
 //!
-//! [`EffectReplayRowStore`]: lash_core::facade_support::effect_replay_driver::EffectReplayRowStore
+//! [`EffectReplayRowStore`]: lash_core_execution::facade_support::effect_replay_driver::EffectReplayRowStore
 
 use std::collections::HashMap;
 use std::path::Path;

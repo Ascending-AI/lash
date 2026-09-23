@@ -57,7 +57,7 @@ use lash_conformance::{
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
-use lash_core::{
+use lash_core_execution::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, ExecutionScope,
     ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, Resolution, ResolveOutcome,
     RuntimeEffectController, RuntimePersistence, SessionExecutionLeaseStore, SessionStoreFactory,
@@ -266,7 +266,7 @@ lash_conformance::runtime_persistence_reopenable_tests!({
     };
     let storage = Arc::new(storage);
     let database_url = database_url().expect("configured Postgres database URL");
-    let clock = Arc::new(lash_core::testing::TestClock::new(10_000));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
     let lease_clock = Arc::clone(&clock);
     (
         database_lock,
@@ -283,20 +283,24 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                 let reopen_storage = PostgresStorage::connect(&database_url)
                     .await
                     .expect("open independent Postgres conformance pool");
-                let request = lash_core::SessionStoreCreateRequest {
+                let request = lash_core_execution::SessionStoreCreateRequest {
                     pending_observer_intents: Vec::new(),
                     session_id,
-                    relation: lash_core::SessionRelation::Root,
-                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                    relation: lash_core_execution::SessionRelation::Root,
+                    policy: lash_core_execution::SessionPolicy::new(
+                        lash_core_execution::TurnBudget::Unbounded,
+                    ),
                 };
                 let open_factory = open_storage
                     .session_store_factory()
-                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-                    .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core::Clock>);
+                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
+                    .with_lease_clock_for_testing(
+                        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>
+                    );
                 let reopen_factory = reopen_storage
                     .session_store_factory()
-                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-                    .with_lease_clock_for_testing(clock as Arc<dyn lash_core::Clock>);
+                    .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
+                    .with_lease_clock_for_testing(clock as Arc<dyn lash_core_execution::Clock>);
                 let open = open_factory
                     .create_store(&request)
                     .await
@@ -328,7 +332,8 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
     reset(storage.pool()).await;
     let session_id = "postgres-concurrent-renewal-rotation";
     let store = Arc::new(storage.session_store(session_id));
-    let owner = lash_core::LeaseOwnerIdentity::opaque("renewal-owner", "renewal-incarnation");
+    let owner =
+        lash_core_execution::LeaseOwnerIdentity::opaque("renewal-owner", "renewal-incarnation");
     let predecessor = store
         .try_claim_session_execution_lease(
             &SessionId::from(session_id),
@@ -361,7 +366,9 @@ async fn postgres_claim_and_renewal_share_session_advisory_lock_ordering() {
                 &SessionId::from(session_id),
                 &claim_owner,
                 &claim_executor_id,
-                &lash_core::LeaseClaimNonce::for_testing("postgres-concurrent-renewal-successor"),
+                &lash_core_execution::LeaseClaimNonce::for_testing(
+                    "postgres-concurrent-renewal-successor",
+                ),
                 120_000,
             )
             .await
@@ -476,7 +483,7 @@ lash_conformance::turn_crash_matrix_tests!({
                     &storage,
                     scope.clone(),
                     PostgresEffectReplayOptions {
-                        lease_timings: lash_core::facade_support::LeaseTimings::new(
+                        lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
                             std::time::Duration::from_secs(60),
                             std::time::Duration::from_millis(50),
                         )
@@ -596,7 +603,7 @@ lash_conformance::append_head_switch_tests!({
     (
         _database_lock,
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        move |leaf_node_id: lash_core::NodeId| async move {
+        move |leaf_node_id: lash_core_execution::NodeId| async move {
             sqlx::query(
                 "UPDATE lash_sessions
                  SET leaf_node_id = $1, head_revision = head_revision + 1
@@ -620,7 +627,7 @@ lash_conformance::append_tombstone_tests!({
     (
         _database_lock,
         Arc::new(storage.session_store("root")) as Arc<dyn RuntimePersistence>,
-        move |node_id: lash_core::NodeId| async move {
+        move |node_id: lash_core_execution::NodeId| async move {
             sqlx::query("UPDATE lash_graph_nodes SET tombstoned = TRUE WHERE node_id = $1")
                 .bind(node_id.into_inner())
                 .execute(&pool)
@@ -796,7 +803,7 @@ lash_conformance::session_store_factory_tests!({
         sync_await(async move {
             reset(storage.pool()).await;
             Arc::new(storage.session_store_factory())
-                as Arc<dyn lash_core::store::ConformanceSessionStoreFactory>
+                as Arc<dyn lash_core_execution::store::ConformanceSessionStoreFactory>
         })
     };
     (_database_lock, "postgres", None, make)
@@ -855,44 +862,46 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let factory = storage.session_store_factory();
     let session_id = "wake-source-lock-target";
     let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create source-lock target");
-    let wake = lash_core::ProcessWakeDelivery {
-        version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+    let wake = lash_core_execution::ProcessWakeDelivery {
+        version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake:source-lock".to_string(),
         target_session_id: SessionId::from(session_id.to_string()),
         process_id: ProcessId::from("wake-source-lock-process"),
-        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "producer.wake".to_string(),
-        event_invocation: lash_core::RuntimeInvocation::effect(
-            lash_core::EffectAddress::new(
-                lash_core::ExecutionScope::process("wake-source-lock-process"),
+        event_invocation: lash_core_execution::RuntimeInvocation::effect(
+            lash_core_execution::EffectAddress::new(
+                lash_core_execution::ExecutionScope::process("wake-source-lock-process"),
                 "wake-source-lock",
             )
             .expect("valid wake effect address"),
-            lash_core::RuntimeAttribution::for_session(session_id),
+            lash_core_execution::RuntimeAttribution::for_session(session_id),
             "wake-source-lock",
         ),
         process_caused_by: None,
-        authority: lash_core::QueuedWorkAuthority::default(),
+        authority: lash_core_execution::QueuedWorkAuthority::default(),
         input: "wake".to_string(),
-        created_at_ms: lash_core::ClockWallTime::timestamp_ms(
-            &lash_core::facade_support::SystemClock,
+        created_at_ms: lash_core_execution::ClockWallTime::timestamp_ms(
+            &lash_core_execution::facade_support::SystemClock,
         ),
     };
-    let draft = lash_core::runtime::process_wake_batch_draft(wake.clone());
+    let draft = lash_core_execution::runtime::process_wake_batch_draft(wake.clone());
     let first = store
         .enqueue_queued_work(draft.clone())
         .await
         .expect("enqueue original wake");
-    let owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock", "test");
+    let owner = lash_core_execution::LeaseOwnerIdentity::opaque("wake-source-lock", "test");
     let lease = match store
         .try_claim_session_execution_lease(
             &SessionId::from(session_id),
@@ -903,8 +912,10 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .await
         .expect("claim target session")
     {
-        lash_core::SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => acquisition.lease,
-        lash_core::SessionExecutionLeaseClaimOutcome::Busy { .. } => {
+        lash_core_execution::SessionExecutionLeaseClaimOutcome::Acquired(acquisition) => {
+            acquisition.lease
+        }
+        lash_core_execution::SessionExecutionLeaseClaimOutcome::Busy { .. } => {
             panic!("fresh source-lock target lease must be available")
         }
     };
@@ -913,9 +924,9 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             &SessionId::from(session_id),
             &lease.fence(),
             &owner,
-            lash_core::runtime::QueuedWorkClaimBoundary::Idle,
+            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&first.batch_id),
-            lash_core::testing::queued_work_claim_policy(1),
+            lash_core_execution::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim source-lock wake")
@@ -974,15 +985,15 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     .expect("take completion source-only advisory lock");
     let completion_store = Arc::clone(&store);
     let completion = tokio::spawn(async move {
-        let state = lash_core::RuntimeSessionState {
+        let state = lash_core_execution::RuntimeSessionState {
             session_id: SessionId::from(session_id.to_string()),
-            ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
-            ))
+            ..lash_core_execution::RuntimeSessionState::new(
+                lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+            )
         };
         completion_store
             .commit_runtime_state(
-                lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
                     .completing_queue_claim(claim.completion())
                     .releasing_session_execution_lease(lease.completion()),
             )
@@ -1016,7 +1027,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect_err("a no-live-row wake at the receiver floor is a typed rewind");
     assert!(matches!(
         late_redelivery,
-        lash_core::StoreError::ProcessWakeSequenceRewound {
+        lash_core_execution::StoreError::ProcessWakeSequenceRewound {
             sequence: 1,
             allocation_floor: 1,
             ..
@@ -1045,12 +1056,13 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let mut timeout_wake = wake;
     timeout_wake.wake_id = "wake:source-lock-timeout".to_string();
     timeout_wake.sequence = 2;
-    timeout_wake.event_invocation.subject = lash_core::runtime::RuntimeSubject::ProcessEvent {
-        process_id: timeout_wake.process_id.clone(),
-        sequence: timeout_wake.sequence,
-        event_type: timeout_wake.event_type.clone(),
-    };
-    let timeout_draft = lash_core::runtime::process_wake_batch_draft(timeout_wake);
+    timeout_wake.event_invocation.subject =
+        lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
+            process_id: timeout_wake.process_id.clone(),
+            sequence: timeout_wake.sequence,
+            event_type: timeout_wake.event_type.clone(),
+        };
+    let timeout_draft = lash_core_execution::runtime::process_wake_batch_draft(timeout_wake);
     let timeout_retry_draft = timeout_draft.clone();
     let timeout_source_key = timeout_draft
         .source_key
@@ -1079,7 +1091,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .await
         .expect_err("source lock wait must be bounded");
     assert!(
-        matches!(timeout_error, lash_core::StoreError::Contended),
+        matches!(timeout_error, lash_core_execution::StoreError::Contended),
         "source lock timeout must surface as retryable contention: {timeout_error}"
     );
     timeout_blocker
@@ -1090,7 +1102,8 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .enqueue_queued_work(timeout_retry_draft)
         .await
         .expect("enqueue second sequence after source lock release");
-    let second_owner = lash_core::LeaseOwnerIdentity::opaque("wake-source-lock-second", "test");
+    let second_owner =
+        lash_core_execution::LeaseOwnerIdentity::opaque("wake-source-lock-second", "test");
     let second_lease = store
         .try_claim_session_execution_lease(
             &SessionId::from(session_id),
@@ -1107,20 +1120,20 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             &SessionId::from(session_id),
             &second_lease.fence(),
             &second_owner,
-            lash_core::runtime::QueuedWorkClaimBoundary::Idle,
+            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
             std::slice::from_ref(&second.batch_id),
-            lash_core::testing::queued_work_claim_policy(1),
+            lash_core_execution::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim second wake sequence")
         .expect("second wake sequence claim");
-    let state = lash_core::store::load_persisted_session_state(store.as_ref())
+    let state = lash_core_execution::store::load_persisted_session_state(store.as_ref())
         .await
         .expect("load target state before second wake settlement")
         .expect("persisted target state");
     store
         .commit_runtime_state(
-            lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
                 .completing_queue_claim(second_claim.completion())
                 .releasing_session_execution_lease(second_lease.completion()),
         )
@@ -1218,7 +1231,7 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
     .expect("insert unknown owner kind");
 
     let store = storage.session_store("unknown-attachment-owner");
-    let result = lash_core::AttachmentManifest::list_uncommitted(&store, 0).await;
+    let result = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0).await;
 
     sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = 'unknown-owner'")
         .execute(storage.pool())
@@ -1283,7 +1296,7 @@ async fn postgres_bare_process_attachment_owner_refuses_with_canonical_typed_err
     .expect("insert bare process owner");
 
     let store = storage.session_store("bare-process-attachment-owner");
-    let result = lash_core::AttachmentManifest::list_uncommitted(&store, 0).await;
+    let result = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0).await;
 
     sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = 'bare-process-owner'")
         .execute(storage.pool())
@@ -1340,30 +1353,32 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     const SESSION_ID: &str = "postgres-injected-commit-clock";
     const TURN_ID: &str = "postgres-injected-clock-turn";
     const NOW_MS: u64 = 1_234_567;
-    let clock = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(NOW_MS));
     let factory = storage
         .session_store_factory_with_shared_process_registry()
         .with_clock(clock);
     let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
-            relation: lash_core::SessionRelation::default(),
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::default(),
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create clocked Postgres session store");
-    let clock_intent = lash_core::AttachmentIntent {
-        attachment_id: lash_core::AttachmentId::parse("postgres-clock-attachment")
+    let clock_intent = lash_core_execution::AttachmentIntent {
+        attachment_id: lash_core_execution::AttachmentId::parse("postgres-clock-attachment")
             .expect("valid attachment id"),
         session_id: SessionId::from(SESSION_ID.to_string()),
         canonical_uri: "lash-attachment://postgres-clock-attachment".to_string(),
         intent_at_epoch_ms: NOW_MS.saturating_sub(1),
-        owner: Some(lash_core::AttachmentOwner::Turn {
+        owner: Some(lash_core_execution::AttachmentOwner::Turn {
             id: TURN_ID.to_string(),
         }),
     };
-    let lash_core::AttachmentWriteFence::Granted(clock_permit) = store
+    let lash_core_execution::AttachmentWriteFence::Granted(clock_permit) = store
         .begin_attachment_write(clock_intent.clone())
         .await
         .expect("begin turn-owned write")
@@ -1374,7 +1389,8 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .complete_attachment_write(&clock_intent, clock_permit)
         .await
         .expect("stamp turn-owned upload");
-    let owner = lash_core::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
+    let owner =
+        lash_core_execution::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
     let lease = store
         .try_claim_session_execution_lease(
             &SessionId::from(SESSION_ID),
@@ -1386,15 +1402,15 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .expect("claim clock test lease")
         .acquired()
         .expect("clock test lease acquired");
-    let state = lash_core::RuntimeSessionState {
+    let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from(SESSION_ID.to_string()),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
-    let operation = lash_core::OperationId::turn(SESSION_ID, TURN_ID, "final");
+    let operation = lash_core_execution::OperationId::turn(SESSION_ID, TURN_ID, "final");
     let operation_key = operation.storage_key().expect("canonical operation key");
-    let (commit, _) = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+    let (commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_operation(operation)
         .expect("stamp clock test commit");
     let commit = commit.releasing_session_execution_lease(lease.completion());
@@ -1765,26 +1781,28 @@ async fn postgres_effect_host_satisfies_cold_process_await_event_conformance_whe
                 .effect_host(),
         );
         let terminal = if identity == "turn_cancel_gate" {
-            let address = lash_core::runtime::TurnAddress::new(
+            let address = lash_core_execution::runtime::TurnAddress::new(
                 format!("cold-process-{nonce}-session"),
                 format!("cold-process-{nonce}-turn"),
             );
             let store_factory: Arc<dyn SessionStoreFactory> =
                 Arc::new(storage.session_store_factory());
             store_factory
-                .create_store(&lash_core::SessionStoreCreateRequest {
+                .create_store(&lash_core_execution::SessionStoreCreateRequest {
                     pending_observer_intents: Vec::new(),
                     session_id: address.session_id.clone(),
-                    relation: lash_core::SessionRelation::Root,
-                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                    relation: lash_core_execution::SessionRelation::Root,
+                    policy: lash_core_execution::SessionPolicy::new(
+                        lash_core_execution::TurnBudget::Unbounded,
+                    ),
                 })
                 .await
                 .expect("create cold-process cancellation session");
-            let receipt = lash_core::runtime::TurnWorkDriver::for_catalog(
+            let receipt = lash_core_execution::runtime::TurnWorkDriver::for_catalog(
                 Arc::clone(&resolver) as Arc<dyn EffectHost>,
                 store_factory,
             )
-            .request_cancel(lash_core::runtime::TurnCancelRequest::new(
+            .request_cancel(lash_core_execution::runtime::TurnCancelRequest::new(
                 address,
                 format!("cold-process-{nonce}-cancel"),
                 None,
@@ -1793,7 +1811,7 @@ async fn postgres_effect_host_satisfies_cold_process_await_event_conformance_whe
             .expect("request cancellation through a successor owner");
             assert!(matches!(
                 receipt.outcome,
-                lash_core::runtime::TurnCancelOutcome::Requested(_)
+                lash_core_execution::runtime::TurnCancelOutcome::Requested(_)
             ));
             resolver
                 .peek_await_event(&key)
@@ -2020,8 +2038,9 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                         &storage,
                         durable_turn_scope("session", "turn"),
                         PostgresEffectReplayOptions {
-                            lease_timings: lash_core::facade_support::LeaseTimings::from_ttl(ttl)
-                                .expect("conformance lease timings"),
+                            lease_timings:
+                                lash_core_execution::facade_support::LeaseTimings::from_ttl(ttl)
+                                    .expect("conformance lease timings"),
                             drain_budget: Default::default(),
                         },
                         clock,
@@ -2091,9 +2110,9 @@ lash_conformance::process_registry_reopenable_tests!({
         sync_await(async move {
             reset(storage.pool()).await;
             let open = Arc::new(storage.process_registry())
-                as Arc<dyn lash_core::ConformanceProcessRegistry>;
+                as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
             let reopen = Arc::new(storage.process_registry())
-                as Arc<dyn lash_core::ConformanceProcessRegistry>;
+                as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
             ReopenableProcessRegistry { open, reopen }
         })
     })
@@ -2120,7 +2139,7 @@ lash_conformance::process_projection_repair_tests!({
     (
         database_lock,
         registry,
-        move |stale: lash_core::ProcessRecord| async move {
+        move |stale: lash_core_execution::ProcessRecord| async move {
             let changed =
                 sqlx::query("UPDATE lash_processes SET record_json = $2 WHERE process_id = $1")
                     .bind(stale.id.as_str())
@@ -2150,7 +2169,7 @@ lash_conformance::process_trigger_retention_tests!({
                 registry: Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>,
                 triggers: Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>,
                 sessions: Arc::new(storage.session_store_factory_with_shared_process_registry())
-                    as Arc<dyn lash_core::SessionStoreFactory>,
+                    as Arc<dyn lash_core_execution::SessionStoreFactory>,
             }
         }
     })
@@ -2224,8 +2243,8 @@ lash_conformance::process_continuation_store_tests!({
     };
     reset(storage.pool()).await;
     let process_storage = Arc::new(storage.process_registry());
-    let registry = Arc::clone(&process_storage) as Arc<dyn lash_core::ProcessRegistry>;
-    let store = process_storage as Arc<dyn lash_core::ProcessContinuationStore>;
+    let registry = Arc::clone(&process_storage) as Arc<dyn lash_core_execution::ProcessRegistry>;
+    let store = process_storage as Arc<dyn lash_core_execution::ProcessContinuationStore>;
     (database_lock, registry, store)
 });
 
@@ -2281,11 +2300,13 @@ lash_conformance::session_read_view_tests!({
         return;
     };
     reset(storage.pool()).await;
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
+        1_800_000_000_000,
+    ));
     let factory = Arc::new(
         storage
             .session_store_factory()
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
     );
     (_database_lock, factory, move || clock.advance(1))
 });
