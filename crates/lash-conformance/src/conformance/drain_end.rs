@@ -5,7 +5,9 @@
 //! parent-end ledger row in the process registry follows it. A durable
 //! `Failed` settlement is an end: it is terminal, so the drain that settled it
 //! ends there (FIG-3559), and a host's abandonment of a pending run is such a
-//! settlement (FIG-3560). What is *not* an end: a fresh empty poll, an
+//! settlement (FIG-3560). An end the epilogue withheld after a settlement is
+//! owed, and the parent-end recovery pass writes it once the owed closing
+//! work settles (FIG-3563). What is *not* an end: a fresh empty poll, an
 //! intermediate physical-turn commit, a run whose failure retains ownership,
 //! an interrupted run, or the worker dying — a retry under the same
 //! `drain_id` is the drain that ends. These laws drive real drains through
@@ -1335,6 +1337,181 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
     );
 }
 
+/// **L10 — an owed end is written when the owed work settles.** A drain's
+/// run fails terminally while a `closing` group of its scope owes work leased
+/// to another host. The settlement is the drain's end, but the epilogue that
+/// follows it withholds the receipt while that obligation stands — and a
+/// durably `Failed` run is never retried, so no drain under the same id asks
+/// again. Once the other host's work settles, the parent-end recovery pass
+/// finds the drain's `Cancel` child naming an owner with no end, reads the
+/// drain's run settled, and runs the same epilogue: the receipt and the
+/// ledger row land and the child is swept. No input is enqueued and the
+/// drain id is never replayed.
+///
+/// As in L7 the group is opened on the second host, so on the SQL tiers its
+/// loser's lease is foreign and the epilogue declines at once. On the
+/// in-memory tier both hosts share one controller: the obligation reads as
+/// this host's running work, the epilogue parks on it, and the release ends
+/// the drain there — the owed end never arises, and the law holds the same
+/// end state.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
+    prefix: &str,
+    world: DrainEndWorld,
+) {
+    let Some(group_host) = world.group_host.clone() else {
+        // No group seam on this tier's embedding — see the module doc.
+        return;
+    };
+    let drain_id = format!("{prefix}-l10-drain");
+    let cancel_id = format!("{prefix}-l10-cancel");
+    register_drain_child(&world.registry, &drain_id, &cancel_id, OnParentEnd::Cancel).await;
+    bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
+    seed_turn_input(
+        &world.store,
+        "a drain that fails while another host owes work",
+    )
+    .await;
+
+    // A group under the drain's scope, opened and closed on the second host
+    // while its loser still runs there.
+    let loser_release = CancellationToken::new();
+    let loser_entered = Arc::new(AtomicUsize::new(0));
+    let scoped = group_host
+        .scoped(admit(drain_scope(&drain_id)))
+        .expect("scope the closing group's opener");
+    let group_key = super::effect_group_drain::group_key(prefix, "l10");
+    let mut handle = super::effect_group_drain::open(
+        &scoped,
+        &group_key,
+        2,
+        crate::LoserPolicy::RunToCompletion,
+        vec![
+            super::effect_group_drain::settles(0),
+            gated_executor(&loser_entered, loser_release.clone()),
+        ],
+    )
+    .await;
+    let _winner = super::effect_group_drain::next(&scoped, &mut handle).await;
+    super::effect_group_drain::close(&scoped, handle, crate::LoserPolicy::RunToCompletion)
+        .await
+        .expect("the group records closing");
+    super::effect_group_drain::until(|| loser_entered.load(Ordering::SeqCst) == 1).await;
+
+    // The terminal error is a turn commit over a one-node budget, as in L8.
+    let epilogue_entered = Arc::new(tokio::sync::Notify::new());
+    let mut runtime = drain_runtime_with_budget(
+        &world,
+        Arc::clone(&world.registry),
+        fixed_text_provider("a turn too large to commit"),
+        Vec::new(),
+        crate::testing::runtime_lease_owner(),
+        crate::CommitBudget::bounded(1024 * 1024, 1),
+    )
+    .await;
+    runtime.set_turn_phase_probe(Arc::new(EpilogueSignal {
+        entered: Arc::clone(&epilogue_entered),
+    }));
+    let drain = crate::task::spawn({
+        let effect_host = Arc::clone(&world.effect_host);
+        let drain_id = drain_id.clone();
+        async move { drive_drain(&mut runtime, &effect_host, &drain_id).await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        epilogue_entered.notified(),
+    )
+    .await
+    .expect("the durably Failed drain reaches its end epilogue");
+
+    // The withheld shape, as L7 reads it: declined (SQL) or parked
+    // (in-memory). Either way the run is settled and the drain has not ended.
+    let mut drain = Some(drain);
+    let mut declined = false;
+    for _ in 0..200 {
+        if drain.as_ref().expect("the drain task").is_finished() {
+            declined = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    let failed = |result: Result<QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>| {
+        let error = result.expect_err("the drain's run failed");
+        assert!(
+            error.is_terminal(),
+            "the drain failed terminally, not retryably: {error:?}"
+        );
+    };
+    if declined {
+        failed(
+            drain
+                .take()
+                .expect("the drain task")
+                .await
+                .expect("the withheld drain task joins"),
+        );
+    }
+    assert!(
+        world
+            .store
+            .pending_queued_run(&SessionId::from(SESSION_ID))
+            .await
+            .expect("read the pending queued run")
+            .is_none(),
+        "the terminal error settled the run: nothing is left to retry"
+    );
+    assert!(
+        !drain_ended(&world.store, &drain_id).await,
+        "the foreign obligation withholds the settled drain's end"
+    );
+    assert!(
+        drain_ledger_row(&world.registry, &drain_id).await.is_none(),
+        "a withheld drain writes no ledger row"
+    );
+
+    // The other host's work settles. Nothing touches the drain.
+    loser_release.cancel();
+    let closing = group_host
+        .effect_group_closing()
+        .expect("the group host answers the closing seam");
+    until_group_settled(&closing, &group_key).await;
+    if let Some(drain) = drain.take() {
+        failed(drain.await.expect("the released drain task joins"));
+    }
+
+    // The recovery pass writes the owed end. The worker stays alive while it
+    // does: the write runs on its own task, which the worker's shutdown ends.
+    let sweep = drain_sweep(&world);
+    let _ = sweep
+        .drive_pending_processes()
+        .await
+        .expect("the parent-end pass runs");
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while !drain_ended(&world.store, &drain_id).await {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the settled drain's owed end is written once its closing work settles");
+    assert!(
+        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        "the owed end writes the ledger row"
+    );
+
+    let _ = sweep
+        .drive_pending_processes()
+        .await
+        .expect("the parent-end sweep runs");
+    assert_eq!(
+        cancel_origin(&child(&world.registry, &cancel_id).await),
+        Some(crate::CancelOrigin::ParentEnded),
+        "the ended drain's Cancel child is swept"
+    );
+}
+
 /// The probe a law parks on: signals that the drain reached its epilogue, so
 /// "still running" below means "parked on the closing group's obligation",
 /// not "still running the turn".
@@ -1443,6 +1620,10 @@ macro_rules! drain_end_tests {
             (
                 an_abandoned_drain_settles_its_closing_group_and_ends,
                 "drain-end-abandoned"
+            ),
+            (
+                a_failed_drain_ends_once_its_foreign_closing_work_settles,
+                "drain-end-owed-after-failed"
             ),
         ]);
     };

@@ -264,11 +264,9 @@ pub struct DurableProcessWorker {
     config: Arc<DurableProcessWorkerConfig>,
     execution_scheduler: Arc<ProcessExecutionScheduler>,
     lifetime: Option<Arc<ProcessWorkerLifetime>>,
-    /// Where the last parent-end recovery pass stopped reading candidates.
-    ///
-    /// Shared by every clone of one worker, so the passes a single worker runs
-    /// advance one cursor instead of each restarting at the lowest scope id.
-    parent_end_cursor: Arc<tokio::sync::Mutex<Option<String>>>,
+    /// The parent-end recovery pass's state, shared by every clone of one
+    /// worker.
+    parent_end: Arc<parent_end::ParentEndRecovery>,
 }
 
 impl Clone for DurableProcessWorker {
@@ -277,7 +275,7 @@ impl Clone for DurableProcessWorker {
             config: Arc::clone(&self.config),
             execution_scheduler: Arc::clone(&self.execution_scheduler),
             lifetime: self.lifetime.clone(),
-            parent_end_cursor: Arc::clone(&self.parent_end_cursor),
+            parent_end: Arc::clone(&self.parent_end),
         }
     }
 }
@@ -425,7 +423,7 @@ impl DurableProcessWorker {
             config: Arc::new(config),
             execution_scheduler,
             lifetime: Some(lifetime),
-            parent_end_cursor: Arc::default(),
+            parent_end: Arc::default(),
         })
     }
 
@@ -444,7 +442,7 @@ impl DurableProcessWorker {
             config,
             execution_scheduler,
             lifetime: Some(lifetime),
-            parent_end_cursor: Arc::default(),
+            parent_end: Arc::default(),
         })
     }
 
@@ -453,7 +451,7 @@ impl DurableProcessWorker {
             config: Arc::clone(&self.config),
             execution_scheduler: Arc::clone(&self.execution_scheduler),
             lifetime: None,
-            parent_end_cursor: Arc::clone(&self.parent_end_cursor),
+            parent_end: Arc::clone(&self.parent_end),
         }
     }
 

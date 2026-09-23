@@ -1,6 +1,36 @@
 use super::*;
 use crate::{CancelOrigin, ParentEndPlan, ParentScope, ProcessId};
 
+/// The parent-end recovery pass's state, shared by every clone of one worker.
+#[derive(Default)]
+pub(super) struct ParentEndRecovery {
+    /// Where the last pass stopped reading candidates, so the passes a single
+    /// worker runs advance one cursor instead of each restarting at the lowest
+    /// scope id.
+    cursor: tokio::sync::Mutex<Option<String>>,
+    /// The drains whose owed end a detached task is writing right now, by
+    /// parent storage id: a later pass that finds the same candidate still
+    /// unended leaves it to that task rather than stacking a second one on
+    /// the same session lane.
+    owed_drain_ends: std::sync::Mutex<BTreeSet<String>>,
+}
+
+/// Holds one drain's slot in [`ParentEndRecovery::owed_drain_ends`] for the
+/// task writing its end, and frees it however the task ends.
+struct OwedDrainEndSlot {
+    recovery: Arc<ParentEndRecovery>,
+    key: String,
+}
+
+impl Drop for OwedDrainEndSlot {
+    fn drop(&mut self) {
+        self.recovery
+            .owed_drain_ends
+            .lock_recover()
+            .remove(&self.key);
+    }
+}
+
 /// Page size for both the ledger scan and the per-parent children scan.
 #[expect(clippy::expect_used, reason = "256 is a non-zero literal")]
 fn page_bound() -> std::num::NonZeroUsize {
@@ -25,7 +55,10 @@ impl DurableProcessWorker {
     /// exactly the children a sweep would have cancelled — and a drain
     /// interrupted before its epilogue is ended by its retry under the same
     /// `drain_id` — so an unconfirmed candidate is left alone for the redrive
-    /// and reconsidered next pass.
+    /// and reconsidered next pass. The one unconfirmed candidate this pass
+    /// acts on is a drain whose run already settled: it is ended, its end is
+    /// owed, and [`write_owed_drain_end`](Self::write_owed_drain_end) writes
+    /// it.
     ///
     /// The pass is bounded and idempotent: `record_parent_end` preserves the
     /// first row, and a scope that already has one is never reported.
@@ -40,7 +73,7 @@ impl DurableProcessWorker {
     /// a scope that becomes resolvable later is reconsidered on a later lap.
     pub(super) async fn redrive_missing_opener_parent_end_rows(&self) -> Result<(), PluginError> {
         let bound = page_bound();
-        let mut cursor = self.parent_end_cursor.lock().await;
+        let mut cursor = self.parent_end.cursor.lock().await;
         let candidates = self
             .config
             .process_registry()
@@ -81,11 +114,12 @@ impl DurableProcessWorker {
                         unopenable_sessions += 1;
                         continue;
                     };
-                    (
-                        session_id,
-                        format!("queue_drain:{drain_id}"),
-                        store.drain_end_exists(drain_id).await,
-                    )
+                    let confirmed = store.drain_end_exists(drain_id).await;
+                    if matches!(confirmed, Ok(false)) {
+                        self.write_owed_drain_end(&parent, session_id, drain_id, store.as_ref())
+                            .await;
+                    }
+                    (session_id, format!("queue_drain:{drain_id}"), confirmed)
                 }
                 crate::EffectOpener::Process { .. } => continue,
             };
@@ -96,7 +130,9 @@ impl DurableProcessWorker {
                         .record_parent_end(&parent)
                         .await?;
                 }
-                // Interrupted, not ended: leave it for the redrive.
+                // Interrupted, not ended: leave it for the redrive. A drain
+                // whose run already settled is ended but owes its end, which
+                // `write_owed_drain_end` has just set writing.
                 Ok(false) => {}
                 // A tier that writes the row inside the same durable execution
                 // as the end evidence has no window to re-derive, and reports
@@ -123,6 +159,139 @@ impl DurableProcessWorker {
             );
         }
         Ok(())
+    }
+
+    /// Write the end a settled drain still owes (FIG-3563).
+    ///
+    /// Every terminal settlement of a drain's run is its end, but the
+    /// epilogue that follows the settlement withholds the end receipt while a
+    /// closing group under the drain's scope owes work leased to another host
+    /// — and a settled run is never retried, so no drain under that id asks
+    /// again. This pass is what asks. A candidate with no receipt whose run
+    /// reads terminally settled gets a runtime over its session, and
+    /// [`LashRuntime::end_settled_queue_drain`] runs the one drain-end
+    /// epilogue under the session lane: the closing groups resume, and the
+    /// receipt and ledger row land once the owed work has settled. Until
+    /// then the epilogue withholds again and the next pass retries — the
+    /// candidate stays listed, since it still has no ledger row.
+    ///
+    /// A drain whose run is still pending is interrupted, not ended: its own
+    /// retry ends it, and this pass leaves it alone.
+    ///
+    /// The write runs on a detached task. The epilogue waits out an
+    /// obligation this process is itself running — unbounded for a
+    /// `RunToCompletion` child — and the pass that found the candidate must
+    /// not stall process intake behind it. One task per drain at a time.
+    async fn write_owed_drain_end(
+        &self,
+        parent: &ParentScope,
+        session_id: &crate::SessionId,
+        drain_id: &str,
+        store: &dyn crate::store::RuntimePersistence,
+    ) {
+        let scope = crate::ExecutionScope::queue_drain(session_id.clone(), drain_id);
+        match store.queued_run(&scope).await {
+            Ok(Some(run)) if run.terminal.is_some() => {}
+            Ok(_) => return,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    drain_id = %drain_id,
+                    error = %error,
+                    "queue drain run read failed; an owed drain end waits for the next pass",
+                );
+                return;
+            }
+        }
+        let Some(key) = parent.storage_id() else {
+            return;
+        };
+        if !self
+            .parent_end
+            .owed_drain_ends
+            .lock_recover()
+            .insert(key.clone())
+        {
+            return;
+        }
+        let slot = OwedDrainEndSlot {
+            recovery: Arc::clone(&self.parent_end),
+            key,
+        };
+        let worker = self.detached_for_task();
+        let session_id = session_id.clone();
+        let drain_id = drain_id.to_string();
+        crate::task::spawn(async move {
+            let _slot = slot;
+            let shutdown = worker.execution_scheduler.shutdown.clone();
+            tokio::select! {
+                () = shutdown.cancelled() => {}
+                () = worker.drive_owed_drain_end(&session_id, &drain_id) => {}
+            }
+        });
+    }
+
+    async fn drive_owed_drain_end(&self, session_id: &crate::SessionId, drain_id: &str) {
+        let Some(store) = self.open_session_store_for_read(session_id).await else {
+            return;
+        };
+        let mut runtime = match self.runtime_for_session_store(session_id, store).await {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    drain_id = %drain_id,
+                    error = %error,
+                    "could not open the session that owes a drain end; the next pass retries",
+                );
+                return;
+            }
+        };
+        if let Err(error) = Box::pin(runtime.end_settled_queue_drain(drain_id)).await {
+            tracing::debug!(
+                session_id = %session_id,
+                drain_id = %drain_id,
+                error = %error,
+                "owed drain end not written this pass",
+            );
+        }
+    }
+
+    /// A runtime over an existing session's own store.
+    ///
+    /// A session with a committed head restores its recorded state and
+    /// policy; the worker's session policy only stands in for a session that
+    /// never committed one — a drain whose first run failed before its commit
+    /// — the way it does for every session this worker opens. Its provider is
+    /// cleared: the worker never pins a provider on a session it does not own,
+    /// so a recorded pin is kept and an unrecorded one stays unrecorded.
+    async fn runtime_for_session_store(
+        &self,
+        session_id: &crate::SessionId,
+        store: std::sync::Arc<dyn crate::store::RuntimePersistence>,
+    ) -> Result<LashRuntime, crate::SessionError> {
+        let mut policy = self.config.session_policy.clone();
+        policy.session_id = Some(session_id.clone());
+        policy.provider_id = String::new();
+        let builder = EmbeddedRuntimeBuilder::new(
+            self.config.runtime_host.durability.commit_budget,
+            self.config
+                .runtime_host
+                .durability
+                .queued_work_batching
+                .clone(),
+            self.config.lease_owner.clone(),
+        )
+        .with_session_id(session_id.to_string())
+        .with_policy(policy)
+        .with_plugin_host(self.config.plugin_host.as_ref().clone())
+        .with_runtime_host(self.config.runtime_host.clone())
+        .with_session_store_factory(Arc::clone(&self.config.session_store_factory))
+        .with_trigger_store(Arc::clone(&self.config.trigger_store))
+        .with_process_work(self.process_wiring())
+        .with_store(store)
+        .with_queued_work(Arc::clone(&self.config.queued_work));
+        Box::pin(builder.build()).await
     }
 
     /// Never creates or admits a session: a factory without the

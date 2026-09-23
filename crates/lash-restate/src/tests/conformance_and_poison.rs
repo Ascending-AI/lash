@@ -1936,6 +1936,13 @@ impl lash_core::QueuedWorkStore for CommitRetryStore {
     {
         self.inner.pending_queued_run(session_id).await
     }
+    async fn queued_run(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        self.inner.queued_run(scope).await
+    }
     async fn settle_queued_run(
         &self,
         fence: &lash_core::SessionExecutionLeaseAuthority,

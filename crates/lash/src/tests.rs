@@ -633,6 +633,13 @@ impl lash_core::QueuedWorkStore for SnapshotStore {
     {
         Ok(None)
     }
+    async fn queued_run(
+        &self,
+        _scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        Ok(None)
+    }
     async fn settle_queued_run(
         &self,
         _fence: &lash_core::SessionExecutionLeaseAuthority,
@@ -1013,6 +1020,13 @@ impl lash_core::QueuedWorkStore for BoundSessionStore {
     async fn pending_queued_run(
         &self,
         _session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        Ok(None)
+    }
+    async fn queued_run(
+        &self,
+        _scope: &lash_core::ExecutionScope,
     ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
     {
         Ok(None)

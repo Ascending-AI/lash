@@ -735,7 +735,9 @@ impl LashRuntime {
     /// settlement is the drain's end exactly as a successful run's commit is
     /// (FIG-3559, FIG-3560). The drain-end epilogue therefore runs here, under
     /// the lane the caller still holds, and decides as it does on every other
-    /// end path — a drain that owns no children has no end to write.
+    /// end path — a drain that owns no children has no end to write, and one
+    /// whose closing work is still owed elsewhere is withheld and written
+    /// later by [`end_settled_queue_drain`](Self::end_settled_queue_drain).
     async fn settle_failed_queued_run(
         &mut self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
@@ -769,46 +771,9 @@ impl LashRuntime {
         expected_revision: u64,
         reason: String,
     ) -> Result<crate::store::QueuedRunAdmission, RuntimeError> {
-        let store = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-            .ok_or_else(|| {
-                RuntimeError::new(
-                    RuntimeErrorCode::QueuedWork,
-                    "queued-run abandonment requires persistence",
-                )
-            })?;
-        let Some(lease) = SessionExecutionLeaseGuard::try_acquire_for_executor(
-            Arc::clone(&store),
-            &self.state.session_id,
-            &self.runtime_lease_owner,
-            &self.runtime_lease_executor_id,
-            self.host.core.control.lease_timings,
-            Arc::clone(&self.host.core.clock),
-        )
-        .await
-        .map_err(super::runtime_error_from_store_commit)?
-        else {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::SessionExecutionLaneBusy,
-                format!(
-                    "session `{}` cannot abandon its queued run until it acquires the execution lane",
-                    self.state.session_id
-                ),
-            ));
-        };
-        if let Err(error) = self
-            .reload_invalidated_resident_session_state_under_lease(Some(&lease))
-            .await
-        {
-            let _ = lease.release_if_live().await;
-            return Err(error);
-        }
-        if let Err(error) = self.refresh_session_graph_from_store().await {
-            let _ = lease.release_if_live().await;
-            return Err(session_head_refresh_error(error));
-        }
+        let (store, lease) = self
+            .claim_lane_for_settled_drain_work("abandon its queued run")
+            .await?;
         let settled = self
             .settle_failed_queued_run(
                 &store,
@@ -829,6 +794,104 @@ impl LashRuntime {
         let settled = settled.map_err(super::runtime_error_from_store_commit)?;
         released.map_err(super::runtime_error_from_store_commit)?;
         Ok(settled)
+    }
+
+    /// Write the end a settled drain still owes (FIG-3563).
+    ///
+    /// Every terminal settlement is a drain end, and its epilogue runs right
+    /// after it — but the epilogue withholds the end while a closing group
+    /// under the drain's scope owes work leased to another host, and nothing
+    /// retries a settled run to ask again: a durable `Failed` is never
+    /// retried, and a completed run's caller has its answer. This is that
+    /// later ask. It claims the session execution lane, reads the drain's run
+    /// by its scope, and — only when the run is terminally settled — runs the
+    /// same epilogue a replayed settled drain runs: the closing groups resume
+    /// (finishing any obligation whose lease has since settled or expired),
+    /// and the receipt and ledger row land once nothing is owed. A run still
+    /// pending is interrupted, not ended, and is left for its own retry; a
+    /// drain whose end already landed replays the receipt as a no-op.
+    ///
+    /// The parent-end recovery sweep is the caller: it finds a drain whose
+    /// registry-listed children name an owner with no end receipt, and calls
+    /// this once the drain's run reads settled. No input is consumed and the
+    /// drain id is not replayed through admission. A busy lane is the
+    /// retryable [`RuntimeErrorCode::SessionExecutionLaneBusy`]; the sweep's
+    /// next pass asks again.
+    pub async fn end_settled_queue_drain(&mut self, drain_id: &str) -> Result<(), RuntimeError> {
+        let (store, lease) = self
+            .claim_lane_for_settled_drain_work("end a settled queue drain")
+            .await?;
+        let scope = crate::ExecutionScope::queue_drain(self.state.session_id.clone(), drain_id);
+        let run = match store.queued_run(&scope).await {
+            Ok(run) => run,
+            Err(error) => {
+                let _ = lease.release_if_live().await;
+                return Err(super::runtime_error_from_store_commit(error));
+            }
+        };
+        if run.is_some_and(|run| run.terminal.is_some()) {
+            Box::pin(self.end_queue_drain(&scope, &lease, &store, false)).await;
+        }
+        lease
+            .release_if_live()
+            .await
+            .map_err(super::runtime_error_from_store_commit)
+    }
+
+    /// Claim the session execution lane for a disposition of queued-run work
+    /// outside a drain — an abandonment or an owed end — and bring the
+    /// resident state up to the committed head under it.
+    async fn claim_lane_for_settled_drain_work(
+        &mut self,
+        purpose: &str,
+    ) -> Result<
+        (
+            Arc<dyn crate::store::RuntimePersistence>,
+            SessionExecutionLeaseGuard,
+        ),
+        RuntimeError,
+    > {
+        let store = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::QueuedWork,
+                    format!("a runtime needs persistence to {purpose}"),
+                )
+            })?;
+        let Some(lease) = SessionExecutionLeaseGuard::try_acquire_for_executor(
+            Arc::clone(&store),
+            &self.state.session_id,
+            &self.runtime_lease_owner,
+            &self.runtime_lease_executor_id,
+            self.host.core.control.lease_timings,
+            Arc::clone(&self.host.core.clock),
+        )
+        .await
+        .map_err(super::runtime_error_from_store_commit)?
+        else {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::SessionExecutionLaneBusy,
+                format!(
+                    "session `{}` cannot {purpose} until it acquires the execution lane",
+                    self.state.session_id
+                ),
+            ));
+        };
+        if let Err(error) = self
+            .reload_invalidated_resident_session_state_under_lease(Some(&lease))
+            .await
+        {
+            let _ = lease.release_if_live().await;
+            return Err(error);
+        }
+        if let Err(error) = self.refresh_session_graph_from_store().await {
+            let _ = lease.release_if_live().await;
+            return Err(session_head_refresh_error(error));
+        }
+        Ok((store, lease))
     }
 }
 

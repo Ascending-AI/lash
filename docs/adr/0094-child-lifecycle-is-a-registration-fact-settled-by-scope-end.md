@@ -426,8 +426,8 @@ the `ParentScope::queue_drain` row via `record_parent_end`. The ledger row is
 the separate-store second write; a crash in the gap is closed by
 `redrive_missing_opener_parent_end_rows`, which confirms
 `drain_end_exists(drain_id)` before re-deriving the row — and a drain whose
-receipt is absent is interrupted, not ended, so its retry under the same
-`drain_id` ends it.
+receipt is absent and whose run is still pending is interrupted, not ended, so
+its retry under the same `drain_id` ends it.
 
 What is not an end: the worker dying, an empty first poll (a drain that never
 owned children writes nothing — a nothing-to-do retry of a drained owner ends
@@ -447,6 +447,29 @@ the resident state the receipt checkpoints, and the registry, and a settlement
 without its end is the ownerless drain this rule exists to prevent. The sweep
 then settles `OnParentEnd::Cancel` children with `ParentEnded`; `Abandon`
 children stay host-managed.
+
+**An owed end is written when the owed work settles (FIG-3563).** The
+epilogue after a settlement withholds the receipt while a closing group under
+the drain scope owes work leased to another host. A settled run is never asked
+again by its own drain — a `Failed` one is never retried, and a completed one's
+caller has its answer — so a withheld end would stay unwritten. The end is owed,
+and the recovery sweep writes it: `redrive_missing_opener_parent_end_rows`
+already lists the drain as a candidate (its children have no ledger row), and
+for a candidate with no receipt it reads the drain's run through
+`QueuedWorkStore::queued_run(scope)`. A terminally settled run means the end is
+owed; the worker opens the session and calls
+`LashRuntime::end_settled_queue_drain`, which claims the lane and runs the same
+epilogue, with the same ordering and the same ownership test. The closing groups
+resume — finishing any obligation whose foreign lease has settled or expired —
+and the receipt and row land once nothing is owed; until then the epilogue
+withholds again and a later pass retries. No input is consumed and the drain id
+is not replayed through admission. The rule is one for every settlement:
+`Failed`, `Empty` or completed. The write runs on a detached task, one per drain
+at a time, because the epilogue waits out an obligation the worker's own
+process is running and the pass must not stall intake behind it. Discovery is
+the registry's candidate list, so a drain that owns no children is never
+visited; the owed-end epilogue runs as one that ran nothing here, which writes
+no end for a childless drain in any case.
 
 The incarnation stays *beside* `ExecutionScope`, not inside it: the scope
 remains the claim address, the pin is the admission-time fact, and

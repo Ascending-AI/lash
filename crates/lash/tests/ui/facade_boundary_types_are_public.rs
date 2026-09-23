@@ -297,6 +297,13 @@ impl QueuedWorkStore for FacadeStore {
     {
         unreachable!("fixture does not serve queued runs")
     }
+    async fn queued_run(
+        &self,
+        _scope: &lash_core::ExecutionScope,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        unreachable!("fixture does not serve queued runs")
+    }
     async fn settle_queued_run(
         &self,
         _fence: &lash_core::SessionExecutionLeaseAuthority,

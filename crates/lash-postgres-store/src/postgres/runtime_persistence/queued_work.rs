@@ -27,6 +27,12 @@ impl QueuedWorkStore for PostgresSessionStore {
     ) -> Result<Option<lash_core::store::QueuedRunAdmission>, StoreError> {
         self.pending_run(session_id).await
     }
+    async fn queued_run(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<Option<lash_core::store::QueuedRunAdmission>, StoreError> {
+        self.run_by_scope(scope).await
+    }
     async fn settle_queued_run(
         &self,
         fence: &SessionExecutionLeaseAuthority,
