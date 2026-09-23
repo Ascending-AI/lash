@@ -991,7 +991,7 @@ class BazelTestContractTests(unittest.TestCase):
         # every unit that resolution compiles, and `//:feature_lane_clippy`
         # lints exactly those. The Cargo command stays for untrusted events,
         # which have no cache credentials and so no pool. The feature-lane
-        # variants and the OFF graph are merge-group breadth: a pull request
+        # variants and the OFF variant are merge-group breadth: a pull request
         # builds only the workspace clippy and the schema checks.
         self.assertIn("//:feature_lane_clippy", clippy_bazel["run"])
         self.assertIn("//:runtime_off", clippy_bazel["run"])
@@ -1000,7 +1000,6 @@ class BazelTestContractTests(unittest.TestCase):
         )
         self.assertIn(
             'if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then\n'
-            "  breadth=true\n"
             "  targets+=(//:feature_lane_clippy //:runtime_off)",
             clippy_bazel["run"],
         )

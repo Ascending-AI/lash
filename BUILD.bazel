@@ -5,6 +5,7 @@ load(
     "FEATURE_LANE_CLIPPY_TARGETS",
     "FEATURE_LANE_COMPILE_TARGETS",
     "FEATURE_LANE_TEST_TARGETS",
+    "RUNTIME_OFF_TARGET",
 )
 load(
     "//tools/bazel:workspace_targets.bzl",
@@ -266,7 +267,12 @@ filegroup(
     name = "schema_checks",
     srcs = [":host_schema_check", ":example_schema_check"],
 )
+# The runtime OFF witness, `cargo check -p lash-runtime --lib
+# --no-default-features`: the facade with every optional feature off, checked
+# at that command's first-party feature resolution (FIG-3427). It is one unit
+# of the `otel-feature-chain` lane, named here so the merge group can prove it
+# without the whole lane graph.
 alias(
     name = "runtime_off",
-    actual = "@runtime_off_crates//:lash-runtime",
+    actual = RUNTIME_OFF_TARGET,
 )
