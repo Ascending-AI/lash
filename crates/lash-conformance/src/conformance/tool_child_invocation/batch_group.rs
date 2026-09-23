@@ -30,7 +30,7 @@ async fn run_batch<F>(
     host: &Arc<dyn crate::EffectHost>,
     prefix: &str,
     session_suffix: &str,
-    calls: Vec<crate::ToolInvocation>,
+    calls: impl FnOnce(&crate::SessionId) -> Vec<crate::ToolInvocation>,
     run: F,
 ) -> (crate::SessionId, crate::session::ToolBatchReplies)
 where
@@ -42,6 +42,11 @@ where
     >,
 {
     let session_id = crate::SessionId::from(format!("{prefix}-batch-group-{session_suffix}"));
+    // Call ids carry the half's session id: an orchestrating leaf derives the
+    // process it starts from its call id, and a durable registry shared by
+    // both halves would otherwise refuse the second start as a conflicting
+    // registration. The session id is normalized out of every compared value.
+    let calls = calls(&session_id);
     let scenario = scenario(
         fixture,
         &session_id,
@@ -155,31 +160,31 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
     .await;
     let host = world.host;
 
-    let calls = || {
+    let calls = |session: &crate::SessionId| {
         vec![
             crate::ToolInvocation::new(
-                format!("{prefix}-plain"),
+                format!("{session}-plain"),
                 crate::ToolId::from(LEAF_PLAIN),
                 serde_json::json!({ "leaf": "plain" }),
             ),
             crate::ToolInvocation::new(
-                format!("{prefix}-granted"),
+                format!("{session}-granted"),
                 crate::ToolId::from(LEAF_GRANTED),
                 serde_json::json!({ "leaf": "granted" }),
             )
             .with_execution_grant(leaf_grant()),
             crate::ToolInvocation::new(
-                format!("{prefix}-orchestrating"),
+                format!("{session}-orchestrating"),
                 crate::ToolId::from(LEAF_ORCHESTRATING),
                 serde_json::json!({ "leaf": "orchestrating" }),
             ),
             crate::ToolInvocation::new(
-                format!("{prefix}-fail"),
+                format!("{session}-fail"),
                 crate::ToolId::from(LEAF_FAIL),
                 serde_json::json!({ "leaf": "fail" }),
             ),
             crate::ToolInvocation::new(
-                format!("{prefix}-absent"),
+                format!("{session}-absent"),
                 crate::ToolId::from(LEAF_ABSENT),
                 serde_json::json!({ "leaf": "absent" }),
             ),
@@ -191,7 +196,7 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
         &host,
         prefix,
         "predecessor",
-        calls(),
+        calls,
         |ctx, calls| {
             Box::pin(async move {
                 ctx.call_tool_batch_via_batch_effect(
@@ -204,7 +209,7 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
     )
     .await;
     let (grouped_session, grouped) =
-        run_batch(fixture, &host, prefix, "grouped", calls(), |ctx, calls| {
+        run_batch(fixture, &host, prefix, "grouped", calls, |ctx, calls| {
             Box::pin(async move {
                 ctx.call_tool_batch(calls, crate::session::ToolBatchOccurrence::Opener(1))
                     .await
@@ -247,7 +252,18 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
         );
         match (&before.record, &after.record) {
             (Some(before), Some(after)) => {
-                assert_eq!(before.call_id, after.call_id, "reply {index} call id");
+                // Call ids carry each half's session id (see `run_batch`).
+                let call_id = |record: &crate::ToolCallRecord, session: &crate::SessionId| {
+                    record
+                        .call_id
+                        .as_deref()
+                        .map(|id| id.replace(session.as_str(), "<session>"))
+                };
+                assert_eq!(
+                    call_id(before, &predecessor_session),
+                    call_id(after, &grouped_session),
+                    "reply {index} call id"
+                );
                 assert_eq!(before.tool, after.tool, "reply {index} tool");
                 assert_eq!(before.args, after.args, "reply {index} args");
             }
