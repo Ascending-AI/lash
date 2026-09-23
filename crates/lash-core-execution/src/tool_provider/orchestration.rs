@@ -351,12 +351,15 @@ async fn coordinate_nested_tool_batch<'run>(
                     // park on a completion nobody resolves. A granted call names
                     // leaf authority by construction and cannot be orchestrating.
                     if grant.is_none() && dispatch.is_orchestrating_tool(&prepared.tool_id) {
-                        let mut outcome = crate::tool_dispatch::execute_orchestrating_tool(
-                            dispatch.as_ref(),
-                            prepared,
-                            tool_context,
-                        )
-                        .await;
+                        // Boxed: the orchestrating body's future crosses
+                        // clippy's large-future threshold.
+                        let mut outcome =
+                            Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
+                                dispatch.as_ref(),
+                                prepared,
+                                tool_context,
+                            ))
+                            .await;
                         for trigger in std::mem::take(&mut outcome.triggers) {
                             dispatch.trigger_outcomes.enqueue(trigger);
                         }
@@ -370,7 +373,9 @@ async fn coordinate_nested_tool_batch<'run>(
                     );
                     let executor_dispatch = Arc::clone(&dispatch);
                     let executor_context = tool_context.clone();
-                    let coordinated = crate::tool_dispatch::coordinate_tool_invocation(
+                    // Boxed: the coordinated attempt's future crosses
+                    // clippy's large-future threshold.
+                    let coordinated = Box::pin(crate::tool_dispatch::coordinate_tool_invocation(
                         dispatch.as_ref(),
                         prepared,
                         grant,
@@ -395,7 +400,7 @@ async fn coordinate_nested_tool_batch<'run>(
                                 completion_key,
                             )
                         },
-                    )
+                    ))
                     .await;
                     // The journaled attempts' triggers ride the outcome; they
                     // belong to the body's own buffer, which its settlement

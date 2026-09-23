@@ -40,7 +40,7 @@ impl HostTurnRunner {
     /// A runner over `host`, which must be the effect host the law's runtime
     /// is built on: group children route through the executors that host
     /// registered.
-    pub fn new(host: Arc<dyn crate::EffectHost>) -> Arc<dyn ConformanceTurnRunner> {
+    pub fn shared(host: Arc<dyn crate::EffectHost>) -> Arc<dyn ConformanceTurnRunner> {
         Arc::new(Self { host })
     }
 }

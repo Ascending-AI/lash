@@ -1807,7 +1807,7 @@ async fn sqlite_turn_runner_fixture() -> SqliteTurnRunnerFixture {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
         &registry,
     ))) as Arc<dyn lash_core::ProcessWorkSubstrate>;
-    let turn_runner = lash_conformance::HostTurnRunner::new(Arc::clone(&effect_host));
+    let turn_runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&effect_host));
     (
         dir,
         "sqlite-turn-runner",

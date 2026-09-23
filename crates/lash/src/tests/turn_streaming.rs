@@ -885,13 +885,10 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
         // bound controller would make that recorded authority unhonourable.
         // The recorder forwards every group operation to the same native
         // substrate the group opened on.
-        Ok(Some(
-            ScopedEffectController::shared(
-                Arc::clone(&self.controller) as Arc<dyn lash_core::RuntimeEffectController>,
-                admitted,
-            )
-            .map_err(lash_core::RuntimeError::from)?,
-        ))
+        Ok(Some(ScopedEffectController::shared(
+            Arc::clone(&self.controller) as Arc<dyn lash_core::RuntimeEffectController>,
+            admitted,
+        )?))
     }
 
     fn install_tool_child_host(

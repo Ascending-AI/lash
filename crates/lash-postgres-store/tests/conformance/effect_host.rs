@@ -288,7 +288,7 @@ async fn postgres_turn_runner_fixture() -> Option<PostgresTurnRunnerFixture> {
     let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
         &registry,
     ))) as Arc<dyn lash_core::ProcessWorkSubstrate>;
-    let runner = lash_conformance::HostTurnRunner::new(Arc::clone(&host));
+    let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
     Some((
         database_lock,
         "postgres-turn-runner",

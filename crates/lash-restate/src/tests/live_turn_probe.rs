@@ -107,7 +107,7 @@ pub(super) struct LiveTurnRunner {
 }
 
 impl LiveTurnRunner {
-    pub(super) fn new(
+    pub(super) fn shared(
         ingress_url: String,
     ) -> std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner> {
         std::sync::Arc::new(Self { ingress_url })
