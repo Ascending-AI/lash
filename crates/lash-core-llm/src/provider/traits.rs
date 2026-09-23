@@ -169,10 +169,18 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
                 .unwrap_or_default()
         )
         .to_ascii_lowercase();
-        // Raw-text overflow matching is a compatibility fallback only. It may
-        // classify an otherwise unknown failure, but it must never reinterpret
-        // structured provider evidence.
-        if !structurally_classified && is_context_overflow_text(&haystack) {
+        // Raw-text matching is a compatibility fallback only. It may classify
+        // an otherwise unknown failure, but it must never reinterpret
+        // structured provider evidence, and it must never downgrade a 5xx or
+        // a transport/timeout failure — those keep their status-derived
+        // retry verdict no matter what an intermediary's error page says.
+        let text_fallback = !structurally_classified
+            && !matches!(
+                failure.kind,
+                ProviderFailureKind::Transport | ProviderFailureKind::Timeout
+            )
+            && !failure.http_status.is_some_and(|status| status >= 500);
+        if text_fallback && is_context_overflow_text(&haystack) {
             failure.kind = ProviderFailureKind::Validation;
             failure.retry_verdict = TransportRetryVerdict::Forbidden;
             failure.terminal_reason = LlmTerminalReason::ContextOverflow;
@@ -189,31 +197,27 @@ impl ProviderFailureClassifier for DefaultProviderFailureClassifier {
             && !haystack.contains("quota exceeded for metric")
             && !haystack.contains("retrydelay")
             && !haystack.contains("please retry");
-        if !structurally_classified {
-            if haystack.contains("insufficient_quota")
+        if text_fallback
+            && (haystack.contains("insufficient_quota")
                 || haystack.contains("usage_limit_reached")
                 || haystack.contains("usage_not_included")
                 || haystack.contains("credit balance is too low")
-                || google_hard_quota
-            {
-                failure.kind = ProviderFailureKind::Quota;
-                failure.retry_verdict = TransportRetryVerdict::NotRetryable;
-            }
-            if haystack.contains("content_filter")
-                || haystack.contains("prohibited_content")
-                || haystack.contains("safety")
-                || haystack.contains("sensitive")
-            {
-                failure.terminal_reason = LlmTerminalReason::ContentFilter;
-                failure.retry_verdict = TransportRetryVerdict::Forbidden;
-            }
-            if haystack.contains("model_not_found")
-                || haystack.contains("unsupported model")
-                || haystack.contains("does not exist")
-            {
-                failure.kind = ProviderFailureKind::Unsupported;
-                failure.retry_verdict = TransportRetryVerdict::NotRetryable;
-            }
+                || google_hard_quota)
+        {
+            failure.kind = ProviderFailureKind::Quota;
+            failure.retry_verdict = TransportRetryVerdict::NotRetryable;
+        }
+        // A missing or unsupported model is structural evidence only: a
+        // typed provider code such as OpenAI's `model_not_found`. Free text
+        // like "does not exist" or "unsupported model" appears on unrelated
+        // error pages (a gateway's 502 upstream message, a 400 about header
+        // casing) and must not pin `Unsupported`.
+        if failure.code.as_ref().is_some_and(|code| {
+            code.namespace() == &Namespace::PROVIDER
+                && matches!(code.spelling(), "model_not_found" | "unsupported_model")
+        }) {
+            failure.kind = ProviderFailureKind::Unsupported;
+            failure.retry_verdict = TransportRetryVerdict::NotRetryable;
         }
         if matches!(
             failure.kind,
