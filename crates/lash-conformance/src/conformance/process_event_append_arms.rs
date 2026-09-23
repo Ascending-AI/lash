@@ -202,6 +202,8 @@ pub async fn process_event_append_arms_are_ordered(
         leased_footprint,
         "a repeated leased completion writes no event row and does not move the floor"
     );
+
+    durable_effect_outcome_event_crash_windows(registry).await;
 }
 
 /// The durable footprint of a process's appends: how many event rows exist, and
@@ -250,7 +252,7 @@ async fn terminal_sequence(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn durable_effect_outcome_event_crash_windows(
+async fn durable_effect_outcome_event_crash_windows(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
     let owned_id = ProcessId::from("durable-effect-outcome-execution-authority");
