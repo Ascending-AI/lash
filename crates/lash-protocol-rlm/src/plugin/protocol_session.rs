@@ -119,6 +119,13 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
         self.runtime_state.validate_turn_extension(extension).await
     }
 
+    async fn bound_variables_prompt(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+    ) -> Result<Option<std::sync::Arc<str>>, SessionError> {
+        self.runtime_state.bound_variables_prompt().await.map(Some)
+    }
+
     fn configure_runtime_on_materialize(
         &self,
         mut ctx: ProtocolRuntimeContext<'_>,

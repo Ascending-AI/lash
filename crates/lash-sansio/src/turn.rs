@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use crate::MessageSequence;
 use crate::prompt::PreparedPrompt;
-use crate::sansio::{TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol};
+use crate::sansio::{
+    ProjectorTurnInputs, TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol,
+};
 use crate::turn_driver::TurnDriverPreamble;
 
 pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
@@ -22,6 +24,11 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub protocol_run_offset: usize,
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
     pub prepared_prompt: PreparedPrompt,
+    /// The projector's recorded-state inputs for the upcoming iteration — see
+    /// [`ProjectorTurnInputs`]. The host derives them from recorded turn
+    /// state; later iterations refresh them through the journaled
+    /// execution-environment sync.
+    pub projector_turn_inputs: ProjectorTurnInputs,
     pub turn_budget: crate::TurnBudget,
     pub no_progress_budget: crate::NoProgressBudget,
     pub model_variant: crate::llm::capability::ReasoningSelection,
@@ -56,6 +63,7 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             autonomous: input.autonomous,
             tool_specs: input.turn_driver_preamble.tool_specs.clone(),
             system_prompt: Arc::clone(&input.prepared_prompt.system_prompt),
+            projector_turn_inputs: input.projector_turn_inputs,
             session_id: input.session_id,
             agent_frame_id: input.agent_frame_id,
             turn_id: input.turn_id,
@@ -182,6 +190,7 @@ mod tests {
             protocol_run_offset: 2,
             turn_driver_preamble,
             prepared_prompt,
+            projector_turn_inputs: ProjectorTurnInputs::default(),
             turn_budget: crate::TurnBudget::bounded(3),
             no_progress_budget: crate::NoProgressBudget::default(),
             model_variant: crate::ReasoningSelection::Effort("mini".to_string()),

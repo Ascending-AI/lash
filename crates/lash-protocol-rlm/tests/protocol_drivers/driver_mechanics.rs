@@ -2091,3 +2091,149 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
     );
     assert_eq!(repaired.code, "print \"repaired\"");
 }
+
+/// FIG-3538: a crash before the iteration-2 LLM commit must redrive into a
+/// byte-identical journaled envelope. Per-iteration projector inputs ride the
+/// journaled execution-environment sync, so replay — which rebuilds the
+/// machine from recorded state — cannot leak divergent live plugin state into
+/// the request.
+#[test]
+fn rlm_redrive_projects_identical_llm_envelope() {
+    // What the host journaled at the iteration-1 boundary: the committed
+    // prompt usage plus the bound-variables render recorded with the sync.
+    let journaled_inputs = sansio::ProjectorTurnInputs {
+        prompt_usage: Some(lash_core::TokenUsage {
+            input_tokens: 700,
+            ..Default::default()
+        }),
+        bound_variables_prompt: Some(Arc::from("rlm-bound-vars: step_total = 41")),
+    };
+    let journaled_sync = sansio::ExecutionEnvironmentSync {
+        system_prompt: Arc::from("journaled system prompt"),
+        tool_specs: Arc::new(Vec::new()),
+        projector_turn_inputs: Some(journaled_inputs),
+    };
+
+    let recorded_initial =
+        drive_rlm_to_second_llm_request(sansio::ProjectorTurnInputs::default(), &journaled_sync);
+    // The redrive's rebuilt machine starts from whatever the host re-derived —
+    // deliberately stale here — because the journaled sync is the authority for
+    // every iteration after the boundary it recorded.
+    let redriven = drive_rlm_to_second_llm_request(
+        sansio::ProjectorTurnInputs {
+            prompt_usage: None,
+            bound_variables_prompt: Some(Arc::from("rlm-bound-vars: STALE")),
+        },
+        &journaled_sync,
+    );
+
+    assert_ne!(
+        serde_json::to_vec(&recorded_initial.0).expect("first request serializes"),
+        serde_json::to_vec(&redriven.0).expect("first request serializes"),
+        "the initial config inputs drive iteration 1, so the stale rebuild differs there"
+    );
+    assert_eq!(
+        serde_json::to_vec(&recorded_initial.1).expect("second request serializes"),
+        serde_json::to_vec(&redriven.1).expect("second request serializes"),
+        "the journaled sync pins iteration 2's projector inputs on redrive"
+    );
+    let encoded = serde_json::to_string(&redriven.1).expect("second request serializes");
+    assert!(
+        encoded.contains("rlm-bound-vars: step_total = 41"),
+        "the journaled bound-variables render reached the envelope"
+    );
+    assert!(
+        !encoded.contains("STALE"),
+        "the redrive's stale initial inputs must not survive the journaled boundary"
+    );
+}
+
+/// Drive an RLM machine through one executed cell and return the two projected
+/// LLM requests. The iteration boundary's `SyncExecutionEnvironment` is
+/// answered with `journaled_sync` — the recorded outcome a redrive replays
+/// verbatim instead of re-deriving.
+fn drive_rlm_to_second_llm_request(
+    initial_inputs: sansio::ProjectorTurnInputs,
+    journaled_sync: &sansio::ExecutionEnvironmentSync,
+) -> (LlmRequest, LlmRequest) {
+    let preamble = lash_protocol_rlm::build_rlm_preamble(
+        lash_core::ProtocolBuildInput {
+            tool_catalog: Arc::new(lash_core::ToolCatalog::from_tool_definitions(Vec::new())),
+            plugin_extensions: Default::default(),
+            trigger_events: Default::default(),
+            extra_prompt_contributions: Vec::new(),
+        },
+        lash_protocol_rlm::RlmProjectorConfig {
+            max_budget_tokens: Some(1_000),
+            ..Default::default()
+        },
+    );
+    let mut config = test_config();
+    config.protocol_driver = preamble.config.protocol;
+    config.projector = preamble.config.projector;
+    config.projector_turn_inputs = initial_inputs;
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("bind a value, then continue")],
+        Arc::new(Vec::new()),
+        0,
+    );
+
+    let mut requests = Vec::new();
+    let mut execs_answered = 0usize;
+    loop {
+        let Some(effect) = machine.poll_effect() else {
+            panic!("machine finished before a second LLM call");
+        };
+        match effect {
+            Effect::SyncExecutionEnvironment {
+                id,
+                update_machine_config,
+            } => {
+                // The initial host-only sync carries no machine update; the
+                // boundary sync replays the journaled record.
+                let result = if update_machine_config {
+                    Ok(Some(journaled_sync.clone()))
+                } else {
+                    Ok(None)
+                };
+                machine.handle_response(Response::ExecutionEnvironmentSynced { id, result });
+            }
+            Effect::LlmCall { id, request } => {
+                requests.push((*request).clone());
+                if requests.len() == 2 {
+                    break;
+                }
+                machine.handle_response(Response::LlmComplete {
+                    id,
+                    text_streamed: false,
+                    result: Ok(rlm_response(vec![text_part(&typescript_block(
+                        "step_total = 41;",
+                    ))])),
+                });
+            }
+            Effect::ExecCode { id, .. } => {
+                execs_answered += 1;
+                machine.handle_response(Response::ExecResult {
+                    id,
+                    result: Ok(exec_response(&["41"], None, None)),
+                });
+            }
+            Effect::Checkpoint { id, .. } => {
+                machine.handle_response(Response::Checkpoint {
+                    id,
+                    delivery: sansio::CheckpointDelivery::default(),
+                });
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        execs_answered, 1,
+        "one bound cell before the second request"
+    );
+    let [first, second]: [LlmRequest; 2] = requests
+        .try_into()
+        .unwrap_or_else(|_| panic!("two requests captured"));
+    (first, second)
+}

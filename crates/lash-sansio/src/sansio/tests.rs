@@ -37,6 +37,7 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         autonomous: false,
         tool_specs: Vec::new().into(),
         system_prompt: Arc::from(""),
+        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("test".to_string()),
         agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
@@ -412,6 +413,7 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
         turn_causes: std::slice::from_ref(&cause),
         protocol_iteration: 0,
         use_tools: false,
+        projector_turn_inputs: &config.projector_turn_inputs,
     });
     assert_eq!(active_request.scope.agent_frame_id, "test-frame");
     assert!(active_request.messages.iter().any(|message| {
@@ -440,6 +442,7 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
         turn_causes: &[],
         protocol_iteration: 1,
         use_tools: false,
+        projector_turn_inputs: &config.projector_turn_inputs,
     });
     assert!(history_request.messages.iter().any(|message| {
         message.role == crate::llm::types::LlmRole::User
@@ -1914,6 +1917,7 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
                 input_schema: serde_json::json!({ "type": "object" }).into(),
                 output_schema: serde_json::json!({ "type": "object" }).into(),
             }]),
+            projector_turn_inputs: None,
         })),
     });
 

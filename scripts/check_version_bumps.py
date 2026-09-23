@@ -720,6 +720,21 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-core-execution/src/runtime/effect/tool_child.rs:TOOL_CHILD_REQUEST_VERSION": (
         "sha256:ea4860d85513148e0a596e26fd07fd262d07f542746df766146fb597870c8c00"
     ),
+    # FIG-3538: the file-level serde-shape projection moved because
+    # `turn_protocol.rs` gained `ProjectorTurnInputs` and an optional
+    # `projector_turn_inputs` field on `ExecutionEnvironmentSync`. Both live on
+    # the journaled sync-outcome side: `Response` is not serialized and the
+    # `TurnCheckpoint` reach (MachineState, pending `Effect`s, messages,
+    # events) never includes the sync payload or the host-supplied
+    # `TurnMachineConfig`, so checkpoint bytes are identical on both sides.
+    # The field serializes only into `runtime_effect_replay.outcome_json`, an
+    # opaque carrier the SQL stores never type-decode, and is Option+default,
+    # so outcome rows written before the field existed still decode.
+    # TURN_CHECKPOINT_SCHEMA_VERSION stays 7. One-time baseline; any further
+    # guarded-shape drift re-fails the gate.
+    "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
+        "sha256:1966aff9d664ca490ceb551a1724f488939768c5396089c837eb2b71bab3ca0b"
+    ),
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

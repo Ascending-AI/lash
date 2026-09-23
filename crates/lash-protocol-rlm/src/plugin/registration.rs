@@ -1,23 +1,19 @@
 use std::sync::Arc;
 
 use super::RlmProtocolPluginConfig;
-use super::budget_warning::BudgetUsageObserver;
 use super::prose_projector::RlmAssistantProseProjector;
 use super::protocol_driver::RlmProtocolDriver;
 use super::protocol_session::RlmProtocolSession;
 use super::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
 use super::tool_args::normalize_projected_tool_args;
 use crate::dialect::TypescriptDialect;
-use crate::driver::SharedUsage;
 use crate::stream_mask;
 use lash_core::plugin::{PluginError, PluginRegistrar};
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn register_rlm_protocol_plugin(
     reg: &mut PluginRegistrar,
     config: RlmProtocolPluginConfig,
     dialect: Arc<TypescriptDialect>,
-    last_prompt_usage: SharedUsage,
 ) -> Result<(), PluginError> {
     // The catalog contribution carries the dialect so the neutrality guard
     // knows the words model-facing tool prose may not spell literally.
@@ -42,8 +38,6 @@ pub(super) fn register_rlm_protocol_plugin(
     reg.protocol().protocol_driver(Arc::new(RlmProtocolDriver {
         config,
         dialect: Arc::clone(&dialect),
-        last_prompt_usage: Arc::clone(&last_prompt_usage),
-        bound_variables_prompt: runtime_state.shared_bound_variables_prompt(),
     }))?;
     reg.tools()
         .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
@@ -62,16 +56,6 @@ pub(super) fn register_rlm_protocol_plugin(
     }));
 
     register_projected_bindings_prompt_contributor(reg, Arc::clone(&protocol_session));
-
-    // Per-turn `prompt_usage` is captured here and passed to the projector via a
-    // shared cell so the budget line can ride in the volatile turn-tail message
-    // instead of poisoning the cached system prefix.
-    reg.context().prepare_turn(
-        10,
-        Arc::new(BudgetUsageObserver {
-            cell: last_prompt_usage,
-        }),
-    );
 
     let warn_session = protocol_session.clone();
     reg.turn().checkpoint(Arc::new(move |ctx| {

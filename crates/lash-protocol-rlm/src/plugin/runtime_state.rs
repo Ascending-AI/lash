@@ -7,28 +7,19 @@ use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
 use crate::dialect::{DialectSession, TypescriptDialect};
 use crate::projection::{RlmProjectedBindings, RlmProjectionExtension, decode_rlm_protocol_event};
-use crate::rlm_support::SharedBoundVariablesPrompt;
 
 pub(crate) struct RlmRuntimeState {
     dialect: Arc<TypescriptDialect>,
     session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
     execution: tokio::sync::Mutex<DialectSession>,
-    bound_variables_prompt: SharedBoundVariablesPrompt,
 }
 
 impl RlmRuntimeState {
     pub(crate) fn new(dialect: Arc<TypescriptDialect>) -> Result<Self, SessionError> {
-        let execution = dialect.create_session();
-        let bound_variables_prompt = Arc::new(std::sync::RwLock::new(
-            execution
-                .prepare_bound_variables_prompt(&BTreeSet::new())?
-                .render(),
-        ));
         Ok(Self {
-            execution: tokio::sync::Mutex::new(execution),
+            execution: tokio::sync::Mutex::new(dialect.create_session()),
             dialect,
             session_projected_bindings: tokio::sync::Mutex::new(RlmProjectedBindings::new()),
-            bound_variables_prompt,
         })
     }
 
@@ -72,23 +63,20 @@ impl RlmRuntimeState {
         )
     }
 
-    pub(crate) fn shared_bound_variables_prompt(&self) -> SharedBoundVariablesPrompt {
-        Arc::clone(&self.bound_variables_prompt)
-    }
-
-    async fn refresh_bound_variables_prompt(&self) -> Result<(), SessionError> {
+    /// Render the current bound-variables view on demand.
+    ///
+    /// The runtime calls this only where the result becomes a recorded input
+    /// — the turn-machine build and each journaled execution-environment sync
+    /// — so the projector never reads this state directly and a redrive
+    /// replays the recorded render (FIG-3538).
+    pub(crate) async fn bound_variables_prompt(&self) -> Result<Arc<str>, SessionError> {
         let exclude = self.protected_projected_binding_names().await;
-        let rendered = self
+        Ok(self
             .execution
             .lock()
             .await
             .prepare_bound_variables_prompt(&exclude)?
-            .render();
-        *self
-            .bound_variables_prompt
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = rendered;
-        Ok(())
+            .render())
     }
 
     async fn protected_projected_binding_names(&self) -> BTreeSet<String> {
@@ -118,8 +106,6 @@ impl RlmRuntimeState {
             .merge(extension.bindings.clone())
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
         *guard = merged;
-        drop(guard);
-        self.refresh_bound_variables_prompt().await?;
         Ok(())
     }
 
@@ -186,8 +172,6 @@ impl RlmRuntimeState {
                     .await?;
             }
         }
-        drop(execution_guard);
-        self.refresh_bound_variables_prompt().await?;
         Ok(())
     }
 
@@ -207,8 +191,6 @@ impl RlmRuntimeState {
                     .await?;
             }
         }
-        drop(execution_guard);
-        self.refresh_bound_variables_prompt().await?;
         Ok(())
     }
 
@@ -228,12 +210,9 @@ impl RlmRuntimeState {
         // the cell to finish instead of being told the state is busy, and a
         // cell cancelled mid-flight leaves the state where it was.
         let mut guard = self.execution.lock().await;
-        let result = guard
+        guard
             .execute(ctx, request, session_projected_bindings)
-            .await;
-        drop(guard);
-        self.refresh_bound_variables_prompt().await?;
-        result
+            .await
     }
 
     pub(crate) fn execution_state_dirty(&self) -> bool {
@@ -281,26 +260,17 @@ impl RlmRuntimeState {
         &self,
         disposition: lash_core::plugin::CodeExecutionDisposition,
     ) -> Result<(), SessionError> {
-        let rolled_back = disposition != lash_core::plugin::CodeExecutionDisposition::Accepted;
         self.execution
             .lock()
             .await
-            .settle_code_execution(disposition)?;
-        if rolled_back {
-            self.refresh_bound_variables_prompt().await?;
-        }
-        Ok(())
+            .settle_code_execution(disposition)
     }
 
     pub(crate) async fn restore_execution_state(
         &self,
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), SessionError> {
-        let mut execution = self.execution.lock().await;
-        execution.restore_execution_state(state)?;
-        drop(execution);
-        self.refresh_bound_variables_prompt().await?;
-        Ok(())
+        self.execution.lock().await.restore_execution_state(state)
     }
 
     async fn apply_seed_or_globals_event(
@@ -714,15 +684,18 @@ mod tests {
     }
 
     #[test]
-    fn executing_code_refreshes_the_driver_bound_variables_snapshot() {
+    fn executing_code_updates_the_bound_variables_render() {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
-                let prompt = state.shared_bound_variables_prompt();
-                assert!(!prompt.read().expect("prompt read").contains("scratch_note"));
+                let prompt = state
+                    .bound_variables_prompt()
+                    .await
+                    .expect("bound variables prompt");
+                assert!(!prompt.contains("scratch_note"));
 
                 state
                     .execute_code(
@@ -735,24 +708,22 @@ mod tests {
                     .await
                     .expect("execute code");
 
-                assert!(
-                    prompt
-                        .read()
-                        .expect("prompt read")
-                        .contains(r#"- `scratch_note` = "after execution""#)
-                );
+                let prompt = state
+                    .bound_variables_prompt()
+                    .await
+                    .expect("bound variables prompt");
+                assert!(prompt.contains(r#"- `scratch_note` = "after execution""#));
             });
     }
 
     #[test]
-    fn cancelled_settlement_refreshes_the_driver_bound_variables_snapshot() {
+    fn cancelled_settlement_restores_the_bound_variables_render() {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
-                let prompt = state.shared_bound_variables_prompt();
 
                 state
                     .execute_code(
@@ -772,18 +743,20 @@ mod tests {
                     )
                     .await
                     .expect("execute cell before late cancellation");
-                assert!(
-                    prompt
-                        .read()
-                        .expect("prompt read")
-                        .contains("cancelled_tail")
-                );
+                let rendered = state
+                    .bound_variables_prompt()
+                    .await
+                    .expect("bound variables prompt");
+                assert!(rendered.contains("cancelled_tail"));
 
                 state
                     .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Cancelled)
                     .await
                     .expect("cancel second cell");
-                let rendered = prompt.read().expect("prompt read");
+                let rendered = state
+                    .bound_variables_prompt()
+                    .await
+                    .expect("bound variables prompt");
                 assert!(rendered.contains("survives"));
                 assert!(!rendered.contains("cancelled_tail"));
             });

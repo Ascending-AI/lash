@@ -1,20 +1,16 @@
 use std::sync::Arc;
 
 use crate::dialect::TypescriptDialect;
-use crate::driver::SharedUsage;
 use crate::plugin::RlmProtocolPluginConfig;
-use crate::plugin::budget_warning::BudgetUsageObserver;
 use crate::plugin::protocol_session::RlmProtocolSession;
 use crate::plugin::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
 use crate::plugin::tool_args::normalize_projected_tool_args;
 use lash_core::plugin::{PluginError, PluginRegistrar};
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn register_native_plugin(
     reg: &mut PluginRegistrar,
     config: RlmProtocolPluginConfig,
     dialect: Arc<TypescriptDialect>,
-    last_prompt_usage: SharedUsage,
 ) -> Result<(), PluginError> {
     // The catalog contribution carries the dialect so the neutrality guard
     // knows the words model-facing tool prose may not spell literally.
@@ -38,8 +34,6 @@ pub(super) fn register_native_plugin(
         .protocol_driver(Arc::new(NativeProtocolDriver {
             config,
             dialect: Arc::clone(&dialect),
-            last_prompt_usage: Arc::clone(&last_prompt_usage),
-            bound_variables_prompt: runtime_state.shared_bound_variables_prompt(),
         }))?;
     reg.tools()
         .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
@@ -58,16 +52,6 @@ pub(super) fn register_native_plugin(
     }));
 
     register_projected_bindings_prompt_contributor(reg, Arc::clone(&protocol_session));
-
-    // Per-turn `prompt_usage` is captured here and passed to the projector via a
-    // shared cell so the budget line can ride in the volatile turn-tail message
-    // instead of poisoning the cached system prefix.
-    reg.context().prepare_turn(
-        10,
-        Arc::new(BudgetUsageObserver {
-            cell: last_prompt_usage,
-        }),
-    );
 
     let warn_session = protocol_session.clone();
     reg.turn().checkpoint(Arc::new(move |ctx| {
@@ -123,19 +107,13 @@ fn register_projected_bindings_prompt_contributor(
 pub struct RlmNativeToolPlugin {
     pub(crate) config: RlmProtocolPluginConfig,
     pub(crate) dialect: Arc<TypescriptDialect>,
-    pub(crate) last_prompt_usage: SharedUsage,
 }
 impl lash_core::plugin::SessionPlugin for RlmNativeToolPlugin {
     fn id(&self) -> &'static str {
         crate::plugin::RLM_PROTOCOL_PLUGIN_ID
     }
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        register_native_plugin(
-            reg,
-            self.config.clone(),
-            Arc::clone(&self.dialect),
-            Arc::clone(&self.last_prompt_usage),
-        )
+        register_native_plugin(reg, self.config.clone(), Arc::clone(&self.dialect))
     }
 }
 struct NativeProseProjector;
@@ -147,8 +125,6 @@ impl lash_core::plugin::AssistantProseProjectorPlugin for NativeProseProjector {
 struct NativeProtocolDriver {
     config: RlmProtocolPluginConfig,
     dialect: Arc<TypescriptDialect>,
-    last_prompt_usage: SharedUsage,
-    bound_variables_prompt: crate::rlm_support::SharedBoundVariablesPrompt,
 }
 impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
     fn build_preamble(
@@ -161,10 +137,8 @@ impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
                 discovery: self.config.discovery.clone(),
                 max_output_chars: self.config.max_output_chars,
                 max_budget_tokens: self.config.continue_as_soft_warn_tokens,
-                last_prompt_usage: Arc::clone(&self.last_prompt_usage),
                 prompt_features: self.config.prompt_features,
             },
-            Arc::clone(&self.bound_variables_prompt),
             Arc::clone(&self.dialect),
         )
     }

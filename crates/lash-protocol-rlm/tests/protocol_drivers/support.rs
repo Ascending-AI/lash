@@ -62,6 +62,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
         autonomous: false,
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
+        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("test"),
         agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
@@ -89,6 +90,7 @@ pub(crate) fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
                 result: Ok(Some(sansio::ExecutionEnvironmentSync {
                     system_prompt: std::sync::Arc::from(""),
                     tool_specs: Arc::new(Vec::new()),
+                    projector_turn_inputs: None,
                 })),
             });
             continue;

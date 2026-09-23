@@ -17,6 +17,7 @@ fn runtime_feedback_projectors_trim_configured_instructions() {
             turn_causes: &[],
             protocol_iteration: 0,
             use_tools: false,
+            projector_turn_inputs: &config.projector_turn_inputs,
         };
         let rlm = projector(1000).project(context());
         let chat = lash_core::sansio::ChatContextProjector.project(context());
