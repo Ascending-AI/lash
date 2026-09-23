@@ -279,7 +279,8 @@ is honest accounting against this budget and not a new axis.
 Checkpoint journal rows deliberately carry the complete `CheckpointClaimSet`,
 not a compact list of row ids: the minimal durable-engine encoding is roughly
 2 KB — an order-of-magnitude estimate, not a measured bound — and grows with
-each claimed row up to the runtime's 64-row claim-batch limit. This bounded
+each claimed row up to the host's turn-input claim cap
+(`QueuedWorkBatchingConfig::max_turn_input_claim`, default 64). This bounded
 payload cost is the price of replay preserving complete
 settlement authority — claim identity, owner, lease token, fencing token,
 session-lease generation, and class-specific rows — so a recovered final commit

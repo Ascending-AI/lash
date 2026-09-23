@@ -1916,6 +1916,12 @@ pub trait StoreMaintenance: Send + Sync {
     /// Physically delete tombstoned graph-node rows and prune terminal
     /// pending-turn-input evidence rows for the bound session. See [`VacuumReport`].
     ///
+    /// Vacuum never affects replay. Terminal pending-turn-input rows are
+    /// admission evidence, not replay state: a replayed turn drives the drive
+    /// set its first execution journaled (ADR 0069 §6) and never reads pending
+    /// rows, and commit receipts and application history live in the turn-commit
+    /// records vacuum does not touch. Pruning them is safe at any time.
+    ///
     /// Vacuum is always scoped to the session bound to this store handle; it must
     /// never prune rows catalog-wide. So vacuum is not the only reclaim step: a
     /// node tombstoned *after* its owning session was deleted (unpinning a deleted

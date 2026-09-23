@@ -583,8 +583,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 78"),
-        "error must report the real expected version 78: {message}"
+        message.contains("schema version 79"),
+        "error must report the real expected version 79: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -620,7 +620,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 78);
+    assert_eq!(user_version, 79);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -745,7 +745,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         Err(error) => error.to_string(),
     };
     assert!(
-        error.contains("schema version 78") && error.contains("version 51"),
+        error.contains("schema version 79") && error.contains("version 51"),
         "{error}"
     );
     let conn = rusqlite::Connection::open(&path).unwrap();

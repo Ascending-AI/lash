@@ -228,23 +228,14 @@ impl LashRuntime {
     }
 
     /// Hand claimed rows back after a local abort.
-    ///
-    /// Unclaimed rows are skipped by construction: they hold no claim to
-    /// release, so an aborted unclaimed drive already leaves its acceptance
-    /// exactly where a drain expects to find it (ADR 0069 §5).
     pub(super) async fn abandon_turn_input_claims_after_local_abort(
         &self,
         err: &RuntimeError,
-        drives: &[super::turn_input_ingress::TurnInputDrive],
+        claims: &[crate::TurnInputClaim],
     ) {
         if self.queued_run.is_some() {
             return;
         }
-        let claims = drives
-            .iter()
-            .filter_map(super::turn_input_ingress::TurnInputDrive::as_claim)
-            .cloned()
-            .collect::<Vec<_>>();
         if !matches!(
             err.code,
             RuntimeErrorCode::SessionExecutionLeaseLost
@@ -262,117 +253,13 @@ impl LashRuntime {
         else {
             return;
         };
-        if let Err(abandon_err) = store.abandon_turn_input_claims(&claims).await {
+        if let Err(abandon_err) = store.abandon_turn_input_claims(claims).await {
             tracing::warn!(
                 error = %abandon_err,
                 claim_count = claims.len(),
                 "failed to abandon turn input claims after local turn abort"
             );
         }
-    }
-
-    /// The row set a replayed acceptance must redrive to re-derive its turn.
-    ///
-    /// A replayed acceptance whose row is already settled redrives the turn so
-    /// the store recognises the commit identity and replays its receipt
-    /// (ADR 0069 §6). That only works if the redrive materializes the same
-    /// words the first execution did, and the first execution may have absorbed
-    /// every earlier claimed row into the same turn. The durable applications
-    /// name that set: every row the settled row's turn applied, in durable
-    /// commit order. Each of them is settled by construction, so the same
-    /// no-op cancel probe the drive site already uses reads them back without
-    /// withdrawing anything.
-    ///
-    /// Application evidence also records *where* each row entered the turn. A
-    /// direct acceptance redrive reconstructs only the rows applied at the
-    /// same checkpoint as that acceptance (normally the initial `None` group);
-    /// checkpoint effects replay their own journaled claim sets later. Folding
-    /// a checkpoint-applied row into this initial set changes both the message
-    /// shape and the semantic commit identity.
-    ///
-    /// Reconstruction is fail-closed. Falling back to the settled row alone is
-    /// only sound when it was the whole initial group, which cannot be proven
-    /// without the durable applications. Refuse before executing the turn and
-    /// tell the operator which history must be restored instead of allowing a
-    /// bare commit-identity mismatch after provider work.
-    pub(super) async fn settled_turn_input_redrive_set(
-        &self,
-        store: &dyn crate::store::RuntimePersistence,
-        settled: &crate::PendingTurnInput,
-    ) -> Result<crate::UnclaimedTurnInputs, RuntimeError> {
-        let unavailable = |detail: String| {
-            RuntimeError::new(
-                RuntimeErrorCode::TurnInputRedriveSetUnavailable,
-                format!(
-                    "cannot rebuild redrive set for settled turn input `{}` in session `{}`: \
-                     {detail}; operator recovery: restore turn-input application history, then \
-                     redrive the same turn",
-                    settled.input_id, self.state.session_id
-                ),
-            )
-        };
-        let applications = store
-            .list_turn_input_applications(&self.state.session_id)
-            .await
-            .map_err(|err| unavailable(format!("application history read failed: {err}")))?;
-        let Some(settled_application) = applications
-            .iter()
-            .find(|application| application.input_id == settled.input_id)
-            .cloned()
-        else {
-            return Err(unavailable(
-                "the settled input has no durable application record".to_string(),
-            ));
-        };
-        let redrive_applications = applications
-            .iter()
-            .filter(|application| {
-                application.turn_id == settled_application.turn_id
-                    && application.checkpoint == settled_application.checkpoint
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut inputs = Vec::with_capacity(redrive_applications.len());
-        for application in &redrive_applications {
-            if application.input_id == settled.input_id {
-                inputs.push(settled.clone());
-                continue;
-            }
-            match store
-                .cancel_pending_turn_input(&self.state.session_id, &application.input_id)
-                .await
-            {
-                Ok(crate::PendingTurnInputCancelOutcome::AlreadyCompleted(sibling)) => {
-                    inputs.push(sibling);
-                }
-                Ok(outcome) => {
-                    return Err(unavailable(format!(
-                        "application sibling `{}` was not completed ({outcome:?})",
-                        application.input_id
-                    )));
-                }
-                Err(err) => {
-                    return Err(unavailable(format!(
-                        "application sibling `{}` could not be read: {err}",
-                        application.input_id
-                    )));
-                }
-            }
-        }
-        tracing::debug!(
-            session_id = %self.state.session_id,
-            turn_id = %settled_application.turn_id,
-            settled_input_id = %settled.input_id,
-            checkpoint = ?settled_application.checkpoint,
-            sibling_count = inputs.len() - 1,
-            event = "turn_input.redrive_set_recovered",
-            "replayed acceptance redrives the row set applied at its original checkpoint"
-        );
-        Ok(crate::UnclaimedTurnInputs {
-            session_id: self.state.session_id.clone(),
-            inputs,
-            applications: redrive_applications,
-        })
     }
 
     /// Drain-time backstop for inputs no turn can deliver (FIG-1573).

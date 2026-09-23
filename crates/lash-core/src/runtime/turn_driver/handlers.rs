@@ -269,9 +269,7 @@ impl RuntimeTurnDriver<'_> {
                     );
                     let applications = claim.applications.clone();
                     let accepted_turn_inputs = claim.accepted_turn_inputs();
-                    self.pending_turn_input_claims.push(
-                        crate::runtime::turn_input_ingress::TurnInputDrive::Claimed(claim),
-                    );
+                    self.pending_turn_input_claims.push(claim);
                     send_turn_input_applications(event_tx, applications).await;
                     if !accepted_turn_inputs.is_empty() {
                         send_session_event(
@@ -319,15 +317,10 @@ impl RuntimeTurnDriver<'_> {
                             .await
                             .map_err(crate::runtime::runtime_error_from_store_commit)?;
                     }
-                    let turn_input_claims = withheld
-                        .turn_inputs
-                        .iter()
-                        .filter_map(crate::runtime::turn_input_ingress::TurnInputDrive::as_claim)
-                        .cloned()
-                        .collect::<Vec<_>>();
+                    let turn_input_claims = &withheld.turn_inputs;
                     if !turn_input_claims.is_empty() {
                         store
-                            .abandon_turn_input_claims(&turn_input_claims)
+                            .abandon_turn_input_claims(turn_input_claims)
                             .await
                             .map_err(crate::runtime::runtime_error_from_store_commit)?;
                     }

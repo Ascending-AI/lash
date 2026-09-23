@@ -1608,6 +1608,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
+        | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
         | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
         | RuntimeEffectCommand::PresentToolResult { .. }

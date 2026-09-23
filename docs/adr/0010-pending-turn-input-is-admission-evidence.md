@@ -22,7 +22,7 @@ Pending Turn Input is runtime admission evidence for submitted user `TurnInput`.
 - Cancellation returns typed outcomes: cancelled, already claimed/accepted, already completed, already cancelled, or not found.
 - Cancelled and completed rows remain as tombstones so idempotency and cancellation outcomes stay observable until host-scheduled `RuntimePersistence::vacuum()` prunes them. Pending-list APIs hide terminal rows. They return every open row through a separate read projection: an unheld or reclaimable row is pending, while a claim matching the currently live Session Execution Lease generation is held and carries that lease's exact expiry. Held is not a persisted `TurnInputState` and does not infer that the holder process is alive.
 - Runtime suffix cancellation is same-session admission order only: the anchor row's `enqueue_seq` and all later pending-input records.
-- Lash does not copy Flue's submission journal. In-flight turn recovery remains durable effect-host replay; pending-input records cover admission, claim, cancellation, and terminal evidence.
+- Lash does not copy Flue's submission journal. In-flight turn recovery remains durable effect-host replay; pending-input records cover admission, claim, cancellation, and terminal evidence. Replay never consults pending-input records: a turn's initial drive set is journaled with its claim ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md) §6), so pruning terminal rows cannot change what a replay drives.
 
 ## Consequences
 

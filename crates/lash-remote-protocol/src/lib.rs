@@ -260,7 +260,11 @@ pub use usage_activity::*;
 // tool-result part carries no `content` string. A window-91 peer refuses the
 // block list and a window-92 peer refuses the retired string, so peers must
 // adopt 92.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 92;
+// Window 93: FIG-3532 adds the `queued` turn outcome and status: a direct
+// turn whose accepted input waits behind the claim bound returns a report
+// with `RemoteTurnOutcome::Queued { ahead }` instead of an error. A window-92
+// peer refuses the unknown tags, so peers must adopt 93.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 93;
 
 /// One versioned remote-protocol message.
 ///

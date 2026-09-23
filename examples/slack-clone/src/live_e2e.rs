@@ -1323,10 +1323,10 @@ async fn run_agent_turn(
                 agent: agent.to_string(),
             })
         }
-        lash::TurnOutcome::Stopped(_) => Err(FailureReason::Harness {
-            detail: format!("{agent} turn stopped: {:?}", turn.result.outcome),
-        }),
         lash::TurnOutcome::Finished(_) | lash::TurnOutcome::AgentFrameSwitch { .. } => Ok(()),
+        other => Err(FailureReason::Harness {
+            detail: format!("{agent} turn did not finish: {other:?}"),
+        }),
     }
 }
 

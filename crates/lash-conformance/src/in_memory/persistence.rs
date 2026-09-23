@@ -65,11 +65,20 @@ crate::checkpoint_claim_probe_tests!({
 });
 
 crate::direct_turn_acceptance_tests!({
-    (
-        (),
-        "in-memory",
-        Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
+    // Bound to its session like the durable fixtures, so session-scoped
+    // maintenance such as `vacuum()` has a scope.
+    let store = crate::SessionStoreFactory::create_store(
+        &crate::InMemorySessionStoreFactory::new(),
+        &crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from("root"),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        },
     )
+    .await
+    .expect("create the in-memory direct-turn acceptance store");
+    ((), "in-memory", store)
 });
 crate::cancelled_turn_withheld_input_tests!({
     (

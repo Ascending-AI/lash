@@ -61,6 +61,28 @@ finish(result);
     }
 }
 
+/// The live pass's store refuses every commit, so its worker dies at its final commit: every effect ran and was
+/// journaled, and nothing was committed.
+struct RefusesEveryCommitStore {
+    inner: Arc<dyn lash_core::RuntimePersistence>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::store::RuntimePersistenceDecorator for RefusesEveryCommitStore {
+    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn commit_runtime_state(
+        &self,
+        _commit: lash_core::store::RuntimeCommit,
+    ) -> Result<lash_core::store::RuntimeCommitReceipt, lash_core::StoreError> {
+        Err(lash_core::StoreError::Backend(
+            "the live worker died at its final commit".to_string(),
+        ))
+    }
+}
+
 struct ProductionToolCell {
     _dir: tempfile::TempDir,
     session_id: SessionId,
@@ -69,7 +91,6 @@ struct ProductionToolCell {
     initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
     runtime_store: Arc<dyn lash_core::RuntimePersistence>,
-    replay_store: Arc<dyn lash_core::RuntimePersistence>,
     plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     tool_executions: Arc<AtomicUsize>,
     llm_provider_calls: Arc<AtomicUsize>,
@@ -169,11 +190,6 @@ impl ProductionToolCell {
                 .expect("open production-path session store"),
         );
         let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
-        let replay_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(
-            lash_sqlite_store::Store::open(&dir.path().join("replay-session.db"))
-                .await
-                .expect("open production-path replay session store"),
-        );
         let policy = replay_test_policy(&session_id);
         let initial_state = replay_test_state(&session_id, &policy);
         Self {
@@ -184,7 +200,6 @@ impl ProductionToolCell {
             initial_state,
             host,
             runtime_store,
-            replay_store,
             plugin_factories,
             tool_executions,
             llm_provider_calls,
@@ -195,7 +210,7 @@ impl ProductionToolCell {
         &self,
         runtime: &mut lash_core::facade_support::LashRuntime,
         effect_host: &dyn EffectHost,
-    ) -> lash_core::facade_support::AssembledTurn {
+    ) -> Result<lash_core::facade_support::AssembledTurn, lash_core::RuntimeError> {
         let turn_scope = runtime.export_persistence_state().turn_scope(&self.turn_id);
         let scoped_effect_controller = effect_host
             .scoped(durable_admission(&turn_scope))
@@ -209,7 +224,6 @@ impl ProductionToolCell {
                 ),
             )
             .await
-            .expect("run production tool cell")
     }
 
     async fn run(&self, effect_host: &dyn EffectHost, start_replay: impl FnOnce()) {
@@ -218,32 +232,38 @@ impl ProductionToolCell {
             self.policy.clone(),
             self.initial_state.clone(),
             self.host.clone(),
-            Arc::clone(&self.runtime_store),
+            Arc::new(RefusesEveryCommitStore {
+                inner: Arc::clone(&self.runtime_store),
+            }),
             self.plugin_factories.clone(),
         )
         .await;
-        let live_turn = self.run_once(&mut live, effect_host).await;
-        assert!(matches!(
-            live_turn.outcome,
-            lash_core::facade_support::TurnOutcome::Finished(_)
-        ));
+        self.run_once(&mut live, effect_host)
+            .await
+            .expect_err("the live worker dies at its final commit");
         assert_eq!(
             self.tool_executions.load(Ordering::SeqCst),
             1,
             "the real caller must execute the first-party tool once on the live pass"
         );
 
+        // The replay is the same handler redriven against the same store: it
+        // drives the journaled acceptance and drive set (ADR 0069 §6), replays
+        // every journaled effect, and commits the turn the live pass could not.
         start_replay();
         let mut replay = replay_test_runtime_with_plugins(
             &self.session_id,
             self.policy.clone(),
             self.initial_state.clone(),
             self.host.clone(),
-            Arc::clone(&self.replay_store),
+            Arc::clone(&self.runtime_store),
             self.plugin_factories.clone(),
         )
         .await;
-        let replay_turn = self.run_once(&mut replay, effect_host).await;
+        let replay_turn = self
+            .run_once(&mut replay, effect_host)
+            .await
+            .expect("the replay commits the production tool cell");
         assert!(matches!(
             replay_turn.outcome,
             lash_core::facade_support::TurnOutcome::Finished(_)

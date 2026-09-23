@@ -408,6 +408,16 @@ pub enum RuntimeEffectCommand {
     AcceptTurnInput {
         draft: Box<crate::PendingTurnInputDraft>,
     },
+    /// Claim the initial drive set of the input `AcceptTurnInput` just admitted
+    /// (ADR 0069 §6). The outcome journals the claimed rows with their content
+    /// and claim token, exactly as a checkpoint journals its claim set, so a
+    /// replaying turn drives the same rows under the same authority and never
+    /// reads pending rows. The envelope names only the accepted input: the
+    /// lease fence and owner are captured by the local executor, so the
+    /// envelope hashes the same under every lease generation.
+    ClaimAcceptedTurnInput {
+        input_id: crate::InputId,
+    },
     Checkpoint {
         checkpoint: CheckpointKind,
     },
@@ -460,6 +470,7 @@ impl RuntimeEffectCommand {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
+            Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::Sleep { .. } => RuntimeEffectKind::Sleep,
@@ -1063,6 +1074,11 @@ pub enum RuntimeEffectOutcome {
     AcceptTurnInput {
         accepted: Box<crate::PendingTurnInput>,
     },
+    /// The accepted input's initial drive set, journaled so replay drives the
+    /// same rows under the same settlement authority (ADR 0069 §6).
+    ClaimAcceptedTurnInput {
+        drive: crate::AcceptedTurnInputDrive,
+    },
     Checkpoint {
         result: CheckpointOutcome,
         #[serde(default)]
@@ -1380,6 +1396,18 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    pub fn into_accepted_turn_input_drive(
+        self,
+    ) -> Result<crate::AcceptedTurnInputDrive, RuntimeEffectControllerError> {
+        match self {
+            Self::ClaimAcceptedTurnInput { drive } => Ok(drive),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::ClaimAcceptedTurnInput,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_exec_code(
         self,
     ) -> Result<Result<ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError> {
@@ -1470,6 +1498,7 @@ impl RuntimeEffectOutcome {
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
+            Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::Sleep => RuntimeEffectKind::Sleep,

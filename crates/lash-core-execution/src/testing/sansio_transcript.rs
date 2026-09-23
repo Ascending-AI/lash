@@ -221,6 +221,9 @@ fn outcome_entry(actor: Actor, outcome: &TurnOutcome) -> Entry {
             }
             entry
         }
+        TurnOutcome::Queued { ahead } => {
+            Entry::new(Kind::Outcome, actor, "turn.queued").attr(Attr::int("ahead", *ahead))
+        }
     }
 }
 

@@ -13,7 +13,7 @@ pub(in crate::runtime) struct TurnEffectStateUpdate {
     pub(super) reasoning_publication: crate::runtime::ReasoningPublicationState,
     pub(super) next_llm_ordinal: usize,
     pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
-    pub(super) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
+    pub(super) pending_turn_input_claims: Vec<crate::TurnInputClaim>,
     pub(super) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
     /// FIG-3157: work the local execution withheld from a terminal
     /// checkpoint delivery. It travels back on every outcome, failed ones

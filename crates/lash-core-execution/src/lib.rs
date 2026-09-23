@@ -745,13 +745,14 @@ pub use process_registry::{
 };
 pub(crate) use runtime::ToolAttemptEffectOutcome;
 pub use runtime::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, AdmittedScope,
-    AdmittedScopeError, ArtifactOwner, AssistantResponseHookEvents, AwaitEventKey,
-    AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
-    ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
-    CompletionKeyPreparation, DeclaredProcessIdentity, DeliveryPolicy, DrainMode, DrainModePolicy,
-    DrainedChild, EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership,
-    EffectHost, EffectJournalRetirement, EffectJournaling, EffectOpener, EffectOpenerError,
+    AbandonEvidence, AbandonRequest, AbandonWriter, AcceptedTurnInputDrive,
+    AcceptedTurnInputRefusal, AdmittedProcessIdentity, AdmittedScope, AdmittedScopeError,
+    ArtifactOwner, AssistantResponseHookEvents, AwaitEventKey, AwaitEventResolver,
+    AwaitEventWaitIdentity, BoundaryReason, CausalRef, ChargeSafetyRefusalEvidence,
+    CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime, CompletionKeyPreparation,
+    DeclaredProcessIdentity, DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild,
+    EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
+    EffectJournalRetirement, EffectJournaling, EffectOpener, EffectOpenerError,
     EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
     GroupChildBinding, GroupDrainReport, GroupExecutors, GroupFinalizationReport,
     GroupOnlyFinalization, GroupSettlement, GroupWakePolicy, HandleId,
@@ -815,12 +816,11 @@ pub use runtime::{
     TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
     TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
     TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-    UnclaimedTurnInputs, UnreportedLedgerAttempt, UnsettledEffectGroup, UsageDispositionError,
-    WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy, effect_groups_unsupported,
-    ensure_process_lease_schema_version,
+    UnreportedLedgerAttempt, UnsettledEffectGroup, UsageDispositionError, WaitKind, WaitState,
+    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier,
+    WorkerSweepPolicy, effect_groups_unsupported, ensure_process_lease_schema_version,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

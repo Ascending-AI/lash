@@ -2277,3 +2277,117 @@ pub(super) async fn segment_handover_records_the_successor_external_reference() 
         "the recorded reference must address the successor's workflow key"
     );
 }
+
+fn journaled_drive_claim(session_lease_generation: u64) -> lash_core::TurnInputClaim {
+    let session_id = SessionId::from("session");
+    lash_core::TurnInputClaim {
+        session_id: session_id.clone(),
+        claim_id: format!("claim-generation-{session_lease_generation}"),
+        owner: lash_core::LeaseOwnerIdentity::opaque("drive-owner", "drive-incarnation"),
+        lease_token: format!("token-generation-{session_lease_generation}"),
+        fencing_token: session_lease_generation,
+        session_lease_generation,
+        data: lash_core::TurnInputClaimData {
+            mode: lash_core::TurnInputClaimMode::NextTurn,
+            inputs: vec![lash_core::PendingTurnInput {
+                input_id: lash_core::InputId::from("in_7"),
+                session_id,
+                enqueue_seq: 7,
+                source_key: None,
+                state: lash_core::TurnInputState::DeferredNextTurn,
+                enqueued_at_ms: 0,
+                input: lash_core::TurnInput::text("deploy staging"),
+            }],
+            applications: Vec::new(),
+        },
+    }
+}
+
+fn drive_envelope() -> RuntimeEffectEnvelope {
+    let acceptance = lash_core::runtime::causal::turn_acceptance_effect_invocation(
+        &durable_turn_scope("session", "turn"),
+        &SessionId::from("session"),
+        &lash_core::TurnId::from("turn"),
+        1,
+    );
+    RuntimeEffectEnvelope::new(
+        lash_core::runtime::causal::turn_input_drive_effect_invocation(&acceptance),
+        RuntimeEffectCommand::ClaimAcceptedTurnInput {
+            input_id: lash_core::InputId::from("in_7"),
+        },
+    )
+}
+
+async fn execute_drive(
+    context: &Arc<ReplayableRecordingContext>,
+    live_generation: u64,
+    local_runs: &Arc<AtomicUsize>,
+) -> lash_core::AcceptedTurnInputDrive {
+    let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(context));
+    controller
+        .execute_effect(
+            drive_envelope(),
+            RuntimeEffectLocalExecutor::testing({
+                let local_runs = Arc::clone(local_runs);
+                move |_envelope| async move {
+                    local_runs.fetch_add(1, Ordering::SeqCst);
+                    Ok(RuntimeEffectOutcome::ClaimAcceptedTurnInput {
+                        drive: lash_core::AcceptedTurnInputDrive::Claimed {
+                            claim: Box::new(journaled_drive_claim(live_generation)),
+                        },
+                    })
+                }
+            }),
+        )
+        .await
+        .expect("the drive effect runs as a journaled Restate run")
+        .into_accepted_turn_input_drive()
+        .expect("the drive effect returns a drive")
+}
+
+/// FIG-3532: the initial drive set of an accepted turn input is a journaled
+/// Restate run. A replay under a later lease generation returns the drive the
+/// first execution journaled, with its original claim token, and never runs the
+/// live claim again.
+#[tokio::test]
+async fn accepted_turn_input_drive_replays_the_journaled_claim() {
+    let context = Arc::new(ReplayableRecordingContext::default());
+    let local_runs = Arc::new(AtomicUsize::new(0));
+    let first = execute_drive(&context, 3, &local_runs).await;
+    assert_eq!(local_runs.load(Ordering::SeqCst), 1);
+
+    context.start_replay();
+    let replayed = execute_drive(&context, 4, &local_runs).await;
+    assert_eq!(
+        local_runs.load(Ordering::SeqCst),
+        1,
+        "replay returns the journaled drive without claiming live rows"
+    );
+    let (
+        lash_core::AcceptedTurnInputDrive::Claimed { claim: first },
+        lash_core::AcceptedTurnInputDrive::Claimed { claim: replayed },
+    ) = (first, replayed)
+    else {
+        panic!("both executions drive a claim");
+    };
+    assert_eq!(replayed.session_lease_generation, 3);
+    assert_eq!(replayed.lease_token, first.lease_token);
+    assert_eq!(replayed.inputs[0].input_id, first.inputs[0].input_id);
+}
+
+/// FIG-3532: nothing about the lease that performs the claim enters the drive
+/// envelope, so the journaled entry hashes identically for every lease
+/// generation that replays it.
+#[test]
+fn accepted_turn_input_drive_envelope_hash_is_independent_of_lease_generation() {
+    let envelope = drive_envelope();
+    let canonical = serde_json::to_value(envelope.canonical_form().expect("canonical drive"))
+        .expect("encode canonical drive");
+    let encoded = canonical.to_string();
+    for lease_field in ["generation", "fencing", "lease", "owner", "claim_token"] {
+        assert!(
+            !encoded.contains(lease_field),
+            "the drive envelope must not carry `{lease_field}`: {encoded}"
+        );
+    }
+}

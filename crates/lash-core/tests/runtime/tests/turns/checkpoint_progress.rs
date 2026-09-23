@@ -1589,8 +1589,6 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
 
     let replay_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(JournalRedriveStore {
         inner: Arc::clone(&store),
-        application_history_available: true,
-        foreign_checkpoint_application: None,
     });
     let replayed = Box::pin(redrive_checkpoint_injected_turn(
         replay_store,
@@ -1619,81 +1617,61 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
 }
 
 #[tokio::test]
-pub(super) async fn checkpoint_injected_turn_redrive_refuses_when_application_history_is_unavailable()
- {
-    let turn_id = &TurnId::from("checkpoint-injected-redrive-refusal");
+pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driving() {
+    let turn_id = &TurnId::from("accepted-input-foreign-claim");
     let store = Arc::new(RecordingStore::default());
     let controller: Arc<dyn lash_core::RuntimeEffectController> =
         Arc::new(JournalReplayEffectController::default());
-    let (input, acceptance) = commit_checkpoint_injected_turn_for_redrive(
-        Arc::clone(&store),
-        Arc::clone(&controller),
-        turn_id,
+    let foreign: Arc<dyn lash_core::RuntimePersistence> = Arc::new(ForeignClaimBeforeDriveStore {
+        inner: Arc::clone(&store),
+    });
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        journal_replay_host(Arc::clone(&controller)),
+        foreign,
     )
     .await;
-    let unavailable: Arc<dyn lash_core::RuntimePersistence> = Arc::new(JournalRedriveStore {
-        inner: Arc::clone(&store),
-        application_history_available: false,
-        foreign_checkpoint_application: None,
-    });
-
-    let error = Box::pin(redrive_checkpoint_injected_turn(
-        unavailable,
+    let scope = lash_core::ScopedEffectController::shared(
         controller,
-        turn_id,
-        input,
-    ))
-    .await
-    .expect_err("redrive must stop before commit when its application set cannot be rebuilt");
-
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::TurnInputRedriveSetUnavailable,
-        "the refusal must be typed instead of surfacing a later commit-identity mismatch"
-    );
-    assert!(
-        error.message.contains(&*acceptance.input_id),
-        "the refusal must name the journaled acceptance that needs recovery: {error:?}"
-    );
-    assert!(
-        error
-            .message
-            .contains("restore turn-input application history, then redrive the same turn"),
-        "the refusal must name the operator recovery step: {error:?}"
-    );
-}
-
-#[tokio::test]
-pub(super) async fn journaled_acceptance_applied_by_a_foreign_turn_refuses_before_commit() {
-    let turn_id = &TurnId::from("checkpoint-injected-redrive-foreign-application");
-    let store = Arc::new(RecordingStore::default());
-    let controller: Arc<dyn lash_core::RuntimeEffectController> =
-        Arc::new(JournalReplayEffectController::default());
-    let (input, acceptance) = commit_checkpoint_injected_turn_for_redrive(
-        Arc::clone(&store),
-        Arc::clone(&controller),
-        turn_id,
+        lash_core::AdmittedScope::turn("root", turn_id),
     )
-    .await;
-    let foreign: Arc<dyn lash_core::RuntimePersistence> = Arc::new(JournalRedriveStore {
-        inner: Arc::clone(&store),
-        application_history_available: true,
-        foreign_checkpoint_application: Some((
-            acceptance.input_id.to_string(),
-            lash_core::TurnId::from("foreign-turn"),
-        )),
-    });
+    .expect("scope the ceding turn");
 
-    let error = Box::pin(redrive_checkpoint_injected_turn(
-        foreign, controller, turn_id, input,
-    ))
-    .await
-    .expect_err("a foreign checkpoint application must stop before commit");
+    let error = runtime
+        .stream_turn_with_agent_frames(
+            TurnInput::text("claimed out from under the acceptance"),
+            TurnOptions::new(CancellationToken::new(), scope),
+        )
+        .await
+        .expect_err("a live probe that finds the accepted row held elsewhere cedes");
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::TurnInputRedriveSetUnavailable,
-        "a journaled acceptance applied at another turn's checkpoint must be refused before commit, not surface StoreCommitFailed"
+        lash_core::RuntimeErrorCode::AcceptedTurnInputCeded,
+        "{error:?}"
+    );
+    let pending = lash_core::store::TurnInputStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("read pending inputs");
+    assert_eq!(
+        pending.len(),
+        1,
+        "the accepted row stays with its holder, neither withdrawn nor re-admitted: {pending:?}"
+    );
+    assert!(
+        lash_core::store::TurnInputStore::list_turn_input_applications(
+            store.as_ref(),
+            &SessionId::from("root"),
+        )
+        .await
+        .expect("read applications")
+        .is_empty(),
+        "the ceding turn commits nothing"
     );
 }
 

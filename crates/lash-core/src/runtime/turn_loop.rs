@@ -15,6 +15,7 @@ mod accept;
 mod commit;
 mod drain_end;
 mod execute;
+mod initial_drive;
 mod lease;
 mod post_commit;
 #[cfg(feature = "testing")]
@@ -64,20 +65,16 @@ pub(in crate::runtime) struct TurnLeaseScope<'lease> {
     pub(in crate::runtime) release_policy: SessionExecutionLeaseReleasePolicy,
 }
 
-/// How many pending next-turn inputs one idle claim absorbs into a single turn.
-///
-/// Direct and drained ingress share the bound because they share the claim
-/// (ADR 0069): a direct turn takes the head of the same queue a drain does.
-pub(super) const MAX_CLAIMED_TURN_INPUTS: usize = 64;
-
 /// Projects a terminal turn outcome onto the closed trace outcome.
 ///
 /// Cancellation is its own trace variant carrying the evidence
 /// [`TurnStop::Cancelled`] already holds, so a cancelled turn is never traced
 /// as a failure.
-fn trace_outcome(outcome: &TurnOutcome) -> lash_trace::TraceTurnOutcome {
+fn trace_outcome(outcome: &TurnOutcome) -> Option<lash_trace::TraceTurnOutcome> {
     use lash_trace::{TraceTurnCompletionReason as Reason, TraceTurnOutcome as Outcome};
-    match outcome {
+    Some(match outcome {
+        // A queued call ran no turn, so there is no completed turn to trace.
+        TurnOutcome::Queued { .. } => return None,
         TurnOutcome::Finished(TurnFinish::AssistantMessage { .. }) => Outcome::Completed {
             done_reason: Reason::AssistantMessage,
         },
@@ -134,7 +131,7 @@ fn trace_outcome(outcome: &TurnOutcome) -> lash_trace::TraceTurnOutcome {
                 },
             }
         }
-    }
+    })
 }
 
 pub(super) fn post_commit_delivery_issue(

@@ -1869,10 +1869,11 @@ pub(super) fn journal_replay_host(
     host
 }
 
+/// A workflow replay's view of the store: it resumes from the invocation's
+/// pre-commit resident state while the store already contains the first
+/// execution's commit.
 pub(super) struct JournalRedriveStore {
     pub(super) inner: Arc<RecordingStore>,
-    pub(super) application_history_available: bool,
-    pub(super) foreign_checkpoint_application: Option<(String, lash_core::TurnId)>,
 }
 
 #[async_trait::async_trait]
@@ -1884,34 +1885,48 @@ impl lash_core::store::RuntimePersistenceDecorator for JournalRedriveStore {
     async fn load_session(
         &self,
     ) -> Result<Option<lash_core::store::PersistedSessionRead>, lash_core::StoreError> {
-        // A workflow replay resumes from the invocation's pre-commit resident
-        // state while the store already contains the first execution's commit.
         Ok(None)
     }
+}
 
-    async fn list_turn_input_applications(
+/// Lets a foreign driver claim every open next-turn row under the live lease
+/// generation right before this runtime's own claim, so the accepted row is
+/// held by someone else when the drive probes it.
+pub(super) struct ForeignClaimBeforeDriveStore {
+    pub(super) inner: Arc<RecordingStore>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::store::RuntimePersistenceDecorator for ForeignClaimBeforeDriveStore {
+    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::TurnInputApplication>, lash_core::StoreError> {
-        if self.application_history_available {
-            let mut applications = lash_core::store::TurnInputStore::list_turn_input_applications(
-                self.inner.as_ref(),
-                session_id,
-            )
-            .await?;
-            if let Some((input_id, turn_id)) = &self.foreign_checkpoint_application {
-                let application = applications
-                    .iter_mut()
-                    .find(|application| application.input_id == *input_id)
-                    .expect("foreign checkpoint application input is retained");
-                application.turn_id = turn_id.clone();
-                application.checkpoint = Some(lash_core::CheckpointKind::BeforeCompletion);
-            }
-            return Ok(applications);
-        }
-        Err(lash_core::StoreError::Backend(
-            "simulated unavailable turn-input application history".to_string(),
-        ))
+        session_execution_lease: &lash_core::SessionExecutionLeaseAuthority,
+        owner: &lash_core::LeaseOwnerIdentity,
+        max_inputs: usize,
+    ) -> Result<Option<lash_core::TurnInputClaim>, lash_core::StoreError> {
+        let foreign =
+            lash_core::LeaseOwnerIdentity::opaque("foreign-driver", "foreign-incarnation");
+        lash_core::store::TurnInputStore::claim_next_turn_inputs(
+            self.inner.as_ref(),
+            session_id,
+            session_execution_lease,
+            &foreign,
+            max_inputs,
+        )
+        .await?;
+        lash_core::store::TurnInputStore::claim_next_turn_inputs(
+            self.inner.as_ref(),
+            session_id,
+            session_execution_lease,
+            owner,
+            max_inputs,
+        )
+        .await
     }
 }
 

@@ -29,6 +29,7 @@ pub struct QueuedWorkBatchingConfig {
     action_token_reserve: std::num::NonZeroUsize,
     max_rows: std::num::NonZeroUsize,
     max_pending_age: std::time::Duration,
+    max_turn_input_claim: std::num::NonZeroUsize,
     /// `None` selects the documented Lash default,
     /// [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime), so the
     /// configuration stays `const`-constructible.
@@ -46,6 +47,7 @@ impl PartialEq for QueuedWorkBatchingConfig {
         self.action_token_reserve == other.action_token_reserve
             && self.max_rows == other.max_rows
             && self.max_pending_age == other.max_pending_age
+            && self.max_turn_input_claim == other.max_turn_input_claim
             && std::sync::Arc::ptr_eq(&self.drain_policy(), &other.drain_policy())
     }
 }
@@ -63,6 +65,11 @@ impl QueuedWorkBatchingConfig {
     /// Hosts may replace this latency bound with
     /// [`Self::with_max_pending_age`].
     pub const DEFAULT_MAX_PENDING_AGE: std::time::Duration = std::time::Duration::from_secs(30);
+    /// Default upper bound on pending next-turn inputs one idle claim absorbs
+    /// into a single turn.
+    ///
+    /// Hosts may replace it with [`Self::with_max_turn_input_claim`].
+    pub const DEFAULT_MAX_TURN_INPUT_CLAIM: usize = 64;
 
     /// These bounds apply to fresh claims. Redriving an interrupted claim keeps
     /// its already-journaled composition intact.
@@ -83,6 +90,8 @@ impl QueuedWorkBatchingConfig {
             max_rows: std::num::NonZeroUsize::new(Self::DEFAULT_MAX_ROWS)
                 .expect("default queued-work row bound is non-zero"),
             max_pending_age: Self::DEFAULT_MAX_PENDING_AGE,
+            max_turn_input_claim: std::num::NonZeroUsize::new(Self::DEFAULT_MAX_TURN_INPUT_CLAIM)
+                .expect("default turn-input claim bound is non-zero"),
             drain_policy: None,
         }
     }
@@ -151,6 +160,32 @@ impl QueuedWorkBatchingConfig {
     /// larger than the entire context is refused and left pending.
     pub const fn action_token_reserve(&self) -> usize {
         self.action_token_reserve.get()
+    }
+
+    /// Sets the maximum number of pending next-turn inputs one idle claim
+    /// absorbs into a single turn.
+    ///
+    /// Direct and drained ingress share the bound because they share the claim
+    /// (ADR 0069): a direct turn takes the head of the same queue a drain does.
+    /// A direct turn whose accepted input sits further back than this bound
+    /// drives nothing and reports the input as queued; the drain answers it in
+    /// arrival order.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `max_inputs` is zero.
+    pub const fn with_max_turn_input_claim(mut self, max_inputs: usize) -> Self {
+        let Some(max_inputs) = std::num::NonZeroUsize::new(max_inputs) else {
+            panic!("turn-input claim bound must be non-zero");
+        };
+        self.max_turn_input_claim = max_inputs;
+        self
+    }
+
+    /// Returns the maximum number of pending next-turn inputs one idle claim
+    /// absorbs into a single turn.
+    pub const fn max_turn_input_claim(&self) -> usize {
+        self.max_turn_input_claim.get()
     }
 
     /// Returns the maximum number of compatible rows in one fresh claim.

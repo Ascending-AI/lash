@@ -128,11 +128,11 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// the *current* catalog, so these are exactly the artifacts its refusal must
 /// enumerate.
 ///
-/// The retained 116 -> 117 generation versioned the runtime-commit receipt
-/// payload and introduced no relation or constraint. Component 118
-/// (FIG-3544) is destructive: no 117 → 118 arm exists, so the component-117
-/// stamp over the current catalog is refused for having no applicable
-/// migration and names no artifacts.
+/// The retained 117 -> 118 generation added the FIG-3544 submission columns
+/// and introduced no relation or constraint. Component 119 (FIG-3532) is
+/// destructive: no 118 → 119 arm exists, so the component-118 stamp over the
+/// current catalog is refused for having no applicable migration and names no
+/// artifacts.
 const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A destructive generation has no migration arm, so a predecessor stamp over
 /// the current catalog is refused at the ordinary reject-and-recreate

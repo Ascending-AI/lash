@@ -24,10 +24,10 @@ async fn postgres_refuses_pre_submission_digest_catalog_at_open() {
         .await
         .expect("connect postgres");
     let pool = storage.pool().clone();
-    assert_eq!(
-        PostgresStorage::schema_version(),
-        PRE_SUBMISSION_DIGEST_COMPONENT_VERSION + 1,
-        "this gate pins the boundary component 118 introduced"
+    assert!(
+        PostgresStorage::schema_version() > PRE_SUBMISSION_DIGEST_COMPONENT_VERSION,
+        "this gate pins the boundary component 118 introduced, which every later \
+         component keeps"
     );
 
     // The component-117 shape of the pending-input table, stamped as 117.

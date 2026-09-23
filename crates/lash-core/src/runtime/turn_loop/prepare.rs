@@ -15,7 +15,7 @@ pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) cancel: CancellationToken,
     pub(in crate::runtime) queued_claims: Vec<crate::QueuedWorkClaim>,
-    pub(in crate::runtime) turn_input_claims: Vec<super::turn_input_ingress::TurnInputDrive>,
+    pub(in crate::runtime) turn_input_claims: Vec<crate::TurnInputClaim>,
     pub(in crate::runtime) materialize_initial_claims: bool,
     pub(in crate::runtime) lease: TurnLeaseScope<'sinks>,
 }
@@ -70,7 +70,7 @@ impl LashRuntime {
         let pending_turn_input = materialize_initial_claims
             .then(|| turn_input_claims.first())
             .flatten()
-            .map(super::turn_input_ingress::TurnInputDrive::materialize_turn_input);
+            .map(crate::TurnInputClaim::materialize_turn_input);
         if let Some(work) = pending_turn_input.as_ref()
             && input.items.is_empty()
         {
@@ -250,7 +250,7 @@ impl LashRuntime {
 
         let turn_input_id = turn_input_claims
             .iter()
-            .flat_map(|drive| drive.inputs().iter().map(|input| input.input_id.clone()))
+            .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.clone()))
             .next();
         let user_id = turn_input_id
             .as_deref()
@@ -298,9 +298,8 @@ impl LashRuntime {
         }
         let mut initial_turn_input_applications = Vec::new();
         for claim in &mut turn_input_claims {
-            claim
-                .record_initial_turn_application(&crate::TurnId::from(&trace_turn_id), &user_id)?;
-            initial_turn_input_applications.extend(claim.applications().to_vec());
+            claim.record_initial_turn_application(&crate::TurnId::from(&trace_turn_id), &user_id);
+            initial_turn_input_applications.extend(claim.applications.iter().cloned());
         }
         if !initial_turn_input_applications.is_empty() {
             emit_turn_activity_to_sink_for_turn(

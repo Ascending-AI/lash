@@ -809,64 +809,46 @@ pub(crate) fn source_key_display_id(source: &str) -> String {
         .to_string()
 }
 
-/// Turn-input rows a turn accepted itself and drives without a claim.
+/// The initial drive set of an accepted turn input, as the
+/// `ClaimAcceptedTurnInput` runtime effect journals it (ADR 0069 §6).
 ///
-/// The unclaimed half of a turn's drive: the rows exist durably before the
-/// turn executes, exactly as a claimed row does, but no session-execution lease
-/// fences them. Their settlement is decided by the head CAS alone
-/// ([ADR 0069 §5](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)).
+/// It is a self-contained authority snapshot: a claimed drive carries the rows
+/// with their content and claim token, a queued drive records how far back in
+/// the queue the accepted row waits, and a refusal names why the turn cedes.
+/// Replay returns this value and never reconstructs it from pending rows, so
+/// `vacuum()` pruning terminal rows cannot change what a replayed turn does.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct UnclaimedTurnInputs {
-    pub session_id: SessionId,
-    pub inputs: Vec<PendingTurnInput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub applications: Vec<TurnInputApplication>,
+#[serde(tag = "drive", rename_all = "snake_case")]
+pub enum AcceptedTurnInputDrive {
+    /// The claim reached the accepted row: drive every claimed row and settle
+    /// them under the claim predicate.
+    Claimed { claim: Box<TurnInputClaim> },
+    /// The accepted row is open but sits behind more earlier admissions than
+    /// one claim absorbs. Nothing is driven and nothing is dropped: the row
+    /// stays queued in arrival order and the next drains answer it.
+    Queued {
+        /// Open next-turn rows admitted before the accepted one.
+        ahead: u64,
+    },
+    /// The accepted row cannot be driven by this turn.
+    Refused { refusal: AcceptedTurnInputRefusal },
 }
-impl UnclaimedTurnInputs {
-    /// Exposes settlement to store and durable-substrate implementors driving
-    /// rows they accepted themselves.
-    pub fn completion(&self) -> TurnInputCompletion {
-        TurnInputCompletion {
-            session_id: self.session_id.clone(),
-            claim: None,
-            data: TurnInputCompletionData {
-                input_ids: self
-                    .inputs
-                    .iter()
-                    .map(|input| input.input_id.clone())
-                    .collect(),
-                applications: self.applications.clone(),
-            },
-        }
-    }
 
-    pub fn record_initial_turn_application(
-        &mut self,
-        turn_id: &crate::TurnId,
-        committed_message_id: &str,
-    ) -> Result<(), crate::RuntimeError> {
-        if !self.applications.is_empty() {
-            if !self.applications.iter().all(|application| {
-                application.turn_id == *turn_id
-                    && application.committed_message_id == committed_message_id
-                    && application.checkpoint.is_none()
-            }) {
-                return Err(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::TurnInputRedriveSetUnavailable,
-                    format!(
-                        "cannot apply retained turn-input redrive set for session `{}` as the \
-                         initial group of turn `{turn_id}`: its durable applications belong to \
-                         another turn or checkpoint",
-                        self.session_id
-                    ),
-                ));
-            }
-            return Ok(());
-        }
-        self.applications = initial_turn_applications(&self.inputs, turn_id, committed_message_id);
-        Ok(())
-    }
+/// Why an accepted turn input's first execution ceded instead of driving it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcceptedTurnInputRefusal {
+    /// The accepted row is held by a claim of the live lease generation that
+    /// is not this drive's. The drive's turn holds that lease, so the holder is
+    /// another claim of the same lane: an earlier run of this drive body, or a
+    /// claim whose hand-back failed. The row stays claim-pinned until that
+    /// claim settles or the generation turns over, and is then drained.
+    HeldByLiveClaim,
+    /// The accepted row is no longer open: another driver settled it, the host
+    /// cancelled it, or `vacuum()` pruned it after either.
+    SettledOrRemoved,
 }
+
 fn initial_turn_applications(
     inputs: &[PendingTurnInput],
     turn_id: &crate::TurnId,

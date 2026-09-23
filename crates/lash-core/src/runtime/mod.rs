@@ -369,13 +369,13 @@ pub use turn_input_ingress::ingress_message_id;
 #[cfg(not(feature = "testing"))]
 pub use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
-    QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
-    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
-    TurnInputState, TurnInputStateKind, UnclaimedTurnInputs,
+    AcceptedTurnInputDrive, AcceptedTurnInputRefusal, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,
+    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput,
+    TurnInputAcceptanceReceipt, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
+    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
+    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, TurnInputStateKind,
 };
 pub use turn_loop::ensure_durable_effect_input;
 #[cfg(feature = "testing")]
@@ -543,6 +543,12 @@ pub struct LashRuntime {
     /// ledger's unreported rows; this is the attribution a later
     /// [`LashRuntime::reconcile_unreported_usage`] needs.
     pub unreported_usage_attempts: Vec<UnreportedUsageAttempt>,
+    /// Claim ids of the journaled initial drive set the running direct turn
+    /// replays (ADR 0069 §6). Such a claim is exempt from the
+    /// recovered-settlement drop: if its rows were reclaimed while the turn was
+    /// down, another driver answered them, so the turn cedes at commit instead
+    /// of committing the same words without a settlement.
+    pub(crate) journaled_drive_claims: std::collections::BTreeSet<String>,
 }
 
 #[cfg(any(test, feature = "testing"))]

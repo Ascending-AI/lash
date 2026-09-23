@@ -45,22 +45,22 @@ pub enum RuntimeErrorCode {
     /// retry policy - the runtime deliberately stops waiting instead of
     /// blocking one invocation indefinitely.
     SessionExecutionLaneBusy,
-    /// A turn that drove the acceptance it minted, without a claim on it, lost
-    /// the head CAS to whoever holds or already settled that row (ADR 0069
-    /// §5). The drive attempt is retired as superseded: no durable record was
-    /// written, the settlement is never retried under a new authority, and the
-    /// row stays exactly where recovery expects to find it. Re-running the
-    /// identical turn is explicitly safe and is how the result is obtained -
-    /// the journaled acceptance re-derives the same admission, so a re-run
-    /// either drives the row or finds it settled and replays the original
-    /// commit's receipt rather than duplicating it (ADR 0069 §6).
+    /// A claim-less turn-input settlement lost the head CAS to whoever holds or
+    /// already settled that row (ADR 0069 §5): no durable record was written.
+    /// Since the initial drive set is journaled with its claim (ADR 0069 §6),
+    /// no runtime path settles without a claim; the store still verifies the
+    /// claim-less predicate, and this code maps its refusal. The FIG-3540
+    /// ingress cutover deletes claim-less settlement together with this code.
     TurnInputSettlementSuperseded,
-    /// A replayed acceptance was already settled, but the durable application
-    /// records needed to reconstruct its original turn-input set were missing,
-    /// unreadable, or inconsistent. Retrying unchanged cannot repair the
-    /// history; an operator must restore the application records before
-    /// redriving the same turn.
-    TurnInputRedriveSetUnavailable,
+    /// The journaled initial drive of a turn cannot drive the input that turn
+    /// accepted: another claim of the live lease generation holds it; it is no
+    /// longer open because it was settled, cancelled, or pruned by `vacuum()`;
+    /// or, on a replay, a recovery drain reclaimed the journaled rows before the
+    /// turn could commit them. Nothing is committed. The drive is a journaled
+    /// effect (ADR 0069 §6), so re-running the same turn cedes the same way; the
+    /// accepted input is answered, if at all, by the driver that holds or
+    /// settled it.
+    AcceptedTurnInputCeded,
     /// A turn was attempted on a runtime opened with
     /// `ToolSurfaceOpenMode::PreservePersisted` (FIG-3353). That open declared
     /// it would not run a turn: its tool surface was never reconciled and no
@@ -487,7 +487,7 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
-            Self::TurnInputRedriveSetUnavailable => "turn_input_redrive_set_unavailable",
+            Self::AcceptedTurnInputCeded => "accepted_turn_input_ceded",
             Self::TurnExecutionRequiresReconciledToolSurface => {
                 "turn_execution_requires_reconciled_tool_surface"
             }
@@ -778,7 +778,7 @@ impl RuntimeErrorCode {
             | Self::MissingExecutionScopeId
             | Self::ExecutionScopeTurnIdMismatch
             | Self::ExecutionScopeAdmissionRefused
-            | Self::TurnInputRedriveSetUnavailable
+            | Self::AcceptedTurnInputCeded
             | Self::TurnExecutionRequiresReconciledToolSurface
             | Self::QueuedRunFailed
             | Self::QueuedRunConfigurationChanged
@@ -963,7 +963,7 @@ impl RuntimeErrorCode {
         Self::SessionExecutionLeaseLost,
         Self::SessionExecutionLaneBusy,
         Self::TurnInputSettlementSuperseded,
-        Self::TurnInputRedriveSetUnavailable,
+        Self::AcceptedTurnInputCeded,
         Self::TurnExecutionRequiresReconciledToolSurface,
         Self::StoreCommitContended,
         Self::QueuedRunPending,
@@ -1161,7 +1161,7 @@ impl RuntimeErrorCode {
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,
-            "turn_input_redrive_set_unavailable" => Self::TurnInputRedriveSetUnavailable,
+            "accepted_turn_input_ceded" => Self::AcceptedTurnInputCeded,
             "turn_execution_requires_reconciled_tool_surface" => {
                 Self::TurnExecutionRequiresReconciledToolSurface
             }
