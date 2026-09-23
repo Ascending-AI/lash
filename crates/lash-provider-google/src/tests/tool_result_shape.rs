@@ -8,6 +8,20 @@ use lash_core::facade_support::ModelToolReturnPart;
 const PNG: &[u8] = &[1, 2, 3, 4];
 
 fn contents(dialect: GoogleDialect) -> Vec<Value> {
+    contents_with(
+        dialect,
+        vec![
+            ModelToolReturnPart::text("[\"before\","),
+            ModelToolReturnPart::Attachment(AttachmentSource::inline(
+                lash_core::MediaType::parse("image/png").unwrap(),
+                PNG.to_vec(),
+            )),
+            ModelToolReturnPart::text(",\"after\"]"),
+        ],
+    )
+}
+
+fn contents_with(dialect: GoogleDialect, content: Vec<ModelToolReturnPart>) -> Vec<Value> {
     let mut req = request(None);
     req.model_capability.google_dialect = dialect;
     req.messages = vec![
@@ -25,14 +39,7 @@ fn contents(dialect: GoogleDialect) -> Vec<Value> {
             vec![LlmContentBlock::ToolResult {
                 call_id: "call_1".into(),
                 tool_name: Some("shot".into()),
-                content: vec![
-                    ModelToolReturnPart::text("[\"before\","),
-                    ModelToolReturnPart::Attachment(AttachmentSource::inline(
-                        lash_core::MediaType::parse("image/png").unwrap(),
-                        PNG.to_vec(),
-                    )),
-                    ModelToolReturnPart::text(",\"after\"]"),
-                ],
+                content,
             }],
         ),
     ];
@@ -92,7 +99,49 @@ fn legacy_text_image_text_result_is_one_function_response_then_the_image() {
                     }
                 },
                 {"text": "Attachments from tool result call_1:"},
+                {"text": "[Attachment 1]"},
                 inline_png(),
+            ],
+        })
+    );
+}
+
+#[test]
+fn gemini3_keeps_audio_out_of_the_function_response() {
+    let audio = AttachmentSource::inline(
+        lash_core::MediaType::parse("audio/mpeg").unwrap(),
+        vec![9, 9],
+    );
+    let contents = contents_with(
+        GoogleDialect::Gemini3,
+        vec![
+            ModelToolReturnPart::text("clip"),
+            ModelToolReturnPart::Attachment(audio),
+            ModelToolReturnPart::Attachment(AttachmentSource::inline(
+                lash_core::MediaType::parse("image/png").unwrap(),
+                PNG.to_vec(),
+            )),
+        ],
+    );
+    assert_eq!(
+        contents[1],
+        json!({
+            "role": "user",
+            "parts": [
+                {
+                    "functionResponse": {
+                        "id": "call_1",
+                        "name": "shot",
+                        "response": {"output": "clip\n[Attachment 1]\n[Attachment 2]"},
+                        "parts": [inline_png()],
+                    }
+                },
+                {"text": "Attachments from tool result call_1:"},
+                {"text": "[Attachment 1]"},
+                {"inlineData": {
+                    "mimeType": "audio/mpeg",
+                    "data": base64::engine::general_purpose::STANDARD.encode([9u8, 9]),
+                }},
             ],
         })
     );

@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/remote-session-observation-event/v91",
+  "$id": "https://lash.dev/schemas/remote-session-observation-event/v92",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "EffectAddress": {
@@ -923,8 +923,22 @@
             }
           ]
         },
+        "blocks": {
+          "description": "A tool result's ordered text and attachment blocks.",
+          "items": {
+            "$ref": "#/definitions/RemoteToolResultBlock"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "content": {
-          "type": "string"
+          "description": "The part's text; absent on a tool result, whose content is `blocks`.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "id": {
           "type": "string"
@@ -976,7 +990,6 @@
         }
       },
       "required": [
-        "content",
         "id",
         "kind"
       ],
@@ -1813,6 +1826,47 @@
           },
           "required": [
             "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteToolResultBlock": {
+      "description": "One ordered block of a tool result: text, or an attachment at the position the tool's value placed it.",
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "source": {
+              "$ref": "#/definitions/RemoteAttachmentSource"
+            },
+            "type": {
+              "enum": [
+                "attachment"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "type"
           ],
           "type": "object"
         }
@@ -2755,6 +2809,6 @@
   ],
   "title": "RemoteSessionObservationEvent",
   "type": "object",
-  "x-lash-schema-version": 91,
+  "x-lash-schema-version": 92,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

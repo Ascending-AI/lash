@@ -230,10 +230,12 @@ impl GoogleOAuthProvider {
                         tool_name,
                     } => {
                         // One function response per call. Its text keeps
-                        // `[Attachment N]` markers where attachments sat;
-                        // the attachments ride inside the response on Gemini 3
-                        // and follow it, in marker order, as user parts
-                        // otherwise.
+                        // `[Attachment N]` markers where attachments sat. On
+                        // Gemini 3 the attachments Google accepts inside a
+                        // function response ride in its `parts`; every other
+                        // attachment (and all of them on older dialects)
+                        // follows the response as user parts, each after its
+                        // marker.
                         let mut response = json!({
                             "functionResponse": {
                                 "id": call_id,
@@ -241,22 +243,32 @@ impl GoogleOAuthProvider {
                                 "response": { "output": tool_result_text(content) },
                             }
                         });
-                        let media: Vec<Value> = content
+                        let mut inside = Vec::new();
+                        let mut after = Vec::new();
+                        for (index, source) in content
                             .iter()
                             .filter_map(ModelToolReturnPart::attachment)
-                            .map(attachment_part)
-                            .collect();
-                        if media.is_empty() {
-                            parts.push(response);
-                        } else if multimodal_function_response {
-                            response["functionResponse"]["parts"] = Value::Array(media);
-                            parts.push(response);
-                        } else {
-                            parts.push(response);
+                            .enumerate()
+                        {
+                            if multimodal_function_response
+                                && function_response_part_accepts(source)
+                            {
+                                inside.push(attachment_part(source));
+                            } else {
+                                after
+                                    .push(json!({ "text": format!("[Attachment {}]", index + 1) }));
+                                after.push(attachment_part(source));
+                            }
+                        }
+                        if !inside.is_empty() {
+                            response["functionResponse"]["parts"] = Value::Array(inside);
+                        }
+                        parts.push(response);
+                        if !after.is_empty() {
                             parts.push(json!({
                                 "text": format!("Attachments from tool result {call_id}:")
                             }));
-                            parts.extend(media);
+                            parts.extend(after);
                         }
                     }
                     LlmContentBlock::Reasoning { text, replay, .. } => {
@@ -510,4 +522,16 @@ impl GoogleOAuthProvider {
             .with_kind(ProviderFailureKind::Validation)
         })
     }
+}
+
+/// Whether Gemini accepts `source` as a multimodal function-response part.
+/// Google documents images (PNG, JPEG, WebP) and documents (PDF, plain text)
+/// there; audio, video and anything else must travel as ordinary user parts.
+fn function_response_part_accepts(source: &AttachmentSource) -> bool {
+    source.media_type().is_some_and(|media_type| {
+        matches!(
+            media_type.as_str(),
+            "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain"
+        )
+    })
 }

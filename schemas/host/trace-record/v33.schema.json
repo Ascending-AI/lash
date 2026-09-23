@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/trace-record/v32",
+  "$id": "https://lash.dev/schemas/trace-record/v33",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "AttachmentMaterializationReason": {
@@ -831,7 +831,10 @@
               ]
             },
             "content": {
-              "type": "string"
+              "items": {
+                "$ref": "#/definitions/TraceToolResultBlock"
+              },
+              "type": "array"
             },
             "kind": {
               "enum": [
@@ -2722,6 +2725,47 @@
       ],
       "type": "string"
     },
+    "TraceToolResultBlock": {
+      "description": "One ordered block of a traced tool result: text, or an attachment at the position the tool's value placed it.",
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "attachment"
+              ],
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/definitions/TraceAttachment"
+            }
+          },
+          "required": [
+            "kind",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TraceToolSpec": {
       "properties": {
         "description": {
@@ -3910,7 +3954,7 @@
     },
     "schema_version": {
       "enum": [
-        32
+        33
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -3929,6 +3973,6 @@
   ],
   "title": "TraceRecord",
   "type": "object",
-  "x-lash-schema-version": 32,
+  "x-lash-schema-version": 33,
   "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
 }

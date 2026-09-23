@@ -1019,3 +1019,48 @@ fn legacy_flat_json_pairs_rejected_when_the_kind_cannot_carry_the_field() {
     let lone = r#"{"id":"m.p0","kind":"Attachment","content":"","tool_call_id":"call-1"}"#;
     serde_json::from_str::<Part>(lone).expect_err("attachment tool_call_id must fail");
 }
+
+#[test]
+fn tool_result_attachments_are_counted_and_distinctly_identified() {
+    let first = AttachmentSource::stored(test_attachment_ref(1));
+    let second = AttachmentSource::stored(test_attachment_ref(2));
+    let result = Part::tool_result(
+        "m1.p0".into(),
+        vec![
+            crate::ModelToolReturnPart::Attachment(first.clone()),
+            crate::ModelToolReturnPart::text("between"),
+            crate::ModelToolReturnPart::Attachment(second.clone()),
+        ],
+        "call-1".into(),
+        "shot".into(),
+    );
+    assert_eq!(
+        result.identified_attachment_sources(),
+        vec![
+            ("m1.p0#1".to_string(), &first),
+            ("m1.p0#2".to_string(), &second),
+        ]
+    );
+    let msgs = vec![
+        Message {
+            id: "m0".into(),
+            role: MessageRole::Assistant,
+            parts: vec![Part::tool_call(
+                "m0.p0".into(),
+                "{}".into(),
+                "call-1".into(),
+                "shot".into(),
+                None,
+            )]
+            .into(),
+            origin: None,
+        },
+        Message {
+            id: "m1".into(),
+            role: MessageRole::User,
+            parts: vec![result].into(),
+            origin: None,
+        },
+    ];
+    assert_eq!(render_prompt(&msgs).attachments(), vec![&first, &second]);
+}

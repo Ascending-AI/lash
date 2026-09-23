@@ -1781,3 +1781,114 @@ fn recovered_settlement_attempts_are_capped_by_original_rows() {
         assert!(!budget.consume(), "spent budget cannot reopen");
     }
 }
+
+/// FIG-3515 Done-when: after a tool value that embeds an attachment, the
+/// next turn's prepared checkpoint and progress boundary still advance. The
+/// result is one part with ordered blocks, so the history the gates check
+/// stays resume-safe and the new turn's input and executed call reach the
+/// draft instead of being skipped.
+#[tokio::test]
+async fn gates_advance_after_an_attachment_bearing_tool_result() {
+    let call = |message_id: &str, call_id: &str| Message {
+        id: message_id.to_string(),
+        role: MessageRole::Assistant,
+        parts: shared_parts(vec![Part::tool_call(
+            format!("{message_id}.p0"),
+            "{}".to_string(),
+            call_id.to_string(),
+            "shot".to_string(),
+            None,
+        )]),
+        origin: None,
+    };
+    let result = |message_id: &str, call_id: &str, content| Message {
+        id: message_id.to_string(),
+        role: MessageRole::User,
+        parts: shared_parts(vec![Part::tool_result(
+            format!("{message_id}.p0"),
+            content,
+            call_id.to_string(),
+            "shot".to_string(),
+        )]),
+        origin: None,
+    };
+    let image = crate::AttachmentSource::inline(
+        crate::MediaType::parse("image/png").expect("png"),
+        vec![1, 2, 3, 4],
+    );
+    let turn_one = vec![
+        text_message("u1", MessageRole::User, "return the array"),
+        call("a1", "turn-one-call"),
+        result(
+            "r1",
+            "turn-one-call",
+            vec![
+                crate::ModelToolReturnPart::text("[\"before\","),
+                crate::ModelToolReturnPart::Attachment(image),
+                crate::ModelToolReturnPart::text(",\"after\"]"),
+            ],
+        ),
+        text_message("a1-done", MessageRole::Assistant, "turn one done"),
+    ];
+    let mut prepared = turn_one.clone();
+    prepared.push(text_message("u2", MessageRole::User, "turn two input"));
+
+    let mut pipeline = TurnBoundary::from_state(state_with_graph(SessionGraph::default()));
+    pipeline
+        .prepared_checkpoint(
+            SessionPolicy::new(UNBOUNDED),
+            7,
+            &MessageSequence::from_base(prepared.clone().into()),
+            None,
+        )
+        .await
+        .expect("prepared checkpoint");
+    assert_eq!(
+        pipeline.state().turn_index,
+        7,
+        "the prepared checkpoint advanced"
+    );
+    assert!(
+        pipeline
+            .message_sequence()
+            .iter()
+            .any(|message| message.id == "u2"),
+        "turn 2's input is in the prepared checkpoint"
+    );
+
+    let mut progressed = prepared;
+    progressed.push(call("a2", "turn-two-call"));
+    progressed.push(result(
+        "r2",
+        "turn-two-call",
+        vec![crate::ModelToolReturnPart::text("ok")],
+    ));
+    let boundary = pipeline
+        .progress_boundary_with_snapshot(ProgressBoundarySnapshot {
+            policy: SessionPolicy::new(UNBOUNDED),
+            turn_index: 8,
+            messages: MessageSequence::from_base(progressed.into()),
+            event_delta: vec![crate::SessionHistoryRecord::Protocol(test_protocol_event(
+                "turn-two-step",
+            ))],
+            execution_state_update: ExecutionStateUpdate::Clean,
+            plugins: None,
+        })
+        .await
+        .expect("progress boundary");
+    assert_eq!(boundary.protocol_events.len(), 1, "the event delta is kept");
+    assert_eq!(
+        pipeline.state().turn_index,
+        8,
+        "the progress boundary advanced"
+    );
+    let ids: Vec<_> = pipeline
+        .message_sequence()
+        .iter()
+        .map(|message| message.id.clone())
+        .collect();
+    assert!(
+        ids.iter().any(|id| id == "a2") && ids.iter().any(|id| id == "r2"),
+        "turn 2's executed call is in the draft: {ids:?}"
+    );
+}

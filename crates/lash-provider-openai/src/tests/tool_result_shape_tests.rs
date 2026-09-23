@@ -142,3 +142,70 @@ fn chat_text_image_text_result_is_one_tool_message_with_the_image_after() {
         })
     );
 }
+
+#[test]
+fn chat_parallel_image_results_are_tool_messages_then_one_user_message() {
+    let image = |bytes: &[u8]| {
+        ModelToolReturnPart::Attachment(AttachmentSource::inline(
+            lash_core::MediaType::parse("image/png").unwrap(),
+            bytes.to_vec(),
+        ))
+    };
+    let call = |id: &str| LlmContentBlock::ToolCall {
+        call_id: id.into(),
+        tool_name: "shot".into(),
+        input_json: "{}".into(),
+        replay: None,
+    };
+    let result = |id: &str, bytes: &[u8]| LlmContentBlock::ToolResult {
+        call_id: id.into(),
+        tool_name: Some("shot".into()),
+        content: vec![ModelToolReturnPart::text(id), image(bytes)],
+    };
+    let req = request(vec![
+        LlmMessage::new(LlmRole::Assistant, vec![call("call_1"), call("call_2")]),
+        LlmMessage::new(
+            LlmRole::User,
+            vec![result("call_1", &[1]), result("call_2", &[2])],
+        ),
+        LlmMessage::new(
+            LlmRole::Assistant,
+            vec![LlmContentBlock::Text {
+                text: "seen".into(),
+                response_meta: None,
+                cache_breakpoint: false,
+            }],
+        ),
+    ]);
+    let body = OpenAiCompatibleProvider::new("key", "https://provider.example/v1")
+        .build_chat_request_body(&req, false)
+        .unwrap();
+    let messages = body["messages"].as_array().expect("messages");
+    let roles: Vec<_> = messages
+        .iter()
+        .map(|message| message["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        roles,
+        ["assistant", "tool", "tool", "user", "assistant"],
+        "{body:#}"
+    );
+    assert_eq!(messages[1]["tool_call_id"], "call_1");
+    assert_eq!(messages[1]["content"], "call_1\n[Attachment 1]");
+    assert_eq!(messages[2]["tool_call_id"], "call_2");
+    let url = |bytes: &[u8]| {
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
+    };
+    assert_eq!(
+        messages[3]["content"],
+        json!([
+            {"type": "text", "text": "Attachments from tool result call_1:"},
+            {"type": "image_url", "image_url": {"url": url(&[1])}},
+            {"type": "text", "text": "Attachments from tool result call_2:"},
+            {"type": "image_url", "image_url": {"url": url(&[2])}},
+        ])
+    );
+}

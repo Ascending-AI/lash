@@ -331,7 +331,11 @@ impl lash_core::ToolProvider for ArrayAttachmentTool {
 /// FIG-3515: a tool value embedding an attachment used to split into several
 /// results for one call id, which the resume-safety check refuses; every
 /// later prepared checkpoint was then skipped, and an Immediate cancel
-/// committed the stale draft without the new turn's input or calls.
+/// committed the stale draft without the new turn's input or calls. In this
+/// harness main commits turn 2's input anyway and fails on the duplicated
+/// result, so the test pins the precondition (one resume-safe result per
+/// call); `turn_boundary::tests::gates_advance_after_an_attachment_bearing_tool_result`
+/// pins the gates themselves.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
     const SESSION_ID: &str = "array-attachment-immediate-cancel";
@@ -376,7 +380,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
             }
         })
         .build();
-    let store = Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    let store = Arc::new(RecordingStore::default());
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let mut runtime = TestRuntime::new(provider)
         .plugins(Vec::new())
@@ -384,6 +388,9 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
             lash_core::attachments::attachment_test_capability().attachment_acceptance,
         )
         .tools(Arc::new(ArrayAttachmentTool))
+        .host(lash_core::facade_support::EmbeddedRuntimeHost::new(
+            test_runtime_host_config(),
+        ))
         .store(runtime_store)
         .with_session_id(SESSION_ID)
         .build()
@@ -393,11 +400,26 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
         .run_turn_assembled(
             TurnInput::text("return the array"),
             CancellationToken::new(),
-            named_turn_scope(&SessionId::from(SESSION_ID), &TurnId::from("array-turn")),
+            host_admitted_scope(
+                &runtime.host.core,
+                lash_core::AdmittedScope::unpinned(
+                    runtime.export_persistence_state().turn_scope("array-turn"),
+                )
+                .expect("turn scope"),
+            ),
         )
         .await
         .expect("array turn assembles");
-    assert!(matches!(turn_one.outcome, TurnOutcome::Finished(_)));
+    assert!(
+        matches!(turn_one.outcome, TurnOutcome::Finished(_)),
+        "turn one: {:?} {:?}",
+        turn_one.outcome,
+        turn_one
+            .errors
+            .iter()
+            .map(|issue| (&issue.code, &issue.message))
+            .collect::<Vec<_>>()
+    );
     let committed = runtime.read_view().expect("read view").messages().to_vec();
     assert!(
         lash_sansio::messages_are_prompt_resume_safe(&committed),
@@ -411,7 +433,8 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
     );
     let turn_id = "cancelled-turn";
     let persisted_state = runtime.export_persistence_state();
-    let turn_scope = native_scope(
+    let turn_scope = host_admitted_scope(
+        &runtime.host.core,
         lash_core::AdmittedScope::unpinned(persisted_state.turn_scope(turn_id))
             .expect("turn scope"),
     );

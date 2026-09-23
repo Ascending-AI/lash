@@ -389,16 +389,18 @@ fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
         .parts
         .iter()
         .flat_map(|part| {
-            part.attachment_sources().map(|attachment| {
-                let (media_type, label, source, reference) = attachment_summary(attachment);
-                RlmAttachmentRef {
-                    id: part.id().to_string(),
-                    media_type,
-                    label,
-                    source,
-                    reference,
-                }
-            })
+            part.identified_attachment_sources()
+                .into_iter()
+                .map(|(id, attachment)| {
+                    let (media_type, label, source, reference) = attachment_summary(attachment);
+                    RlmAttachmentRef {
+                        id,
+                        media_type,
+                        label,
+                        source,
+                        reference,
+                    }
+                })
         })
         .collect::<Vec<_>>();
     if content.is_empty() && attachments.is_empty() {

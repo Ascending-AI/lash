@@ -629,6 +629,24 @@ impl Part {
         own.into_iter().chain(blocks)
     }
 
+    /// Every attachment source the part carries, each with an id unique
+    /// within the message: an attachment part's own id, or `{id}#{n}` for
+    /// the tool result's `n`th attachment (1-based, matching its
+    /// `[Attachment n]` marker).
+    pub fn identified_attachment_sources(&self) -> Vec<(String, &AttachmentSource)> {
+        match self {
+            Self::ToolResult { id, .. } => self
+                .attachment_sources()
+                .enumerate()
+                .map(|(index, source)| (format!("{id}#{}", index + 1), source))
+                .collect(),
+            _ => self
+                .attachment_sources()
+                .map(|source| (self.id().to_string(), source))
+                .collect(),
+        }
+    }
+
     /// Mutable access to every attachment source the part carries, in the
     /// order [`Part::attachment_sources`] yields them.
     pub fn attachment_sources_mut(&mut self) -> Vec<&mut AttachmentSource> {
@@ -932,15 +950,13 @@ pub struct RenderedPrompt {
 }
 
 impl RenderedPrompt {
-    /// Sources in message order, derived from the structured blocks.
+    /// Sources in message order, derived from the structured blocks,
+    /// including the attachments inside tool results.
     pub fn attachments(&self) -> Vec<&AttachmentSource> {
         self.messages
             .iter()
             .flat_map(|message| message.blocks.iter())
-            .filter_map(|block| match block {
-                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
-                _ => None,
-            })
+            .flat_map(LlmContentBlock::attachment_sources)
             .collect()
     }
 }
