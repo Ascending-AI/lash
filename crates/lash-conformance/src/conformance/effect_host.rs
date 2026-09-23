@@ -448,6 +448,9 @@ pub struct ConformanceInvocation {
     controller: Arc<dyn RuntimeEffectController>,
     execution_scope: ExecutionScope,
     effect_redrive: ConformanceEffectRedrive,
+    /// The controller's effect-journal fault injector, when it is a journaled
+    /// controller exposing one (FIG-3524); `None` for native controllers.
+    journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
     end: Arc<dyn Fn() + Send + Sync>,
     redrive: Arc<dyn Fn() -> Arc<dyn RuntimeEffectController> + Send + Sync>,
 }
@@ -465,9 +468,27 @@ impl ConformanceInvocation {
             controller,
             execution_scope,
             effect_redrive,
+            journal_faults: None,
             end: Arc::new(end),
             redrive: Arc::new(redrive),
         }
+    }
+
+    /// Attach the controller's effect-journal fault injector (FIG-3524).
+    #[must_use]
+    pub fn with_effect_journal_faults(
+        mut self,
+        faults: lash_core::facade_support::effect_replay_driver::EffectJournalFaults,
+    ) -> Self {
+        self.journal_faults = Some(faults);
+        self
+    }
+
+    /// The live controller's journal fault injector, when it exposes one.
+    pub fn effect_journal_faults(
+        &self,
+    ) -> Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults> {
+        self.journal_faults.clone()
     }
 
     /// Borrow the controller bound to the live invocation.
@@ -508,6 +529,7 @@ impl ConformanceInvocation {
             controller,
             execution_scope: self.execution_scope,
             effect_redrive: self.effect_redrive,
+            journal_faults: self.journal_faults,
             end: self.end,
             redrive: self.redrive,
         }

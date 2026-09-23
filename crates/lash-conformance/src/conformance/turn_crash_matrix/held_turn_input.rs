@@ -37,6 +37,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
         inner: invocation.controller_handle(),
         control: control.clone(),
         executions: Arc::clone(&executions),
+        journal_faults: invocation.effect_journal_faults(),
     });
     let runtime = Box::pin(build_runtime(
         decorated,
@@ -142,6 +143,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
             inner: successor_invocation.controller_handle(),
             control: successor_control.clone(),
             executions,
+            journal_faults: successor_invocation.effect_journal_faults(),
         });
     let successor = Box::pin(build_runtime_with_lease_timings(
         successor_store,

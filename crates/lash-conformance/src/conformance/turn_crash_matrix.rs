@@ -36,6 +36,16 @@
 //! Durable-store methods that [`SeamStore`] passes through undecorated are
 //! outside that seam-coverage boundary until they are deliberately modeled.
 //!
+//! Beside the crash placements, [`turn_crash_matrix_error_return_fail_stop`]
+//! places an error *return* — not a crash — at the tool-attempt seam and,
+//! on journaled controllers, inside its effect journal at `claim`,
+//! `finalize` and `renew` (FIG-3524). After an unretried storage error the
+//! turn must stop: the fail-stop oracle asserts no durable commit, no tool
+//! dispatch and no provider request follows, and that the typed store error
+//! reaches the caller. Each placement's ruling is a reviewable row in
+//! `turn_crash_outcomes.json`; a row pinning violations is a known-defect
+//! entry under the same rule as the level-2 defect rulings.
+//!
 //! The outcome table is hand-written in `turn_crash_outcomes.json`. Its rulings
 //! follow ADR 0029's reclaim-mediated LAW/NON-LAW split, ADR 0045's stateless
 //! service rule, and the current-head CAS/floor semantics. In particular, a
@@ -82,6 +92,7 @@ use crate::{
 };
 
 mod cold_process;
+mod error_return;
 mod expectations;
 mod held_turn_input;
 
@@ -90,9 +101,14 @@ pub use cold_process::{
     cold_process_durable_recovery_expectation, cold_process_real_turn_driver,
     cold_process_turn_cancel_actions, cold_process_turn_expectations, cold_process_turn_scope,
 };
+use error_return::{ErrorReturnPlacement, ErrorReturnRuling, ErrorReturnRulingEntry};
+pub use error_return::{
+    FailStopObservation, FailStopViolation, fail_stop_violations,
+    turn_crash_matrix_error_return_fail_stop,
+};
 use expectations::{
-    durable_recovery_rulings, turn_crash_matrix_outcomes, validate_durable_recovery_rulings,
-    validate_outcome_table,
+    durable_recovery_rulings, error_return_rulings, turn_crash_matrix_outcomes,
+    validate_durable_recovery_rulings, validate_error_return_rulings, validate_outcome_table,
 };
 pub use held_turn_input::held_turn_input_visibility_survives_claim_holder_crash;
 use pretty_assertions::assert_eq;
@@ -328,6 +344,7 @@ struct DurableRecoveryRuling {
 enum ReviewedTurnCrashRuling {
     CrashPoint(TurnCrashOutcome),
     DurableRecovery(DurableRecoveryRuling),
+    ErrorReturn(ErrorReturnRulingEntry),
 }
 
 impl DurableEndState {
@@ -350,6 +367,9 @@ struct SeamState {
     trace: Vec<TurnSeamOperation>,
     completed: Vec<TurnSeamOperation>,
     armed: Option<TurnCrashPoint>,
+    /// The armed error-return placement (FIG-3524), independent of `armed`:
+    /// a crash point and an error return are never armed on the same run.
+    error_return: Option<ErrorReturnPlacement>,
     hit: bool,
     process_crashed: bool,
 }
@@ -462,6 +482,7 @@ impl SeamControl {
         state.trace.clear();
         state.completed.clear();
         state.armed = Some(point);
+        state.error_return = None;
         state.hit = false;
         state.process_crashed = false;
     }
@@ -471,8 +492,24 @@ impl SeamControl {
         state.trace.clear();
         state.completed.clear();
         state.armed = None;
+        state.error_return = None;
         state.hit = false;
         state.process_crashed = false;
+    }
+
+    /// Arm an error-return placement for the fail-stop sweep (FIG-3524).
+    fn arm_error_return(&self, placement: ErrorReturnPlacement) {
+        let mut state = self.state.lock_recover();
+        state.trace.clear();
+        state.completed.clear();
+        state.armed = None;
+        state.error_return = Some(placement);
+        state.hit = false;
+        state.process_crashed = false;
+    }
+
+    fn armed_error_return(&self) -> Option<ErrorReturnPlacement> {
+        self.state.lock_recover().error_return
     }
 
     fn simulate_process_crash(&self) {
@@ -1146,6 +1183,25 @@ struct SeamEffectController {
     inner: Arc<dyn RuntimeEffectController>,
     control: SeamControl,
     executions: Arc<std::sync::atomic::AtomicUsize>,
+    /// The wrapped controller's journal fault injector, when it is a
+    /// journaled controller exposing one (FIG-3524).
+    journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
+}
+
+impl SeamEffectController {
+    /// The typed store error an armed `ToolAttempt` error-return substitutes
+    /// for the real `execute_effect` call: the journal's own `Store`
+    /// vocabulary where the controller exposes one, the generic runtime-store
+    /// code where it does not.
+    fn injected_store_error(&self) -> RuntimeEffectControllerError {
+        let code = self
+            .journal_faults
+            .as_ref()
+            .map_or(crate::RuntimeErrorCode::RuntimeStore, |faults| {
+                faults.store_code()
+            });
+        RuntimeEffectControllerError::new(code, "injected store error at the tool-attempt seam")
+    }
 }
 
 #[async_trait::async_trait]
@@ -1263,6 +1319,32 @@ impl RuntimeEffectController for SeamEffectController {
             return self.inner.execute_effect(envelope, executor).await;
         };
         let operation = TurnSeamOperation::Effect(operation);
+        // FIG-3524: an armed error-return makes the tool-attempt seam fail
+        // once — at the seam itself, or inside its journal claim/finalize/
+        // renew — instead of crashing the task.
+        if let Some(placement) = self.control.armed_error_return()
+            && matches!(
+                operation,
+                TurnSeamOperation::Effect(EffectOperation::ToolAttempt { .. })
+            )
+        {
+            match placement.journal_point() {
+                None => {
+                    let error = self.injected_store_error();
+                    return self
+                        .control
+                        .around(operation, async move { Err(error) })
+                        .await;
+                }
+                Some(point) => {
+                    let faults = self
+                        .journal_faults
+                        .clone()
+                        .unwrap_or_else(|| panic!("{placement:?} requires a journaled controller"));
+                    faults.fail_next(point, envelope.invocation.replay_key());
+                }
+            }
+        }
         if !counts_external_execution {
             return self
                 .control
@@ -1608,6 +1690,11 @@ impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
 struct TraceTool {
     marker: Option<std::path::PathBuf>,
     control: SeamControl,
+    /// The journaled controller's fault injector (FIG-3524). When the armed
+    /// placement is `EffectJournalRenew`, the tool holds its own execution
+    /// open until the injected renew error fires, so the lease-renewal loop
+    /// is guaranteed to reach the fault before the effect completes.
+    journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
 }
 
 fn trace_tool_definition() -> crate::ToolDefinition {
@@ -1651,6 +1738,17 @@ impl crate::ToolProvider for TraceTool {
             .matches(&operation, CrashPlacement::AfterExternalEffectBeforeOutcome)
         {
             self.control.stop_here().await;
+        }
+        if self.control.armed_error_return() == Some(ErrorReturnPlacement::EffectJournalRenew) {
+            let faults = self
+                .journal_faults
+                .clone()
+                .expect("a renew placement requires a journaled controller");
+            tokio::time::timeout(HIT_TIMEOUT, faults.wait_fired())
+                .await
+                .expect(
+                    "armed effect-lease renew fault never fired; the placement covered nothing",
+                );
         }
         crate::ToolOutcome::ok(serde_json::json!({"effect":"executed"})).into()
     }
@@ -2084,6 +2182,7 @@ where
         inner: Arc::new(crate::NativeRuntimeEffectController::default()),
         control: control.clone(),
         executions,
+        journal_faults: None,
     });
     let runtime = Box::pin(build_runtime_with_lease_timings(
         decorated,
@@ -2114,6 +2213,8 @@ where
         .unwrap_or_else(|error| panic!("invalid turn crash outcome table: {error}"));
     validate_durable_recovery_rulings(&durable_recovery_rulings())
         .unwrap_or_else(|error| panic!("invalid durable recovery rulings: {error}"));
+    validate_error_return_rulings(&error_return_rulings())
+        .unwrap_or_else(|error| panic!("invalid error-return rulings: {error}"));
 }
 
 #[expect(
@@ -2306,6 +2407,7 @@ async fn run_crash_matrix_case<F, I>(
         inner: invocation.controller_handle(),
         control: control.clone(),
         executions: Arc::clone(&executions),
+        journal_faults: None,
     });
     let runtime = Box::pin(build_runtime(
         decorated,
@@ -2354,6 +2456,7 @@ async fn run_crash_matrix_case<F, I>(
             inner: successor_invocation.controller_handle(),
             control: successor_control.clone(),
             executions: Arc::clone(&executions),
+            journal_faults: None,
         });
     let successor = Box::pin(build_runtime_with_lease_timings(
         Arc::clone(&successor_store),
@@ -2523,6 +2626,7 @@ async fn drive_drain_turn<F, I>(
         inner: invocation.controller_handle(),
         control: control.clone(),
         executions: Arc::clone(executions),
+        journal_faults: None,
     });
     let runtime = Box::pin(build_runtime_with_lease_timings(
         store,
@@ -2541,107 +2645,4 @@ async fn drive_drain_turn<F, I>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn install_known_defect_fixture(table: &mut [TurnCrashOutcome]) -> &mut KnownDefectExpectation {
-        let entry = table
-            .iter_mut()
-            .find(|entry| entry.level_2.is_some())
-            .expect("level-2 row");
-        let effect_executions = *entry
-            .level_2
-            .as_ref()
-            .expect("level-2 expectation")
-            .effect_executions();
-        entry.level_2 = Some(Level2Expectation::KnownDefect(KnownDefectExpectation {
-            effect_executions,
-            ticket: "FIG-999".to_string(),
-            expected_defective: DurableEndState {
-                terminal: 1,
-                pending_inputs: 0,
-                queued_work: 1,
-            },
-        }));
-        entry.outcome = "KNOWN-DEFECT FIG-999; correct durable end state terminal=1, pending_inputs=0, queued_work=0".to_string();
-        match entry.level_2.as_mut() {
-            Some(Level2Expectation::KnownDefect(defect)) => defect,
-            _ => unreachable!("installed known-defect fixture"),
-        }
-    }
-
-    #[test]
-    fn golden_trace_generates_exactly_the_reviewed_outcome_table() {
-        let generated = generated_points(&golden_trace());
-        let table = turn_crash_matrix_outcomes();
-        validate_outcome_table(&generated, &table).expect("committed table is valid");
-        validate_durable_recovery_rulings(&durable_recovery_rulings())
-            .expect("committed durable recovery rulings are valid");
-    }
-
-    #[test]
-    fn outcome_validation_rejects_a_dropped_level_1_point() {
-        let generated = generated_points(&golden_trace());
-        let mut table = turn_crash_matrix_outcomes();
-        table.remove(4);
-        assert!(
-            validate_outcome_table(&generated, &table).is_err(),
-            "removing any generated level-1 point must invalidate the oracle"
-        );
-    }
-
-    #[test]
-    fn outcome_validation_rejects_a_relocated_level_2_expectation() {
-        let generated = generated_points(&golden_trace());
-        let mut table = turn_crash_matrix_outcomes();
-        let source = table
-            .iter()
-            .position(|entry| {
-                entry.point
-                    == ColdProcessTurnAction::ProviderInitialMidStream
-                        .point()
-                        .expect("crash point")
-            })
-            .expect("level-2 source row");
-        let destination = table
-            .iter()
-            .position(|entry| {
-                entry.point
-                    == TurnCrashPoint {
-                        operation: TurnSeamOperation::Store(StoreOperation::LoadSessionHeadMeta),
-                        placement: CrashPlacement::Boundary,
-                    }
-            })
-            .expect("level-1-only destination row");
-        table[destination].level_2 = table[source].level_2.take();
-        assert!(
-            validate_outcome_table(&generated, &table).is_err(),
-            "moving a level-2 expectation to a different point must invalidate the oracle"
-        );
-    }
-
-    #[test]
-    fn outcome_validation_rejects_a_known_defect_without_a_ticket() {
-        let generated = generated_points(&golden_trace());
-        let mut table = turn_crash_matrix_outcomes();
-        assert!(
-            validate_outcome_table(&generated, &table).is_ok(),
-            "the synthetic defect test must start from a valid oracle"
-        );
-        let defect = install_known_defect_fixture(&mut table);
-        defect.ticket.clear();
-        assert!(
-            validate_outcome_table(&generated, &table).is_err(),
-            "a known defect without a ticket id must invalidate the oracle"
-        );
-    }
-
-    #[test]
-    fn generated_point_keys_are_unique() {
-        let mut keys = std::collections::BTreeMap::new();
-        for point in generated_points(&golden_trace()) {
-            let key = point_key(&point);
-            assert!(keys.insert(key, point).is_none());
-        }
-    }
-}
+mod tests;
