@@ -3,6 +3,9 @@
 - Status: Accepted. Amended by [ADR 0100](0100-the-run-observation-contract.md),
   which keeps facets derived and read-only while expression fields carry
   authoritative IR.
+  Amended by FIG-3571: facets for an admitted definition are computed over the
+  admitted artifact's resolved paths, lifted process declarations included, so
+  a facet names the same node the run overlay does.
 - Date: 2026-07-17
 - Deciders: Samuel Galanakis
 - Design map: Linear FIG-326 (wayfinder), decisions FIG-329…FIG-333, research FIG-327/FIG-328

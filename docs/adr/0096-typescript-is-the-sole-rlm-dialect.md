@@ -9,6 +9,16 @@ and [ADR 0063](0063-one-rlm-turn-is-prompted-in-one-dialect.md). Amends
 [ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md) and
 [ADR 0064](0064-the-typescript-dialect-is-broad-and-every-gap-is-an-explicit-ruling.md).
 
+Amended by FIG-3571 (arc FIG-3570): artifact identity hashes the linked IR the
+artifact carries, names included. `ModuleArtifact::ir` is that program,
+verbatim; there is no normalized or renamed copy, and `module_ref` hashes its
+binder names along with its structure and hidden process arguments. Two
+alpha-variant cells are therefore two distinct modules with two refs, each
+stored immutably (law L9); the earlier normalizer that made them share a ref is
+deleted. The program's `language` (the front end that lowered it) is part of
+the identity, so two front ends never share a module ref. The measured cost on
+a multi-session corpus was about 1.3% more artifacts and stored bytes.
+
 ## Context
 
 ADR 0061 made two dialects first-class, permanently, at full parity, and
