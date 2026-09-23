@@ -1170,24 +1170,43 @@ impl CheckpointStateCanonicalizer {
     }
 }
 
+/// Digest-shaped identities a run derives from its own identity entropy, as
+/// `(marker, alias prefix)`: each is a marker then 64 hex digits.
+///
+/// `ti:` is a provisioned turn-input id, a digest of the turn acceptance's
+/// effect address (FIG-3513). That address carries the runtime-minted turn
+/// UUID, so the id differs on every execution exactly as the UUID does, and
+/// it reaches durable state bare (`origin.input_id`) and embedded in message
+/// and part ids (`m_ingress_ti:<hex>`, `m_ingress_ti:<hex>.p0`).
+const IDENTITY_DIGEST_MARKERS: &[(&str, &str)] = &[
+    ("sha256:", "sha256"),
+    ("blake3:", "blake3"),
+    ("ti:", "turn-input"),
+];
+
 fn canonicalize_embedded_hashes(aliases: &mut BTreeMap<String, String>, raw: &str) -> String {
     let mut canonical = raw.to_string();
-    for algorithm in ["sha256", "blake3"] {
-        let marker = format!("{algorithm}:");
+    for (marker, prefix) in IDENTITY_DIGEST_MARKERS {
         let mut search_from = 0usize;
-        while let Some(relative) = canonical[search_from..].find(&marker) {
-            let hash_start = search_from + relative + marker.len();
+        while let Some(relative) = canonical[search_from..].find(marker) {
+            let marker_start = search_from + relative;
+            let hash_start = marker_start + marker.len();
             let hash_end = hash_start + 64;
+            // A marker glued to a preceding word character is part of some
+            // other token (`multi:`), not an identity digest.
+            let at_boundary = canonical[..marker_start]
+                .chars()
+                .next_back()
+                .is_none_or(|character| !character.is_ascii_alphanumeric());
             let Some(hash) = canonical.get(hash_start..hash_end) else {
                 break;
             };
-            if !hash.chars().all(|character| character.is_ascii_hexdigit()) {
+            if !at_boundary || !hash.chars().all(|character| character.is_ascii_hexdigit()) {
                 search_from = hash_start;
                 continue;
             }
-            let hash = hash.to_string();
-            let alias_key = format!("{algorithm}:{hash}");
-            let alias = canonical_alias(aliases, &alias_key, algorithm);
+            let alias_key = format!("{marker}{hash}");
+            let alias = canonical_alias(aliases, &alias_key, prefix);
             canonical.replace_range(hash_start..hash_end, &alias);
             search_from = hash_start + alias.len();
         }
@@ -1455,6 +1474,49 @@ mod seed_tests {
 
         assert_eq!(first, rerun);
         assert_eq!(first, "process:lashlang:v3:blake3:<blake3-001>");
+    }
+
+    #[test]
+    fn determinism_projection_canonicalizes_provisioned_turn_input_ids() {
+        let mut first_aliases = BTreeMap::new();
+        let mut rerun_aliases = BTreeMap::new();
+        let first_id = format!("ti:{}", "a".repeat(64));
+        let rerun_id = format!("ti:{}", "b".repeat(64));
+        for (first, rerun, expected) in [
+            (
+                first_id.clone(),
+                rerun_id.clone(),
+                "ti:<turn-input-001>".to_string(),
+            ),
+            (
+                format!("m_ingress_{first_id}"),
+                format!("m_ingress_{rerun_id}"),
+                "m_ingress_ti:<turn-input-001>".to_string(),
+            ),
+            (
+                format!("m_ingress_{first_id}.p0"),
+                format!("m_ingress_{rerun_id}.p0"),
+                "m_ingress_ti:<turn-input-001>.p0".to_string(),
+            ),
+        ] {
+            let first = canonicalize_embedded_hashes(&mut first_aliases, &first);
+            let rerun = canonicalize_embedded_hashes(&mut rerun_aliases, &rerun);
+            assert_eq!(first, rerun);
+            assert_eq!(first, expected);
+        }
+
+        // Two distinct inputs keep distinct aliases, so a rerun that swaps
+        // which input a message names still diverges.
+        assert_eq!(
+            canonicalize_embedded_hashes(&mut first_aliases, &format!("ti:{}", "c".repeat(64))),
+            "ti:<turn-input-002>"
+        );
+        // A marker inside another word is not an identity digest.
+        let glued = format!("multi:{}", "d".repeat(64));
+        assert_eq!(
+            canonicalize_embedded_hashes(&mut BTreeMap::new(), &glued),
+            glued
+        );
     }
 
     #[test]
