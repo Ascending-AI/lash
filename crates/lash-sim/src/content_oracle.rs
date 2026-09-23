@@ -46,16 +46,16 @@
 //!
 //! # The two laws
 //!
-//! [`durable_content`] is registered: it holds on today's runtime. Every
-//! committed assistant message and tool result equals what was emitted, and the
-//! reported usage of every *completed* attempt reaches the ledger as its own
-//! delta. On sessions where no attempt failed after reporting usage, the
+//! Both laws are registered as run-only oracles of the generated lane.
+//!
+//! [`durable_content`] checks that every committed assistant message and tool
+//! result equals what was emitted, and that the reported usage of every
+//! *completed* attempt reaches the ledger as its own delta. On sessions where no attempt failed after reporting usage, the
 //! committed deltas and the reopened ledger equal the emitted usage exactly.
 //!
 //! [`failed_attempt_usage_ledgered`] is the same usage law extended to failed
 //! attempts: every attempt that reported usage, including one that then
-//! failed, reaches the ledger as its own delta. It fails today (FIG-3514) and
-//! is registered by that ticket's fix.
+//! failed, reaches the ledger as its own delta. FIG-3514's fix made it hold.
 
 use std::collections::BTreeMap;
 use std::fmt;
