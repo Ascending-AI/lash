@@ -84,6 +84,10 @@ pub struct UsageBuckets {
 }
 
 impl UsageBuckets {
+    fn is_zero(&self) -> bool {
+        *self == Self::default()
+    }
+
     const FIELDS: [&'static str; 5] = [
         "input_tokens",
         "output_tokens",
@@ -195,9 +199,9 @@ pub struct SessionContent {
 
 impl SessionContent {
     fn has_failed_reported_attempt(&self) -> bool {
-        self.emitted_attempts
-            .iter()
-            .any(|attempt| !attempt.completed && attempt.usage.is_some())
+        self.emitted_attempts.iter().any(|attempt| {
+            !attempt.completed && attempt.usage.is_some_and(|usage| !usage.is_zero())
+        })
     }
 }
 
@@ -561,7 +565,11 @@ pub fn durable_content(sessions: &[SessionContent]) -> OracleVerdict {
 }
 
 /// The per-attempt usage law extended to attempts that failed after reporting
-/// usage. Not registered until FIG-3514 lands; see the module docs.
+/// usage; see the module docs.
+///
+/// An attempt that reported all-zero usage carries no charge, and the runtime
+/// writes no ledger delta for a zero usage on any path (the cumulative write
+/// skips it too), so zero reports are outside both sides of the comparison.
 pub fn failed_attempt_usage_ledgered(sessions: &[SessionContent]) -> OracleVerdict {
     let mut checked = 0usize;
     for session in sessions.iter().filter(|s| s.has_failed_reported_attempt()) {
@@ -569,6 +577,7 @@ pub fn failed_attempt_usage_ledgered(sessions: &[SessionContent]) -> OracleVerdi
             .emitted_attempts
             .iter()
             .filter_map(|attempt| attempt.usage)
+            .filter(|usage| !usage.is_zero())
             .collect::<Vec<_>>();
         if let Err(message) = require_same_multiset(
             &reported,
@@ -1084,6 +1093,31 @@ mod tests {
 
         let vacuous = failed_attempt_usage_ledgered(&[healthy()]);
         assert!(vacuous.message.contains("vacuous"), "{}", vacuous.message);
+    }
+
+    #[test]
+    fn failed_attempt_law_ignores_a_zero_usage_report() {
+        // A failed attempt that reported all-zero usage owes no delta: the
+        // runtime ledgers no zero usage on any path, so a session whose only
+        // failed report is zero leaves nothing for the law to check.
+        let mut zero = retried_like_today();
+        zero.emitted_attempts[0].usage = Some(usage(0, 0));
+        let only_zero = failed_attempt_usage_ledgered(&[healthy(), zero.clone()]);
+        assert!(
+            only_zero.message.contains("vacuous"),
+            "{}",
+            only_zero.message
+        );
+
+        let mut fixed = retried_like_today();
+        fixed.committed_usage = vec![usage(7, 0), usage(9, 4)];
+        fixed
+            .reopened
+            .as_mut()
+            .expect("reopened")
+            .reported_ledger_total = usage(16, 4);
+        let verdict = failed_attempt_usage_ledgered(&[healthy(), fixed, zero]);
+        assert!(verdict.is_passed(), "{}", verdict.message);
     }
 
     #[test]
