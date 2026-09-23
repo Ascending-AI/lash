@@ -244,7 +244,9 @@ impl ConversationRecord {
 }
 
 /// Token usage statistics from an LLM call.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TokenUsage {
     pub input_tokens: i64,
     pub output_tokens: i64,
@@ -616,7 +618,17 @@ pub enum TurnStop {
 
 /// What cancellation does with active-turn input the cancelled turn did not
 /// deliver.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnCancelDisposition {
     #[default]

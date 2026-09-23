@@ -394,6 +394,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             turn_failure_settlements: Vec::new(),
         });
         let result = lash_core::store::RuntimeCommitReceipt {
+            schema_version: lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
             head_revision: next_head_revision,
             checkpoint_ref: lash_core::BlobRef("checkpoint".to_string()),
             manifest: lash_core::store::SessionCheckpoint::default(),

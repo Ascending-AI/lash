@@ -255,6 +255,10 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: a sans-IO host stores the serialized checkpoint, so the bytes \
              this version gates live outside lash's own store",
         ),
+        DurableFormat::RuntimeCommitReceipt => SurfaceRelation::Unwalkable(
+            "no bounded surface: one row per committed turn, each receipt refused at decode \
+             rather than at rest",
+        ),
         DurableFormat::Bytecode => SurfaceRelation::Walk {
             surface: DurableSurface::ParkedSegment,
             primary: false,

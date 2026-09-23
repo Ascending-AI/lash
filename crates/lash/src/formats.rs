@@ -55,8 +55,9 @@ pub use lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
 pub use lash_core::store::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, CHECKPOINT_COMPONENT_ENCODING_VERSION,
     CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION, CURRENT_SESSION_STATE_VERSION,
-    RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION,
-    SESSION_HEAD_META_SCHEMA_VERSION, USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
+    RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION, RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
+    SESSION_CHECKPOINT_SCHEMA_VERSION, SESSION_HEAD_META_SCHEMA_VERSION,
+    USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
 };
 pub use lash_core::{
     PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_EVENT_VOCABULARY_VERSION,
@@ -134,6 +135,9 @@ pub enum DurableFormat {
     ToolPresentation,
     /// The serialized sans-IO turn checkpoint.
     TurnCheckpoint,
+    /// The persisted runtime turn-commit receipt a committed turn replays
+    /// from `runtime_turn_commits.result_json`.
+    RuntimeCommitReceipt,
     /// Compiled Lashlang bytecode. Identity-checked rather than
     /// version-compared — see [`FormatProbe::IdentityOnly`].
     Bytecode,
@@ -194,6 +198,7 @@ impl DurableFormat {
             DurableFormat::ToolAttemptCapture => "tool attempt capture",
             DurableFormat::ToolPresentation => "tool presentation",
             DurableFormat::TurnCheckpoint => "turn checkpoint",
+            DurableFormat::RuntimeCommitReceipt => "runtime commit receipt",
             DurableFormat::Bytecode => "bytecode",
             DurableFormat::VmContinuation => "VM continuation",
             DurableFormat::LashlangSnapshot => "Lashlang snapshot",
@@ -412,6 +417,13 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
             version: FormatVersion::Counter(TURN_CHECKPOINT_SCHEMA_VERSION),
             owning_crate: "lash-sansio",
             constant: "TURN_CHECKPOINT_SCHEMA_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::RuntimeCommitReceipt,
+            version: FormatVersion::Counter(RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
+            owning_crate: "lash-core",
+            constant: "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]

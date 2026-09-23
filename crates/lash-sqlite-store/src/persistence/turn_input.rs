@@ -644,12 +644,11 @@ impl TurnInputStore for Store {
                     let mut commits = Vec::new();
                     for row in rows {
                         let (turn_id, result_json) = row.map_err(sqlite_error)?;
-                        let result: RuntimeCommitReceipt = serde_json::from_str(&result_json)
-                            .map_err(|err| {
-                                StoreError::Backend(format!(
-                                    "failed to decode runtime turn commit result: {err}"
-                                ))
-                            })?;
+                        let result = lash_core::store::decode_runtime_commit_receipt(
+                            &session_id,
+                            &turn_id,
+                            &result_json,
+                        )?;
                         commits.push((
                             result.head_revision,
                             turn_id,

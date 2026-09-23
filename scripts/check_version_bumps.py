@@ -291,6 +291,15 @@ REGISTRATION_BASELINES = {
     "crates/lash-core-execution/src/runtime/process/model/lease.rs:PROCESS_LEASE_SCHEMA_VERSION": (
         "sha256:5ba0ecd22f3c782cd1b68121ca8772b6a2833ed48a54440dc3a614604ebb2dd0"
     ),
+    # FIG-3537: the durable runtime-commit receipt (RuntimeCommitReceipt,
+    # persisted in lash_runtime_turn_commits.result_json) gains its explicit
+    # schema_version stamp, joining the durable-format registry and the
+    # payload-shape gate in the same change. The constant has no merge-base
+    # value because the surface is new: the receipt was previously unversioned
+    # and deliberately excluded from the gate. Registration v1.
+    "crates/lash-core-store/src/store/runtime_commit.rs:RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION": (
+        "sha256:04a9c1a7dcf3c3fbd5eed9a3586f1f9bf9de87b67855c96b8a5fa07d4ade330c"
+    ),
 }
 
 # Burned one-time proofs that a change moved Rust identifiers across a guarded
@@ -766,6 +775,38 @@ IDENTIFIER_RENAME_BASELINES = {
     "crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION": (
         "sha256:1966aff9d664ca490ceb551a1724f488939768c5396089c837eb2b71bab3ca0b"
     ),
+    # FIG-3537: enrolling lash_runtime_turn_commits.result_json in the
+    # payload-shape gate required `schemars::JsonSchema` derives across the
+    # receipt's field-type closure, which reaches types these five surfaces
+    # also guard. JsonSchema emits no serde output: every diff in the guarded
+    # files is a derive-list addition or a derive-input-only attribute, no
+    # field name, variant name, serde attribute, preimage byte expression,
+    # tag or constant value changed, and the regenerated durable-read
+    # fixtures reproduced the guarded payloads byte-identically. The
+    # serialized bytes cannot have moved, so TOOL_SETTLEMENT_VERSION stays 5,
+    # TOOL_PRESENTATION_VERSION stays 1, TOOL_ATTEMPT_CAPTURE_VERSION stays 4,
+    # TURN_CHECKPOINT_SCHEMA_VERSION stays 7 and
+    # SESSION_NODE_BODY_SCHEMA_VERSION stays 21. One-time baselines; any
+    # further guarded-shape drift re-fails the gate.
+    'crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_SETTLEMENT_VERSION': 'sha256:b9aa9d815a1f28148cfb01d460f8035fc52b3ed41c2120a3f487b64878f8f76c',
+    'crates/lash-core-execution/src/runtime/effect/tool_presentation.rs:TOOL_PRESENTATION_VERSION': 'sha256:ebba20281bc0efbc99e2c254846d49dadcb6e95c82a0bf0ea78dc5a0a538f994',
+    'crates/lash-core-execution/src/runtime/effect/tool_settlement.rs:TOOL_ATTEMPT_CAPTURE_VERSION': 'sha256:ff5d37cb5f1d9f7b19d8531c770332037abfaa263ea22655314cb4732f4a9cde',
+    'crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION': 'sha256:cc4a431dd40874aad1ce9addb160ad9702cefb1545e43b28eadc051bcfe8c664',
+    # The same enrollment also moved `NonNegativeFiniteF64` and its impls from
+    # `llm/types.rs` into `llm/types/non_negative_finite_f64.rs` to keep the
+    # host file inside the production line budget. A module move re-spells no
+    # field name, variant, serde attribute, or `schema_name`, and the type is
+    # still swept whole through the guard's `paths`, so the serialized bytes
+    # are identical on both sides.
+    'crates/lash-core-store/src/session_graph.rs:SESSION_NODE_BODY_SCHEMA_VERSION': 'sha256:742dec920b986c908faa3df91a1d9bb06e02624af0e9e0c0c64674d5cdc6f0c3',
+    # FIG-3537: the protocol-turn-options schemars mirror was renamed
+    # ProtocolTurnOptionsWire -> ProtocolTurnOptionsSchemaWire so it no longer
+    # collides with the local decode carrier of the same name inside the
+    # manual Deserialize impl. The mirror feeds only the payload-shape
+    # document; the persisted envelope is still emitted by the untouched
+    # hand-written serialize/deserialize codecs, so the serialized bytes are
+    # identical and PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION stays 1.
+    'crates/lash-core-store/src/protocol_turn_options.rs:PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION': 'sha256:ad097b283e75c77ba0efeb14e03898e87e8f4673eb9eeb2a52c996c8fa42d01b',
 }
 
 # Burned one-time proofs that an atomic stack's lower branch already reserved

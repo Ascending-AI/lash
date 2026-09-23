@@ -627,8 +627,11 @@ impl TurnInputStore for PostgresSessionStore {
         for row in rows {
             let turn_id = row.get::<String, _>(0);
             let result_json: String = row.get(1);
-            let result: RuntimeCommitReceipt =
-                store_decode_json(&result_json, "runtime turn commit result")?;
+            let result = lash_core::store::decode_runtime_commit_receipt(
+                session_id,
+                &turn_id,
+                &result_json,
+            )?;
             commits.push((
                 result.head_revision,
                 turn_id,

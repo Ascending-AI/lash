@@ -47,6 +47,22 @@ impl SessionObserverIntent {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct FrameNodeId(String);
+
+/// The wire shape is the validated identity string; `FrameNodeId::new`'s
+/// emptiness refusal cannot be expressed as a schema assertion.
+impl schemars::JsonSchema for FrameNodeId {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        <String as schemars::JsonSchema>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        <String as schemars::JsonSchema>::json_schema(generator)
+    }
+}
 /// Rejection produced when constructing a [`FrameNodeId`] from invalid text.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -404,7 +420,7 @@ pub enum SessionToolAccessError {
     #[error("hidden tool name `{name}` appears more than once")]
     DuplicateHiddenToolName { name: String },
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 enum SessionToolAccessWire {
     Ambient {
@@ -522,6 +538,19 @@ impl Serialize for SessionToolAccess {
             },
         }
         .serialize(serializer)
+    }
+}
+/// The serde layer encodes and decodes through [`SessionToolAccessWire`], so
+/// the wire enum's schema is the decode shape; the checked invariants
+/// (`validate_restricted_tools`, hidden-name rules) are post-decode refusals
+/// no schema assertion can express.
+impl schemars::JsonSchema for SessionToolAccess {
+    fn schema_name() -> String {
+        "SessionToolAccess".to_string()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        SessionToolAccessWire::json_schema(generator)
     }
 }
 impl<'de> Deserialize<'de> for SessionToolAccess {

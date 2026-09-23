@@ -6,7 +6,7 @@
 
 use crate::{ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause, TurnInput};
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionCommand {
     /// Apply durable session-policy intent at the command drain. Consecutive
@@ -62,7 +62,17 @@ pub enum SessionCommandSettlement {
     Pending(SessionCommandReceipt),
     Cancelled(SessionCommandReceipt),
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryPolicy {
     EarliestSafeBoundary,
@@ -95,7 +105,17 @@ impl DeliveryPolicy {
 /// setter exists to break the correspondence. Store ordering projections
 /// therefore compare `work_kind` with [`Self::Control`]'s stable value for the
 /// session-command family rather than hydrating payloads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum QueuedWorkKind {
     Turn,
@@ -144,7 +164,17 @@ impl QueuedWorkKind {
 /// with different principals or different elevation overrides never share a
 /// turn. Keeping this separate from `merge_key` prevents a grouping label from
 /// becoming an authorization encoding.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct QueuedWorkAuthority {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -183,7 +213,7 @@ pub struct QueuedWorkClaimPolicy {
     pub max_pending_age_ms: u64,
     pub drain_policy: std::sync::Arc<dyn crate::QueuedDrainPolicy>,
 }
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueuedWorkPayload {
     ProcessWake {
@@ -231,12 +261,12 @@ impl QueuedWorkPayload {
         }
     }
 }
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct QueuedWorkItem {
     pub item_id: String,
     pub payload: QueuedWorkPayload,
 }
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct QueuedWorkBatch {
     pub batch_id: crate::BatchId,
     pub session_id: SessionId,

@@ -9,25 +9,9 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use super::*;
-use tracing::instrument::WithSubscriber as _;
-use tracing_subscriber::layer::{Context, SubscriberExt};
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{Layer, Registry};
-
-struct WarningCounter(Arc<AtomicUsize>);
-
-impl<S> Layer<S> for WarningCounter
-where
-    S: tracing::Subscriber,
-{
-    fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
-        if *event.metadata().level() == tracing::Level::WARN {
-            self.0.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-}
 
 async fn persisted_record_decode_store(
     storage: &PostgresStorage,
@@ -185,42 +169,27 @@ fn turn_failure_settlement_query_filters_receipts_without_evidence() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_receipts() {
-    const SESSION_ID: &str = "failure-evidence-corrupt-receipt";
-    const NON_EVIDENCE_RECEIPTS: i64 = 256;
-
-    let Some(database_url) = postgres_test_support::database_url() else {
-        eprintln!("skipping Postgres receipt-filter contract: database URL is not set");
-        return;
-    };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+/// Seed one committed session carrying failure evidence, then splice an extra
+/// receipt row into `lash_runtime_turn_commits` under the `bad-evidence-receipt`
+/// operation key so a refusal can be asserted against that exact row.
+async fn seed_failure_evidence_session(
+    session_id: &str,
+    bad_result_json: &str,
+) -> (PostgresStorage, postgres_test_support::SharedDatabaseLock) {
+    let database_url = postgres_test_support::database_url()
+        .expect("receipt refusal tests require LASH_POSTGRES_DATABASE_URL");
+    let database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
     let storage = PostgresStorage::connect(&database_url)
         .await
-        .expect("connect receipt-filter contract storage");
-    let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT tablename FROM pg_tables
-         WHERE schemaname = 'public'
-           AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_await_event_meta')
-         ORDER BY tablename",
-    )
-    .fetch_all(storage.pool())
-    .await
-    .expect("list Lash tables for receipt-filter reset");
-    let truncate = format!("TRUNCATE {} RESTART IDENTITY CASCADE", tables.join(", "));
-    sqlx::query(&truncate)
-        .execute(storage.pool())
-        .await
-        .expect("reset receipt-filter tables");
+        .expect("connect receipt-refusal storage");
 
-    let store = storage.session_store(SESSION_ID);
+    let store = storage.session_store(session_id);
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(SESSION_ID))
+        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
         .await
-        .expect("bind receipt-filter session");
+        .expect("bind receipt-refusal session");
     let state = lash_core::RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: SessionId::from(session_id.to_string()),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -247,74 +216,102 @@ async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_recei
         .await
         .expect("seed one failure-evidence receipt");
 
-    let (evidence_turn_id, result_json, committed_at_ms): (String, String, i64) = sqlx::query_as(
-        "SELECT turn_id, result_json, committed_at_ms
-             FROM lash_runtime_turn_commits
-             WHERE session_id = $1",
-    )
-    .bind(SESSION_ID)
-    .fetch_one(storage.pool())
-    .await
-    .expect("read seeded failure-evidence receipt");
-    let mut no_evidence: serde_json::Value =
-        serde_json::from_str(&result_json).expect("seed receipt is valid JSON");
-    no_evidence
-        .as_object_mut()
-        .expect("receipt JSON is an object")
-        .remove("failure_evidence");
-    let no_evidence =
-        serde_json::to_string(&no_evidence).expect("serialize receipt without failure evidence");
     sqlx::query(
         "INSERT INTO lash_runtime_turn_commits
          (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms)
-         SELECT $1,
-                'non-evidence-' || to_char(index, 'FM000'),
-                'non-evidence-hash-' || to_char(index, 'FM000'),
-                $2,
-                $3 + index
-         FROM generate_series(1, $4) AS index",
+         SELECT $1, 'bad-evidence-receipt', 'bad-evidence-hash', $2, committed_at_ms + 1
+         FROM lash_runtime_turn_commits
+         WHERE session_id = $1",
     )
-    .bind(SESSION_ID)
-    .bind(no_evidence)
-    .bind(committed_at_ms)
-    .bind(NON_EVIDENCE_RECEIPTS)
+    .bind(session_id)
+    .bind(bad_result_json)
     .execute(storage.pool())
     .await
-    .expect("seed ordinary receipts");
-    sqlx::query(
-        "INSERT INTO lash_runtime_turn_commits
-         (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms)
-         VALUES ($1, 'corrupt-evidence', 'corrupt-evidence-hash', $2, $3)",
-    )
-    .bind(SESSION_ID)
-    .bind(r#"{"failure_evidence":"#)
-    .bind(committed_at_ms + NON_EVIDENCE_RECEIPTS + 1)
-    .execute(storage.pool())
-    .await
-    .expect("seed corrupt evidence receipt");
+    .expect("splice the bad receipt row");
+    (storage, database_lock)
+}
 
-    let warning_count = Arc::new(AtomicUsize::new(0));
-    let subscriber = Registry::default().with(WarningCounter(Arc::clone(&warning_count)));
-    let reopened = store
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn turn_failure_reopen_refuses_one_corrupt_evidence_receipt() {
+    const SESSION_ID: &str = "failure-evidence-corrupt-receipt";
+    let Some(_) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres receipt refusal: database URL is not set");
+        return;
+    };
+    let (storage, _database_lock) =
+        seed_failure_evidence_session(SESSION_ID, r#"{"failure_evidence":"#).await;
+
+    let error = storage
+        .session_store(SESSION_ID)
         .load_session()
-        .with_subscriber(subscriber)
         .await
-        .expect("one corrupt evidence receipt must not make the session unreadable")
-        .expect("seeded session remains readable");
+        .expect_err("a corrupt evidence receipt must refuse the whole load");
+    assert!(
+        matches!(
+            &error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "RuntimeCommitReceipt",
+                message,
+            } if message.contains(SESSION_ID) && message.contains("bad-evidence-receipt")
+        ),
+        "the corrupt receipt refusal must name the session and operation: {error:?}"
+    );
+}
 
-    assert_eq!(
-        reopened.turn_failure_settlements.len(),
-        1,
-        "only the valid evidence receipt becomes a settlement"
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn turn_failure_reopen_refuses_a_preversioned_receipt() {
+    const SESSION_ID: &str = "failure-evidence-preversioned-receipt";
+    let Some(_) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres receipt refusal: database URL is not set");
+        return;
+    };
+    let (storage, _database_lock) =
+        seed_failure_evidence_session(SESSION_ID, r#"{"failure_evidence":[{}]}"#).await;
+
+    let error = storage
+        .session_store(SESSION_ID)
+        .load_session()
+        .await
+        .expect_err("an unversioned receipt must refuse the whole load");
+    assert!(
+        matches!(
+            &error,
+            StoreError::MissingRecordSchemaVersion {
+                record_kind: "RuntimeCommitReceipt",
+                ..
+            }
+        ),
+        "the pre-versioned receipt refusal must be typed: {error:?}"
     );
-    assert_eq!(
-        reopened.turn_failure_settlements[0].turn_id,
-        evidence_turn_id
-    );
-    assert_eq!(
-        warning_count.load(Ordering::Relaxed),
-        1,
-        "the skipped corrupt evidence receipt emits one warning"
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn turn_failure_reopen_refuses_a_newer_receipt_version() {
+    const SESSION_ID: &str = "failure-evidence-newer-receipt";
+    let Some(_) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres receipt refusal: database URL is not set");
+        return;
+    };
+    let newer = lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
+    let bad_json = format!(r#"{{"schema_version":{newer},"failure_evidence":[{{}}]}}"#);
+    let (storage, _database_lock) = seed_failure_evidence_session(SESSION_ID, &bad_json).await;
+
+    let error = storage
+        .session_store(SESSION_ID)
+        .load_session()
+        .await
+        .expect_err("a newer receipt version must refuse the whole load");
+    assert!(
+        matches!(
+            &error,
+            StoreError::UnsupportedRecordSchemaVersion {
+                record_kind: "RuntimeCommitReceipt",
+                actual,
+                expected,
+            } if *actual == newer
+                && *expected == lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
+        ),
+        "the newer-version receipt refusal must be the typed version error: {error:?}"
     );
 }
 

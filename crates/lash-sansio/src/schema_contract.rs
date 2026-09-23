@@ -20,7 +20,9 @@ mod ref_inline_tests;
 use omission_null::{NullAcceptance, canonical_null_acceptance, materialize_omission_null_paths};
 pub use omission_null::{OmissionNullPath, OmissionNullPathSegment};
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct SchemaContract {
     pub canonical: Value,
     #[serde(default, skip_serializing_if = "SchemaProjectionPolicy::is_default")]
@@ -58,7 +60,9 @@ impl From<Value> for SchemaContract {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct SchemaProjectionPolicy {
     #[serde(default, skip_serializing_if = "ProjectionMode::is_auto")]
     pub mode: ProjectionMode,
@@ -87,7 +91,17 @@ impl Default for SchemaProjectionPolicy {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectionMode {
     #[default]
@@ -102,7 +116,9 @@ impl ProjectionMode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct SchemaProjectionOverride {
     pub dialect: String,
     pub schema: Value,

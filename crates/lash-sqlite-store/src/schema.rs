@@ -759,7 +759,12 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// recreated rather than decoded under the new shape.
 /// Version 75 adds durable queued-run admissions and normalized membership.
 /// Durable-core 74 catalogs require recreation.
-pub(crate) const SCHEMA_VERSION: i32 = 75;
+/// Bumped to 76 for FIG-3537: `runtime_turn_commits.result_json` now carries
+/// RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION and every receipt read fails closed
+/// on a missing, invalid, or unsupported version instead of skipping the
+/// row. Pre-versioned receipts are refused; a pre-76 database is rejected at
+/// open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 76;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

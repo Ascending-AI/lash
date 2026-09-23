@@ -14,7 +14,9 @@ pub(crate) const TURN_FAILURE_PARTIAL_OUTPUT_TRUNCATION_MARKER: &str = "\n[trunc
 /// This is settlement evidence, not a [`crate::Message`], graph node, or
 /// prompt contribution. Hosts may inspect it and make their own continuation
 /// decision; core never turns it into semantic context.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "residency", rename_all = "snake_case")]
 pub enum TurnFailurePartialOutput {
     /// The complete visible partial output fit inside the residency bound.
@@ -62,7 +64,9 @@ impl TurnFailurePartialOutput {
 }
 
 /// Typed refusal facts that made regeneration unsafe.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ChargeSafetyRefusalEvidence {
     /// Stable refusal code surfaced on the terminal provider error.
     pub code: String,
@@ -76,7 +80,9 @@ pub struct ChargeSafetyRefusalEvidence {
 }
 
 /// Durable component retained for one failed provider generation.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TurnFailureEvidence {
     /// Visible partial output, absent when the adapter reported no partial
     /// response at all. Partial tool-call state is deliberately not executable.

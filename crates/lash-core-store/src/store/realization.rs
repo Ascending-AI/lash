@@ -87,6 +87,7 @@ mod tests {
                 .collect();
             let manifest = commit.checkpoint.manifest()?;
             Ok(RuntimeCommitReceipt {
+                schema_version: crate::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
                 head_revision: commit.expected_head_revision + u64::from(self.advances_revision),
                 checkpoint_ref: "empty-frame-facade".to_string().into(),
                 manifest,

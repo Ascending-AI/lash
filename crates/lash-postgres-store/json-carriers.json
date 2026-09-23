@@ -12,8 +12,8 @@
     "reason": "StoredSessionNodeBody states SESSION_NODE_BODY_SCHEMA_VERSION and is fenced against newer generations on decode; its shape is guarded by that surface in scripts/versioned-surfaces.toml, which spans the session-history model the schemars payload projection cannot reach."
   },
   "lash_runtime_turn_commits.result_json": {
-    "verdict": "deliberately-excluded",
-    "reason": "RuntimeCommitReceipt is a receipt coupled to turn_commit_hash and identity_encoding_version; enrolling the full receipt DTO is a separate cutover."
+    "verdict": "enroll-now",
+    "reason": "RuntimeCommitReceipt carries RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION and refuses missing, invalid, or unsupported versions on every read; its schemars shape is the decode contract both SQL backends persist."
   },
   "lash_queued_work_batches.authority_json": {
     "verdict": "deliberately-excluded",

@@ -1,23 +1,6 @@
 use super::*;
 use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
 use lashlang::LashlangArtifactStore;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tracing::instrument::WithSubscriber as _;
-use tracing_subscriber::layer::{Context, SubscriberExt};
-use tracing_subscriber::{Layer, Registry};
-
-struct WarningCounter(std::sync::Arc<AtomicUsize>);
-
-impl<S> Layer<S> for WarningCounter
-where
-    S: tracing::Subscriber,
-{
-    fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
-        if *event.metadata().level() == tracing::Level::WARN {
-            self.0.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-}
 
 fn assert_corrupt<T>(result: Result<T, StoreError>, expected_kind: &'static str) {
     match result {
@@ -160,17 +143,16 @@ fn turn_failure_settlement_query_filters_receipts_without_evidence() {
     );
 }
 
-#[tokio::test]
-async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_receipts() {
-    const SESSION_ID: &str = "failure-evidence-corrupt-receipt";
-    const NON_EVIDENCE_RECEIPTS: usize = 256;
-
-    let store = Store::memory().await.expect("open receipt-filter store");
+/// Seed one committed session carrying failure evidence, then splice an extra
+/// receipt row into `runtime_turn_commits` under the `bad-evidence-receipt`
+/// operation key so a refusal can be asserted against that exact row.
+async fn seed_failure_evidence_session(session_id: &str, bad_result_json: &str) -> Store {
+    let store = Store::memory().await.expect("open receipt store");
     store
-        .bind_session(&SessionId::from(SESSION_ID))
-        .expect("bind receipt-filter store");
+        .bind_session(&SessionId::from(session_id))
+        .expect("bind receipt store");
     let state = lash_core::RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
+        session_id: SessionId::from(session_id.to_string()),
         ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         ))
@@ -197,84 +179,93 @@ async fn turn_failure_reopen_skips_one_corrupt_evidence_receipt_among_many_recei
         .await
         .expect("seed one failure-evidence receipt");
 
-    let evidence_turn_id = store
+    let session_id = session_id.to_string();
+    let bad_result_json = bad_result_json.to_string();
+    store
         .conn
-        .call(|conn| {
-            let (turn_id, result_json, committed_at_ms) = conn.query_row(
-                "SELECT turn_id, result_json, committed_at_ms
-                 FROM runtime_turn_commits
-                 WHERE session_id = ?1",
-                params![SESSION_ID],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                    ))
-                },
+        .call(move |conn| {
+            let committed_at_ms = conn.query_row(
+                "SELECT committed_at_ms FROM runtime_turn_commits WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get::<_, i64>(0),
             )?;
-            let mut no_evidence: serde_json::Value =
-                serde_json::from_str(&result_json).expect("seed receipt is valid JSON");
-            no_evidence
-                .as_object_mut()
-                .expect("receipt JSON is an object")
-                .remove("failure_evidence");
-            let no_evidence = serde_json::to_string(&no_evidence)
-                .expect("serialize receipt without failure evidence");
-            for index in 0..NON_EVIDENCE_RECEIPTS {
-                conn.execute(
-                    "INSERT INTO runtime_turn_commits
-                     (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        SESSION_ID,
-                        format!("non-evidence-{index:03}"),
-                        format!("non-evidence-hash-{index:03}"),
-                        no_evidence,
-                        committed_at_ms + i64::try_from(index).expect("receipt index") + 1,
-                    ],
-                )?;
-            }
             conn.execute(
                 "INSERT INTO runtime_turn_commits
                  (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms)
-                 VALUES (?1, 'corrupt-evidence', 'corrupt-evidence-hash', ?2, ?3)",
-                params![
-                    SESSION_ID,
-                    r#"{"failure_evidence":"#,
-                    committed_at_ms
-                        + i64::try_from(NON_EVIDENCE_RECEIPTS).expect("receipt count")
-                        + 1,
-                ],
+                 VALUES (?1, 'bad-evidence-receipt', 'bad-evidence-hash', ?2, ?3)",
+                params![session_id, bad_result_json, committed_at_ms + 1],
             )?;
-            Ok(turn_id)
+            Ok(())
         })
         .await
-        .expect("seed many ordinary receipts and one corrupt evidence receipt");
+        .expect("splice the bad receipt row");
+    store
+}
 
-    let warning_count = std::sync::Arc::new(AtomicUsize::new(0));
-    let subscriber =
-        Registry::default().with(WarningCounter(std::sync::Arc::clone(&warning_count)));
-    let reopened = store
+#[tokio::test]
+async fn turn_failure_reopen_refuses_one_corrupt_evidence_receipt() {
+    const SESSION_ID: &str = "failure-evidence-corrupt-receipt";
+    let store = seed_failure_evidence_session(SESSION_ID, r#"{"failure_evidence":"#).await;
+
+    let error = store
         .load_session()
-        .with_subscriber(subscriber)
         .await
-        .expect("one corrupt evidence receipt must not make the session unreadable")
-        .expect("seeded session remains readable");
+        .expect_err("a corrupt evidence receipt must refuse the whole load");
+    assert!(
+        matches!(
+            &error,
+            StoreError::StoredDataCorrupt {
+                record_kind: "RuntimeCommitReceipt",
+                message,
+            } if message.contains(SESSION_ID) && message.contains("bad-evidence-receipt")
+        ),
+        "the corrupt receipt refusal must name the session and operation: {error:?}"
+    );
+}
 
-    assert_eq!(
-        reopened.turn_failure_settlements.len(),
-        1,
-        "only the valid evidence receipt becomes a settlement"
+#[tokio::test]
+async fn turn_failure_reopen_refuses_a_preversioned_receipt() {
+    const SESSION_ID: &str = "failure-evidence-preversioned-receipt";
+    let store = seed_failure_evidence_session(SESSION_ID, r#"{"failure_evidence":[{}]}"#).await;
+
+    let error = store
+        .load_session()
+        .await
+        .expect_err("an unversioned receipt must refuse the whole load");
+    assert!(
+        matches!(
+            &error,
+            StoreError::MissingRecordSchemaVersion {
+                record_kind: "RuntimeCommitReceipt",
+                ..
+            }
+        ),
+        "the pre-versioned receipt refusal must be typed: {error:?}"
     );
-    assert_eq!(
-        reopened.turn_failure_settlements[0].turn_id,
-        evidence_turn_id
-    );
-    assert_eq!(
-        warning_count.load(Ordering::Relaxed),
-        1,
-        "the skipped corrupt evidence receipt emits one warning"
+}
+
+#[tokio::test]
+async fn turn_failure_reopen_refuses_a_newer_receipt_version() {
+    const SESSION_ID: &str = "failure-evidence-newer-receipt";
+    let newer = lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
+    let bad_json = format!(r#"{{"schema_version":{newer},"failure_evidence":[{{}}]}}"#);
+    let store = seed_failure_evidence_session(SESSION_ID, &bad_json).await;
+
+    let error = store
+        .load_session()
+        .await
+        .expect_err("a newer receipt version must refuse the whole load");
+    assert!(
+        matches!(
+            &error,
+            StoreError::UnsupportedRecordSchemaVersion {
+                record_kind: "RuntimeCommitReceipt",
+                actual,
+                expected,
+            } if *actual == newer
+                && *expected == lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
+        ),
+        "the newer-version receipt refusal must be the typed version error: {error:?}"
     );
 }
 

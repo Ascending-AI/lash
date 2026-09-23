@@ -118,7 +118,9 @@ impl SessionPolicy {
 /// Every field is applied at the session-command drain. The command commit is
 /// therefore the publication boundary: resident policy is never changed by a
 /// setter before the durable head accepts the same values.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ApplyConfigPatch {
     /// Exact session-config wire generation. The patch and the head row share
     /// one schema because they carry the same durable policy facts.
@@ -253,7 +255,9 @@ pub struct ProviderPinMismatch {
 /// one value, so the default overlay is per-field: a child that caps output
 /// tokens keeps the temperature and seed its parent pinned. Discarding
 /// inherited intent stays available, but it has to be asked for.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "mode", content = "generation", rename_all = "snake_case")]
 pub enum GenerationOverlay {
     /// Layer the set options over the inherited ones. Options this overlay

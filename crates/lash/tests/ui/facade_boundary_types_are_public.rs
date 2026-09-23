@@ -78,6 +78,7 @@ impl SessionCommitStore for FacadeStore {
             .collect();
         let manifest: SessionCheckpoint = commit.checkpoint.manifest()?;
         Ok(RuntimeCommitReceipt {
+            schema_version: lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
             head_revision: commit.expected_head_revision + 1,
             checkpoint_ref: "checkpoint".to_string().into(),
             manifest,

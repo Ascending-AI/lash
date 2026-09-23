@@ -6,7 +6,17 @@ use crate::{SchemaContract, SchemaProjectionOverride};
 
 /// Automatic retry policy for a tool's execution.
 ///
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolRetryPolicy {
     /// Never retry automatically.
@@ -90,7 +100,17 @@ fn is_default_tool_retry_policy(policy: &ToolRetryPolicy) -> bool {
     *policy == ToolRetryPolicy::default()
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolActivation {
     #[default]
@@ -102,7 +122,9 @@ fn is_default_tool_activation(activation: &ToolActivation) -> bool {
     *activation == ToolActivation::default()
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolOutputContract {
     #[default]
@@ -176,7 +198,9 @@ impl ToolOutputContract {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolArgumentProjectionPolicy {
     #[default]
@@ -205,6 +229,22 @@ fn is_default_tool_argument_projection_policy(policy: &ToolArgumentProjectionPol
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 #[serde(transparent)]
 pub struct ToolId(String);
+
+/// The wire shape is the non-empty string; `ToolId::new`'s emptiness refusal
+/// cannot be expressed as a schema assertion.
+impl schemars::JsonSchema for ToolId {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        <String as schemars::JsonSchema>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        <String as schemars::JsonSchema>::json_schema(generator)
+    }
+}
 
 impl ToolId {
     pub fn new(id: impl Into<String>) -> Self {
@@ -267,7 +307,9 @@ fn is_inline(value: &bool) -> bool {
 /// there is no per-manifest tier. The optional compact contract is the
 /// catalog-facing projection of the resolved contract; full schemas stay in
 /// [`ToolContract`].
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ToolManifest {
     #[serde(default = "inline_default", skip_serializing_if = "is_inline")]
     pub inline: bool,
@@ -294,7 +336,9 @@ pub struct ToolManifest {
 }
 
 /// Heavy tool contract resolved only when a prompt or call needs schemas/docs.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ToolContract {
     #[serde(skip)]
     identity: Option<ToolContractIdentity>,
@@ -558,7 +602,9 @@ impl ToolContract {
 /// is reachable from the persisted RLM execution-state envelope, whose
 /// canonical-encoding invariant bans `#[serde(flatten)]` because a flattened
 /// subtree has no declaration order a structural pre-pass can validate.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ToolDefinition {
     pub manifest: ToolManifest,
     pub contract: ToolContract,
@@ -575,7 +621,9 @@ pub struct ModelTool {
 const COMPACT_TOOL_EXAMPLE_LIMIT: usize = 2;
 const COMPACT_TOOL_EXAMPLE_CHAR_LIMIT: usize = 240;
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct CompactToolContract {
     pub name: String,
     pub signature: String,

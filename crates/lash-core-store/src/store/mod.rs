@@ -110,8 +110,10 @@ pub use retention::{
     is_facade_minted_operation_id, mint_facade_operation_id, plugin_operation_receipt_storage_key,
 };
 pub use runtime_commit::{
-    AppendRequestIdentity, RuntimeCommit, RuntimeCommitReceipt, RuntimeTurnCommitStamp,
-    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SemanticBoundaryOperation,
+    AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+    RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
+    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+    SemanticBoundaryOperation, decode_runtime_commit_receipt, ensure_supported_receipt_version,
 };
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
@@ -230,7 +232,17 @@ pub fn validate_session_id(session_id: &SessionId) -> Result<(), StoreError> {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(transparent)]
 pub struct BlobRef(pub String);
 

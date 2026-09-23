@@ -36,7 +36,7 @@ pub const PLUGIN_STATE_CHECKPOINT_COMPONENT: &str = "plugin_state";
 pub const EXECUTION_STATE_CHECKPOINT_COMPONENT: &str = "execution_state";
 
 /// Complete durable root for a session checkpoint.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct SessionCheckpoint {
     pub schema_version: u32,
     pub turn_state: crate::PersistedTurnState,
@@ -82,7 +82,9 @@ impl SessionCheckpoint {
 }
 
 /// Durable address and codec identity for one checkpoint component.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct CheckpointComponentDescriptor {
     pub blob_ref: BlobRef,
     pub encoding_version: u32,

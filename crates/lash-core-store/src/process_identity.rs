@@ -251,7 +251,7 @@ impl WakeDeliveryState {
 /// in the invocation delivered with a process wake.
 pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 3;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProcessWakeDelivery {
     pub version: u32,
     pub wake_id: String,

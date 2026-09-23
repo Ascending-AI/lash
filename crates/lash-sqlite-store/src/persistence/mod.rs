@@ -30,26 +30,10 @@ use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagno
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
-struct CorruptTurnFailureReceipt {
-    /// Operation storage key of the corrupt receipt, not a turn identity.
-    turn_id: String,
-    error: String,
-}
-
-struct TurnFailureSettlementLoad {
-    settlements: Vec<lash_core::TurnFailureSettlement>,
-    corrupt_receipts: Vec<CorruptTurnFailureReceipt>,
-}
-
-struct SessionLoadWithWarnings {
-    read: PersistedSessionRead,
-    corrupt_failure_receipts: Vec<CorruptTurnFailureReceipt>,
-}
-
 fn load_turn_failure_settlements_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
-) -> Result<TurnFailureSettlementLoad, StoreError> {
+) -> Result<Vec<lash_core::TurnFailureSettlement>, StoreError> {
     let mut statement = conn
         .prepare(session_sql().turn_commits.select_failure_settlements.sql())
         .map_err(sqlite_error)?;
@@ -59,20 +43,10 @@ fn load_turn_failure_settlements_conn(
         })
         .map_err(sqlite_error)?;
     let mut settlements = Vec::new();
-    let mut corrupt_rows = Vec::new();
     for row in rows {
         let (turn_id, result_json) = row.map_err(sqlite_error)?;
-        let receipt: lash_core::store::RuntimeCommitReceipt =
-            match serde_json::from_str(&result_json) {
-                Ok(receipt) => receipt,
-                Err(error) => {
-                    corrupt_rows.push(CorruptTurnFailureReceipt {
-                        turn_id,
-                        error: error.to_string(),
-                    });
-                    continue;
-                }
-            };
+        let receipt =
+            lash_core::store::decode_runtime_commit_receipt(session_id, &turn_id, &result_json)?;
         if !receipt.failure_evidence.is_empty() {
             settlements.push(lash_core::TurnFailureSettlement {
                 turn_id,
@@ -80,10 +54,7 @@ fn load_turn_failure_settlements_conn(
             });
         }
     }
-    Ok(TurnFailureSettlementLoad {
-        settlements,
-        corrupt_receipts: corrupt_rows,
-    })
+    Ok(settlements)
 }
 
 fn read_session_state_version_conn(

@@ -936,6 +936,62 @@ paths = ["crates/lash-core-store/src/store/runtime_commit.rs"]
 symbols = ["usage_payload_identity_bytes"]
 
 [[surface]]
+constant = "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION"
+constant_path = "crates/lash-core-store/src/store/runtime_commit.rs"
+description = "persisted runtime turn-commit receipt in runtime_turn_commits.result_json"
+manifest = "RuntimeCommitReceipt"
+
+# The receipt is the durable `result_json` a committed turn returns on replay.
+# These guards name the receipt declaration and the payload types its fields
+# reach directly; each of those types' own closures is already pinned by its
+# owning surface (SessionCheckpoint, SessionNodeBody, the queue and turn-input
+# vocabularies), and the PostgreSQL/SQLite payload-shape fingerprint covers the
+# full schemars document this guard cannot see.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/store/runtime_commit.rs"]
+symbols = [
+  "RuntimeCommitReceipt",
+  "RuntimeUsageDeltaIdentity",
+  "decode_runtime_commit_receipt",
+  "ensure_supported_receipt_version",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/store/runtime_commit_plan.rs"]
+symbols = ["RuntimeCommitReceiptRecord"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/session_graph.rs"]
+symbols = ["RealizedNodeTimestamp"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/turn_failure_evidence.rs"]
+symbols = [
+  "TurnFailureEvidence",
+  "TurnFailurePartialOutput",
+  "ChargeSafetyRefusalEvidence",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/queued_work_vocabulary.rs"]
+symbols = ["QueuedWorkBatch"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/turn_input_vocabulary.rs"]
+symbols = ["TurnInputApplication"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/turn_control_vocabulary.rs"]
+symbols = ["TurnCancelInputOutcome"]
+
+[[surface]]
 constant = "PRODUCT_EVENT_LOG_FORMAT_VERSION"
 constant_path = "examples/agent-workbench/src/main_sections/state.rs"
 description = "agent-workbench product-event log JSON snapshot"
@@ -1224,11 +1280,14 @@ must_cover = [
 
 # Message parts reach the LLM type family: the attachment source a part
 # carries, the provider replay metadata pinned to tool-call, reasoning, and
-# text parts, and the generation options the policy holds. That file is a wire
-# shape file whole, so it is swept whole.
+# text parts, and the generation options the policy holds. Those files are
+# wire shape files whole, so they are swept whole.
 [[surface.guard]]
 kind = "rust_serde_shapes"
-paths = ["crates/lash-sansio/src/llm/types.rs"]
+paths = [
+  "crates/lash-sansio/src/llm/types.rs",
+  "crates/lash-sansio/src/llm/types/non_negative_finite_f64.rs",
+]
 must_cover = [
   "AttachmentSource",
   "ProviderReplayMeta",
@@ -1259,13 +1318,16 @@ paths = ["crates/lash-core-store/src/protocol_turn_options.rs"]
 # emitted field names, their order, and the stamped version's type, and
 # `ProtocolTurnOptionsWire` is the accept side. `rust_items` cannot see `impl`
 # blocks, so both must be named here for the guard to cover the wire contract.
-# The constant itself is guarded too: its Rust type decides how the stamped
-# value is emitted (`serialize_u32` vs anything else) and, with the in-memory
-# `schema_version: u32` field gone, nothing else in the guard records it.
+# `ProtocolTurnOptionsSchemaWire` is the schemars mirror the payload-shape
+# enrollment reads. The constant itself is guarded too: its Rust type decides
+# how the stamped value is emitted (`serialize_u32` vs anything else) and, with
+# the in-memory `schema_version: u32` field gone, nothing else in the guard
+# records it.
 symbols = [
   "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION",
   "ProtocolTurnOptions",
   "ProtocolTurnOptionsWire",
+  "ProtocolTurnOptionsSchemaWire",
   "serialize_protocol_turn_options",
 ]
 

@@ -113,6 +113,22 @@ impl<'de> serde::Deserialize<'de> for AttachmentId {
     }
 }
 
+/// The wire shape is the validated identity string; the id alphabet is
+/// enforced by `parse`, which no schema assertion can express.
+impl schemars::JsonSchema for AttachmentId {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        <String as schemars::JsonSchema>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        <String as schemars::JsonSchema>::json_schema(generator)
+    }
+}
+
 /// A MIME media type failed syntactic validation.
 ///
 /// [`MediaType::parse`] returns this error when the input is not exactly two
@@ -234,7 +250,25 @@ impl<'de> serde::Deserialize<'de> for MediaType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// The wire shape is the validated string: MIME-syntax refinement happens in
+/// `parse`, which no schema assertion can express.
+impl schemars::JsonSchema for MediaType {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        <String as schemars::JsonSchema>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        <String as schemars::JsonSchema>::json_schema(generator)
+    }
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AttachmentTypeMetadata {
     Image {
@@ -274,7 +308,9 @@ impl AttachmentCreateMeta {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AttachmentRef {
     pub id: AttachmentId,
     pub media_type: MediaType,

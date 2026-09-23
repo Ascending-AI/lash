@@ -2,7 +2,9 @@ use std::num::NonZeroUsize;
 
 use crate::provider::{ModelCapability, ReasoningSelection};
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ModelSpec {
     pub id: String,
@@ -154,7 +156,9 @@ impl Default for ModelSpec {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ModelLimits {
     /// The prompt budget: the maximum input tokens the provider accepts for
