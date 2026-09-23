@@ -351,6 +351,7 @@ fn continuation_test_vm_with_host<'a, H: ExecutionHost>(
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
+        &program.chunk.private_slots,
         &ProjectedBindings::new(),
         Vec::new(),
     );

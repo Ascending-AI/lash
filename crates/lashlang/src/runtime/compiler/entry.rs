@@ -35,7 +35,8 @@ impl Compiler {
         );
         compiler.expression_source_spans = expression_source_spans(program);
         compiler.compile_program_block(program);
-        let chunk = compiler.finish();
+        let mut chunk = compiler.finish();
+        chunk.mark_private_slots(&program.private_bindings);
         let compile_stats = *stats.borrow();
         (chunk, compile_stats)
     }
@@ -60,7 +61,8 @@ impl Compiler {
         });
         compiler.expression_source_spans = source_spans;
         compiler.compile_program_block(program);
-        let chunk = compiler.finish();
+        let mut chunk = compiler.finish();
+        chunk.mark_private_slots(&program.private_bindings);
         let compile_stats = *stats.borrow();
         (chunk, compile_stats)
     }
@@ -145,6 +147,7 @@ impl Compiler {
             constants: self.constants,
             names: self.names,
             slot_names,
+            private_slots: Vec::new(),
             key_lists: self.key_lists,
             format_templates: self.format_templates,
             compiled_schemas: self.compiled_schemas,

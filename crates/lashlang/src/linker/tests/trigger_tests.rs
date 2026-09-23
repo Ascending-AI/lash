@@ -133,7 +133,7 @@ fn linked_module_accepts_named_processes_resource_params_and_activations() {
     assert!(
         linked
             .artifact
-            .module_ref
+            .module_ref()
             .as_str()
             .starts_with("lashlang:v2:blake3:")
     );
@@ -327,8 +327,8 @@ fn host_requirements_ref_tracks_host_named_data_type_shape_changes() {
     .expect("link changed trigger occurrence shape");
 
     assert_ne!(
-        first.artifact.host_requirements_ref,
-        second.artifact.host_requirements_ref
+        first.artifact.host_requirements_ref(),
+        second.artifact.host_requirements_ref()
     );
 }
 
@@ -611,7 +611,7 @@ fn linked_artifact_keeps_explicit_keys_and_leaves_derivation_to_the_runtime() {
     // registration without one names no key at all. The host derives the
     // identity from the descriptor value and the target it actually carries,
     // so the linker has nothing left to attribute.
-    let keys = subscription_keys(&linked.artifact.ir);
+    let keys = subscription_keys(linked.artifact.ir());
     assert_eq!(keys, vec!["evening-scan".to_string()], "{keys:?}");
 }
 

@@ -113,7 +113,7 @@ fn the_durable_process_example_links_and_lifts_one_process() {
         .expect("durable-process.ts should link");
     let processes = linked
         .artifact
-        .ir
+        .ir()
         .declarations
         .iter()
         .filter_map(|declaration| match declaration {

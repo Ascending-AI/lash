@@ -37,13 +37,13 @@ pub fn compile(
     entry: Entry<'_>,
     source_spans: Option<&BTreeMap<AstPath, Span>>,
 ) -> Result<CompiledProgram, RuntimeError> {
-    let program = &artifact.ir;
+    let program = &artifact.ir();
     match entry {
         Entry::Main => Ok(compile_main(artifact, source_spans)),
         Entry::Process(process_ref) => {
             let process_name = artifact.process_name_for_ref(process_ref).ok_or_else(|| {
                 RuntimeError::ProcessRefNotExported {
-                    module_ref: artifact.module_ref.clone(),
+                    module_ref: artifact.module_ref().clone(),
                     process_ref: process_ref.clone(),
                 }
             })?;
@@ -60,7 +60,7 @@ pub fn compile(
                     _ => None,
                 })
                 .ok_or_else(|| RuntimeError::ArtifactProcessMissing {
-                    module_ref: artifact.module_ref.clone(),
+                    module_ref: artifact.module_ref().clone(),
                     name: process_name.to_string(),
                 })?;
             // The process body compiles as the program's main, so its spans
@@ -79,6 +79,8 @@ pub fn compile(
                 language: program.language.clone(),
                 declarations: program.declarations.clone(),
                 main: process.body.clone(),
+                // A process body's bindings never reach session globals.
+                private_bindings: Default::default(),
                 spans: BTreeMap::new(),
             };
             let (chunk, compile_stats) = Compiler::compile_linked_process_program(
@@ -111,7 +113,7 @@ pub(crate) fn compile_main(
         })
         .unwrap_or_default();
     let (chunk, compile_stats) = Compiler::compile_linked_program(
-        &artifact.ir,
+        artifact.ir(),
         spans,
         artifact.into(),
         LashlangExecutionContext::main(),
@@ -206,6 +208,7 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         let slots = SlotState::from_globals(
             globals,
             &program.chunk.slot_names,
+            &program.chunk.private_slots,
             projected,
             std::mem::take(&mut scratch.slot_values),
         );
@@ -225,8 +228,13 @@ async fn execute_with_optional_scratch<H: ExecutionHost>(
         let (mut globals, mut heap) = state.take_runtime();
         crate::runtime::projected_refresh::refresh_record(&mut globals, projected);
         crate::runtime::projected_refresh::refresh_heap(&mut heap, projected);
-        let slots =
-            SlotState::from_globals(globals, &program.chunk.slot_names, projected, Vec::new());
+        let slots = SlotState::from_globals(
+            globals,
+            &program.chunk.slot_names,
+            &program.chunk.private_slots,
+            projected,
+            Vec::new(),
+        );
         let mut vm = Vm::new(&program.chunk, slots, host, None, host.execution_mode());
         vm.install_heap(heap);
         let result = run_vm(program, host, &mut vm).await;

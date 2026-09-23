@@ -149,13 +149,30 @@ pub struct ModuleExports {
 /// second program from it. It keeps every binding name and carries no spans
 /// (the durable form is span-free; a linked module keeps its diagnostic spans
 /// beside the artifact).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// An artifact is admitted by construction: its fields are private, and the
+/// only ways to obtain one are the validating builders (the linker,
+/// [`Self::from_program`]) and the verifying store decoder
+/// ([`Self::from_store_bytes`]). There is no struct literal, no field write
+/// and no `Deserialize` path around them, so every artifact [`crate::compile`]
+/// sees has a valid program and refs derived from its own content.
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ModuleArtifact {
-    pub module_ref: ModuleRef,
-    pub host_requirements_ref: HostRequirementsRef,
-    pub host_requirements: HostRequirements,
-    pub exports: ModuleExports,
-    pub ir: Program,
+    module_ref: ModuleRef,
+    host_requirements_ref: HostRequirementsRef,
+    host_requirements: HostRequirements,
+    exports: ModuleExports,
+    ir: Program,
+}
+
+/// The stored shape of a [`ModuleArtifact`], decoded only to be verified.
+#[derive(Deserialize)]
+struct StoredModuleArtifact {
+    module_ref: ModuleRef,
+    host_requirements_ref: HostRequirementsRef,
+    host_requirements: HostRequirements,
+    exports: ModuleExports,
+    ir: Program,
 }
 
 impl ModuleArtifact {
@@ -176,7 +193,7 @@ impl ModuleArtifact {
         requirements: HostRequirements,
     ) -> Result<Self, ModuleArtifactError> {
         Self::check_ir(&ir)?;
-        let host_requirements_ref = host_requirements_ref(&requirements);
+        let host_requirements_ref = hash_host_requirements(&requirements);
         let exports = module_exports(&ir);
         let module_ref = module_ref(&ir, &host_requirements_ref, &exports);
         Ok(Self {
@@ -198,6 +215,7 @@ impl ModuleArtifact {
             return Err(ModuleArtifactError::DurableSpans);
         }
         crate::ast::validate_ast(ir)?;
+        crate::ast::check_unique_declarations(ir)?;
         if let Some(process) = ir.declarations.iter().find_map(|declaration| {
             let Declaration::Process(process) = declaration else {
                 return None;
@@ -212,16 +230,40 @@ impl ModuleArtifact {
     }
 
     /// The definition identity a trace and an admitted graph both name
-    /// (ADR 0100 R6): a digest of the artifact's span-free program in its
-    /// deterministic JSON encoding, under `lash-workflow-source/v4`. It never
-    /// depends on how a dialect would print the program.
+    /// (ADR 0100 R6): a digest, under `lash-workflow-source/v4`, of the same
+    /// deterministic atom stream the module ref hashes for the program (its
+    /// language and its span-free IR, names and number literals by the one IR
+    /// number rule). It never depends on how a dialect would print the program
+    /// or on a serializer's spelling.
     pub fn source_identity(&self) -> String {
-        #[expect(
-            clippy::expect_used,
-            reason = "`Program` derives `Serialize` over plain data, so encoding it cannot fail"
-        )]
-        let encoded = serde_json::to_vec(&self.ir).expect("program serializes");
-        lash_sansio::core_support::blake3_domain_hash_hex("lash-workflow-source/v4", encoded)
+        let mut writer = HashWriter::for_source_identity();
+        writer.atom("source");
+        writer.atom(self.ir.language.as_str());
+        write_program(&mut writer, &self.ir);
+        writer.finish().as_str().to_string()
+    }
+
+    /// The module's identity: a hash of its language, host requirements,
+    /// exports and complete program.
+    pub fn module_ref(&self) -> &ModuleRef {
+        &self.module_ref
+    }
+
+    pub fn host_requirements_ref(&self) -> &HostRequirementsRef {
+        &self.host_requirements_ref
+    }
+
+    pub fn host_requirements(&self) -> &HostRequirements {
+        &self.host_requirements
+    }
+
+    pub fn exports(&self) -> &ModuleExports {
+        &self.exports
+    }
+
+    /// The executable program: the linked program, verbatim and span-free.
+    pub fn ir(&self) -> &Program {
+        &self.ir
     }
 
     pub fn process_ref(&self, process_name: &str) -> Option<&ProcessRef> {
@@ -281,14 +323,15 @@ impl ModuleArtifact {
         crate::ModuleIntrospection::from_artifact(self)
     }
 
-    /// Refuses an artifact whose recorded refs do not match its own content.
+    /// Refuses decoded content whose recorded refs do not match the content.
     ///
     /// The refs are derived from borrowed content rather than by rebuilding the
-    /// artifact, so a publish never deep-copies the program only to hash it
-    /// (FIG-3088).
-    pub fn verify(&self) -> Result<(), ModuleArtifactError> {
+    /// artifact, so a decode never deep-copies the program only to hash it
+    /// (FIG-3088). Only the store decoder needs it: every other artifact was
+    /// built by a validating builder.
+    fn verify(&self) -> Result<(), ModuleArtifactError> {
         Self::check_ir(&self.ir)?;
-        let derived_host_requirements_ref = host_requirements_ref(&self.host_requirements);
+        let derived_host_requirements_ref = hash_host_requirements(&self.host_requirements);
         let derived_exports = module_exports(&self.ir);
         let derived_module_ref =
             module_ref(&self.ir, &derived_host_requirements_ref, &derived_exports);
@@ -317,7 +360,6 @@ impl ModuleArtifact {
     }
 
     pub fn to_store_bytes(&self) -> Result<Vec<u8>, ModuleArtifactError> {
-        self.verify()?;
         serde_json::to_vec(self).map_err(|err| ModuleArtifactError::Codec(err.to_string()))
     }
 
@@ -325,7 +367,7 @@ impl ModuleArtifact {
         let raw: serde_json::Value = serde_json::from_slice(bytes)
             .map_err(|err| ModuleArtifactError::Codec(err.to_string()))?;
         reject_future_shape(&raw)?;
-        let artifact: Self = serde_json::from_slice(bytes).map_err(|err| {
+        let stored: StoredModuleArtifact = serde_json::from_slice(bytes).map_err(|err| {
             let message = err.to_string();
             if message.contains("unknown variant") {
                 ModuleArtifactError::FutureShape {
@@ -336,6 +378,13 @@ impl ModuleArtifact {
                 ModuleArtifactError::Codec(message)
             }
         })?;
+        let artifact = Self {
+            module_ref: stored.module_ref,
+            host_requirements_ref: stored.host_requirements_ref,
+            host_requirements: stored.host_requirements,
+            exports: stored.exports,
+            ir: stored.ir,
+        };
         artifact.verify()?;
         Ok(artifact)
     }
@@ -693,7 +742,6 @@ impl LashlangArtifactStore for InMemoryLashlangArtifactStore {
                 "invalid module reference".into(),
             ));
         }
-        artifact.verify()?;
         let publication_pause = self.publication_pause.lock_recover().take();
         if let Some(pause) = publication_pause {
             pause.pause().await;
@@ -869,7 +917,7 @@ fn module_exports(program: &Program) -> ModuleExports {
     exports
 }
 
-fn host_requirements_ref(requirements: &HostRequirements) -> HostRequirementsRef {
+fn hash_host_requirements(requirements: &HostRequirements) -> HostRequirementsRef {
     let mut writer = HashWriter::new();
     writer.atom(LASHLANG_SEMANTIC_HASH_VERSION);
     writer.atom("host-requirements");
@@ -972,6 +1020,11 @@ fn write_program(writer: &mut HashWriter, program: &Program) {
         write_declaration(writer, declaration);
     }
     write_expr(writer, &program.main);
+    writer.atom("private-bindings");
+    writer.usize(program.private_bindings.len());
+    for name in &program.private_bindings {
+        write_name(writer, name);
+    }
 }
 
 fn write_declaration(writer: &mut HashWriter, declaration: &Declaration) {
@@ -1130,7 +1183,7 @@ fn write_expr(writer: &mut HashWriter, expr: &Expr) {
         }
         Expr::Number(value) => {
             writer.atom("number");
-            writer.u64(if *value == 0.0 { 0 } else { value.to_bits() });
+            writer.u64(crate::ast::number::canonical_bits(*value));
         }
         Expr::String(value) => {
             writer.atom("string");

@@ -228,44 +228,32 @@ fn malformed_artifact_json_remains_an_undecodable_codec_error() {
     assert!(!matches!(error, ModuleArtifactError::FutureShape { .. }));
 }
 
-/// The refs are now derived from borrowed content instead of by rebuilding the
-/// artifact, so the store's admission check has to keep refusing an artifact
-/// whose refs do not describe the content it carries.
+/// An artifact's refs are private and derived from its content, so a forged
+/// ref can only arrive as stored bytes; the store decoder is what refuses it.
+/// The refs are derived from borrowed content rather than by rebuilding the
+/// artifact (FIG-3088), and each comparison is exercised on its own.
 ///
 /// Red side: dropping the `artifact.verify()?;` line from
-/// `InMemoryLashlangArtifactStore::publish_module_artifact`, or either of the
-/// two ref comparisons exercised here, lets the forged artifacts publish.
-/// Each half gets its own store so the refusal under test is the ref check and
-/// never the immutability check on an already-published ref.
-#[tokio::test(flavor = "current_thread")]
-async fn publish_refuses_an_artifact_whose_refs_do_not_match_its_content() {
-    let owner = lash_core_execution::ArtifactOwner::host("fig-3088");
+/// `ModuleArtifact::from_store_bytes`, or either of the two ref comparisons
+/// exercised here, lets the forged bytes decode.
+#[test]
+fn store_decode_refuses_bytes_whose_refs_do_not_match_their_content() {
     let honest = process_typed_artifact("event");
 
     // A forged `module_ref`: the content is the "payload" program, the ref is
     // the one the "event" program hashes to.
     let mut forged_module_ref = process_typed_artifact("payload");
-    let payload_ref = forged_module_ref.module_ref.clone();
     forged_module_ref.module_ref = honest.module_ref.clone();
-    let store = InMemoryLashlangArtifactStore::new();
-    let error = store
-        .publish_module_artifact(&owner, &forged_module_ref)
-        .await
-        .expect_err("a module_ref that does not hash its own content must be refused");
+    let error = ModuleArtifact::from_store_bytes(
+        &forged_module_ref
+            .to_store_bytes()
+            .expect("the forged artifact encodes"),
+    )
+    .expect_err("a module_ref that does not hash its own content must be refused");
     assert!(
         error.to_string().contains("module_ref"),
         "expected a module_ref mismatch, got {error}"
     );
-    for refused in [&honest.module_ref, &payload_ref] {
-        assert!(
-            store
-                .get_module_artifact(refused)
-                .await
-                .expect("the store reads back")
-                .is_none(),
-            "a refused publish must retain nothing"
-        );
-    }
 
     // A forged `host_requirements_ref`: the content and the module_ref are the
     // honest ones, only the requirements ref names requirements this artifact
@@ -274,43 +262,32 @@ async fn publish_refuses_an_artifact_whose_refs_do_not_match_its_content() {
     let mut forged_requirements_ref = process_typed_artifact("event");
     let mut unrequested = forged_requirements_ref.host_requirements.clone();
     unrequested.globals.insert("unrequested_global".to_string());
-    forged_requirements_ref.host_requirements_ref = host_requirements_ref(&unrequested);
+    forged_requirements_ref.host_requirements_ref = hash_host_requirements(&unrequested);
     assert_ne!(
         forged_requirements_ref.host_requirements_ref,
         honest.host_requirements_ref
     );
     assert_eq!(forged_requirements_ref.module_ref, honest.module_ref);
-    let store = InMemoryLashlangArtifactStore::new();
-    let error = store
-        .publish_module_artifact(&owner, &forged_requirements_ref)
-        .await
-        .expect_err("host requirements that do not hash to their ref must be refused");
+    let error = ModuleArtifact::from_store_bytes(
+        &forged_requirements_ref
+            .to_store_bytes()
+            .expect("the forged artifact encodes"),
+    )
+    .expect_err("host requirements that do not hash to their ref must be refused");
     assert!(
         error.to_string().contains("host_requirements_ref"),
         "expected a host_requirements_ref mismatch, got {error}"
     );
-    assert!(
-        store
-            .get_module_artifact(&honest.module_ref)
-            .await
-            .expect("the store reads back")
-            .is_none(),
-        "a refused publish must retain nothing"
-    );
 
-    // The same store still admits the artifact whose refs do match, so the
-    // refusals above are the ref check and not a blanket rejection.
-    let store = InMemoryLashlangArtifactStore::new();
-    store
-        .publish_module_artifact(&owner, &honest)
-        .await
-        .expect("an artifact whose refs match its content publishes");
-    let stored = store
-        .get_module_artifact(&honest.module_ref)
-        .await
-        .expect("the store reads back")
-        .expect("the honest artifact is retained");
-    assert_eq!(*stored, honest);
+    // The honest artifact's bytes decode, so the refusals above are the ref
+    // check and not a blanket rejection.
+    let decoded = ModuleArtifact::from_store_bytes(
+        &honest
+            .to_store_bytes()
+            .expect("the honest artifact encodes"),
+    )
+    .expect("an artifact whose refs match its content decodes");
+    assert_eq!(decoded, honest);
 }
 
 /// One module ref addresses one byte string, and a name is part of it.
@@ -373,4 +350,62 @@ fn process_parameter_names_stay_in_the_ir() {
         event.module_ref,
         process_typed_artifact("payload").module_ref
     );
+}
+
+/// A process's origin is derived by the linker (FIG-3571): a program handed
+/// to it cannot claim a lifted process, and no program an artifact carries can
+/// hold an origin its declaration contradicts.
+#[test]
+fn process_origins_are_derived_never_authored() {
+    let lifted_body =
+        || crate::testing::ast_builders::finish(crate::testing::ast_builders::bool_lit(true));
+    let with_process = |name: &str, origin: crate::ProcessOrigin, params: usize| {
+        let mut declaration = crate::testing::ast_builders::process_returning(
+            name,
+            (0..params)
+                .map(|index| {
+                    crate::testing::ast_builders::param(&format!("p{index}"), TypeExpr::Any)
+                })
+                .collect(),
+            TypeExpr::Bool,
+            lifted_body(),
+        );
+        if let Declaration::Process(process) = &mut declaration {
+            process.origin = origin;
+        }
+        crate::testing::ast_builders::module(vec![declaration], Vec::new())
+    };
+    let lifted_name = format!("{}{}", crate::LIFTED_PROCESS_NAME_PREFIX, "0".repeat(64));
+    let lifted = |hidden_params| crate::ProcessOrigin::Lifted {
+        site: crate::AstPath::main(vec![0, 0]),
+        hidden_params,
+    };
+    for (program, reason) in [
+        (
+            with_process(&lifted_name, crate::ProcessOrigin::Declared, 0),
+            "a declared process cannot take a lifted process's name",
+        ),
+        (
+            with_process("authored", lifted(0), 0),
+            "a lifted process is named by its literal's digest",
+        ),
+        (
+            with_process(&lifted_name, lifted(2), 1),
+            "a lifted process has more hidden parameters than parameters",
+        ),
+    ] {
+        assert!(matches!(
+            crate::validate_ast(&program),
+            Err(crate::InvalidAst::InvalidProcessOrigin { reason: refused, .. }) if refused == reason
+        ));
+        assert!(ModuleArtifact::from_program(program).is_err(), "{reason}");
+    }
+    let claimed = with_process(&lifted_name, lifted(0), 0);
+    crate::validate_ast(&claimed).expect("a well-formed lifted declaration validates");
+    assert!(matches!(
+        crate::LinkedModule::link(claimed, crate::testing::harness::test_environment()),
+        Err(crate::LinkError::InvalidAst {
+            source: crate::InvalidAst::InvalidProcessOrigin { .. }
+        })
+    ));
 }

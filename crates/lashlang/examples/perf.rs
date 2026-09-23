@@ -202,8 +202,8 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
             for _ in 0..iterations {
                 let linked = linked_benchmark_program(std::hint::black_box(scenario));
                 std::hint::black_box((
-                    &linked.artifact.module_ref,
-                    &linked.artifact.host_requirements_ref,
+                    &linked.artifact.module_ref(),
+                    &linked.artifact.host_requirements_ref(),
                 ));
             }
         }
@@ -256,7 +256,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                 rt.block_on(store.publish_module_artifact(&owner, &linked.artifact))
                     .expect("artifact store put should succeed");
                 let artifact = rt
-                    .block_on(store.get_module_artifact(&linked.artifact.module_ref))
+                    .block_on(store.get_module_artifact(linked.artifact.module_ref()))
                     .expect("artifact store get should succeed")
                     .expect("artifact should exist");
                 std::hint::black_box(artifact);
@@ -275,7 +275,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                     .get_or_compile(
                         &linked.artifact,
                         &process_ref,
-                        &linked.artifact.host_requirements_ref,
+                        linked.artifact.host_requirements_ref(),
                     )
                     .expect("process cache compile should succeed");
                 std::hint::black_box(compiled.compile_stats());
@@ -432,7 +432,7 @@ fn run_phase_breakdown(
             benchmark_host_environment(),
         )
         .expect("benchmark program should link");
-        std::hint::black_box(linked.artifact.module_ref);
+        std::hint::black_box(linked.artifact.module_ref());
     });
     let compile = measure_phase("compile", iterations, || {
         let compiled = lashlang::compile(

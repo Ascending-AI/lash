@@ -62,6 +62,9 @@
   let draftDoc = $state(null);
   let canonicalSource = $state('');
   let savedVersion = $state(0);
+  // The saved version's admitted definition: the artifact a run executes and
+  // the only one whose events the overlay shows.
+  let savedDefinition = $state(null);
   let flowNodes = $state([]);
   let flowEdges = $state([]);
   let flowKey = $state(0);
@@ -270,6 +273,7 @@
     draftDoc = structuredClone($state.snapshot(doc));
     canonicalSource = doc.source;
     savedVersion = doc.version;
+    savedDefinition = doc.definition ?? null;
     dirty = false;
     history.reset(draftDoc);
     if (refit) flowKey += 1;
@@ -361,7 +365,7 @@
 
   function onPlay() {
     saveOk = null;
-    run.start();
+    run.start(savedDefinition);
   }
   function onResetLayout() {
     clearPositions();

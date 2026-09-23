@@ -34,6 +34,7 @@ pub fn module(declarations: Vec<Declaration>, expressions: Vec<Expr>) -> Program
         language: lashlang::SourceLanguage::ir(),
         declarations,
         main: Expr::Block(expressions),
+        private_bindings: Default::default(),
         spans: Default::default(),
     }
 }

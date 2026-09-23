@@ -441,6 +441,23 @@ impl LinkedModule {
         surface: impl Borrow<LashlangHostEnvironment>,
     ) -> Result<Self, LinkError> {
         crate::ast::validate_ast(&program)?;
+        // The linker derives every lifted declaration; a program handed to it
+        // declares its processes and cannot claim one was lifted.
+        if let Some(process) = program
+            .declarations
+            .iter()
+            .find_map(|declaration| match declaration {
+                crate::Declaration::Process(process) if process.origin.is_lifted() => Some(process),
+                _ => None,
+            })
+        {
+            return Err(LinkError::InvalidAst {
+                source: crate::InvalidAst::InvalidProcessOrigin {
+                    process: process.name.to_string(),
+                    reason: "a linked program's lifted processes are derived by the linker",
+                },
+            });
+        }
         let surface = surface.borrow();
         let mut linker = Linker::new(&program, surface);
         let mut program = linker.link_program()?;

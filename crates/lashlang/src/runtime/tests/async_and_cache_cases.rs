@@ -399,14 +399,14 @@ fn compiled_process_cache_reuses_process_ref_and_host_requirements_ref() {
         .get_or_compile(
             &linked.artifact,
             &process_ref,
-            &linked.artifact.host_requirements_ref,
+            linked.artifact.host_requirements_ref(),
         )
         .expect("compile first");
     let second = cache
         .get_or_compile(
             &linked.artifact,
             &process_ref,
-            &linked.artifact.host_requirements_ref,
+            linked.artifact.host_requirements_ref(),
         )
         .expect("compile second");
 
@@ -1897,7 +1897,7 @@ fn a_compiled_process_cache_hit_builds_no_key() {
         .get_or_compile(
             &linked.artifact,
             &process_ref,
-            &linked.artifact.host_requirements_ref,
+            linked.artifact.host_requirements_ref(),
         )
         .expect("first compile misses");
     let after_miss = crate::runtime::cache::COMPILED_PROCESS_KEYS_BUILT.load(Ordering::Relaxed);
@@ -1908,7 +1908,7 @@ fn a_compiled_process_cache_hit_builds_no_key() {
             .get_or_compile(
                 &linked.artifact,
                 &process_ref,
-                &linked.artifact.host_requirements_ref,
+                linked.artifact.host_requirements_ref(),
             )
             .expect("subsequent lookups hit");
     }

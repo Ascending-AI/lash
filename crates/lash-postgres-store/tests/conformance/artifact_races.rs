@@ -73,19 +73,19 @@ async fn postgres_artifact_release_observes_owner_that_commits_ahead_of_it() {
         .await
         .expect("publish owner A");
 
-    let mut publisher = lock_artifact_mutations(&storage, &module.module_ref).await;
+    let mut publisher = lock_artifact_mutations(&storage, module.module_ref()).await;
     sqlx::query(
         "INSERT INTO lash_artifact_owners
          (namespace, artifact_ref, owner_kind, owner_id)
          VALUES ('lashlang_module', $1, 'host', 'artifact-race-b')",
     )
-    .bind(module.module_ref.as_str())
+    .bind(module.module_ref().as_str())
     .execute(&mut *publisher)
     .await
     .expect("stage uncommitted owner B edge");
 
     let releasing_store = store.clone();
-    let module_ref = module.module_ref.clone();
+    let module_ref = module.module_ref().clone();
     let release = tokio::spawn(async move {
         releasing_store
             .release_module_artifact(&owner_a, &module_ref)
@@ -104,14 +104,14 @@ async fn postgres_artifact_release_observes_owner_that_commits_ahead_of_it() {
 
     assert!(
         store
-            .get_module_artifact(&module.module_ref)
+            .get_module_artifact(module.module_ref())
             .await
             .expect("read B-owned artifact")
             .is_some(),
         "the owner that committed ahead of release must keep the bytes live"
     );
     store
-        .release_module_artifact(&owner_b, &module.module_ref)
+        .release_module_artifact(&owner_b, module.module_ref())
         .await
         .expect("release owner B");
 }
@@ -132,19 +132,19 @@ async fn postgres_concurrent_final_artifact_releases_converge_to_absent_bytes() 
         .await
         .expect("publish owner A");
     store
-        .retain_module_artifact(&owner_b, &module.module_ref)
+        .retain_module_artifact(&owner_b, module.module_ref())
         .await
         .expect("retain owner B");
-    let blocker = lock_artifact_mutations(&storage, &module.module_ref).await;
+    let blocker = lock_artifact_mutations(&storage, module.module_ref()).await;
     let left_store = store.clone();
-    let left_ref = module.module_ref.clone();
+    let left_ref = module.module_ref().clone();
     let left = tokio::spawn(async move {
         left_store
             .release_module_artifact(&owner_a, &left_ref)
             .await
     });
     let right_store = store.clone();
-    let right_ref = module.module_ref.clone();
+    let right_ref = module.module_ref().clone();
     let right = tokio::spawn(async move {
         right_store
             .release_module_artifact(&owner_b, &right_ref)
@@ -157,7 +157,7 @@ async fn postgres_concurrent_final_artifact_releases_converge_to_absent_bytes() 
     right.await.expect("join B").expect("release B");
     assert!(
         store
-            .get_module_artifact(&module.module_ref)
+            .get_module_artifact(module.module_ref())
             .await
             .expect("read after final releases")
             .is_none()
@@ -180,7 +180,7 @@ async fn postgres_artifact_retirement_fences_a_late_publisher() {
         .publish_module_artifact(&owner, &module)
         .await
         .expect("publish the execution-owned artifact retirement will sever");
-    let blocker = lock_artifact_mutations(&storage, &module.module_ref).await;
+    let blocker = lock_artifact_mutations(&storage, module.module_ref()).await;
     let retiring_store = store.clone();
     let retiring_owner = owner.clone();
     let retirement = tokio::spawn(async move {
@@ -210,7 +210,7 @@ async fn postgres_artifact_retirement_fences_a_late_publisher() {
     assert!(publish.await.expect("join publisher").is_err());
     assert!(
         store
-            .get_module_artifact(&module.module_ref)
+            .get_module_artifact(module.module_ref())
             .await
             .expect("read after late publisher")
             .is_none()

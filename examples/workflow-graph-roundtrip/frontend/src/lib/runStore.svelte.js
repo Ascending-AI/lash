@@ -1,4 +1,5 @@
 import { runWorkflow } from './api.js';
+import { acceptsRunEvent } from './runEvents.js';
 
 const EMPTY_DISPLAY = {
   messages: [],
@@ -16,7 +17,9 @@ export class RunController {
   running = $state(false);
   runId = $state(null);
   workflowVersion = $state(null);
+  // The loaded document's `definition`: the one artifact this overlay shows.
   definition = $state(null);
+  discarded = $state(0);
   // nodeId -> 'started' | 'running' | 'waiting' | 'succeeded' | 'failed'
   overlay = $state({});
   activeNodeId = $state(null);
@@ -36,13 +39,14 @@ export class RunController {
     this.finished = false;
   }
 
-  async start() {
+  async start(definition) {
     // A new Play supersedes any in-flight run.
     if (this.#abort) this.#abort.abort();
     this.reset();
     this.running = true;
     this.runId = null;
-    this.definition = null;
+    this.definition = definition ?? null;
+    this.discarded = 0;
     const controller = new AbortController();
     this.#abort = controller;
 
@@ -70,9 +74,12 @@ export class RunController {
   }
 
   #apply(ev) {
+    if (!acceptsRunEvent(this.definition, ev)) {
+      this.discarded += 1;
+      return;
+    }
     this.runId = ev.runId;
     this.workflowVersion = ev.workflowVersion;
-    this.definition = ev.definition;
     this.eventCount += 1;
     if (ev.display) {
       this.display = {

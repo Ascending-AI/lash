@@ -100,6 +100,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
         t.compile_fail("tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs");
         // FIG-3571: one executable carrier.
         t.compile_fail("tests/ui/linked_module_has_one_carrier.rs");
+        t.compile_fail("tests/ui/module_artifact_cannot_be_assembled.rs");
     }
 }
 

@@ -37,10 +37,7 @@ fn a_binding_survives_a_long_run_of_unrelated_cells() {
     cells.push(Cell::finish("kept"));
 
     let (session, _) = drive(HarnessMode::Resident, &cells);
-    assert_eq!(
-        session.user_bindings().get("kept"),
-        Some(&serde_json::json!(7))
-    );
+    assert_eq!(session.globals().get("kept"), Some(&serde_json::json!(7)));
 }
 
 #[test]
@@ -54,10 +51,7 @@ fn a_later_cell_shadows_an_earlier_binding() {
             Cell::number("value", 5.0),
         ],
     );
-    assert_eq!(
-        session.user_bindings().get("value"),
-        Some(&serde_json::json!(5))
-    );
+    assert_eq!(session.globals().get("value"), Some(&serde_json::json!(5)));
 }
 
 #[test]
@@ -70,7 +64,7 @@ fn a_later_cell_grows_a_structure_an_earlier_cell_built() {
             Cell::extend("grown_again", "grown", 4.0),
         ],
     );
-    let bindings = session.user_bindings();
+    let bindings = session.globals();
     assert_eq!(bindings.get("base"), Some(&serde_json::json!([1, 2])));
     assert_eq!(
         bindings.get("grown_again"),
@@ -95,7 +89,7 @@ fn a_nested_structure_crosses_the_boundary_intact() {
         ],
     );
     assert_eq!(
-        session.user_bindings().get("shape"),
+        session.globals().get("shape"),
         Some(&serde_json::json!({ "scalar": 3, "items": [4, 5, 6] }))
     );
 }
@@ -111,7 +105,7 @@ fn a_dropped_binding_keeps_its_name_and_loses_its_value() {
         ],
     );
     assert_eq!(
-        session.user_bindings().get("payload"),
+        session.globals().get("payload"),
         Some(&serde_json::Value::Null),
         "dropping a value must not delete the name a later cell may still read"
     );
@@ -132,7 +126,7 @@ fn a_failing_cell_between_two_working_cells_changes_nothing() {
         ],
     );
     assert_eq!(
-        session.user_bindings().get("after"),
+        session.globals().get("after"),
         Some(&serde_json::json!([1, 2, 3]))
     );
 }
@@ -162,7 +156,7 @@ fn a_closure_valued_binding_does_not_survive_the_cell_boundary() {
             Cell::number("sibling", 3.0),
         ],
     );
-    let bindings = session.user_bindings();
+    let bindings = session.globals();
     assert!(
         !bindings.contains_key("callback"),
         "a closure-valued binding reached the next cell: {bindings:?}"
@@ -176,7 +170,7 @@ fn a_closure_valued_binding_does_not_survive_the_cell_boundary() {
 fn a_container_reaching_a_closure_does_not_survive_either() {
     let mut session = Session::open(HarnessMode::Resident);
     session.run_ok("const handlers = { onDone: (value: number) => value + 1 };\nconst tag = 5;");
-    let bindings = session.user_bindings();
+    let bindings = session.globals();
     assert!(
         !bindings.contains_key("handlers"),
         "a container reaching a closure survived the boundary: {bindings:?}"
@@ -207,8 +201,5 @@ fn an_ordinary_value_shadows_a_closure_valued_binding() {
             Cell::derive("read", "slot"),
         ],
     );
-    assert_eq!(
-        session.user_bindings().get("read"),
-        Some(&serde_json::json!(12))
-    );
+    assert_eq!(session.globals().get("read"), Some(&serde_json::json!(12)));
 }

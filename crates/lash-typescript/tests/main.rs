@@ -14,8 +14,6 @@ mod aggregate_witnesses;
 mod array_append;
 #[path = "assignment_in_operand.rs"]
 mod assignment_in_operand;
-#[path = "carrier_laws.rs"]
-mod carrier_laws;
 #[path = "cell_boundary_closures.rs"]
 mod cell_boundary_closures;
 #[path = "codemode_parity_examples.rs"]

@@ -476,7 +476,7 @@ fn a_draft_claims_no_runtime_identity_and_identity_never_depends_on_printing() {
         lashlang::Expr::SleepUntil(Box::new(lashlang::Expr::String("tomorrow".into()))),
     ]))
     .expect("a non-sourceable program still forms an artifact");
-    assert!(typescript_program_source(&artifact.ir).is_err());
+    assert!(typescript_program_source(artifact.ir()).is_err());
     let graph = lash_typescript::workflow_graph::workflow_graph_from_artifact(&artifact);
     assert_eq!(graph.source_identity, Some(artifact.source_identity()));
     assert!(graph.nodes().all(|node| node.source_span.is_none()));
@@ -1069,7 +1069,9 @@ finish(1);
         panic!("expected while container")
     };
     *condition = ir("state.count < 2");
-    let WorkflowNodeKind::StateUpdate { target, expression } = &mut edited.main.nodes[3].kind
+    let WorkflowNodeKind::StateUpdate {
+        target, expression, ..
+    } = &mut edited.main.nodes[3].kind
     else {
         panic!("expected state update")
     };
@@ -1108,7 +1110,7 @@ finish(1);
     ));
     assert!(matches!(
         &reprojected.main.nodes[3].kind,
-        WorkflowNodeKind::StateUpdate { target, expression }
+        WorkflowNodeKind::StateUpdate { target, expression, update: None }
             if target == &ir_target("state.other") && expression == &ir("state.count + 40")
     ));
     assert!(matches!(
@@ -1513,7 +1515,7 @@ fn artifact_projection_rebuilds_canonical_spans_for_lifted_processes() {
     let linked = lash_typescript::link(authored, &lashlang::testing::harness::test_environment())
         .expect("compact process source links");
     let canonical =
-        typescript_program_source(&linked.artifact.ir).expect("the artifact prints canonically");
+        typescript_program_source(linked.artifact.ir()).expect("the artifact prints canonically");
     assert_ne!(authored, canonical, "the fixture must change formatting");
 
     let graph = lash_typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
@@ -2504,3 +2506,6 @@ fn effect_argument_ir_edit_renders_without_an_expression_text_field() {
     let rendered = workflow_graph_to_source(&graph).expect("edited effect argument IR renders");
     assert_eq!(rendered, "await sleep(\"2s\");\n");
 }
+
+#[path = "workflow_graph/carrier_fix_round.rs"]
+mod carrier_fix_round;

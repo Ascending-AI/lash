@@ -32,9 +32,10 @@ pub fn parse_unguarded_for_measurement(source: &str) -> Result<lashlang::Program
 pub const TYPESCRIPT_LANGUAGE: &str = "typescript";
 
 /// The prefix on every binding the lowerer generates. Source identifiers that
-/// start with it are rejected, so a name carrying it is always generated — and
-/// never something a caller should render back to a user.
-pub const GENERATED_BINDING_PREFIX: &str = lower::GENERATED_BINDING_PREFIX;
+/// start with it are rejected. It is this front end's own namespace: the
+/// lowered program marks every generated binding private, so no caller needs
+/// to recognise the prefix.
+pub(crate) use lower::GENERATED_BINDING_PREFIX;
 
 /// Exposed so the register's documented inventory can be pinned against the
 /// allowlist instead of being maintained by hand.

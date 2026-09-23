@@ -7,9 +7,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use std::collections::BTreeSet;
+
 use super::{
-    AssignPathStep, AstPath, AstString, CatchClause, Declaration, Expr, InvalidAst, Program,
-    TryExpr,
+    AssignPathStep, AstPath, AstString, BinaryOp, CatchClause, Declaration, Expr, InvalidAst,
+    JavaScriptBinaryOp, Program, TryExpr,
 };
 
 /// The front end a [`Program`] was lowered from, recorded per artifact.
@@ -82,12 +84,19 @@ pub enum StructuralRole {
     /// A member assignment `root.path = value` that pins its reference base
     /// before evaluating the value. `expr` is `Block([base = object,
     /// (key = index)?, result = value, base.step = result, result])`, where
-    /// `step` reads `key` when present.
+    /// `step` reads `key` when present. The value reads the pinned base only
+    /// as the left operand of an arithmetic update (`base.step op operand`,
+    /// the compound `object.step op= operand`); see [`AttributeAssignParts`].
     AttributeAssign,
     /// A callback-driven collection transform (`map`, `filter`, ...). `expr`
-    /// is a `Block` that binds the receiver, then the callback, and evaluates
-    /// to the transform's result. `operation` is the front end's name for the
-    /// transform; structure never depends on it.
+    /// is `Block([receiver = r, callback = f, operand = x*, driver =
+    /// function, result+])`: it binds the receiver, then the callback, then
+    /// any further operands (an initial value, evaluated extra arguments),
+    /// then a driver function that captures the receiver and the callback,
+    /// and ends with the one or two expressions that run the driver and yield
+    /// the transform's result. `operation` is the front end's name for the
+    /// transform; structure never depends on it. See
+    /// [`CollectionTransformParts`].
     CollectionTransform { operation: AstString },
     /// The process failure wrapper around an authored run body. `expr` is
     /// `Try { body: Finish(Call { function: run, args }), catch e: Fail(e) }`,
@@ -145,18 +154,11 @@ impl StructuralRole {
             Self::AttributeAssign => AttributeAssignParts::of(expr)
                 .map(|_| ())
                 .ok_or_else(|| malformed("an attribute assignment pins a base, evaluates a value, stores through the base and yields the value")),
-            Self::CollectionTransform { .. } => match expr {
-                Expr::Block(items)
-                    if items.len() >= 3
-                        && matches!(&items[0], Expr::Assign { target, .. } if target.is_simple())
-                        && matches!(&items[1], Expr::Assign { target, .. } if target.is_simple()) =>
-                {
-                    Ok(())
-                }
-                _ => Err(malformed(
-                    "a collection transform binds its receiver and callback before it runs",
+            Self::CollectionTransform { .. } => CollectionTransformParts::of(expr)
+                .map(|_| ())
+                .ok_or_else(|| malformed(
+                    "a collection transform binds its receiver, its callback and its operands, then a driver capturing both, then runs it",
                 )),
-            },
             Self::ProcessWrapper => process_wrapper_run_path(expr)
                 .map(|_| ())
                 .ok_or_else(|| malformed("a process wrapper finishes with its run call and fails with what it catches")),
@@ -175,6 +177,64 @@ pub struct AttributeAssignParts<'a> {
     pub value: &'a Expr,
     /// The [`Expr::children`] index of `value` inside the role's block.
     pub value_index: u32,
+    /// Set when the value updates the current attribute by one arithmetic
+    /// operator: `value` is `base.step op operand`.
+    pub update: Option<AttributeUpdate<'a>>,
+}
+
+/// A compound attribute assignment's operator and right operand.
+#[derive(Clone, Copy, Debug)]
+pub struct AttributeUpdate<'a> {
+    pub operator: UpdateOperator,
+    pub operand: &'a Expr,
+}
+
+/// An arithmetic operator a compound attribute assignment applies to the
+/// attribute's current value. Named neutrally: a front end's IR decides
+/// whether the operation is Lashlang's or ECMA-262's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+}
+
+impl UpdateOperator {
+    fn of_javascript(op: JavaScriptBinaryOp) -> Option<Self> {
+        Some(match op {
+            JavaScriptBinaryOp::Add => Self::Add,
+            JavaScriptBinaryOp::Subtract => Self::Subtract,
+            JavaScriptBinaryOp::Multiply => Self::Multiply,
+            JavaScriptBinaryOp::Divide => Self::Divide,
+            JavaScriptBinaryOp::Remainder => Self::Remainder,
+            _ => return None,
+        })
+    }
+
+    fn of_lashlang(op: BinaryOp) -> Option<Self> {
+        Some(match op {
+            BinaryOp::Add => Self::Add,
+            BinaryOp::Subtract => Self::Subtract,
+            BinaryOp::Multiply => Self::Multiply,
+            BinaryOp::Divide => Self::Divide,
+            BinaryOp::Modulo => Self::Remainder,
+            _ => return None,
+        })
+    }
+
+    /// The ECMA-262 operator this update applies.
+    pub fn javascript_op(self) -> JavaScriptBinaryOp {
+        match self {
+            Self::Add => JavaScriptBinaryOp::Add,
+            Self::Subtract => JavaScriptBinaryOp::Subtract,
+            Self::Multiply => JavaScriptBinaryOp::Multiply,
+            Self::Divide => JavaScriptBinaryOp::Divide,
+            Self::Remainder => JavaScriptBinaryOp::Remainder,
+        }
+    }
 }
 
 /// The attribute an [`AttributeAssignParts`] writes.
@@ -225,22 +285,130 @@ impl<'a> AttributeAssignParts<'a> {
         {
             return None;
         }
-        let step = match (store_target.steps.as_slice(), key) {
-            ([AssignPathStep::Field(field)], None) => AttributeStep::Field(field),
+        let (step, key_name) = match (store_target.steps.as_slice(), key) {
+            ([AssignPathStep::Field(field)], None) => (AttributeStep::Field(field), None),
             (
                 [AssignPathStep::Index(Expr::Variable(read))],
                 Some(Expr::Assign {
                     target: key_target,
                     expr: index,
                 }),
-            ) if key_target.is_simple() && *read == key_target.root => AttributeStep::Index(index),
+            ) if key_target.is_simple() && *read == key_target.root => {
+                (AttributeStep::Index(index), Some(read))
+            }
             _ => return None,
         };
+        let base = &base_target.root;
+        let reads_current = |left: &Expr| match (left, &step, key_name) {
+            (Expr::Field { target, field }, AttributeStep::Field(step), None) => {
+                matches!(target.as_ref(), Expr::Variable(name) if name == base) && field == *step
+            }
+            (Expr::Index { target, index }, AttributeStep::Index(_), Some(key)) => {
+                matches!(target.as_ref(), Expr::Variable(name) if name == base)
+                    && matches!(index.as_ref(), Expr::Variable(name) if name == key)
+            }
+            _ => false,
+        };
+        let update = match value.as_ref() {
+            Expr::JavaScriptBinary { left, op, right } if reads_current(left) => {
+                UpdateOperator::of_javascript(*op).map(|operator| AttributeUpdate {
+                    operator,
+                    operand: right.as_ref(),
+                })
+            }
+            Expr::Binary { left, op, right } if reads_current(left) => {
+                UpdateOperator::of_lashlang(*op).map(|operator| AttributeUpdate {
+                    operator,
+                    operand: right.as_ref(),
+                })
+            }
+            _ => None,
+        };
+        // The pinned base (and key) are the role's own slots: the value reads
+        // them only as the current attribute an update applies to.
+        let rest = update.map_or(value.as_ref(), |update| update.operand);
+        if reads_variable(rest, base) || key_name.is_some_and(|key| reads_variable(rest, key)) {
+            return None;
+        }
         Some(Self {
             object,
             step,
             value,
             value_index: if key.is_some() { 2 } else { 1 },
+            update,
+        })
+    }
+}
+
+/// Whether `expr` reads the variable `name` anywhere.
+fn reads_variable(expr: &Expr, name: &AstString) -> bool {
+    if matches!(expr, Expr::Variable(read) if read == name) {
+        return true;
+    }
+    expr.children().any(|child| reads_variable(child, name))
+}
+
+/// The authored parts of a [`StructuralRole::CollectionTransform`] block.
+#[derive(Clone, Copy, Debug)]
+pub struct CollectionTransformParts<'a> {
+    /// The collection the transform reads.
+    pub receiver: &'a Expr,
+    /// The callback the transform applies.
+    pub callback: &'a Expr,
+    /// Further operands bound before the driver: an initial value, evaluated
+    /// extra arguments, a receiver copy. Empty for the one-callback form.
+    pub operands: &'a [Expr],
+}
+
+impl<'a> CollectionTransformParts<'a> {
+    /// Reads the parts of a collection-transform block, or `None` when the
+    /// block does not have the role's shape.
+    pub fn of(expr: &'a Expr) -> Option<Self> {
+        let Expr::Block(items) = expr else {
+            return None;
+        };
+        let [
+            Expr::Assign {
+                target: receiver_slot,
+                expr: receiver,
+            },
+            Expr::Assign {
+                target: callback_slot,
+                expr: callback,
+            },
+            rest @ ..,
+        ] = items.as_slice()
+        else {
+            return None;
+        };
+        if !receiver_slot.is_simple()
+            || !callback_slot.is_simple()
+            || receiver_slot.root == callback_slot.root
+        {
+            return None;
+        }
+        let driver = rest.iter().position(|item| {
+            matches!(item, Expr::Assign { target, expr }
+                if target.is_simple()
+                    && matches!(expr.as_ref(), Expr::Function(function)
+                        if function.captures.contains(&receiver_slot.root)
+                            && function.captures.contains(&callback_slot.root)))
+        })?;
+        let (operands, after) = rest.split_at(driver);
+        let result = &after[1..];
+        let simple_assign =
+            |item: &Expr| matches!(item, Expr::Assign { target, .. } if target.is_simple());
+        if !operands.iter().all(simple_assign)
+            || result.is_empty()
+            || result.len() > 2
+            || result.iter().any(simple_assign)
+        {
+            return None;
+        }
+        Some(Self {
+            receiver,
+            callback,
+            operands,
         })
     }
 }
@@ -291,4 +459,98 @@ pub fn process_wrapper_run_path(wrapper: &Expr) -> Option<(Vec<u32>, &Expr)> {
     // The function's only child is its body.
     path.push(0);
     Some((path, &run.body))
+}
+
+/// Whether a main-level binding belongs to the session or to the front end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BindingVisibility {
+    /// An authored binding: it survives the cell as a session global.
+    SessionVisible,
+    /// A front end's own slot: it lives only while the cell runs.
+    Private,
+}
+
+/// Refuses two declarations of one kind that share a name. The linker names
+/// the duplicate with its span for an authored program; this is the check an
+/// admitted artifact's program is held to.
+pub(crate) fn check_unique_declarations(program: &Program) -> Result<(), InvalidAst> {
+    let mut names = BTreeSet::new();
+    for declaration in &program.declarations {
+        let name = match declaration {
+            Declaration::Type(declaration) => ("type", declaration.name.as_str()),
+            Declaration::Process(declaration) => ("process", declaration.name.as_str()),
+            Declaration::Function(declaration) => ("function", declaration.name.as_str()),
+        };
+        if !names.insert(name) {
+            return Err(InvalidAst::DuplicateDeclaration {
+                name: name.1.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// A declared process never takes a lifted name; a lifted one carries its
+/// literal's digest and has no more hidden parameters than parameters.
+pub(super) fn check_process_origins(program: &Program) -> Result<(), InvalidAst> {
+    for declaration in &program.declarations {
+        let Declaration::Process(process) = declaration else {
+            continue;
+        };
+        let lifted_name = process.name.starts_with(LIFTED_PROCESS_NAME_PREFIX);
+        let reason = match &process.origin {
+            ProcessOrigin::Declared if lifted_name => {
+                "a declared process cannot take a lifted process's name"
+            }
+            ProcessOrigin::Lifted { .. } if !lifted_name => {
+                "a lifted process is named by its literal's digest"
+            }
+            ProcessOrigin::Lifted { hidden_params, .. }
+                if *hidden_params as usize > process.params.len() =>
+            {
+                "a lifted process has more hidden parameters than parameters"
+            }
+            _ => continue,
+        };
+        return Err(InvalidAst::InvalidProcessOrigin {
+            process: process.name.to_string(),
+            reason,
+        });
+    }
+    Ok(())
+}
+
+/// The prefix on every declaration name the linker derives from a lifted
+/// process literal. A dialect that authors process names from source text can
+/// never collide with one, because the linker invents these and no authored
+/// name can start with it by accident.
+pub const LIFTED_PROCESS_NAME_PREFIX: &str = "__process_";
+
+/// The name a body at a given AST path lifts to.
+///
+/// A digest over the canonical body plus the path, so it is a function of what
+/// the body *is* and where it sits — never of link order, span tables, or
+/// anything else a re-derivation could reorder. The linker's lift and the
+/// workflow lens's literal projection must agree on this spelling.
+pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
+    let preimage = serde_json::json!({
+        "body": body,
+        "path": path,
+    });
+    let digest = lash_sansio::core_support::blake3_domain_hash_hex(
+        "lash-lifted-process-name/v1",
+        preimage.to_string(),
+    );
+    format!("{LIFTED_PROCESS_NAME_PREFIX}{digest}")
+}
+
+impl Program {
+    /// A main-level binding's visibility role.
+    pub fn binding_visibility(&self, name: &str) -> BindingVisibility {
+        if self.private_bindings.contains(name) {
+            BindingVisibility::Private
+        } else {
+            BindingVisibility::SessionVisible
+        }
+    }
 }

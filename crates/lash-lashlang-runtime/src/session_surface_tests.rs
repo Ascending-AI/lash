@@ -136,13 +136,13 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
         .expect("module artifact publishes");
 
     let process_input = LashlangProcessInput {
-        module_ref: linked.artifact.module_ref.clone(),
+        module_ref: linked.artifact.module_ref().clone(),
         process_ref: linked
             .artifact
             .process_ref("main")
             .expect("main process ref")
             .clone(),
-        host_requirements_ref: linked.artifact.host_requirements_ref.clone(),
+        host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
         process_name: "main".to_string(),
         args: serde_json::Map::new(),
     };
@@ -385,13 +385,13 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
         .await
         .expect("publish recovery process");
     let process_input = LashlangProcessInput {
-        module_ref: linked.artifact.module_ref.clone(),
+        module_ref: linked.artifact.module_ref().clone(),
         process_ref: linked
             .artifact
             .process_ref("main")
             .expect("main process")
             .clone(),
-        host_requirements_ref: linked.artifact.host_requirements_ref.clone(),
+        host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
         process_name: "main".to_string(),
         args: serde_json::Map::new(),
     };
@@ -667,13 +667,13 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
     .expect("failure worker");
     for name in ["scalar", "batch"] {
         let input = LashlangProcessInput {
-            module_ref: linked.artifact.module_ref.clone(),
+            module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
                 .process_ref(name)
                 .expect("process ref")
                 .clone(),
-            host_requirements_ref: linked.artifact.host_requirements_ref.clone(),
+            host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: name.to_owned(),
             args: serde_json::Map::new(),
         };

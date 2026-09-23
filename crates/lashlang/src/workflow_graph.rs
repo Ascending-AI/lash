@@ -644,8 +644,12 @@ pub enum WorkflowNodeKind {
     StateUpdate {
         #[serde(deserialize_with = "deserialize_strict")]
         target: AssignTarget,
+        /// The assigned value, or with `update`, the operand the update applies
+        /// to the target's current value (`target op= expression`).
         #[serde(deserialize_with = "deserialize_strict")]
         expression: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        update: Option<crate::UpdateOperator>,
     },
     Terminal {
         terminal: WorkflowTerminalKind,

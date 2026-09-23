@@ -40,16 +40,6 @@ fn sample_module_artifact(process_name: &str) -> ModuleArtifact {
     ModuleArtifact::from_program(program).expect("build sample module artifact")
 }
 
-/// `finish true`
-#[expect(
-    clippy::expect_used,
-    reason = "test-support fixture a #[test] fn calls; the clippy.toml exemptions reach #[test] fns, not this helper"
-)]
-fn trivial_module_artifact() -> ModuleArtifact {
-    let program = builders::program(vec![builders::finish(builders::bool_lit(true))]);
-    ModuleArtifact::from_program(program).expect("build trivial module artifact")
-}
-
 fn execution_owner(id: &str) -> ArtifactOwner {
     ArtifactOwner::execution(ExecutionScope::RuntimeOperation {
         operation_id: id.to_string(),
@@ -94,7 +84,7 @@ pub async fn failed_registration_reclaims_staging_owner(store: Arc<dyn LashlangA
         .expect("fence and reclaim abandoned registration");
     assert!(
         store
-            .get_module_artifact(&artifact.module_ref)
+            .get_module_artifact(artifact.module_ref())
             .await
             .expect("read failed-registration artifact")
             .is_none()
@@ -111,7 +101,7 @@ pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
     let second = ArtifactOwner::host("host-b");
     assert!(
         store
-            .get_module_artifact(&artifact.module_ref)
+            .get_module_artifact(artifact.module_ref())
             .await
             .expect("read missing module")
             .is_none()
@@ -122,16 +112,16 @@ pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
         .await
         .expect("publish first owner");
     store
-        .retain_module_artifact(&second, &artifact.module_ref)
+        .retain_module_artifact(&second, artifact.module_ref())
         .await
         .expect("retain second owner");
     store
-        .release_module_artifact(&first, &artifact.module_ref)
+        .release_module_artifact(&first, artifact.module_ref())
         .await
         .expect("release first owner");
     assert!(
         store
-            .get_module_artifact(&artifact.module_ref)
+            .get_module_artifact(artifact.module_ref())
             .await
             .expect("read second-owned module")
             .is_some(),
@@ -139,19 +129,19 @@ pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
     );
 
     store
-        .release_module_artifact(&second, &artifact.module_ref)
+        .release_module_artifact(&second, artifact.module_ref())
         .await
         .expect("release final owner");
     assert!(
         store
-            .get_module_artifact(&artifact.module_ref)
+            .get_module_artifact(artifact.module_ref())
             .await
             .expect("read reclaimed module")
             .is_none(),
         "the final exact release must reclaim the artifact"
     );
     store
-        .release_module_artifact(&second, &artifact.module_ref)
+        .release_module_artifact(&second, artifact.module_ref())
         .await
         .expect("repeated release is idempotent");
 }
@@ -172,20 +162,20 @@ pub async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
         .await
         .expect("stage module");
     store
-        .transfer_module_artifact(&staged, &process, &artifact.module_ref)
+        .transfer_module_artifact(&staged, &process, artifact.module_ref())
         .await
         .expect("transfer module");
     store
-        .transfer_module_artifact(&staged, &process, &artifact.module_ref)
+        .transfer_module_artifact(&staged, &process, artifact.module_ref())
         .await
         .expect("replayed transfer is idempotent");
     store
-        .release_module_artifact(&process, &artifact.module_ref)
+        .release_module_artifact(&process, artifact.module_ref())
         .await
         .expect("release process owner");
     assert!(
         store
-            .get_module_artifact(&artifact.module_ref)
+            .get_module_artifact(artifact.module_ref())
             .await
             .expect("read reclaimed transfer")
             .is_none()
@@ -209,7 +199,7 @@ pub async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactS
         .expect("retire abandoned owner");
     assert!(
         store
-            .get_module_artifact(&artifact.module_ref)
+            .get_module_artifact(artifact.module_ref())
             .await
             .expect("read abandoned module")
             .is_none()
@@ -267,10 +257,10 @@ pub async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     open.publish_module_artifact(&first, &artifact)
         .await
         .expect("publish module");
-    open.retain_module_artifact(&second, &artifact.module_ref)
+    open.retain_module_artifact(&second, artifact.module_ref())
         .await
         .expect("retain second owner");
-    open.release_module_artifact(&first, &artifact.module_ref)
+    open.release_module_artifact(&first, artifact.module_ref())
         .await
         .expect("sever first owner before reopen");
     drop(open);
@@ -282,22 +272,22 @@ pub async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     );
     assert!(
         reopened
-            .get_module_artifact(&artifact.module_ref)
+            .get_module_artifact(artifact.module_ref())
             .await
             .expect("read after reopen")
             .is_some()
     );
     reopened
-        .release_module_artifact(&first, &artifact.module_ref)
+        .release_module_artifact(&first, artifact.module_ref())
         .await
         .expect("retry interrupted owner sever after reopen");
     reopened
-        .release_module_artifact(&second, &artifact.module_ref)
+        .release_module_artifact(&second, artifact.module_ref())
         .await
         .expect("release final owner after reopen");
     assert!(
         reopened
-            .get_module_artifact(&artifact.module_ref)
+            .get_module_artifact(artifact.module_ref())
             .await
             .expect("read reclaimed after reopen")
             .is_none()
@@ -312,14 +302,6 @@ pub async fn hostile_module_references_are_rejected(store: Arc<dyn LashlangArtif
     for raw in ["", "nul\0reference"] {
         let module_ref: crate::ModuleRef = serde_json::from_value(serde_json::json!(raw)).unwrap();
         assert!(store.get_module_artifact(&module_ref).await.is_err());
-        let mut artifact = trivial_module_artifact();
-        artifact.module_ref = module_ref;
-        assert!(
-            store
-                .publish_module_artifact(&ArtifactOwner::host("hostile-test"), &artifact)
-                .await
-                .is_err()
-        );
     }
 }
 
@@ -345,9 +327,23 @@ fn alpha_variant_module_artifact(binding: &str) -> ModuleArtifact {
     ModuleArtifact::from_program(program).expect("build alpha-variant module artifact")
 }
 
+/// A cell that finishes with one number literal.
+#[expect(
+    clippy::expect_used,
+    reason = "test-support fixture a #[test] fn calls; the clippy.toml exemptions reach #[test] fns, not this helper"
+)]
+fn number_module_artifact(value: f64) -> ModuleArtifact {
+    ModuleArtifact::from_program(builders::program(vec![builders::finish(builders::num(
+        value,
+    ))]))
+    .expect("build number-literal module artifact")
+}
+
 /// L9 (FIG-3571): a module ref names exactly one byte string, alpha-variant
-/// cells publish under distinct refs without an immutability conflict, and a
-/// forged ref is refused.
+/// cells publish under distinct refs without an immutability conflict, a
+/// forged ref is refused, and the one IR number rule holds through the store
+/// (`0` and `-0` are two modules, every NaN is one, and a non-finite literal
+/// reads back as itself).
 ///
 /// The FIG-3120 pair is the witness: the perf guard's `spawnChild` cell and
 /// its high-traffic `loadChild` twin differ only in one binder name.
@@ -360,7 +356,8 @@ pub async fn alpha_variants_publish_distinct_refs(store: Arc<dyn LashlangArtifac
     let spawn_child = alpha_variant_module_artifact("spawnChild");
     let load_child = alpha_variant_module_artifact("loadChild");
     assert_ne!(
-        spawn_child.module_ref, load_child.module_ref,
+        spawn_child.module_ref(),
+        load_child.module_ref(),
         "alpha-variant cells name distinct modules"
     );
     for artifact in [&spawn_child, &load_child, &spawn_child] {
@@ -371,7 +368,7 @@ pub async fn alpha_variants_publish_distinct_refs(store: Arc<dyn LashlangArtifac
     }
     for artifact in [&spawn_child, &load_child] {
         let stored = store
-            .get_module_artifact(&artifact.module_ref)
+            .get_module_artifact(artifact.module_ref())
             .await
             .expect("the store reads back")
             .expect("the published artifact is retained");
@@ -383,13 +380,80 @@ pub async fn alpha_variants_publish_distinct_refs(store: Arc<dyn LashlangArtifac
             "one module ref addresses one byte string"
         );
     }
-    let mut forged = load_child.clone();
-    forged.module_ref = spawn_child.module_ref.clone();
-    assert!(
+    let numbers = [
+        f64::NAN,
+        f64::from_bits(f64::NAN.to_bits() | 1),
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        0.0,
+        -0.0,
+    ]
+    .map(number_module_artifact);
+    assert_eq!(
+        numbers[0].module_ref(),
+        numbers[1].module_ref(),
+        "every NaN is the one canonical NaN"
+    );
+    assert_eq!(numbers[0].source_identity(), numbers[1].source_identity());
+    let distinct = [
+        &numbers[0],
+        &numbers[2],
+        &numbers[3],
+        &numbers[4],
+        &numbers[5],
+    ];
+    assert_eq!(
+        distinct
+            .iter()
+            .map(|artifact| artifact.module_ref())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        distinct.len(),
+        "NaN, Infinity, -Infinity, 0 and -0 are distinct modules"
+    );
+    assert_eq!(
+        distinct
+            .iter()
+            .map(|artifact| artifact.source_identity())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        distinct.len(),
+        "and distinct definitions"
+    );
+    for artifact in distinct {
         store
-            .publish_module_artifact(&owner, &forged)
+            .publish_module_artifact(&owner, artifact)
             .await
-            .is_err(),
+            .expect("a number-literal module publishes");
+        let stored = store
+            .get_module_artifact(artifact.module_ref())
+            .await
+            .expect("the store reads back")
+            .expect("the published artifact is retained");
+        assert_eq!(
+            stored.to_store_bytes().expect("stored artifact encodes"),
+            artifact
+                .to_store_bytes()
+                .expect("published artifact encodes"),
+            "a number literal reads back as the bytes it published"
+        );
+        assert_eq!(stored.source_identity(), artifact.source_identity());
+    }
+    // A forged ref cannot reach a store as an artifact: an artifact's refs
+    // are private and derived from its content. It can only arrive as stored
+    // bytes, and the decoder every store reads through refuses it.
+    let mut forged: serde_json::Value = serde_json::from_slice(
+        &load_child
+            .to_store_bytes()
+            .expect("published artifact encodes"),
+    )
+    .expect("stored artifact bytes are JSON");
+    forged["module_ref"] = serde_json::json!(spawn_child.module_ref());
+    assert!(
+        ModuleArtifact::from_store_bytes(
+            &serde_json::to_vec(&forged).expect("forged bytes encode")
+        )
+        .is_err(),
         "a ref that does not hash its content is refused"
     );
 }

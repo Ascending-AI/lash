@@ -29,17 +29,19 @@ pub use artifact::{
     global_in_memory_lashlang_artifact_store, host_requirements_for_program,
 };
 pub use ast::{
-    AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BinaryOp, CatchClause, Declaration,
-    Expr, ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LIFTED_PROCESS_NAME_PREFIX,
-    LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl,
-    ProcessLiteralExpr, ProcessOrigin, ProcessParam, ProcessSignalDecl, ProcessSignature,
-    ProcessSignatureError, ProcessType, Program, ResourceRefExpr, SourceLanguage, StructuralRole,
-    TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp, UnionMembers, check_ast_nesting_depth,
-    fold_expr_children, format_type_expr, lifted_process_identity, process_wrapper_run_path,
-    validate_ast, walk_expr,
+    AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BinaryOp, BindingVisibility,
+    CatchClause, Declaration, Expr, ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr,
+    FunctionParam, InvalidAst, JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp,
+    LIFTED_PROCESS_NAME_PREFIX, LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH,
+    NestingTooDeep, ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessParam,
+    ProcessSignalDecl, ProcessSignature, ProcessSignatureError, ProcessType, Program,
+    ResourceRefExpr, SourceLanguage, StructuralRole, TryExpr, TypeDecl, TypeExpr, TypeField,
+    UnaryOp, UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
+    lifted_process_identity, process_wrapper_run_path, validate_ast, walk_expr,
 };
-pub use ast::{AttributeAssignParts, AttributeStep};
+pub use ast::{
+    AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts, UpdateOperator,
+};
 
 /// Names of every source Lashlang builtin, in registry order.
 pub fn builtin_names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
@@ -511,8 +513,8 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&first, &second));
         assert!(std::sync::Arc::ptr_eq(&first, &extra));
         assert_eq!(
-            first.linked_module().artifact.host_requirements_ref,
-            extra.linked_module().artifact.host_requirements_ref
+            first.linked_module().artifact.host_requirements_ref(),
+            extra.linked_module().artifact.host_requirements_ref()
         );
 
         let stats = cache.stats();
@@ -620,8 +622,8 @@ mod tests {
         assert!(!std::sync::Arc::ptr_eq(&first, &newline));
         assert!(!std::sync::Arc::ptr_eq(&first, &changed));
         assert_ne!(
-            first.linked_module().artifact.host_requirements_ref,
-            changed.linked_module().artifact.host_requirements_ref
+            first.linked_module().artifact.host_requirements_ref(),
+            changed.linked_module().artifact.host_requirements_ref()
         );
         assert!(matches!(
             missing,
@@ -646,7 +648,7 @@ mod tests {
             .get_or_compile_ast(source, finish_persisted(), &available)
             .expect("live global should link");
         assert_eq!(
-            linked.linked_module().artifact.host_requirements.globals,
+            linked.linked_module().artifact.host_requirements().globals,
             ["persisted".to_string()].into_iter().collect()
         );
         let error = cache

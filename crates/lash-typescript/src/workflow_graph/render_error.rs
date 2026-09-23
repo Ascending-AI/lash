@@ -7,8 +7,8 @@ impl GraphRenderError {
     /// `duplicate_node_id`, `unknown_node_reference`,
     /// `invalid_node_payload`, `invalid_expression`,
     /// `invalid_assignment_target`, `invalid_opaque_source`,
-    /// `duplicate_process_name`, `canonical_source`, and
-    /// `rendered_source_invalid`.
+    /// `duplicate_process_name`, `process_origin_mismatch`,
+    /// `canonical_source`, and `rendered_source_invalid`.
     pub const fn code(&self) -> &'static str {
         match self {
             Self::UnsupportedSchemaVersion { .. } => "unsupported_schema_version",
@@ -19,6 +19,7 @@ impl GraphRenderError {
             Self::InvalidAssignmentTarget { .. } => "invalid_assignment_target",
             Self::InvalidOpaqueSource { .. } => "invalid_opaque_source",
             Self::DuplicateProcessName { .. } => "duplicate_process_name",
+            Self::ProcessOriginMismatch { .. } => "process_origin_mismatch",
             Self::CanonicalSource(_) => "canonical_source",
             Self::RenderedSourceInvalid { .. } => "rendered_source_invalid",
         }
@@ -35,6 +36,7 @@ impl GraphRenderError {
             | Self::InvalidOpaqueSource { node_id, .. } => Some(node_id),
             Self::UnsupportedSchemaVersion { .. }
             | Self::DuplicateProcessName { .. }
+            | Self::ProcessOriginMismatch { .. }
             | Self::CanonicalSource(_)
             | Self::RenderedSourceInvalid { .. } => None,
         }
@@ -51,6 +53,7 @@ impl GraphRenderError {
             | Self::InvalidNodePayload { .. }
             | Self::InvalidOpaqueSource { .. }
             | Self::DuplicateProcessName { .. }
+            | Self::ProcessOriginMismatch { .. }
             | Self::CanonicalSource(_)
             | Self::RenderedSourceInvalid { .. } => None,
         }
@@ -136,6 +139,15 @@ mod tests {
                     name: "child".to_string(),
                 },
                 "duplicate_process_name",
+                None,
+                None,
+            ),
+            (
+                GraphRenderError::ProcessOriginMismatch {
+                    name: "child".to_string(),
+                    message: "fixture".to_string(),
+                },
+                "process_origin_mismatch",
                 None,
                 None,
             ),

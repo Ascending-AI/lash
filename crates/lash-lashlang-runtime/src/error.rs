@@ -144,9 +144,6 @@ pub enum LashlangRuntimeError {
     /// The requested Lashlang module artifact is missing from storage.
     #[error("missing lashlang module artifact `{module_ref}` for process `{process}`")]
     MissingArtifact { module_ref: String, process: String },
-    /// A loaded module artifact does not verify against its content identity.
-    #[error("invalid lashlang module artifact `{module_ref}`: {message}")]
-    InvalidArtifact { module_ref: String, message: String },
     /// The module artifact does not export the requested process reference.
     #[error(
         "lashlang module artifact `{module_ref}` does not export process `{process}` as requested ref {process_ref}"

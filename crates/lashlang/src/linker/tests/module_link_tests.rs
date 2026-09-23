@@ -277,7 +277,7 @@ fn linked_module_captures_concrete_process_body_resources_statically() {
     );
     let linked = LinkedModule::link(program, full_host_environment())
         .expect("process body should capture concrete host resources");
-    let process = linked.artifact.ir.process("scan").expect("scan process");
+    let process = linked.artifact.ir().process("scan").expect("scan process");
     fn contains_resource_ref(expr: &Expr, path: &str) -> bool {
         matches!(expr, Expr::ResourceRef(resource) if resource.path_string() == path)
             || expr
@@ -386,10 +386,13 @@ fn linked_module_hash_ignores_unused_host_abilities() {
     )
     .expect("link process ability");
 
-    assert_eq!(minimal.artifact.module_ref, processes.artifact.module_ref);
     assert_eq!(
-        minimal.artifact.host_requirements_ref,
-        processes.artifact.host_requirements_ref
+        minimal.artifact.module_ref(),
+        processes.artifact.module_ref()
+    );
+    assert_eq!(
+        minimal.artifact.host_requirements_ref(),
+        processes.artifact.host_requirements_ref()
     );
 }
 
@@ -421,12 +424,12 @@ async fn module_artifact_store_bytes_reject_corruption() {
         .expect("put artifact");
     assert_eq!(
         store
-            .get_module_artifact(&linked.artifact.module_ref)
+            .get_module_artifact(linked.artifact.module_ref())
             .await
             .expect("get artifact")
             .expect("artifact exists")
-            .module_ref,
-        linked.artifact.module_ref
+            .module_ref(),
+        linked.artifact.module_ref()
     );
 
     assert!(ModuleArtifact::from_store_bytes(b"not json").is_err());

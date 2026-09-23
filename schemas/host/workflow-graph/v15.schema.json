@@ -212,10 +212,10 @@
         },
         {
           "additionalProperties": false,
+          "description": "A number literal. Its identity and stored form follow the one IR number rule ([`number`]): distinct `-0`, one canonical NaN, and a lossless spelling for non-finite values.",
           "properties": {
             "Number": {
-              "format": "double",
-              "type": "number"
+              "$ref": "#/definitions/IrNumber"
             }
           },
           "required": [
@@ -1085,6 +1085,18 @@
       ],
       "type": "object"
     },
+    "IrNumber": {
+      "anyOf": [
+        {
+          "format": "double",
+          "type": "number"
+        },
+        {
+          "$ref": "#/definitions/NonFiniteNumber"
+        }
+      ],
+      "description": "The stored form of an IR number literal."
+    },
     "JavaScriptBinaryOp": {
       "enum": [
         "Add",
@@ -1184,6 +1196,15 @@
           "type": "object"
         }
       ]
+    },
+    "NonFiniteNumber": {
+      "description": "A non-finite number literal's stored spelling.",
+      "enum": [
+        "NaN",
+        "Infinity",
+        "-Infinity"
+      ],
+      "type": "string"
     },
     "ProcessLiteralExpr": {
       "description": "The authored shape of an inline process body, as a dialect lowers it.\n\n`params` carries the parameter names and their declared types, so a TypeScript arrow's annotations reach the lifted declaration's signature instead of widening to `Any`. `body` is the same wrapper a process literal run lowers to: the authored statements inside the process-failure wrapper, with the params passed through by name.",
@@ -1426,7 +1447,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "A member assignment `root.path = value` that pins its reference base before evaluating the value. `expr` is `Block([base = object, (key = index)?, result = value, base.step = result, result])`, where `step` reads `key` when present.",
+          "description": "A member assignment `root.path = value` that pins its reference base before evaluating the value. `expr` is `Block([base = object, (key = index)?, result = value, base.step = result, result])`, where `step` reads `key` when present. The value reads the pinned base only as the left operand of an arithmetic update (`base.step op operand`, the compound `object.step op= operand`); see [`AttributeAssignParts`].",
           "properties": {
             "kind": {
               "enum": [
@@ -1442,7 +1463,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "A callback-driven collection transform (`map`, `filter`, ...). `expr` is a `Block` that binds the receiver, then the callback, and evaluates to the transform's result. `operation` is the front end's name for the transform; structure never depends on it.",
+          "description": "A callback-driven collection transform (`map`, `filter`, ...). `expr` is `Block([receiver = r, callback = f, operand = x*, driver = function, result+])`: it binds the receiver, then the callback, then any further operands (an initial value, evaluated extra arguments), then a driver function that captures the receiver and the callback, and ends with the one or two expressions that run the driver and yield the transform's result. `operation` is the front end's name for the transform; structure never depends on it. See [`CollectionTransformParts`].",
           "properties": {
             "kind": {
               "enum": [
@@ -1656,6 +1677,17 @@
       },
       "minItems": 2,
       "type": "array"
+    },
+    "UpdateOperator": {
+      "description": "An arithmetic operator a compound attribute assignment applies to the attribute's current value. Named neutrally: a front end's IR decides whether the operation is Lashlang's or ECMA-262's.",
+      "enum": [
+        "add",
+        "subtract",
+        "multiply",
+        "divide",
+        "remainder"
+      ],
+      "type": "string"
     },
     "VariableVersion": {
       "additionalProperties": false,
@@ -2326,7 +2358,12 @@
           "additionalProperties": false,
           "properties": {
             "expression": {
-              "$ref": "#/definitions/Expr"
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Expr"
+                }
+              ],
+              "description": "The assigned value, or with `update`, the operand the update applies to the target's current value (`target op= expression`)."
             },
             "kind": {
               "enum": [
@@ -2336,6 +2373,16 @@
             },
             "target": {
               "$ref": "#/definitions/AssignTarget"
+            },
+            "update": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/UpdateOperator"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [

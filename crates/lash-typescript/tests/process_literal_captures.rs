@@ -91,7 +91,7 @@ fn a_lifted_process_registers_the_signals_its_body_waits_for() {
         .unwrap_or_else(|error| panic!("the waiter program links: {error:?}"));
     let signals = linked
         .artifact
-        .ir
+        .ir()
         .declarations
         .iter()
         .find_map(|declaration| match declaration {

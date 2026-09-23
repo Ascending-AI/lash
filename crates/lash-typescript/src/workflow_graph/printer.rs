@@ -31,7 +31,7 @@
 use lashlang::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessLiteralExpr,
-    Program, ResourceRefExpr, StructuralRole, UnaryOp,
+    Program, ResourceRefExpr, StructuralRole, TypeExpr, UnaryOp,
 };
 use std::collections::BTreeMap;
 
@@ -53,8 +53,6 @@ pub enum TypeScriptSourceError {
     GeneratedBinding { name: String },
     #[error("invalid {context} identifier `{name}`")]
     InvalidIdentifier { context: &'static str, name: String },
-    #[error("cannot render number literal `{value}` as TypeScript")]
-    UnsupportedNumber { value: String },
     #[error("cannot render host descriptor constructor `{type_name}` without a constructor path")]
     UnknownHostDescriptorConstructor { type_name: String },
     #[error("label `{title}` has no TypeScript spelling")]
@@ -239,7 +237,7 @@ impl<'p> Printer<'p> {
         })?;
         let params = authored_params(process)
             .iter()
-            .map(|param| self.identifier("process parameter", param.name.as_str()))
+            .map(|param| self.process_param(param))
             .collect::<Result<Vec<_>, _>>()?;
         let mut out = String::new();
         if let Some(label) = &process.label {
@@ -316,8 +314,13 @@ impl<'p> Printer<'p> {
                 }
                 Ok(format!("{prefix}{}\n{statement}", label_comment(label)?))
             }
-            expression if let Some((target, value)) = attribute_assignment(expression)? => {
-                Ok(format!("{prefix}{target} = {};\n", self.expression(value)?))
+            expression
+                if let Some((target, operator, value)) = attribute_assignment(expression)? =>
+            {
+                Ok(format!(
+                    "{prefix}{target} {operator} {};\n",
+                    self.expression(value)?
+                ))
             }
             Expr::Block(_) => {
                 let mut inner = bound.clone();
@@ -336,8 +339,12 @@ impl<'p> Printer<'p> {
                     bound.push(target.root.to_string());
                     // A process literal only lifts from a `const` binding, so
                     // the one binding form the lens cannot spell as `let` is
-                    // the one that introduces a process.
-                    let keyword = if matches!(expr.as_ref(), Expr::ProcessLiteral(_)) {
+                    // the one that introduces a process: a literal, or a
+                    // lifted process's reference, which prints as its literal.
+                    let keyword = if matches!(expr.as_ref(), Expr::ProcessLiteral(_))
+                        || matches!(expr.as_ref(), Expr::ProcessRef { process }
+                            if self.lifted.contains_key(process.as_str()))
+                    {
                         "const"
                     } else {
                         "let"
@@ -513,7 +520,7 @@ impl<'p> Printer<'p> {
                     let params = authored_params(lifted);
                     let printed = params
                         .iter()
-                        .map(|param| self.identifier("process parameter", param.name.as_str()))
+                        .map(|param| self.process_param(param))
                         .collect::<Result<Vec<_>, _>>()?;
                     let mut bound = params.iter().map(|param| param.name.to_string()).collect();
                     Ok(format!(
@@ -593,7 +600,7 @@ impl<'p> Printer<'p> {
                 let params = literal
                     .params
                     .iter()
-                    .map(|param| self.identifier("process parameter", param.name.as_str()))
+                    .map(|param| self.process_param(param))
                     .collect::<Result<Vec<_>, _>>()?;
                 let mut bound = literal
                     .params
@@ -740,16 +747,19 @@ impl<'p> Printer<'p> {
         if let Some(sugared) = self.collection_transform(expression)? {
             return Ok(Some(sugared));
         }
-        if let Some((target, value)) = attribute_assignment(expression)? {
-            return Ok(Some(format!("({target} = {})", self.expression(value)?)));
+        if let Some((target, operator, value)) = attribute_assignment(expression)? {
+            return Ok(Some(format!(
+                "({target} {operator} {})",
+                self.expression(value)?
+            )));
         }
         Ok(None)
     }
 
     /// A collection-transform role prints back as `receiver.<operation>(fn)`
-    /// when its setup is exactly the receiver, the callback and the worker;
-    /// any other setup (an initial value, extra arguments) has no one-call
-    /// spelling here.
+    /// when it binds no operand beyond its receiver and callback; any other
+    /// setup (an initial value, extra arguments) has no one-call spelling
+    /// here.
     fn collection_transform(
         &self,
         expression: &Expr,
@@ -761,26 +771,33 @@ impl<'p> Printer<'p> {
         else {
             return Ok(None);
         };
-        let Expr::Block(items) = expr.as_ref() else {
+        let Some(parts) = lashlang::CollectionTransformParts::of(expr) else {
             return Ok(None);
         };
-        let [
-            Expr::Assign { expr: receiver, .. },
-            Expr::Assign { expr: callback, .. },
-            _worker,
-            _tail,
-        ] = items.as_slice()
-        else {
+        if !parts.operands.is_empty() {
             return Err(TypeScriptSourceError::Unrepresentable {
                 kind: "a collection transform with extra arguments",
             });
-        };
+        }
         Ok(Some(format!(
             "{}.{}({})",
-            self.member_target(receiver)?,
+            self.member_target(parts.receiver)?,
             self.identifier("operation", operation.as_str())?,
-            self.expression(callback)?
+            self.expression(parts.callback)?
         )))
+    }
+
+    /// A closure prints as an arrow, and as an `async` arrow when its own body
+    /// awaits: only an async arrow lowers to a closure that awaits, and an
+    /// `await` in a sync arrow does not parse.
+    /// A process parameter with the annotation its declared type lowers
+    /// from, so a typed parameter keeps its type through a re-admission.
+    fn process_param(&self, param: &lashlang::ProcessParam) -> Printed {
+        let name = self.identifier("process parameter", param.name.as_str())?;
+        Ok(match type_annotation(&param.ty)? {
+            Some(annotation) => format!("{name}: {annotation}"),
+            None => name,
+        })
     }
 
     fn arrow(&self, function: &FunctionExpr) -> Printed {
@@ -790,10 +807,23 @@ impl<'p> Printer<'p> {
             .map(|param| self.identifier("arrow parameter", param.as_str()))
             .collect::<Result<Vec<_>, _>>()?;
         let mut bound = function.params.iter().map(ToString::to_string).collect();
+        // An expression-bodied arrow lowers to a body that is one `return`;
+        // it prints back as an expression body, which lowers to that `return`
+        // again, and a braced body would lower to a different program.
+        let body = match function.body.as_ref() {
+            Expr::Block(items) if let [Expr::Return(value)] = items.as_slice() => {
+                format!("({})", self.expression(value)?)
+            }
+            body => self.block(body, 0, &mut bound)?,
+        };
         Ok(format!(
-            "({}) => {}",
+            "{}({}) => {body}",
+            if awaits_in_own_body(&function.body) {
+                "async "
+            } else {
+                ""
+            },
             params.join(", "),
-            self.block(&function.body, 0, &mut bound)?
         ))
     }
 
@@ -936,10 +966,11 @@ fn is_statement_body(expression: &Expr) -> bool {
     )
 }
 
-/// The authored target spelling and value of an attribute-assignment role.
+/// The authored target spelling, assignment operator (`=`, or `op=` for an
+/// update) and right-hand side of an attribute-assignment role.
 fn attribute_assignment(
     expression: &Expr,
-) -> Result<Option<(String, &Expr)>, TypeScriptSourceError> {
+) -> Result<Option<(String, String, &Expr)>, TypeScriptSourceError> {
     let Expr::Role {
         role: StructuralRole::AttributeAssign,
         expr,
@@ -960,7 +991,76 @@ fn attribute_assignment(
             format!("{object}[{}]", printer.expression(index)?)
         }
     };
-    Ok(Some((target, parts.value)))
+    Ok(Some(match parts.update {
+        Some(update) => (
+            target,
+            format!("{}=", javascript_binary_op(update.operator.javascript_op())),
+            update.operand,
+        ),
+        None => (target, "=".to_string(), parts.value),
+    }))
+}
+
+/// The TypeScript annotation a process parameter type lowers from, or `None`
+/// for `Any`, which an unannotated parameter lowers to. It inverts the
+/// lowering's annotation conversion; a type no annotation lowers to is
+/// refused rather than widened.
+fn type_annotation(ty: &TypeExpr) -> Result<Option<String>, TypeScriptSourceError> {
+    fn annotation(ty: &TypeExpr) -> Result<String, TypeScriptSourceError> {
+        Ok(match ty {
+            TypeExpr::Any => "unknown".to_string(),
+            TypeExpr::Str => "string".to_string(),
+            TypeExpr::Float => "number".to_string(),
+            TypeExpr::Bool => "boolean".to_string(),
+            TypeExpr::Null => "null".to_string(),
+            TypeExpr::Enum(values) => values
+                .iter()
+                .map(|value| string_literal(value.as_str()))
+                .collect::<Vec<_>>()
+                .join(" | "),
+            TypeExpr::List(item) => format!("Array<{}>", annotation(item)?),
+            TypeExpr::Object(fields) => format!(
+                "{{ {} }}",
+                fields
+                    .iter()
+                    .map(|field| {
+                        Ok(format!(
+                            "{}{}: {}",
+                            property_name(field.name.as_str()),
+                            if field.optional { "?" } else { "" },
+                            annotation(&field.ty)?
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, TypeScriptSourceError>>()?
+                    .join("; ")
+            ),
+            TypeExpr::Union(items) => items
+                .iter()
+                .map(annotation)
+                .collect::<Result<Vec<_>, _>>()?
+                .join(" | "),
+            TypeExpr::Ref(name) => name.to_string(),
+            _ => {
+                return Err(TypeScriptSourceError::Unrepresentable {
+                    kind: "a process parameter type no TypeScript annotation lowers to",
+                });
+            }
+        })
+    }
+    match ty {
+        TypeExpr::Any => Ok(None),
+        ty => annotation(ty).map(Some),
+    }
+}
+
+/// Whether `expr` awaits in its own function body: a nested closure or process
+/// body awaits on its own account.
+fn awaits_in_own_body(expr: &Expr) -> bool {
+    match expr {
+        Expr::Await(_) => true,
+        Expr::Function(_) | Expr::ProcessLiteral(_) => false,
+        _ => expr.children().any(awaits_in_own_body),
+    }
 }
 
 /// `let` when the loop body reassigns its element binding, `const` otherwise.
@@ -1080,13 +1180,36 @@ fn key(name: &str) -> String {
     string_literal(name)
 }
 
+/// A number literal by the one IR number rule: `NaN`, `Infinity` and
+/// `-Infinity` by name (the lowering reads them back as the same literals),
+/// `-0` with its sign, and every other value in its shortest round-trip form.
 fn number_literal(value: f64) -> Printed {
-    if !value.is_finite() {
-        return Err(TypeScriptSourceError::UnsupportedNumber {
-            value: value.to_string(),
-        });
+    Ok(if value.is_nan() {
+        "NaN".to_string()
+    } else if value == f64::INFINITY {
+        "Infinity".to_string()
+    } else if value == f64::NEG_INFINITY {
+        "-Infinity".to_string()
+    } else if value == 0.0 && value.is_sign_negative() {
+        "-0".to_string()
+    } else {
+        ryu_js::Buffer::new().format_finite(value).to_string()
+    })
+}
+
+/// A type literal's property name: bare when it is an identifier, quoted
+/// otherwise.
+fn property_name(name: &str) -> String {
+    let mut chars = name.chars();
+    let identifier = chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_' || first == '$')
+        && chars.all(|rest| rest.is_ascii_alphanumeric() || rest == '_' || rest == '$');
+    if identifier {
+        name.to_string()
+    } else {
+        string_literal(name)
     }
-    Ok(ryu_js::Buffer::new().format_finite(value).to_string())
 }
 
 fn string_literal(value: &str) -> String {

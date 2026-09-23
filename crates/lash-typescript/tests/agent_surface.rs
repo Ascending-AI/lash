@@ -89,7 +89,7 @@ fn a_process_literal_is_a_lifted_declaration_and_return_stays_a_function_return(
     let linked =
         lash_typescript::link(source, &process_environment()).expect("agent program should link");
 
-    let [Declaration::Process(process)] = linked.artifact.ir.declarations.as_slice() else {
+    let [Declaration::Process(process)] = linked.artifact.ir().declarations.as_slice() else {
         panic!("expected exactly one lifted process declaration")
     };
     assert_eq!(process.params[0].name.as_str(), "input");
@@ -137,12 +137,15 @@ fn durable_process_agent_primitives_link_through_existing_effects() {
     "#;
     let linked = lash_typescript::link(source, &process_environment())
         .expect("all TypeScript agent primitives should link to shared effects");
-    assert_eq!(linked.artifact.exports.processes.len(), 1);
-    let artifact: lashlang::ModuleArtifact = serde_json::from_slice(
-        &serde_json::to_vec(&linked.artifact).expect("encode TypeScript artifact"),
+    assert_eq!(linked.artifact.exports().processes.len(), 1);
+    let artifact = lashlang::ModuleArtifact::from_store_bytes(
+        &linked
+            .artifact
+            .to_store_bytes()
+            .expect("encode TypeScript artifact"),
     )
     .expect("decode TypeScript artifact");
-    assert_eq!(artifact.module_ref, linked.artifact.module_ref);
+    assert_eq!(artifact.module_ref(), linked.artifact.module_ref());
 }
 
 #[test]
@@ -161,7 +164,7 @@ fn production_link_cache_preserves_typescript_artifact_identity() {
         linked
             .linked_module()
             .artifact
-            .module_ref
+            .module_ref()
             .as_str()
             .starts_with("lashlang:v2:blake3:")
     );
@@ -1406,7 +1409,7 @@ impl ExecutionHost for ProcessDurabilityHost {
 fn lifted_process_name(linked: &lashlang::LinkedModule, params: usize) -> String {
     linked
         .artifact
-        .ir
+        .ir()
         .declarations
         .iter()
         .find_map(|declaration| match declaration {

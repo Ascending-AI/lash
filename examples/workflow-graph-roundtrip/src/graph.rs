@@ -142,6 +142,7 @@ pub(crate) fn document_from_graph(
     }
     WorkflowDocument {
         schema_version: graph.schema_version,
+        definition: graph.source_identity.clone(),
         facet_schema_version: graph.facet_schema_version,
         version,
         source,
@@ -843,6 +844,7 @@ fn node_from_flow_data(
             WorkflowNodeKind::StateUpdate {
                 target,
                 expression: editable_expression(id, data, graph_scope)?,
+                update: None,
             }
         }
         "computation" => WorkflowNodeKind::Computation {
@@ -1059,7 +1061,9 @@ fn apply_editable_data(
             *expression =
                 required_expression(&node_id, data.expression.as_ref(), "expression", &scope)?;
         }
-        WorkflowNodeKind::StateUpdate { target, expression } => {
+        WorkflowNodeKind::StateUpdate {
+            target, expression, ..
+        } => {
             *target = parse_assignment_target(
                 &node_id,
                 &required_text(&node_id, data.target.as_ref(), "target")?,

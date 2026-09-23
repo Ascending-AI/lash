@@ -180,6 +180,7 @@ impl<'module> Linker<'module> {
             language: self.program.language.clone(),
             declarations,
             main,
+            private_bindings: self.program.private_bindings.clone(),
             spans,
         })
     }

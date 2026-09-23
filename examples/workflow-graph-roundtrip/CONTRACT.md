@@ -106,6 +106,9 @@ The HTTP adapter adds the optimistic `version` and canonical `source`, flattens
 nested core subgraphs into `nodes`, `edges`, and `roots`, and formats type
 facets for display. `schemaVersion` copies the core graph version.
 `facetSchemaVersion` is present only when the backend projected facets.
+`definition` is the source identity of the admitted artifact the document's
+graph is the view of; it is absent when the source does not admit, and a
+draft never carries one.
 
 Optional adapter properties are omitted. `data.nameSource` is `label` for an
 authored `@label` and `derived` for an automatic name. A labeled node carries
@@ -217,7 +220,8 @@ Invalid graph edits return HTTP `422`:
 Typed render codes are `unsupported_schema_version`, `duplicate_node_id`,
 `unknown_node_reference`, `missing_required_child`, `invalid_node_payload`,
 `invalid_expression`, `invalid_assignment_target`, `invalid_opaque_source`,
-`duplicate_process_name`, `canonical_source`, and `rendered_source_invalid`.
+`duplicate_process_name`, `process_origin_mismatch`, `canonical_source`, and
+`rendered_source_invalid`.
 Malformed host DTO structure uses
 `invalid_graph_document`. A stale save returns HTTP `409` with
 `version_conflict`.
@@ -278,9 +282,12 @@ terminal node's `succeeded` event is the final normal event.
 Every emitted event carries the runtime site's `nodeId` directly. That id
 refers to a node in the exact saved graph version identified by
 `workflowVersion`; no pairing map or join helper is involved. `definition` is
-the source identity of the admitted artifact the run executes. The run's
-program and the overlay's node ids come from that one artifact: preparation
-refuses a saved graph whose nodes are not nodes of the artifact's own view. A preparation
+the source identity of the admitted artifact the run executes. Each saved
+version records its admission and its entry process by ref, so a run never
+selects a process by name. Preparation refuses an overlay graph that is not the
+artifact's own view: its `definition` must be the artifact's, and its nodes
+exactly the view's, both ways. A client shows only events whose `definition`
+is its loaded document's and discards the rest. A preparation
 failure before SSE starts is JSON with HTTP `500`; an execution failure is a
 correlated `failed` event before EOF.
 

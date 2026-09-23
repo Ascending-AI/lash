@@ -853,72 +853,6 @@ fn test_child_max_attempts() -> std::num::NonZeroU32 {
     std::num::NonZeroU32::new(5).expect("test attempt bound is non-zero")
 }
 
-/// Production stores correctly refuse malformed publications, so the runtime oracle must
-/// inject corruption at the read boundary it is responsible for validating.
-struct ForgedReadArtifactStore {
-    inner: Arc<dyn LashlangArtifactStore>,
-    forged: Arc<lashlang::ModuleArtifact>,
-}
-
-#[async_trait::async_trait]
-impl LashlangArtifactStore for ForgedReadArtifactStore {
-    fn durability_tier(&self) -> lashlang::DurabilityTier {
-        self.inner.durability_tier()
-    }
-
-    async fn publish_module_artifact(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.inner.publish_module_artifact(owner, artifact).await
-    }
-
-    async fn retain_module_artifact(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.inner.retain_module_artifact(owner, module_ref).await
-    }
-
-    async fn transfer_module_artifact(
-        &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.inner
-            .transfer_module_artifact(from, to, module_ref)
-            .await
-    }
-
-    async fn release_module_artifact(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.inner.release_module_artifact(owner, module_ref).await
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.inner.retire_module_artifact_owner(owner).await
-    }
-
-    async fn get_module_artifact(
-        &self,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
-        if module_ref == &self.forged.module_ref {
-            return Ok(Some(Arc::clone(&self.forged)));
-        }
-        self.inner.get_module_artifact(module_ref).await
-    }
-}
-
 struct EveryNEffectsController(usize);
 
 #[async_trait::async_trait]
@@ -1818,7 +1752,7 @@ process scan(root: str) -> str {
         .expect("the incompatible-host fixture must itself be valid");
     assert!(
         lashlang_host_environment_satisfies_requirements(
-            &output.artifact.host_requirements,
+            output.artifact.host_requirements(),
             &incompatible_environment,
         )
         .is_err(),
@@ -2130,114 +2064,6 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         error,
         LashlangRuntimeError::InvalidProcessArgument { ref path, .. }
             if path == "envelope.handler"
-    ));
-
-    let mismatching_identity =
-        lashlang::ProcessDefinitionIdentity::from_artifact_export(&mismatching.artifact, "handler")
-            .unwrap();
-    let mut forged = mismatching.artifact.clone();
-    let process = forged
-        .ir
-        .declarations
-        .iter_mut()
-        .find_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) if process.name == "handler" => Some(process),
-            _ => None,
-        })
-        .expect("handler declaration exists");
-    process.params[0].name = "event".into();
-    assert!(forged.verify().is_err(), "forged artifact must not verify");
-    let forged_store: Arc<dyn LashlangArtifactStore> = Arc::new(ForgedReadArtifactStore {
-        inner: Arc::clone(&artifact_store),
-        forged: Arc::new(forged),
-    });
-    let error = prepare_lashlang_process_start(
-        forged_store,
-        "parent:root",
-        start_with(mismatching_identity),
-        lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
-        lash_core::RecoveryContract::Rerunnable,
-        test_child_max_attempts(),
-    )
-    .await
-    .expect_err("forged signature with unchanged refs must fail before registration");
-    assert!(matches!(
-        error,
-        LashlangRuntimeError::InvalidProcessArgument { ref path, .. }
-            if path == "envelope.handler"
-    ));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn prepared_start_rejects_a_forged_receiving_artifact() {
-    let store = Arc::new(InMemoryLashlangArtifactStore::new());
-    let environment = LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default(),
-    );
-    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "process install(value: str) -> bool { finish true }",
-        program: process_module(
-            "install",
-            vec![b::param("value", lashlang::TypeExpr::Str)],
-            lashlang::TypeExpr::Bool,
-            b::bool_lit(true),
-        ),
-        environment: &environment,
-    })
-    .expect("receiver compiles");
-    store
-        .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
-        .await
-        .expect("module publishes");
-    let mut forged = output.artifact.clone();
-    let process = forged
-        .ir
-        .declarations
-        .iter_mut()
-        .find_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) if process.name == "install" => Some(process),
-            _ => None,
-        })
-        .expect("install declaration exists");
-    process.params[0].name = "forged".into();
-    assert!(forged.verify().is_err(), "forged artifact must not verify");
-    let artifact_store: Arc<dyn LashlangArtifactStore> = Arc::new(ForgedReadArtifactStore {
-        inner: store,
-        forged: Arc::new(forged),
-    });
-    let mut args = lashlang::Record::new();
-    args.insert("value".to_string(), lashlang::Value::String("value".into()));
-    let start = lashlang::ProcessStart {
-        module_ref: output.module_ref.clone(),
-        process_ref: output.artifact.process_ref("install").unwrap().clone(),
-        host_requirements_ref: output.host_requirements_ref.clone(),
-        start_site: test_start_site("child_process:install", 1),
-        process_name: "install".to_string(),
-        args,
-    };
-
-    let error = prepare_lashlang_process_start(
-        artifact_store,
-        "parent:root",
-        start,
-        lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
-        lash_core::RecoveryContract::Rerunnable,
-        test_child_max_attempts(),
-    )
-    .await
-    .expect_err("forged receiving artifact must fail before registration");
-    assert!(matches!(
-        error,
-        LashlangRuntimeError::InvalidArtifact { .. }
     ));
 }
 

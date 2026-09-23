@@ -127,7 +127,7 @@ fn a_direct_ir_process_body_is_projected_from_the_first_statement() {
         )],
         Vec::new(),
     ));
-    let program = &linked.artifact.ir;
+    let program = &linked.artifact.ir();
     let crate::Declaration::Process(process) = &program.declarations[0] else {
         panic!("one process")
     };
@@ -157,6 +157,29 @@ fn malformed_roles_are_refused() {
                 operation: "map".into(),
             },
             b::block(vec![b::num(1.0)]),
+        ),
+        // Receiver and callback bound, but no driver capturing them: the
+        // shape the one-line check accepted before FIG-3571 tightened it.
+        (
+            StructuralRole::CollectionTransform {
+                operation: "map".into(),
+            },
+            b::block(vec![
+                b::assign("receiver", b::list(vec![])),
+                b::assign("callback", b::closure(None, &["item"], &[], b::var("item"))),
+                b::num(1.0),
+            ]),
+        ),
+        // An attribute update whose value reads the pinned base other than as
+        // the current attribute.
+        (
+            StructuralRole::AttributeAssign,
+            b::block(vec![
+                b::assign("base", b::var("state")),
+                b::assign("result", b::var("base")),
+                b::assign_path("base", vec![b::field_step("field")], b::var("result")),
+                b::var("result"),
+            ]),
         ),
         (StructuralRole::ProcessWrapper, b::finish(b::null())),
     ];

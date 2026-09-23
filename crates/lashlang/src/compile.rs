@@ -16,7 +16,7 @@ pub struct ModuleCompileRequest<'a> {
     pub environment: &'a LashlangHostEnvironment,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ModuleCompileOutput {
     pub artifact: ModuleArtifact,
     pub module_ref: ModuleRef,
@@ -45,8 +45,8 @@ pub fn compile_module(
         .introspect()
         .map_err(ModuleCompileError::introspection)?;
     Ok(ModuleCompileOutput {
-        module_ref: linked.artifact.module_ref.clone(),
-        host_requirements_ref: linked.artifact.host_requirements_ref.clone(),
+        module_ref: linked.artifact.module_ref().clone(),
+        host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
         artifact: linked.artifact,
         introspection,
     })
@@ -224,7 +224,7 @@ mod tests {
                 .process_name,
             "echo"
         );
-        assert_eq!(output.module_ref, output.artifact.module_ref);
+        assert_eq!(&output.module_ref, output.artifact.module_ref());
     }
 
     #[test]

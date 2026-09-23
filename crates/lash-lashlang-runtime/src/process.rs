@@ -424,7 +424,7 @@ pub async fn run_lashlang_process(
             session_id,
             process_id: process_id.clone(),
             source_identity: artifact.source_identity(),
-            module_ref: artifact.module_ref.clone(),
+            module_ref: artifact.module_ref().clone(),
             process_ref: input.process_ref.clone(),
             process_name: input.process_name.clone(),
             attempt,

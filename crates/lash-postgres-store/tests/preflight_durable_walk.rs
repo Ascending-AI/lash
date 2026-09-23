@@ -130,7 +130,7 @@ async fn module_artifact_surface_reads_the_persisted_json() {
         .expect("walk module artifacts");
     assert_eq!(page.coverage, ScanCoverage::Scanned);
     assert_eq!(page.items.len(), 1, "{page:?}");
-    assert_eq!(page.items[0].cursor, artifact.module_ref.as_str());
+    assert_eq!(page.items[0].cursor, artifact.module_ref().as_str());
     match &page.items[0].payload {
         DurablePayload::Json(json) => assert!(
             json.contains("host_requirements_ref") && json.contains("\"ir\""),

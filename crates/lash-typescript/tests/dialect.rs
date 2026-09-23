@@ -599,19 +599,18 @@ mod durability {
                 "a generated binding leaked into the continuation of `{source}`"
             );
         }
-        // A block binding that shadows an outer name is the one shape that
-        // still needs a generated slot. It stays out of the model-facing
-        // surface, which filters the generated prefix.
+        // A block binding that shadows an outer name still needs a slot of
+        // its own, but the lowering marks that slot private, so the VM drops
+        // it when the cell ends: no surface has to filter it by name.
         let shadowing = "const e = 'outer'; let seen = ''; try { throw 'boom'; } catch (e) { seen = e; } finish(`${e}|${seen}`);";
+        let globals = persisted_globals(shadowing);
         assert!(
-            persisted_globals(shadowing)
-                .iter()
-                .any(|name| name.starts_with(lash_typescript::GENERATED_BINDING_PREFIX)),
-            "a shadowing binding needs a slot of its own"
+            globals.iter().all(|name| !name.starts_with("__typescript")),
+            "a private shadow slot persisted: {globals:?}"
         );
         assert!(
-            lash_typescript::GENERATED_BINDING_PREFIX.starts_with("__typescript"),
-            "the reserved prefix is what callers filter on"
+            globals.iter().any(|name| name == "e") && globals.iter().any(|name| name == "seen"),
+            "the authored bindings persist: {globals:?}"
         );
     }
 

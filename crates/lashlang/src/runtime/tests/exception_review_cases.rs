@@ -244,6 +244,7 @@ async fn suspension_inside_a_catch_body_is_byte_identical_under_gc_stress() {
         let slots = SlotState::from_globals(
             Record::new(),
             &program.chunk.slot_names,
+            &program.chunk.private_slots,
             &ProjectedBindings::new(),
             Vec::new(),
         );
@@ -315,6 +316,7 @@ async fn a_cleanup_chain_is_exactly_once_across_a_process_boundary() {
         let slots = SlotState::from_globals(
             Record::new(),
             &program.chunk.slot_names,
+            &program.chunk.private_slots,
             &ProjectedBindings::new(),
             Vec::new(),
         );

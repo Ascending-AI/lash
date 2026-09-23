@@ -42,16 +42,19 @@ pub use printer::{
     typescript_program_source, typescript_statement_source,
 };
 
-/// Parse source, canonicalize it, and project it into a deterministic draft
-/// graph, with optional host-derived, non-authoritative type facets.
+/// Parse source, canonicalize it, and project it into a deterministic graph,
+/// with optional host-derived, non-authoritative type facets.
 ///
 /// The projection itself is `lashlang`'s ([`WorkflowGraphProjector`]); this
 /// dialect contributes the canonical text the node spans address and the text
-/// of opaque statements. A draft claims no runtime identity: with no
-/// environment its `source_identity` is `None`. With one, the source is also
-/// admitted (linked) against it, and the graph names the identity of the
-/// artifact it admits to; its node ids are that artifact's. Link errors become
-/// node diagnostics and never prevent graph projection.
+/// of opaque statements. With no environment the result is the draft: it
+/// claims no runtime identity and carries no facets. With one, the source is
+/// admitted (linked) against it, and the result is the admitted artifact's
+/// runnable view ([`workflow_graph_from_artifact`]) with facets computed over
+/// that artifact's resolved IR and paths, lifted declarations included. A
+/// source that does not admit stays a draft: the facets of its canonical
+/// program carry the link errors as node diagnostics, and it claims no
+/// identity.
 pub fn workflow_graph_from_source_with_facets(
     src: &str,
     environment: Option<&LashlangHostEnvironment>,
@@ -59,24 +62,32 @@ pub fn workflow_graph_from_source_with_facets(
     let parsed = crate::parse(src)?;
     let canonical = typescript_program_source(&parsed)?;
     let canonical_program = crate::parse(&canonical)?;
-    let analysis =
-        environment.map(|environment| analyze_workflow_program(&canonical_program, environment));
-    let admitted = environment.and_then(|environment| {
-        crate::link(src, environment)
-            .ok()
-            .map(|linked| linked.artifact.source_identity())
-    });
-    let mut projector =
-        WorkflowGraphProjector::new(&canonical_program).with_spans(canonical_program.spans.clone());
-    if let Some(identity) = admitted {
-        projector = projector.with_source_identity(identity);
+    let Some(environment) = environment else {
+        return Ok(draft_graph(&canonical_program, None));
+    };
+    match crate::link(src, environment) {
+        Ok(linked) => {
+            let analysis = analyze_workflow_program(linked.artifact.ir(), environment);
+            Ok(artifact_graph(&linked.artifact, Some(&analysis)))
+        }
+        Err(_) => {
+            let analysis = analyze_workflow_program(&canonical_program, environment);
+            Ok(draft_graph(&canonical_program, Some(&analysis)))
+        }
     }
-    if let Some(analysis) = analysis.as_ref() {
+}
+
+fn draft_graph(
+    program: &Program,
+    analysis: Option<&lashlang::WorkflowLinkAnalysis>,
+) -> WorkflowGraph {
+    let mut projector = WorkflowGraphProjector::new(program).with_spans(program.spans.clone());
+    if let Some(analysis) = analysis {
         projector = projector.with_analysis(analysis);
     }
     let mut graph = projector.project(&TypeScriptStatementText);
     present_loop_sources(&mut graph);
-    Ok(graph)
+    graph
 }
 
 /// The runnable view of an admitted module artifact: the graph of exactly the
@@ -89,52 +100,162 @@ pub fn workflow_graph_from_source_with_facets(
 /// artifact ([`lashlang::ProcessOrigin::Lifted`]). A program with no
 /// TypeScript spelling projects with no spans.
 pub fn workflow_graph_from_artifact(artifact: &lashlang::ModuleArtifact) -> WorkflowGraph {
-    let mut graph = WorkflowGraphProjector::new(&artifact.ir)
+    artifact_graph(artifact, None)
+}
+
+fn artifact_graph(
+    artifact: &lashlang::ModuleArtifact,
+    analysis: Option<&lashlang::WorkflowLinkAnalysis>,
+) -> WorkflowGraph {
+    let mut projector = WorkflowGraphProjector::new(artifact.ir())
         .with_source_identity(artifact.source_identity())
-        .with_spans(canonical_artifact_spans(artifact).unwrap_or_default())
-        .project(&TypeScriptStatementText);
+        .with_spans(canonical_artifact_spans(artifact).unwrap_or_default());
+    if let Some(analysis) = analysis {
+        projector = projector.with_analysis(analysis);
+    }
+    let mut graph = projector.project(&TypeScriptStatementText);
     present_loop_sources(&mut graph);
     graph
 }
 
+/// The canonical spans of an artifact's program, keyed by the artifact's own
+/// paths.
+///
+/// The printed program holds every process body inline: a declared process
+/// prints as the literal `main` binds it to, and a lifted one as the literal at
+/// its site, which is itself inside another process body when it was lifted
+/// out of one. Each body's text position is resolved from those two facts, and
+/// each canonical span moves to the declaration path under the deepest body
+/// holding it. A span is kept only when the artifact has a node at its path of
+/// the same form as the text's node there, so a path the printing and the
+/// linking do not share can never carry another node's span.
 fn canonical_artifact_spans(
     artifact: &lashlang::ModuleArtifact,
 ) -> Option<std::collections::BTreeMap<lashlang::AstPath, lashlang::Span>> {
-    let canonical = typescript_program_source(&artifact.ir).ok()?;
+    let ir = artifact.ir();
+    let canonical = typescript_program_source(ir).ok()?;
     let draft = crate::parse(&canonical).ok()?;
-    // Deepest site first, so a nested literal maps to its own declaration.
-    let mut sites = artifact
-        .ir
-        .declarations
-        .iter()
-        .enumerate()
-        .filter_map(|(index, declaration)| match declaration {
-            Declaration::Process(ProcessDecl {
-                origin: lashlang::ProcessOrigin::Lifted { site, .. },
-                ..
-            }) if site.root == lashlang::AstRoot::Main => {
-                Some((u32::try_from(index).ok()?, site.steps.clone()))
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    sites.sort_by_key(|(_, site)| std::cmp::Reverse(site.len()));
+    let bodies = process_body_text_paths(ir);
     let spans = draft
         .spans
-        .into_iter()
-        .map(|(path, span)| {
-            if path.root != lashlang::AstRoot::Main {
-                return (path, span);
-            }
-            let lifted = sites.iter().find_map(|(index, site)| {
-                let rest = path.steps.strip_prefix(site.as_slice())?;
-                let body = rest.strip_prefix(&[0])?;
-                Some(lashlang::AstPath::declaration(*index, body.to_vec()))
-            });
-            (lifted.unwrap_or(path), span)
+        .iter()
+        .filter_map(|(path, span)| {
+            let (path, span) = (path.clone(), *span);
+            let artifact_path = if path.root == lashlang::AstRoot::Main {
+                bodies
+                    .iter()
+                    .filter_map(|(index, body)| {
+                        let rest = path.steps.strip_prefix(body.as_slice())?;
+                        Some((
+                            body.len(),
+                            lashlang::AstPath::declaration(*index, rest.to_vec()),
+                        ))
+                    })
+                    .max_by_key(|(depth, _)| *depth)
+                    .map_or_else(|| path.clone(), |(_, path)| path)
+            } else {
+                path.clone()
+            };
+            let text = expr_at(&draft, &path)?;
+            let admitted = expr_at(ir, &artifact_path)?;
+            same_form(text, admitted).then_some((artifact_path, span))
         })
         .collect();
     Some(spans)
+}
+
+/// Where the printed program holds each process declaration's body: the
+/// `main` path of the literal body it prints as.
+fn process_body_text_paths(ir: &Program) -> Vec<(u32, Vec<u32>)> {
+    let index_of = |name: &str| {
+        ir.declarations
+            .iter()
+            .position(|declaration| {
+                matches!(declaration, Declaration::Process(process) if process.name == name)
+            })
+            .and_then(|index| u32::try_from(index).ok())
+    };
+    let mut bodies = std::collections::BTreeMap::new();
+    // A declared process prints as the literal its first `main` binding holds.
+    if let Expr::Block(statements) = &ir.main {
+        for (position, statement) in statements.iter().enumerate() {
+            if let Expr::Assign { target, expr } = statement
+                && target.is_simple()
+                && let Expr::ProcessRef { process } = expr.as_ref()
+                && let Some(index) = index_of(process.as_str())
+                && matches!(
+                    &ir.declarations[index as usize],
+                    Declaration::Process(process) if process.origin.is_declared()
+                )
+                && let Ok(position) = u32::try_from(position)
+            {
+                bodies.entry(index).or_insert_with(|| vec![position, 0, 0]);
+            }
+        }
+    }
+    // A lifted process prints as the literal at its site; a site inside
+    // another process body resolves once that body's text position is known.
+    loop {
+        let mut resolved = false;
+        for (index, declaration) in ir.declarations.iter().enumerate() {
+            let (
+                Ok(index),
+                Declaration::Process(ProcessDecl {
+                    origin: lashlang::ProcessOrigin::Lifted { site, .. },
+                    ..
+                }),
+            ) = (u32::try_from(index), declaration)
+            else {
+                continue;
+            };
+            if bodies.contains_key(&index) {
+                continue;
+            }
+            let base = match site.root {
+                lashlang::AstRoot::Main => Some(Vec::new()),
+                lashlang::AstRoot::Declaration(parent) => bodies.get(&parent).cloned(),
+            };
+            if let Some(mut body) = base {
+                body.extend_from_slice(&site.steps);
+                body.push(0);
+                bodies.insert(index, body);
+                resolved = true;
+            }
+        }
+        if !resolved {
+            break;
+        }
+    }
+    bodies.into_iter().collect()
+}
+
+fn expr_at<'p>(program: &'p Program, path: &lashlang::AstPath) -> Option<&'p Expr> {
+    let mut expr = match path.root {
+        lashlang::AstRoot::Main => &program.main,
+        lashlang::AstRoot::Declaration(index) => match program.declarations.get(index as usize)? {
+            Declaration::Process(process) => &process.body,
+            Declaration::Function(function) => &function.body,
+            Declaration::Type(_) => return None,
+        },
+    };
+    for step in &path.steps {
+        expr = expr.children().nth(*step as usize)?;
+    }
+    Some(expr)
+}
+
+/// Whether the text's node and the artifact's node at one path are the same
+/// node: the same form, or a form the linker resolves in place (an inline
+/// process literal to its declaration's reference, a module path to its
+/// resource).
+fn same_form(text: &Expr, admitted: &Expr) -> bool {
+    matches!(
+        (text, admitted),
+        (
+            Expr::ProcessLiteral(_) | Expr::Variable(_),
+            Expr::ProcessRef { .. }
+        ) | (Expr::Variable(_) | Expr::Field { .. }, Expr::ResourceRef(_))
+    ) || std::mem::discriminant(text) == std::mem::discriminant(admitted)
 }
 
 /// Shows a `for .. of` loop's authored source in its container.
@@ -208,6 +329,11 @@ pub enum GraphRenderError {
     InvalidOpaqueSource { node_id: String, message: String },
     #[error("duplicate process name `{name}`")]
     DuplicateProcessName { name: String },
+    /// A process's origin is derived at admission, never authored: a declared
+    /// process cannot take a lifted name, and a lifted one must still name the
+    /// literal it was lifted from, at its site, with its hidden parameters.
+    #[error("process `{name}` has an origin its program does not derive: {message}")]
+    ProcessOriginMismatch { name: String, message: String },
     #[error(transparent)]
     CanonicalSource(#[from] TypeScriptSourceError),
     #[error("rendered workflow source did not parse: {message}")]
@@ -344,6 +470,7 @@ fn validate_graph(graph: &WorkflowGraph) -> Result<(), GraphRenderError> {
     let mut process_names = BTreeSet::new();
     for declaration in &graph.declarations {
         if let WorkflowDeclaration::Process(process) = declaration {
+            validate_process_origin(process)?;
             if !process_names.insert(process.name.clone()) {
                 return Err(GraphRenderError::DuplicateProcessName {
                     name: process.name.clone(),
@@ -358,6 +485,44 @@ fn validate_graph(graph: &WorkflowGraph) -> Result<(), GraphRenderError> {
         }
     }
     Ok(())
+}
+
+/// The origin checks a process's own fields can decide; the splice checks the
+/// rest against the literal at the site ([`splice_lifted_bodies`]).
+fn validate_process_origin(process: &WorkflowProcess) -> Result<(), GraphRenderError> {
+    let mismatch = |message: &str| {
+        Err(GraphRenderError::ProcessOriginMismatch {
+            name: process.name.clone(),
+            message: message.to_string(),
+        })
+    };
+    match &process.origin {
+        lashlang::ProcessOrigin::Declared
+            if process
+                .name
+                .starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX) =>
+        {
+            mismatch("a declared process cannot take a lifted process's name")
+        }
+        lashlang::ProcessOrigin::Lifted { .. }
+            if !process
+                .name
+                .starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX) =>
+        {
+            mismatch("a lifted process is named by its literal's digest")
+        }
+        lashlang::ProcessOrigin::Lifted { hidden_params, .. }
+            if *hidden_params as usize > process.params.len() =>
+        {
+            mismatch("a lifted process has more hidden parameters than parameters")
+        }
+        // TypeScript declares no processes, so the lens has no spelling for
+        // a literal lifted out of a declared process's body.
+        lashlang::ProcessOrigin::Lifted { site, .. } if site.root != lashlang::AstRoot::Main => {
+            mismatch("the TypeScript lens renders only literals lifted from main")
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_subgraph(
@@ -542,11 +707,14 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
         processes: &process_names,
     };
     let mut main = subgraph_to_block(&graph.main, context)?;
-    splice_lifted_bodies(&mut main, &mut lifted.into_iter(), context)?;
+    splice_lifted_bodies(&mut main, lifted, context)?;
     Ok(Program {
         language: lashlang::SourceLanguage::new(crate::TYPESCRIPT_LANGUAGE),
         declarations,
         main,
+        // A graph renders to source, which the lowering re-admits; the
+        // private roles of its bindings come back from that lowering.
+        private_bindings: Default::default(),
         spans: Default::default(),
     })
 }
@@ -562,37 +730,91 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
 /// process container. The lens owns those bodies, so the rendered subgraph is
 /// spliced over the literal's body here.
 ///
-/// Literals are matched to declarations positionally: `project` collects
-/// literals in `Expr::children` walk order and pushes one declaration per
-/// literal in that order, and this walk is the same order over `children_mut`.
-/// Matching on the lifted name instead would not work — the name digests the
-/// body and the *lowered* AST path, and the rebuilt program is the printer's
-/// input, not a lowered program, so neither half survives the round trip.
-///
-/// A host may add or delete a process-literal-bearing statement without
-/// touching the declaration list, so the two sequences can differ in length:
-/// a literal with no declaration left keeps its authored body, and a
-/// declaration with no literal left renders nowhere.
-fn splice_lifted_bodies<'a>(
+/// A declaration is matched to its literal by origin: the literal must sit at
+/// the declaration's `site` and still digest to its name. A rendered body is
+/// rebuilt in the shape the lowering gives a braced arrow body (one completion
+/// list), so a literal nested in it sits at the same site it was projected
+/// from. A label a host added to the statement holding a literal is metadata,
+/// not structure, so the site is also looked up with the rendered program's
+/// label steps skipped. A literal no declaration names keeps its authored
+/// body; a declaration whose literal is gone or changed is refused, never
+/// spliced into another literal.
+fn splice_lifted_bodies(
+    main: &mut Expr,
+    lifted: Vec<&WorkflowProcess>,
+    context: RenderContext<'_>,
+) -> Result<(), GraphRenderError> {
+    let mut by_site = std::collections::BTreeMap::new();
+    for process in lifted {
+        let lashlang::ProcessOrigin::Lifted { site, .. } = &process.origin else {
+            continue;
+        };
+        by_site.insert(site.steps.clone(), process);
+    }
+    splice_at(
+        main,
+        &mut Vec::new(),
+        &mut Vec::new(),
+        &mut by_site,
+        context,
+    )?;
+    match by_site.into_values().next() {
+        Some(process) => Err(GraphRenderError::ProcessOriginMismatch {
+            name: process.name.clone(),
+            message: "no process literal sits at its site".to_string(),
+        }),
+        None => Ok(()),
+    }
+}
+
+fn splice_at(
     expr: &mut Expr,
-    lifted: &mut impl Iterator<Item = &'a WorkflowProcess>,
+    path: &mut Vec<u32>,
+    unlabelled: &mut Vec<u32>,
+    by_site: &mut std::collections::BTreeMap<Vec<u32>, &WorkflowProcess>,
     context: RenderContext<'_>,
 ) -> Result<(), GraphRenderError> {
     if let Expr::ProcessLiteral(literal) = expr
-        && let Some(process) = lifted.next()
+        && let Some((site, process)) = by_site
+            .remove_entry(path.as_slice())
+            .or_else(|| by_site.remove_entry(unlabelled.as_slice()))
     {
-        let body = subgraph_to_block(
+        if lashlang::lifted_process_identity(&literal.body, &site) != process.name {
+            return Err(GraphRenderError::ProcessOriginMismatch {
+                name: process.name.clone(),
+                message: "the literal at its site no longer digests to its name".to_string(),
+            });
+        }
+        let mut statements = match subgraph_to_block(
             &process.body,
             RenderContext {
                 scope: RenderScope::Process,
                 processes: context.processes,
             },
-        )?;
+        )? {
+            Expr::Block(statements) => statements,
+            other => vec![other],
+        };
+        statements.push(Expr::Undefined);
+        let body = Expr::Role {
+            role: lashlang::StructuralRole::Completion,
+            expr: Box::new(Expr::Block(statements)),
+        };
         literal.params = process.params.clone();
         *literal.body = process_wrapper(&process.params, body);
     }
-    for child in expr.children_mut() {
-        splice_lifted_bodies(child, lifted, context)?;
+    let label = matches!(expr, Expr::LabelAnnotated { .. });
+    for (index, child) in expr.children_mut().enumerate() {
+        let step = u32::try_from(index).unwrap_or(u32::MAX);
+        path.push(step);
+        if !label {
+            unlabelled.push(step);
+        }
+        splice_at(child, path, unlabelled, by_site, context)?;
+        path.pop();
+        if !label {
+            unlabelled.pop();
+        }
     }
     Ok(())
 }
@@ -675,16 +897,33 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
             binding,
             expression,
         } => with_assignment_ir(binding, expression.clone()),
-        WorkflowNodeKind::StateUpdate { target, expression } => {
+        WorkflowNodeKind::StateUpdate {
+            target,
+            expression,
+            update,
+        } => {
             let [output] = node.outputs.as_slice() else {
                 return invalid_payload(node, "state update must have exactly one output");
             };
             if target.root.as_str() != output.variable {
                 return invalid_payload(node, "state-update target root must match its output");
             }
-            Expr::Assign {
-                target: target.clone(),
-                expr: Box::new(expression.clone()),
+            match update {
+                Some(operator) => {
+                    let Some(role) =
+                        crate::lower::attribute_update(target, *operator, expression.clone())
+                    else {
+                        return invalid_payload(
+                            node,
+                            "an update's target is one member step of a variable",
+                        );
+                    };
+                    role
+                }
+                None => Expr::Assign {
+                    target: target.clone(),
+                    expr: Box::new(expression.clone()),
+                },
             }
         }
         WorkflowNodeKind::Terminal {

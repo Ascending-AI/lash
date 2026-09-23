@@ -274,18 +274,58 @@ pub async fn execute_compiled_traced<H: ExecutionHost>(
     }
 }
 
-/// Every execution site a compiled program's instructions carry, in
-/// instruction order.
+/// Every execution site a compiled program can emit: the sites its
+/// instructions carry, in instruction order, then the leaf sites of its
+/// aggregate batch tables (literal batches, their comprehension templates,
+/// and list batches).
 ///
 /// A compiled program's chunk is private, and the execution sites are the one
 /// thing a correlation proof outside this crate has to read off it: the whole
 /// question is whether a site the VM emits names the workflow node the
 /// projector minted for the same source position.
 pub fn compiled_execution_sites(compiled: &CompiledProgram) -> Vec<&LashlangExecutionSite> {
-    compiled
+    fn batch_sites<'c>(
+        batch: &'c crate::runtime::CompiledResourceOperationBatch,
+        sites: &mut Vec<&'c LashlangExecutionSite>,
+    ) {
+        sites.extend(batch.leaves.iter().filter_map(|leaf| leaf.site.as_ref()));
+        shape_sites(&batch.shape, sites);
+    }
+    fn shape_sites<'c>(
+        shape: &'c crate::runtime::CompiledAggregateAwaitShape,
+        sites: &mut Vec<&'c LashlangExecutionSite>,
+    ) {
+        use crate::runtime::CompiledAggregateAwaitShape as Shape;
+        match shape {
+            Shape::Comprehension { template, .. } => batch_sites(template, sites),
+            Shape::Tuple(items) | Shape::List(items) => {
+                for item in items {
+                    shape_sites(item, sites);
+                }
+            }
+            Shape::Record { values, .. } => {
+                for value in values {
+                    shape_sites(value, sites);
+                }
+            }
+            Shape::BatchLeaf(_) | Shape::Value(_) => {}
+        }
+    }
+    let mut sites = compiled
         .chunk
         .lashlang_execution_sites
         .iter()
         .flatten()
-        .collect()
+        .collect::<Vec<_>>();
+    for batch in &compiled.chunk.resource_operation_batches {
+        batch_sites(batch, &mut sites);
+    }
+    sites.extend(
+        compiled
+            .chunk
+            .resource_operation_list_batches
+            .iter()
+            .filter_map(|batch| batch.site.as_ref()),
+    );
+    sites
 }

@@ -25,6 +25,10 @@ pub(crate) struct Chunk {
     pub(crate) constants: Vec<Value>,
     pub(crate) names: Vec<Name>,
     pub(crate) slot_names: Vec<Name>,
+    /// Which root slots hold a private binding ([`crate::BindingVisibility`]),
+    /// aligned with `slot_names`. A private slot is never imported from or
+    /// exported to the session's globals. Empty when no binding is private.
+    pub(crate) private_slots: Vec<bool>,
     pub(crate) key_lists: Vec<Box<[usize]>>,
     pub(crate) format_templates: Vec<CompiledFormatTemplate>,
     pub(crate) compiled_schemas: Vec<ValidationPlan>,
@@ -78,6 +82,22 @@ pub(crate) struct HandlerScopeExtent {
 }
 
 impl Chunk {
+    /// Records which root slots hold one of `main`'s private bindings.
+    pub(crate) fn mark_private_slots(
+        &mut self,
+        private_bindings: &std::collections::BTreeSet<crate::AstString>,
+    ) {
+        if private_bindings.is_empty() {
+            self.private_slots.clear();
+            return;
+        }
+        self.private_slots = self
+            .slot_names
+            .iter()
+            .map(|name| private_bindings.contains(name.text.as_ref()))
+            .collect();
+    }
+
     /// Looks up the scope a durable handler record names. The handler target is
     /// the scope's identity: no two scopes share one, so a record that does not
     /// match exactly names no scope the compiler emitted.

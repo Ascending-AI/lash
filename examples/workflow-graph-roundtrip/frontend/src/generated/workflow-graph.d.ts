@@ -116,9 +116,13 @@ export type WorkflowNodeKind =
       kind: 'computation';
     }
   | {
+      /**
+       * The assigned value, or with `update`, the operand the update applies to the target's current value (`target op= expression`).
+       */
       expression: Expr;
       kind: 'state_update';
       target: AssignTarget;
+      update?: UpdateOperator | null;
     }
   | {
       expression: Expr;
@@ -190,7 +194,7 @@ export type Expr =
       Bool: boolean;
     }
   | {
-      Number: number;
+      Number: IrNumber;
     }
   | {
       String: string;
@@ -404,6 +408,14 @@ export type Expr =
   | {
       TypeLiteral: TypeExpr;
     };
+/**
+ * The stored form of an IR number literal.
+ */
+export type IrNumber = number | NonFiniteNumber;
+/**
+ * A non-finite number literal's stored spelling.
+ */
+export type NonFiniteNumber = 'NaN' | 'Infinity' | '-Infinity';
 export type ListComprehensionClause =
   | {
       For: {
@@ -492,6 +504,10 @@ export type WorkflowArgument =
 export type WorkflowResultStep = 'await' | 'unwrap_result';
 export type WorkflowEffectKind =
   'await_join' | 'wait_signal' | 'sleep_for' | 'sleep_until' | 'print' | 'yield' | 'break' | 'continue';
+/**
+ * An arithmetic operator a compound attribute assignment applies to the attribute's current value. Named neutrally: a front end's IR decides whether the operation is Lashlang's or ECMA-262's.
+ */
+export type UpdateOperator = 'add' | 'subtract' | 'multiply' | 'divide' | 'remainder';
 export type WorkflowTerminalKind = 'finish' | 'fail';
 /**
  * One editable list-comprehension clause.

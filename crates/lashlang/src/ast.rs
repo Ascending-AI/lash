@@ -1,18 +1,22 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub use crate::ast_string::AstString;
 use crate::span::Span;
 
+#[path = "ast_number.rs"]
+pub(crate) mod number;
 #[path = "ast_roles.rs"]
 mod roles;
-use roles::check_program_roles;
+pub(crate) use roles::check_unique_declarations;
 pub use roles::{
-    AttributeAssignParts, AttributeStep, ProcessOrigin, SourceLanguage, StructuralRole,
-    process_wrapper_run_path,
+    AttributeAssignParts, AttributeStep, AttributeUpdate, BindingVisibility,
+    CollectionTransformParts, LIFTED_PROCESS_NAME_PREFIX, ProcessOrigin, SourceLanguage,
+    StructuralRole, UpdateOperator, lifted_process_identity, process_wrapper_run_path,
 };
+use roles::{check_process_origins, check_program_roles};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Program {
@@ -22,6 +26,13 @@ pub struct Program {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declarations: Vec<Declaration>,
     pub main: Expr,
+    /// The visibility role of `main`'s bindings, assigned by the front end.
+    /// A binding named here is private: it is the front end's own slot (a
+    /// block-scoped shadow, an assignment temporary), and the VM neither
+    /// imports it from nor exports it to the session's globals. Every other
+    /// main-level binding is session-visible.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub private_bindings: BTreeSet<AstString>,
     /// Source spans for the program's nodes, addressed by [`AstPath`]. A
     /// declaration's own span lives at `AstPath::declaration(i, [])`; absence
     /// is "no span", so no sentinel ever doubles as offset zero.
@@ -171,6 +182,16 @@ pub enum InvalidAst {
         role: &'static str,
         reason: &'static str,
     },
+    /// Two declarations share a name.
+    #[error("`{name}` is declared twice")]
+    DuplicateDeclaration { name: String },
+    /// A process's origin contradicts its declaration. An origin is derived
+    /// when the linker admits a program, never authored.
+    #[error("process `{process}` has an impossible origin: {reason}")]
+    InvalidProcessOrigin {
+        process: String,
+        reason: &'static str,
+    },
 }
 
 /// Rejects an AST the compiler cannot lower as written.
@@ -182,6 +203,7 @@ pub fn validate_ast(program: &Program) -> Result<(), InvalidAst> {
     check_ast_nesting_depth(program)?;
     check_program_process_types(program)?;
     check_program_roles(program)?;
+    check_process_origins(program)?;
     check_loop_control(&program.main)?;
     for declaration in &program.declarations {
         match declaration {
@@ -367,6 +389,7 @@ impl Program {
             language: SourceLanguage::ir(),
             declarations: Vec::new(),
             main: Expr::Block(expressions),
+            private_bindings: BTreeSet::new(),
             spans: BTreeMap::new(),
         }
     }
@@ -386,6 +409,7 @@ impl PartialEq for Program {
         self.language == other.language
             && self.declarations == other.declarations
             && self.main == other.main
+            && self.private_bindings == other.private_bindings
     }
 }
 
@@ -500,7 +524,14 @@ pub enum Expr {
     /// The JavaScript `undefined` value. This node is AST-only.
     Undefined,
     Bool(bool),
-    Number(f64),
+    /// A number literal. Its identity and stored form follow the one IR
+    /// number rule ([`number`]): distinct `-0`, one canonical NaN, and a
+    /// lossless spelling for non-finite values.
+    Number(
+        #[serde(with = "number")]
+        #[schemars(with = "number::IrNumber")]
+        f64,
+    ),
     String(AstString),
     Variable(AstString),
     Tuple(Vec<Expr>),
@@ -658,30 +689,6 @@ pub struct FunctionExpr {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub captures: Vec<AstString>,
     pub body: Box<Expr>,
-}
-
-/// The prefix on every declaration name the linker derives from a lifted
-/// process literal. A dialect that authors process names from source text can
-/// never collide with one, because the linker invents these and no authored
-/// name can start with it by accident.
-pub const LIFTED_PROCESS_NAME_PREFIX: &str = "__process_";
-
-/// The name a body at a given AST path lifts to.
-///
-/// A digest over the canonical body plus the path, so it is a function of what
-/// the body *is* and where it sits — never of link order, span tables, or
-/// anything else a re-derivation could reorder. The linker's lift and the
-/// workflow lens's literal projection must agree on this spelling.
-pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
-    let preimage = serde_json::json!({
-        "body": body,
-        "path": path,
-    });
-    let digest = lash_sansio::core_support::blake3_domain_hash_hex(
-        "lash-lifted-process-name/v1",
-        preimage.to_string(),
-    );
-    format!("{LIFTED_PROCESS_NAME_PREFIX}{digest}")
 }
 
 /// The authored shape of an inline process body, as a dialect lowers it.

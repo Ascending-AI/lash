@@ -237,7 +237,7 @@ where
 
     let module = handles
         .artifacts
-        .get_module_artifact(&artifact.module_ref)
+        .get_module_artifact(artifact.module_ref())
         .await
         .expect("module artifact isolated from environment writes")
         .expect("module artifact present");

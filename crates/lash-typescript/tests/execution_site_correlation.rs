@@ -15,9 +15,7 @@
 
 use lash_typescript::parse;
 use lashlang::testing::ast_builders as b;
-use lashlang::testing::harness::{
-    EchoHost, compile_labeled_program, compiled_execution_sites, link_labeled,
-};
+use lashlang::testing::harness::{EchoHost, compiled_execution_sites, link_labeled};
 use lashlang::{
     AbilityOp, AbilityResult, AstRoot, Declaration, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, LashlangExecutionObservation, Program, State, Value, WorkflowEffectKind,
@@ -110,11 +108,11 @@ for (const item of [first]) {
 finish(first);
 "#;
     let linked = link_labeled(parse_program(source));
-    let graph_node_ids = workflow_graph_from_program(&linked.artifact.ir)
+    let graph_node_ids = workflow_graph_from_program(linked.artifact.ir())
         .nodes()
         .map(|node| node.id.to_string())
         .collect::<std::collections::BTreeSet<_>>();
-    let compiled = compile_labeled_program(linked.artifact.ir.clone());
+    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
     let host = ObservationHost::default();
 
     let outcome = lashlang::execute(&compiled, &mut State::new(), &host)
@@ -146,7 +144,7 @@ finish(first);
 fn only_lifted_process(linked: &lashlang::LinkedModule) -> String {
     let mut names = linked
         .artifact
-        .ir
+        .ir()
         .declarations
         .iter()
         .filter_map(|declaration| match declaration {
@@ -192,7 +190,7 @@ finish(1);
         .find(|site| site.node_kind == lash_sansio::ExecutionNodeKind::ResourceOperation)
         .expect("resource operation execution site");
 
-    let graph = workflow_graph_from_program(&linked.artifact.ir);
+    let graph = workflow_graph_from_program(linked.artifact.ir());
     let graph_node = graph
         .nodes()
         .find(|node| node.id.as_str() == site.node_id)
@@ -241,7 +239,7 @@ finish(worker);
     let linked = link_labeled(parse_program(source));
     let (index, process) = linked
         .artifact
-        .ir
+        .ir()
         .declarations
         .iter()
         .enumerate()
@@ -253,7 +251,7 @@ finish(worker);
         })
         .expect("the process literal lifts");
     assert!(
-        linked.artifact.ir.spans.is_empty(),
+        linked.artifact.ir().spans.is_empty(),
         "the durable artifact is span-free"
     );
     let process_spans = linked
@@ -309,8 +307,8 @@ if (true) {
 finish(selected);
 "#;
     let linked = link_labeled(parse_program(source));
-    let graph = workflow_graph_from_program(&linked.artifact.ir);
-    let compiled = compile_labeled_program(linked.artifact.ir.clone());
+    let graph = workflow_graph_from_program(linked.artifact.ir());
+    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
 
     let mut invocation_paths = Vec::new();
     for _ in 0..2 {
@@ -436,7 +434,7 @@ let outer = (inner = await sleep(1));
 finish(outer);
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled = compile_labeled_program(linked.artifact.ir.clone());
+    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
     let compiler = compiled_site_descriptors(&compiled);
 
     assert!(
@@ -454,7 +452,7 @@ finish(outer);
     );
     assert_eq!(
         compiler,
-        graph_site_descriptors(&linked.artifact.ir),
+        graph_site_descriptors(linked.artifact.ir()),
         "the projector must agree with the compiler, descriptor and path"
     );
 }
@@ -466,13 +464,13 @@ fn execution_site_function_call_is_projected_with_the_compiler_descriptor() {
 finish(identity(1));
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled = compile_labeled_program(linked.artifact.ir.clone());
+    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
     let expected = vec![
         ("call".to_string(), "function call".to_string(), vec![1]),
         ("terminal".to_string(), "result".to_string(), vec![1]),
     ];
     assert_eq!(compiled_site_descriptors(&compiled), expected);
-    assert_eq!(graph_site_descriptors(&linked.artifact.ir), expected);
+    assert_eq!(graph_site_descriptors(linked.artifact.ir()), expected);
 }
 
 /// The compiler and the projector emit the same descriptor vocabulary.
@@ -508,7 +506,7 @@ while (false) {
 finish(result);
 "#;
     let linked = link_labeled(parse_program(source));
-    let main = compile_labeled_program(linked.artifact.ir.clone());
+    let main = lashlang::testing::harness::compile_linked_main(&linked);
     let process = lashlang::testing::harness::compile_linked_process_named(
         &linked,
         &only_lifted_process(&linked),
@@ -519,7 +517,7 @@ finish(result);
     compiler.extend(descriptor_pairs(&process));
     compiler.sort();
     compiler.dedup();
-    let mut graph = workflow_graph_from_program(&linked.artifact.ir)
+    let mut graph = workflow_graph_from_program(linked.artifact.ir())
         .nodes()
         .flat_map(|node| node.execution_sites.iter())
         .map(|site| (site.kind.to_string(), site.label.clone()))
@@ -601,12 +599,12 @@ while (false) {
 }
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled = compile_labeled_program(linked.artifact.ir.clone());
+    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
     let compiler = compiled_site_descriptors(&compiled)
         .into_iter()
         .filter(|(kind, _, _)| kind == "loop")
         .collect::<Vec<_>>();
-    let graph = graph_site_descriptors(&linked.artifact.ir)
+    let graph = graph_site_descriptors(linked.artifact.ir())
         .into_iter()
         .filter(|(kind, _, _)| kind == "loop")
         .collect::<Vec<_>>();
@@ -630,8 +628,8 @@ selected = true
 finish(selected);
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled = compile_labeled_program(linked.artifact.ir.clone());
-    let graph = workflow_graph_from_program(&linked.artifact.ir);
+    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let graph = workflow_graph_from_program(linked.artifact.ir());
     let graph_ids = graph
         .nodes()
         .map(|node| node.id.to_string())
@@ -673,7 +671,7 @@ fn direct_ir_process_sites_are_children_of_the_process_root() {
     let linked = link_labeled(program);
     let compiled = lashlang::testing::harness::compile_linked_process_named(&linked, "direct")
         .expect("direct IR process should compile");
-    let graph = workflow_graph_from_program(&linked.artifact.ir);
+    let graph = workflow_graph_from_program(linked.artifact.ir());
     let process = graph.process("direct").expect("projected process");
     let graph_ids = graph
         .nodes()

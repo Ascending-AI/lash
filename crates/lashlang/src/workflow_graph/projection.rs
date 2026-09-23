@@ -59,7 +59,7 @@ pub fn workflow_graph_from_artifact(
     artifact: &crate::ModuleArtifact,
     text: &dyn WorkflowStatementText,
 ) -> WorkflowGraph {
-    WorkflowGraphProjector::new(&artifact.ir)
+    WorkflowGraphProjector::new(artifact.ir())
         .with_source_identity(artifact.source_identity())
         .project(text)
 }
@@ -358,13 +358,14 @@ impl Session<'_, '_> {
         ownership: &WorkflowOwnership,
         versions: &mut VersionState,
     ) -> (WorkflowNodeKind, String, Vec<VariableVersion>) {
-        if let Some((target, value)) = attribute_assignment(expression) {
+        if let Some((target, value, update)) = attribute_assignment(expression) {
             let name = format!("update {}", target.root);
             let outputs = vec![versions.allocate(target.root.as_str())];
             return (
                 WorkflowNodeKind::StateUpdate {
                     target,
                     expression: value.clone(),
+                    update,
                 },
                 name,
                 outputs,
@@ -385,6 +386,7 @@ impl Session<'_, '_> {
                 WorkflowNodeKind::StateUpdate {
                     target: target.clone(),
                     expression: expr.as_ref().clone(),
+                    update: None,
                 },
                 format!("update {}", target.root),
                 vec![versions.allocate(target.root.as_str())],
@@ -638,7 +640,11 @@ fn expr_at<'p>(program: &'p Program, path: &AstPath) -> Option<&'p Expr> {
 
 /// The authored target and value of an attribute assignment whose object is a
 /// plain variable: the only shape a graph state update can name.
-fn attribute_assignment(expression: &Expr) -> Option<(AssignTarget, &Expr)> {
+/// A member assignment role as a state update: its target, then either its
+/// value or, for a compound update, the operand and operator.
+fn attribute_assignment(
+    expression: &Expr,
+) -> Option<(AssignTarget, &Expr, Option<crate::UpdateOperator>)> {
     let Expr::Role {
         role: StructuralRole::AttributeAssign,
         expr,
@@ -654,12 +660,17 @@ fn attribute_assignment(expression: &Expr) -> Option<(AssignTarget, &Expr)> {
         AttributeStep::Field(field) => crate::AssignPathStep::Field(field.clone()),
         AttributeStep::Index(index) => crate::AssignPathStep::Index(index.clone()),
     };
+    let (value, update) = match parts.update {
+        Some(update) => (update.operand, Some(update.operator)),
+        None => (parts.value, None),
+    };
     Some((
         AssignTarget {
             root: root.clone(),
             steps: vec![step],
         },
-        parts.value,
+        value,
+        update,
     ))
 }
 
@@ -925,7 +936,7 @@ fn loop_outputs(
 fn collect_statement_roots(body: &WorkflowBody<'_>, assigned: &mut BTreeSet<String>) {
     for statement in &body.statements {
         let (_, expression) = peel_label(statement.expr);
-        if let Some((target, _)) = attribute_assignment(expression) {
+        if let Some((target, _, _)) = attribute_assignment(expression) {
             assigned.insert(target.root.to_string());
         } else if let Expr::Assign { target, .. } = expression {
             assigned.insert(target.root.to_string());
@@ -1040,6 +1051,8 @@ fn is_pure_value(expression: &Expr) -> bool {
 fn awaits(expression: &Expr) -> bool {
     match expression {
         Expr::Await(_) => true,
+        // A closure's or a process literal's body awaits on its own account.
+        Expr::Function(_) | Expr::ProcessLiteral(_) => false,
         Expr::BuiltinCall { name, .. } if name.as_str() == "__typescript_await_pending" => true,
         _ => expression.children().any(awaits),
     }

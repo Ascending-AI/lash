@@ -14,7 +14,7 @@ const PARKED_SOURCE: &str = "const add = (left: number, right: number) => left +
 fn parked_cell_with_live_closure_survives_snapshot_restore() {
     let mut session = Session::open(HarnessMode::Resident);
     session.run_ok("const base = [1, 2];");
-    let before = session.user_bindings();
+    let before = session.globals();
 
     let evidence = session.run_parked(PARKED_SOURCE);
     assert_eq!(evidence.finish, serde_json::json!(42));
@@ -25,7 +25,7 @@ fn parked_cell_with_live_closure_survives_snapshot_restore() {
     assert!(evidence.continuation_bytes > 0);
 
     assert_eq!(
-        session.user_bindings(),
+        session.globals(),
         before,
         "a closure created inside the parked cell must not become a session binding"
     );

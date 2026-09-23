@@ -628,6 +628,7 @@ async fn suspend_in_exceptional_finally<H: ExecutionHost>(
     let slots = SlotState::from_globals(
         Record::new(),
         &program.chunk.slot_names,
+        &program.chunk.private_slots,
         &ProjectedBindings::new(),
         Vec::new(),
     );

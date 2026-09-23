@@ -697,11 +697,11 @@ pub fn validate_lashlang_process_admission(
     input: &LashlangProcessInput,
     host: LashlangHostEnvironmentCheck<'_>,
 ) -> Result<(), LashlangProcessAdmissionRefusal> {
-    if artifact.host_requirements_ref != input.host_requirements_ref {
+    if artifact.host_requirements_ref() != &input.host_requirements_ref {
         return Err(LashlangProcessAdmissionRefusal::HostRequirementsMismatch {
             process: input.process_name.clone(),
             requested: input.host_requirements_ref.to_string(),
-            actual: artifact.host_requirements_ref.to_string(),
+            actual: artifact.host_requirements_ref().to_string(),
         });
     }
     if artifact.process_ref(&input.process_name) != Some(&input.process_ref) {
@@ -716,7 +716,7 @@ pub fn validate_lashlang_process_admission(
             host.map_err(
                 |message| LashlangProcessAdmissionRefusal::HostEnvironmentInvalid { message },
             )?;
-        lashlang_host_environment_satisfies_requirements(&artifact.host_requirements, host)
+        lashlang_host_environment_satisfies_requirements(artifact.host_requirements(), host)
             .map_err(
                 |error| LashlangProcessAdmissionRefusal::HostEnvironmentIncompatible {
                     process: input.process_name.clone(),
@@ -829,12 +829,6 @@ pub async fn prepare_lashlang_process_start(
             module_ref: start.module_ref.to_string(),
             process: start.process_name.clone(),
         })?;
-    artifact
-        .verify()
-        .map_err(|source| LashlangRuntimeError::InvalidArtifact {
-            module_ref: start.module_ref.to_string(),
-            message: source.to_string(),
-        })?;
     let admission_input = LashlangProcessInput {
         module_ref: start.module_ref.clone(),
         process_ref: start.process_ref.clone(),
@@ -847,7 +841,7 @@ pub async fn prepare_lashlang_process_start(
         &admission_input,
         LashlangHostEnvironmentCheck::OmitHostEnvironment,
     )?;
-    let process = artifact.ir.process(&start.process_name).ok_or_else(|| {
+    let process = artifact.ir().process(&start.process_name).ok_or_else(|| {
         LashlangRuntimeError::ArtifactProcessMismatch {
             module_ref: start.module_ref.to_string(),
             process: start.process_name.clone(),
@@ -891,7 +885,7 @@ pub async fn prepare_lashlang_process_start(
         }
     }
     let signal_event_types = artifact
-        .ir
+        .ir()
         .process(&start.process_name)
         .map(lashlang_process_signal_event_types)
         .unwrap_or_default();
@@ -1216,7 +1210,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             .into_iter()
             .chain(
                 artifact
-                    .ir
+                    .ir()
                     .process(&identity.process_name)
                     .map(lashlang_process_signal_event_types)
                     .unwrap_or_default(),

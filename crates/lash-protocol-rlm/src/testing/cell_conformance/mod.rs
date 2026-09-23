@@ -115,7 +115,7 @@ fn drive(mode: HarnessMode, cells: &[Cell]) -> (Session, SessionModel) {
             }
         }
         assert_eq!(
-            &session.user_bindings(),
+            &session.globals(),
             model.bindings(),
             "after {context} the session's bindings left the model"
         );

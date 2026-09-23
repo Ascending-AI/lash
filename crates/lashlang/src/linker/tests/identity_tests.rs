@@ -66,11 +66,15 @@ fn label_annotations_require_enabled_language_feature() {
     assert!(
         linked
             .artifact
-            .host_requirements
+            .host_requirements()
             .language_features
             .label_annotations
     );
-    let process = linked.artifact.ir.process("scan").expect("linked process");
+    let process = linked
+        .artifact
+        .ir()
+        .process("scan")
+        .expect("linked process");
     assert_eq!(
         process.label.as_ref().map(|label| label.title.as_str()),
         Some("Scan files")
@@ -154,7 +158,7 @@ fn label_metadata_round_trips_and_changes_artifact_identity() {
         .expect("encode annotated artifact");
     let decoded = ModuleArtifact::from_store_bytes(&bytes).expect("decode annotated artifact");
     assert_eq!(decoded, first.artifact);
-    assert_ne!(first.artifact.module_ref, changed.artifact.module_ref);
+    assert_ne!(first.artifact.module_ref(), changed.artifact.module_ref());
     assert_ne!(
         first.artifact.process_ref("scan"),
         changed.artifact.process_ref("scan")
@@ -188,7 +192,10 @@ fn module_ref_ignores_spans_and_formatting() {
     )
     .expect("link formatted");
 
-    assert_eq!(compact.artifact.module_ref, formatted.artifact.module_ref);
+    assert_eq!(
+        compact.artifact.module_ref(),
+        formatted.artifact.module_ref()
+    );
 }
 
 #[test]
@@ -283,14 +290,14 @@ fn host_requirements_ref_tracks_resource_requirements_not_unrelated_tools() {
         LinkedModule::link(tool_call_process("echo", "value"), full_host_environment())
             .expect("link changed requirement");
 
-    assert_eq!(base.artifact.module_ref, extra.artifact.module_ref);
+    assert_eq!(base.artifact.module_ref(), extra.artifact.module_ref());
     assert_eq!(
-        base.artifact.host_requirements_ref,
-        extra.artifact.host_requirements_ref
+        base.artifact.host_requirements_ref(),
+        extra.artifact.host_requirements_ref()
     );
     assert_ne!(
-        base.artifact.host_requirements_ref,
-        changed_requirement.artifact.host_requirements_ref
+        base.artifact.host_requirements_ref(),
+        changed_requirement.artifact.host_requirements_ref()
     );
 }
 

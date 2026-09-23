@@ -1172,7 +1172,10 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // encoding became canonical: every component is length-prefixed
         // (`turn:12:test-session:6:turn-7`) so delimiter-bearing ids cannot
         // collide, which changes the call id and the frame key derived from
-        // it.
+        // it. FIG-3571 deleted `canonical_program_ir` and its normalizer: an
+        // artifact carries the linked program verbatim as `ir`, so the module
+        // ref hashes binder names again. The call id below names no module
+        // ref, so it does not move.
         // What the pair asserts is unchanged: the two sides are still equal,
         // which is the trace-sink independence this test exists for; only the
         // derivation both sides share moved.

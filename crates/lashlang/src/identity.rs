@@ -74,8 +74,8 @@ impl ProcessDefinitionIdentity {
     pub fn from_artifact_export(artifact: &ModuleArtifact, process_name: &str) -> Option<Self> {
         let process_ref = artifact.process_ref(process_name)?.clone();
         Some(Self::new(
-            artifact.module_ref.clone(),
-            artifact.host_requirements_ref.clone(),
+            artifact.module_ref().clone(),
+            artifact.host_requirements_ref().clone(),
             process_ref,
             process_name,
         ))
@@ -95,8 +95,8 @@ impl ProcessDefinitionIdentity {
     }
 
     pub fn matches_artifact_export(&self, artifact: &ModuleArtifact) -> bool {
-        if self.module_ref != artifact.module_ref
-            || self.host_requirements_ref != artifact.host_requirements_ref
+        if &self.module_ref != artifact.module_ref()
+            || &self.host_requirements_ref != artifact.host_requirements_ref()
         {
             return false;
         }
@@ -109,12 +109,6 @@ impl ProcessDefinitionIdentity {
         &self,
         artifact: &ModuleArtifact,
     ) -> Result<crate::TypeExpr, ProcessDefinitionIdentityError> {
-        artifact
-            .verify()
-            .map_err(|source| ProcessDefinitionIdentityError::InvalidArtifact {
-                process: self.process_name.clone(),
-                message: source.to_string(),
-            })?;
         if !self.matches_artifact_export(artifact) {
             return Err(ProcessDefinitionIdentityError::ArtifactMismatch {
                 process: self.process_name.clone(),
@@ -144,8 +138,6 @@ pub enum ProcessDefinitionIdentityError {
     ArtifactMismatch { process: String },
     #[error("artifact process `{process}` has no complete signature")]
     MissingSignature { process: String },
-    #[error("artifact for process `{process}` failed identity verification: {message}")]
-    InvalidArtifact { process: String, message: String },
 }
 
 fn decode_field<T: serde::de::DeserializeOwned>(

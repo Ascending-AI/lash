@@ -535,7 +535,7 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         owner: &lash_core_execution::ArtifactOwner,
         artifact: &lashlang::ModuleArtifact,
     ) -> Result<(), lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
+        if !crate::namespace::is_valid_opaque_key(artifact.module_ref().as_str()) {
             return Err(lashlang::ArtifactStoreError::Backend(
                 "invalid module reference".into(),
             ));
@@ -553,7 +553,7 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         }
         self.publish_namespaced_bytes(
             MODULE_ARTIFACT_NAMESPACE,
-            artifact.module_ref.as_str(),
+            artifact.module_ref().as_str(),
             &bytes,
             owner,
         )

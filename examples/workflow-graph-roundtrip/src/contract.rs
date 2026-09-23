@@ -12,6 +12,11 @@ use serde_json::{Value, json};
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowDocument {
     pub schema_version: u32,
+    /// The source identity of the admitted artifact this document's graph
+    /// is the view of; absent for a draft whose source does not admit. A run
+    /// overlay shows a run's events only when their `definition` is this one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facet_schema_version: Option<u32>,
     pub version: u64,

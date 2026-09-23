@@ -40,7 +40,11 @@ fn collect_execution_sites(
     label: Option<&LabelMetadata>,
     sites: &mut Vec<WorkflowExecutionSite>,
 ) {
-    if ownership.path_for_ast(ast_path) != Some(node_path) {
+    // An inline process literal's body runs in the process it lifts to,
+    // never under the node that holds it, so it contributes no site here.
+    if ownership.path_for_ast(ast_path) != Some(node_path)
+        || matches!(expression, Expr::ProcessLiteral(_))
+    {
         return;
     }
     if let Some(label) = label

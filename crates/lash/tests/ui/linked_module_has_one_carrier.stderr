@@ -1,13 +1,13 @@
 error[E0599]: no method named `program` found for reference `&LinkedModule` in the current scope
- --> tests/ui/linked_module_has_one_carrier.rs:8:20
-  |
-8 |     let _ = linked.program();
-  |                    ^^^^^^^ method not found in `&LinkedModule`
+  --> tests/ui/linked_module_has_one_carrier.rs:11:20
+   |
+11 |     let _ = linked.program();
+   |                    ^^^^^^^ method not found in `&LinkedModule`
 
 error[E0277]: the trait bound `LinkedModule: serde::Serialize` is not satisfied
-  --> tests/ui/linked_module_has_one_carrier.rs:12:35
+  --> tests/ui/linked_module_has_one_carrier.rs:15:35
    |
-12 |     let _ = serde_json::to_string(linked);
+15 |     let _ = serde_json::to_string(linked);
    |             --------------------- ^^^^^^ the trait `serde_core::ser::Serialize` is not implemented for `LinkedModule`
    |             |
    |             required by a bound introduced by this call
@@ -32,3 +32,36 @@ note: required by a bound in `serde_json::to_string`
    | where
    |     T: ?Sized + Serialize,
    |                 ^^^^^^^^^ required by this bound in `to_string`
+
+error[E0616]: field `ir` of struct `lash::rlm::lang::ModuleArtifact` is private
+  --> tests/ui/linked_module_has_one_carrier.rs:19:14
+   |
+19 |     artifact.ir = ir;
+   |              ^^ private field
+
+error[E0277]: the trait bound `lash::rlm::lang::ModuleArtifact: serde::Deserialize<'de>` is not satisfied
+  --> tests/ui/linked_module_has_one_carrier.rs:24:30
+   |
+24 |     serde_json::from_slice::<ModuleArtifact>(bytes).unwrap()
+   |                              ^^^^^^^^^^^^^^ the trait `serde_core::de::Deserialize<'_>` is not implemented for `lash::rlm::lang::ModuleArtifact`
+   |
+   = note: for local types consider adding `#[derive(serde::Deserialize)]` to your `lash::rlm::lang::ModuleArtifact` type
+   = note: for types from other crates check whether the crate offers a `serde` feature flag
+   = help: the following other types implement trait `serde_core::de::Deserialize<'de>`:
+             &'a Path
+             &'a RawValue
+             &'a [u8]
+             &'a serde_bytes::bytearray::ByteArray<N>
+             &'a serde_bytes::bytes::Bytes
+             &'a str
+             ()
+             (T,)
+           and $N others
+note: required by a bound in `from_slice`
+  --> $CARGO/serde_json-$VERSION/src/de.rs
+   |
+   | pub fn from_slice<'a, T>(v: &'a [u8]) -> Result<T>
+   |        ---------- required by a bound in this function
+   | where
+   |     T: de::Deserialize<'a>,
+   |        ^^^^^^^^^^^^^^^^^^^ required by this bound in `from_slice`

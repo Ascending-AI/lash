@@ -386,7 +386,13 @@ impl<'module> Linker<'module> {
         scope.bind("inputs", Binding::Value(process_input_record_type(process)));
         self.completion_facts.borrow_mut().clear();
         self.collect_completion.set(true);
+        // Inference lowers the body only to learn its output. The body is
+        // lowered again for the program, and that lowering lifts its literals;
+        // the literals this pass lifts are dropped, or each would be declared
+        // twice.
+        let lifted = self.lifted_declarations.borrow().len();
         let result = self.lower_expr(&process.body, path, &mut scope);
+        self.lifted_declarations.borrow_mut().truncate(lifted);
         self.collect_completion.set(false);
         result?;
         let completion = self

@@ -62,13 +62,13 @@ pub(super) async fn counting_lashlang_registration(process_id: &ProcessId) -> Pr
     ProcessRegistration::new(
         process_id.clone(),
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: linked.artifact.module_ref.clone(),
+            module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
                 .artifact
                 .process_ref("worker")
                 .expect("worker process ref")
                 .clone(),
-            host_requirements_ref: linked.artifact.host_requirements_ref.clone(),
+            host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
             process_name: "worker".to_string(),
             args: serde_json::Map::new(),
         }),

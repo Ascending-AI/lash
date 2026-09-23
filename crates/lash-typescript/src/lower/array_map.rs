@@ -11,7 +11,7 @@ use lashlang::{
     fold_expr_children,
 };
 
-use super::{GENERATED_BINDING_PREFIX, Lowerer, spans};
+use super::{Lowerer, spans};
 use crate::adapter::Expr;
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -107,11 +107,9 @@ impl Lowerer {
                     name: "__typescript_stdlib".into(),
                     args: vec![LashExpr::String("__enumerate".into()), items],
                 };
-                let pair = format!("{GENERATED_BINDING_PREFIX}{}_pair", self.next_binding);
-                self.next_binding += 1;
+                let pair = self.generated_binding("pair");
                 let lowered_callback = self.lower_expr(callback)?;
-                let wrapper = format!("{GENERATED_BINDING_PREFIX}{}_map", self.next_binding);
-                self.next_binding += 1;
+                let wrapper = self.generated_binding("map");
                 let index_of = |index: usize| LashExpr::Index {
                     target: Box::new(LashExpr::Variable(pair.as_str().into())),
                     index: Box::new(LashExpr::Number(index as f64)),

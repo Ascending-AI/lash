@@ -88,13 +88,13 @@ async fn inject_message_scopes_emission_to_requested_session() {
     .await
     .expect("publish mail-listener module");
     let process_input = lash_lashlang_runtime::LashlangProcessInput {
-        module_ref: linked.artifact.module_ref.clone(),
+        module_ref: linked.artifact.module_ref().clone(),
         process_ref: linked
             .artifact
             .process_ref("mail_listener")
             .expect("mail-listener process ref")
             .clone(),
-        host_requirements_ref: linked.artifact.host_requirements_ref.clone(),
+        host_requirements_ref: linked.artifact.host_requirements_ref().clone(),
         process_name: "mail_listener".to_string(),
         args: serde_json::Map::new(),
     };

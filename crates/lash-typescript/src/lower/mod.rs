@@ -21,6 +21,7 @@ mod loops;
 use loops::*;
 mod array_callbacks;
 mod array_map;
+mod attribute_update;
 mod await_expr;
 mod binding;
 mod calls;
@@ -33,6 +34,7 @@ mod process_wrapper;
 mod regex;
 mod spans;
 mod triggers;
+pub(crate) use attribute_update::attribute_update;
 use binding::*;
 use constructs::*;
 pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_workflow_fragment};
@@ -104,6 +106,10 @@ struct Lowerer {
     scopes: Vec<Scope>,
     functions: Vec<FunctionContext>,
     next_binding: usize,
+    /// Every binding name this lowering invented. They are the front end's
+    /// own slots, so the lowered program marks them private
+    /// ([`lashlang::BindingVisibility::Private`]).
+    generated_bindings: BTreeSet<String>,
     next_function: usize,
     position: PositionContext,
     switch_breaks: Vec<(String, usize)>,
@@ -744,11 +750,7 @@ impl Lowerer {
                     self.functions.pop();
                     return Err(reserved_identifier(source_name));
                 }
-                let generated = self.next_binding;
-                self.next_binding += 1;
-                Some(format!(
-                    "{GENERATED_BINDING_PREFIX}{generated}_{source_name}"
-                ))
+                Some(self.generated_binding(source_name))
             }
             (_, internal_name) => internal_name,
         };

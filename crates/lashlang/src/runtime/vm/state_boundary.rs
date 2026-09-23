@@ -16,8 +16,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         // in `from_globals` never revisits those (FIG-2865).
         crate::runtime::projected_refresh::refresh_record(&mut globals, &projected);
         crate::runtime::projected_refresh::refresh_heap(&mut heap, &projected);
-        let slots =
-            SlotState::from_globals(globals, &program.chunk.slot_names, &projected, Vec::new());
+        let slots = SlotState::from_globals(
+            globals,
+            &program.chunk.slot_names,
+            &program.chunk.private_slots,
+            &projected,
+            Vec::new(),
+        );
         let mut vm = Self::new(&program.chunk, slots, host, None, host.execution_mode());
         vm.install_heap(heap);
         if host.profile_execution() {

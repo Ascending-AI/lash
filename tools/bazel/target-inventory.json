@@ -19798,6 +19798,15 @@
           "tags": [
             "dev-deferred"
           ]
+        },
+        {
+          "cargo": "carrier_laws",
+          "cargo_only": "the no-abort stress binary runs 43 s; too slow for the developer loop; the merge group runs it in the Bazel tail",
+          "kind": "test",
+          "label": "//crates/lash-typescript:carrier_laws__test",
+          "tags": [
+            "dev-deferred"
+          ]
         }
       ],
       "test_batch": {

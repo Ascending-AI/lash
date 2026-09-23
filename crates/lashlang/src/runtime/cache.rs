@@ -184,7 +184,7 @@ impl CompiledProcessCache {
         if let Some(entry) = self.mru.lookup(|entry| {
             entry
                 .key
-                .matches(&artifact.module_ref, process_ref, host_requirements_ref)
+                .matches(artifact.module_ref(), process_ref, host_requirements_ref)
         }) {
             return Ok(entry.compiled.clone());
         }
@@ -194,7 +194,7 @@ impl CompiledProcessCache {
         // Only a miss stores an entry, so only a miss pays for the owned key.
         self.mru.insert(CachedCompiledProcess {
             key: CompiledProcessCacheKey::new(
-                artifact.module_ref.clone(),
+                artifact.module_ref().clone(),
                 process_ref.clone(),
                 host_requirements_ref.clone(),
             ),
@@ -347,7 +347,7 @@ fn linked_program_matches(
         source_hash,
         source,
     ) && entry.process_handles == surface.process_handles
-        && surface.satisfies(&entry.program.linked.artifact.host_requirements)
+        && surface.satisfies(entry.program.linked.artifact.host_requirements())
 }
 
 fn source_matches(cached_hash: u64, cached_source: &str, source_hash: u64, source: &str) -> bool {

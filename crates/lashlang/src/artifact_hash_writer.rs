@@ -40,6 +40,14 @@ impl HashWriter {
         }
     }
 
+    /// A writer for a module's source identity (ADR 0100 R6): the same
+    /// deterministic atom stream as its content hash, under its own domain.
+    pub(super) fn for_source_identity() -> Self {
+        Self {
+            hasher: Blake3DomainHasher::new("lash-workflow-source/v4"),
+        }
+    }
+
     pub(super) fn atom(&mut self, value: &str) {
         self.integer(value.len() as u64);
         self.hasher.update(b":");

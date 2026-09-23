@@ -401,7 +401,7 @@ impl lashlang::LashlangArtifactStore for Store {
         owner: &lash_core_execution::ArtifactOwner,
         artifact: &lashlang::ModuleArtifact,
     ) -> Result<(), lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
+        if !crate::namespace::is_valid_opaque_key(artifact.module_ref().as_str()) {
             return Err(lashlang::ArtifactStoreError::Backend(
                 "invalid module reference".into(),
             ));
@@ -409,7 +409,7 @@ impl lashlang::LashlangArtifactStore for Store {
         let bytes = artifact
             .to_store_bytes()
             .map_err(|err| lashlang::ArtifactStoreError::Encode(err.to_string()))?;
-        let artifact_ref = artifact.module_ref.as_str().to_string();
+        let artifact_ref = artifact.module_ref().as_str().to_string();
         let publication_pause = self.artifact_publication_pause.lock_recover().take();
         if let Some(pause) = publication_pause {
             pause.pause().await;
@@ -425,7 +425,7 @@ impl lashlang::LashlangArtifactStore for Store {
         .map_err(lashlang::ArtifactStoreError::from)?;
         self.artifact_cache
             .lock_recover()
-            .insert(artifact.module_ref.clone(), Arc::new(artifact.clone()));
+            .insert(artifact.module_ref().clone(), Arc::new(artifact.clone()));
         Ok(())
     }
 

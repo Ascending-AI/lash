@@ -202,7 +202,9 @@ pub fn is_pure_expr(expr: &Expr) -> bool {
         | Expr::Variable(_)
         | Expr::ProcessRef { .. }
         | Expr::ResourceRef(_) => true,
-        Expr::ProcessLiteral(literal) => is_pure_expr(&literal.body),
+        // A literal's value is the process it defines, which the linker turns
+        // into a reference; its body runs only in that process.
+        Expr::ProcessLiteral(_) => true,
         Expr::Tuple(items) => items.iter().all(is_pure_expr),
         Expr::List(items) => items.iter().all(is_pure_expr),
         Expr::Record(entries) => entries.iter().all(|(_, value)| is_pure_expr(value)),

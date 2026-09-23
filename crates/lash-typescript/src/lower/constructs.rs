@@ -213,9 +213,16 @@ impl Lowerer {
     }
 
     pub(super) fn temporary(&mut self, label: &str) -> String {
+        self.generated_binding(label)
+    }
+
+    /// A fresh binding name no author can write, recorded as private.
+    pub(super) fn generated_binding(&mut self, label: &str) -> String {
         let id = self.next_binding;
         self.next_binding += 1;
-        format!("{GENERATED_BINDING_PREFIX}{id}_{label}")
+        let name = format!("{GENERATED_BINDING_PREFIX}{id}_{label}");
+        self.generated_bindings.insert(name.clone());
+        name
     }
 
     fn temp_assignment(name: &str, value: LashExpr) -> LashExpr {
@@ -835,15 +842,25 @@ impl Lowerer {
             }
             AssignOp::Binary(op) => {
                 let rhs = self.lower_expr(value)?;
-                output.push(Self::temp_assignment(
-                    &result,
-                    self.lower_binary_values(old, op, rhs)?,
-                ));
+                let updated = self.lower_binary_values(old, op, rhs)?;
+                // `object.step op= value` with an arithmetic operator is the
+                // attribute update the role names. The exponent, bitwise and
+                // shift operators lower through temporaries or a library
+                // call, so their value is not one operator applied to the
+                // current attribute, and they stay unmarked.
+                let update = member && matches!(updated, LashExpr::JavaScriptBinary { .. });
+                output.push(Self::temp_assignment(&result, updated));
                 output.push(LashExpr::Assign {
                     target,
                     expr: Box::new(Self::variable(&result)),
                 });
                 output.push(Self::variable(&result));
+                if update {
+                    return Ok(LashExpr::Role {
+                        role: StructuralRole::AttributeAssign,
+                        expr: Box::new(LashExpr::Block(output)),
+                    });
+                }
             }
             AssignOp::Logical(op) => {
                 let should_keep = match op {
