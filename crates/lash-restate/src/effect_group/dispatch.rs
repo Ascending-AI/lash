@@ -451,6 +451,52 @@ impl EffectGroupDispatch {
             return record_child_settlement(controller.context(), &request, outcome).await;
         }
 
+        if matches!(
+            request.envelope.command,
+            RuntimeEffectCommand::Sleep { .. } | RuntimeEffectCommand::AwaitEvent { .. }
+        ) {
+            // A timer or durable-wait child is this invocation's own durable
+            // wait (FIG-3397): a `ctx` timer or the Restate durable-wait
+            // promise, journaled on the child's invocation — never a
+            // wall-clock wait inside a recorded `ctx.run` body (ADR 0042).
+            // The resolver answers wait *options*; the ctx-bound controller
+            // is what reads them. The group index fenced the retained member
+            // at open and this invocation is that member, so the wait runs as
+            // a plain effect on the child's own journal rather than
+            // re-carrying the membership the controller's command arms refuse.
+            let Some(executor) = self.executors.executor_for(&request.envelope) else {
+                return Err(std::io::Error::other(format!(
+                    "no executor currently routes effect group {} child {}; retry on a carrying deployment",
+                    request.group_key, request.position
+                ))
+                .into());
+            };
+            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
+            let envelope = RuntimeEffectEnvelope {
+                group: None,
+                ..request.envelope.clone()
+            };
+            let outcome = {
+                let wait = lash_core::RuntimeEffectController::execute_effect(
+                    &controller,
+                    envelope,
+                    executor,
+                );
+                tokio::pin!(wait);
+                tokio::select! {
+                    biased;
+                    cancel = &mut cancel_watch => {
+                        cancel.map_err(|error| std::io::Error::other(format!(
+                            "observe effect-group child cancellation: {error}"
+                        )))?;
+                        EffectGroupChildRunOutcome::Cancelled
+                    }
+                    outcome = &mut wait => EffectGroupChildRunOutcome::Completed { outcome },
+                }
+            };
+            return record_child_settlement(controller.context(), &request, outcome).await;
+        }
+
         let cancellation = tokio_util::sync::CancellationToken::new();
         let run_cancellation = cancellation.clone();
         let envelope = request.envelope.clone();
