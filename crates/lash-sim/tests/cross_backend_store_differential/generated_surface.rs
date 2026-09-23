@@ -860,6 +860,26 @@ impl SurfaceRunner {
                 // (ADR 0099 §6): the dispatch outcome with its realized intent
                 // outcomes moved into the settlement, which carries them, the
                 // started-process possession and the resolved model return.
+                // Each declaration's `event_types` is the product's default
+                // process event vocabulary, not something the store derives:
+                // the provider's `ProcessStartDeclaration::external` stamps it,
+                // and the store must round-trip it verbatim. Take it from that
+                // same constructor so a vocabulary change (FIG-3464 added
+                // `process.effect_outcome` and `process.effect_omissions`)
+                // cannot leave this oracle stale; every other field stays a
+                // literal.
+                let process_event_types = serde_json::to_value(
+                    lash_core::ProcessStartDeclaration::external(
+                        ProcessOriginator::session(SessionScope::new(SURFACE_SESSION)),
+                        serde_json::Value::Null,
+                        lash_core::ProcessLifecyclePolicy::new(
+                            lash_core::ParentScope::Host,
+                            lash_core::OnParentEnd::Cancel,
+                        ),
+                    )
+                    .event_types,
+                )
+                .expect("serialize the default process event vocabulary");
                 let literal_settlement = serde_json::json!({
                     "outcome": {
                         "attempts": [
@@ -880,134 +900,7 @@ impl SurfaceRunner {
                                     "intent": {
                                         "declaration": {
                                             "disposition": "externally_owned",
-                                            "event_types": [
-                                                {
-                                                    "name": "process.cancel_requested",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.first_started",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.waiting",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.resumed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.external_ref_set",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.abandon_requested",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.caller_departed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.observer_added",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.observer_removed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.subscription_retargeted",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.completed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {
-                                                        "terminal": {
-                                                            "await_output": {
-                                                                "pointer": "/await_output"
-                                                            },
-                                                            "status": "completed"
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    "name": "process.failed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {
-                                                        "terminal": {
-                                                            "await_output": {
-                                                                "pointer": "/await_output"
-                                                            },
-                                                            "status": "failed"
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    "name": "process.cancelled",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {
-                                                        "terminal": {
-                                                            "await_output": {
-                                                                "pointer": "/await_output"
-                                                            },
-                                                            "status": "cancelled"
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    "name": "process.abandoned",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {
-                                                        "terminal": {
-                                                            "await_output": {
-                                                                "pointer": "/await_output"
-                                                            },
-                                                            "status": "abandoned"
-                                                        }
-                                                    }
-                                                }
-                                            ],
+                                            "event_types": process_event_types.clone(),
                                             "input": {
                                                 "metadata": {
                                                     "index": 0,
@@ -1039,134 +932,7 @@ impl SurfaceRunner {
                                     "intent": {
                                         "declaration": {
                                             "disposition": "externally_owned",
-                                            "event_types": [
-                                                {
-                                                    "name": "process.cancel_requested",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.first_started",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.waiting",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.resumed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.external_ref_set",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.abandon_requested",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.caller_departed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.observer_added",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.observer_removed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.subscription_retargeted",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {}
-                                                },
-                                                {
-                                                    "name": "process.completed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {
-                                                        "terminal": {
-                                                            "await_output": {
-                                                                "pointer": "/await_output"
-                                                            },
-                                                            "status": "completed"
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    "name": "process.failed",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {
-                                                        "terminal": {
-                                                            "await_output": {
-                                                                "pointer": "/await_output"
-                                                            },
-                                                            "status": "failed"
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    "name": "process.cancelled",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {
-                                                        "terminal": {
-                                                            "await_output": {
-                                                                "pointer": "/await_output"
-                                                            },
-                                                            "status": "cancelled"
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    "name": "process.abandoned",
-                                                    "payload_schema": {
-                                                        "schema": {}
-                                                    },
-                                                    "semantics": {
-                                                        "terminal": {
-                                                            "await_output": {
-                                                                "pointer": "/await_output"
-                                                            },
-                                                            "status": "abandoned"
-                                                        }
-                                                    }
-                                                }
-                                            ],
+                                            "event_types": process_event_types.clone(),
                                             "input": {
                                                 "metadata": {
                                                     "index": 1,
