@@ -1577,7 +1577,8 @@ impl BackendRunner {
                             .await
                             .map_err(StoreError::Backend)?
                             .expect("SQLite session must survive an independent reopen");
-                        let path = concrete_factory.catalog_path();
+                        let path =
+                            root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
                         self.factory =
                             Some(concrete_factory as Arc<dyn ConformanceSessionStoreFactory>);
                         self.raw_reader = RawDurableReader::Sqlite {
@@ -1900,7 +1901,7 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
         .create_store(&create_request)
         .await
         .expect("create SQLite storage-failure differential store");
-    let sqlite_connection = rusqlite::Connection::open(sqlite_factory.catalog_path())
+    let sqlite_connection = rusqlite::Connection::open(sqlite_factory.catalog_uri())
         .expect("open SQLite storage-failure fixture");
     sqlite_connection
         .execute("DROP TABLE session_meta", [])
@@ -2072,7 +2073,8 @@ async fn runners_for_case_with_clock(
         lash_sqlite_store::SqliteSessionStoreFactory::new(sqlite_case_root.clone())
             .with_clock(Arc::clone(&clock)),
     );
-    let sqlite_path = sqlite_factory.catalog_path();
+    let sqlite_path =
+        sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
     let sqlite_store = sqlite_factory
         .create_conformance_store(&create_request)
         .await

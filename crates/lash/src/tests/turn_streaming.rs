@@ -225,7 +225,7 @@ fn assert_sqlite_session_lane_free_at_generation(
     session_id: &SessionId,
     expected_generation: u64,
 ) {
-    let conn = rusqlite::Connection::open(store_factory.catalog_path())
+    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
         .expect("open SQLite session catalog");
     let (owner, generation) = conn
         .query_row(

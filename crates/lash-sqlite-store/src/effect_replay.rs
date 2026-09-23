@@ -18,14 +18,14 @@ use std::sync::Arc;
 
 use lash_core_execution::facade_support::effect_replay_driver;
 use lash_core_execution::facade_support::effect_replay_driver::{
-    AcceptedGroupChild, CompletionKeys, EffectCancelOutcome, EffectCancelRequest,
-    EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectCommitState,
-    EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
-    EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupColumn,
-    EffectGroupLifecycle, EffectGroupLifecyclePhase, EffectGroupRecord, EffectLeaseFence,
-    EffectLeaseStamp, EffectReplayCapabilities, EffectReplayRowStore, EffectReplayVocabulary,
-    EffectRowStatus, EffectTerminal, StoreEffectReplayDriver, StoredChildArbitration,
-    StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild, decide_effect_claim,
+    AcceptedGroupChild, EffectCancelOutcome, EffectCancelRequest, EffectClaimDecision,
+    EffectClaimObservation, EffectClaimRequest, EffectCommitState, EffectDischargeOutcome,
+    EffectDischargeRequest, EffectFinalizeOutcome, EffectGroupChildCommitOutcome,
+    EffectGroupChildCommitRequest, EffectGroupColumn, EffectGroupLifecycle,
+    EffectGroupLifecyclePhase, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp,
+    EffectReplayRowStore, EffectReplayVocabulary, EffectRowStatus, EffectTerminal,
+    StoreEffectReplayDriver, StoredChildArbitration, StoredEffectRow, StoredGroupSettlement,
+    UnsettledGroupChild, decide_effect_claim,
 };
 use lash_core_execution::{
     EffectJournalRetirement, EffectRetirementGate, ExecutionScope, GroupExecutors,
@@ -42,6 +42,7 @@ use lash_store_sql::effect::replay::ReplayStatements;
 
 use super::*;
 use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events, wait_sql};
+use crate::location::{DatabaseLocation, DatabaseTarget, validate_file_database_path};
 use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema, fence_sql};
 
 mod row_store;
@@ -299,12 +300,12 @@ pub struct SqliteEffectReplayOptions {
 #[derive(Clone)]
 pub struct SqliteEffectHost {
     inner: Arc<SqliteEffectReplay>,
-    turn_control_binding_id: Arc<str>,
-    /// The journal file, when the host is file-backed: a session-store
-    /// factory attaches it for the retention sweep.
-    fence_database: Option<PathBuf>,
-    /// The bound process registry's file, attached to the journal connection
-    /// so process-scope fences live beside the process rows (ADR 0049).
+    /// The journal's database. Its identity is the turn-control binding; a
+    /// session-store factory attaches it for the retention sweep.
+    journal: DatabaseLocation,
+    /// The bound process registry's database, attached to the journal
+    /// connection so process-scope fences live beside the process rows (ADR
+    /// 0049).
     registry: Arc<RegistryAttachment>,
     closure_lifecycle: SqliteConnection,
     closure_registry: Arc<RegistryAttachment>,
@@ -315,7 +316,7 @@ pub struct SqliteEffectHost {
 pub struct SqliteRuntimeEffectController {
     inner: Arc<SqliteEffectReplay>,
     scope: ExecutionScope,
-    turn_control_binding_id: Arc<str>,
+    journal: DatabaseLocation,
 }
 
 // The `AwaitEventResolver` / `EffectHost` / `RuntimeEffectController` surface of
@@ -329,7 +330,7 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteEffectHost {
     }
 
     fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(self.turn_control_binding_id.to_string())
+        Some(self.journal.identity().to_string())
     }
 }
 
@@ -338,17 +339,16 @@ lash_core_execution::impl_store_replay_await_event_resolver!(impl lash_core_exec
 #[async_trait::async_trait]
 impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
     fn turn_control_binding_id(&self) -> String {
-        self.turn_control_binding_id.to_string()
+        self.journal.identity().to_string()
     }
 
     fn effect_scope_fence_database(&self) -> Option<PathBuf> {
-        self.fence_database.clone()
+        self.journal.target().file_path().map(Path::to_path_buf)
     }
 
     fn bind_process_registry(&self, binding: lash_core_execution::ProcessRegistryBinding) {
         if let Some(path) = binding.fence_database {
-            self.registry.request(path.clone());
-            self.closure_registry.request(path);
+            self.attach_process_registry(DatabaseTarget::File(path));
         }
     }
 
@@ -444,7 +444,7 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteRuntimeEffectController 
     }
 
     fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(self.turn_control_binding_id.to_string())
+        Some(self.journal.identity().to_string())
     }
 }
 
@@ -480,41 +480,54 @@ impl SqliteEffectHost {
         .await
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "replay binding identity is the canonical form of the host-supplied database path (FIG-2971)"
-    )]
+    /// The host over the journal file at `path`. The file is its own
+    /// location: the host's binding identity is `sqlite:<canonical path>`,
+    /// stable across relative spellings and symlinked configuration.
     pub async fn open_with_options_and_clock(
         path: &Path,
         options: SqliteEffectReplayOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        validate_effect_host_path(path)?;
-        // Opening creates the database before the host is returned, so the
-        // canonical path is a stable identity across relative paths and
-        // symlinked deployment configuration. Fall back only for platforms
-        // that cannot canonicalize an already-open file.
-        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        validate_file_database_path(path, "SqliteEffectHost")?;
+        Self::open_at(&DatabaseLocation::standalone_file(path), options, clock).await
+    }
+
+    /// The host over the journal at `journal`, keyed on its deployment's
+    /// identity.
+    pub(crate) async fn open_at(
+        journal: &DatabaseLocation,
+        options: SqliteEffectReplayOptions,
+        clock: Arc<dyn lash_core_execution::Clock>,
+    ) -> tokio_rusqlite::Result<Self> {
         let registry = Arc::new(RegistryAttachment::default());
-        let inner = open_effect_replay_driver(
-            path,
-            &binding_path,
-            StoreBacking::File,
-            options,
-            clock,
-            Arc::clone(&registry),
-        )
-        .await?;
-        let closure_lifecycle = SqliteConnection::open(path).await?;
-        let closure_registry = Arc::new(RegistryAttachment::default());
+        let inner =
+            open_effect_replay_driver(journal, options, clock, Arc::clone(&registry)).await?;
+        let closure_lifecycle = SqliteConnection::open(journal.target()).await?;
         Ok(Self {
             inner,
-            fence_database: Some(path.to_path_buf()),
+            journal: journal.clone(),
             registry,
             closure_lifecycle,
-            closure_registry,
-            turn_control_binding_id: Arc::from(format!("sqlite:{}", binding_path.display())),
+            closure_registry: Arc::new(RegistryAttachment::default()),
         })
+    }
+
+    /// Keep process-scope fences in the registry at `registry`, attached to
+    /// the journal connection on first use (ADR 0049).
+    pub(crate) fn attach_process_registry(&self, registry: DatabaseTarget) {
+        self.registry.request(registry.clone());
+        self.closure_registry.request(registry);
+    }
+
+    /// A controller scoped to `scope` over a driver of its own on this host's
+    /// journal, with this host's binding identity.
+    pub(crate) async fn open_scoped_controller(
+        &self,
+        scope: ExecutionScope,
+        options: SqliteEffectReplayOptions,
+        clock: Arc<dyn lash_core_execution::Clock>,
+    ) -> tokio_rusqlite::Result<SqliteRuntimeEffectController> {
+        SqliteRuntimeEffectController::open_at(&self.journal, scope, options, clock).await
     }
 
     /// Force strict replay mode: missing effect history fails instead of
@@ -595,70 +608,38 @@ impl SqliteRuntimeEffectController {
         .await
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "replay binding identity is the canonical form of the host-supplied database path (FIG-2971)"
-    )]
     pub async fn open_with_options_and_clock(
         path: &Path,
         scope: ExecutionScope,
         options: SqliteEffectReplayOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        validate_effect_host_path(path)?;
-        let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        validate_file_database_path(path, "SqliteRuntimeEffectController")?;
+        Self::open_at(
+            &DatabaseLocation::standalone_file(path),
+            scope,
+            options,
+            clock,
+        )
+        .await
+    }
+
+    async fn open_at(
+        journal: &DatabaseLocation,
+        scope: ExecutionScope,
+        options: SqliteEffectReplayOptions,
+        clock: Arc<dyn lash_core_execution::Clock>,
+    ) -> tokio_rusqlite::Result<Self> {
         Ok(Self {
             inner: open_effect_replay_driver(
-                path,
-                &binding_path,
-                StoreBacking::File,
+                journal,
                 options,
                 clock,
                 Arc::new(RegistryAttachment::default()),
             )
             .await?,
             scope,
-            turn_control_binding_id: Arc::from(format!("sqlite:{}", binding_path.display())),
-        })
-    }
-
-    #[cfg(feature = "testing")]
-    pub async fn memory(scope: ExecutionScope) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options(scope, SqliteEffectReplayOptions::default()).await
-    }
-
-    #[cfg(feature = "testing")]
-    pub async fn memory_with_clock(
-        scope: ExecutionScope,
-        clock: Arc<dyn lash_core_execution::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(scope, SqliteEffectReplayOptions::default(), clock)
-            .await
-    }
-
-    #[cfg(feature = "testing")]
-    pub async fn memory_with_options(
-        scope: ExecutionScope,
-        options: SqliteEffectReplayOptions,
-    ) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(
-            scope,
-            options,
-            Arc::new(lash_core_execution::facade_support::SystemClock),
-        )
-        .await
-    }
-
-    #[cfg(feature = "testing")]
-    pub async fn memory_with_options_and_clock(
-        scope: ExecutionScope,
-        options: SqliteEffectReplayOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        Ok(Self {
-            inner: open_effect_replay_memory_driver(options, clock).await?,
-            scope,
-            turn_control_binding_id: Arc::from(format!("sqlite-memory:{}", uuid::Uuid::new_v4())),
+            journal: journal.clone(),
         })
     }
 
@@ -677,30 +658,13 @@ impl SqliteRuntimeEffectController {
     }
 }
 
-fn validate_effect_host_path(path: &Path) -> tokio_rusqlite::Result<()> {
-    let rendered = path.to_string_lossy();
-    if path.as_os_str().is_empty() || rendered == ":memory:" || rendered.starts_with("file:") {
-        return Err(tokio_rusqlite::Error::Error(
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
-                Some(format!(
-                    "SqliteEffectHost requires a file-backed database path, got `{rendered}`"
-                )),
-            ),
-        ));
-    }
-    Ok(())
-}
-
 async fn open_effect_replay_driver(
-    path: &Path,
-    binding_path: &Path,
-    backing: StoreBacking,
+    journal: &DatabaseLocation,
     options: SqliteEffectReplayOptions,
     clock: Arc<dyn lash_core_execution::Clock>,
     registry: Arc<RegistryAttachment>,
 ) -> tokio_rusqlite::Result<Arc<SqliteEffectReplay>> {
-    let conn = SqliteConnection::open(path).await?;
+    let conn = SqliteConnection::open(journal.target()).await?;
     ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay).await?;
     let signing_secret = conn
         .call(|connection| {
@@ -714,46 +678,14 @@ async fn open_effect_replay_driver(
             )
         })
         .await?;
-    apply_pragmas(&conn, backing).await?;
+    apply_pragmas(&conn).await?;
     Ok(Arc::new(build_effect_replay_driver(
         conn,
         options,
         clock,
         signing_secret,
-        CompletionKeys::Issued,
         registry,
-        settlement_notify::SettlementNotifierKey::for_file(binding_path),
-    )))
-}
-
-#[cfg(feature = "testing")]
-async fn open_effect_replay_memory_driver(
-    options: SqliteEffectReplayOptions,
-    clock: Arc<dyn lash_core_execution::Clock>,
-) -> tokio_rusqlite::Result<Arc<SqliteEffectReplay>> {
-    let conn = SqliteConnection::open_in_memory().await?;
-    ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay).await?;
-    let signing_secret = conn
-        .call(|connection| {
-            connection.query_row(
-                wait_sql(Schema::Main)
-                    .meta_sqlite
-                    .select_signing_secret
-                    .sql(),
-                [],
-                |row| row.get(0),
-            )
-        })
-        .await?;
-    apply_pragmas(&conn, StoreBacking::Memory).await?;
-    Ok(Arc::new(build_effect_replay_driver(
-        conn,
-        options,
-        clock,
-        signing_secret,
-        CompletionKeys::Unsupported,
-        Arc::new(RegistryAttachment::default()),
-        settlement_notify::SettlementNotifierKey::for_memory(),
+        settlement_notify::SettlementNotifierKey::for_deployment(journal.identity()),
     )))
 }
 
@@ -762,7 +694,6 @@ fn build_effect_replay_driver(
     options: SqliteEffectReplayOptions,
     clock: Arc<dyn lash_core_execution::Clock>,
     signing_secret: Vec<u8>,
-    completion_keys: CompletionKeys,
     registry: Arc<RegistryAttachment>,
     settlement_key: settlement_notify::SettlementNotifierKey,
 ) -> SqliteEffectReplay {
@@ -774,7 +705,6 @@ fn build_effect_replay_driver(
     );
     StoreEffectReplayDriver::new(
         SqliteEffectReplayRowStore {
-            completion_keys,
             conn,
             clock: Arc::clone(&clock),
             registry,
@@ -792,9 +722,6 @@ fn build_effect_replay_driver(
 /// `pub` only because it names an associated type of the shared adapter; the
 /// module is private, so nothing outside this crate can reach it.
 pub struct SqliteEffectReplayRowStore {
-    /// File-backed rows outlive the process and back routable completion keys;
-    /// the testing-only memory backing's do not.
-    completion_keys: CompletionKeys,
     conn: SqliteConnection,
     /// SQLite's authoritative lease clock, shared with the driver's sleep clock
     /// because the store and its host share one clock domain.
@@ -802,8 +729,8 @@ pub struct SqliteEffectReplayRowStore {
     /// The bound process registry whose file holds process-scope fences.
     registry: Arc<RegistryAttachment>,
     /// This store's identity in the process-wide settlement-notifier registry:
-    /// the canonical database path for a file journal, so two hosts over one
-    /// file wake each other's parked settlement readers.
+    /// its deployment's identity, so two hosts over one deployment wake each
+    /// other's parked settlement readers.
     settlement_key: settlement_notify::SettlementNotifierKey,
 }
 
@@ -816,7 +743,7 @@ impl SqliteEffectReplayRowStore {
     }
 
     /// Wake every waiter parked on `group_key`'s next settlement — this
-    /// host's own awaiter or another host's over the same file. Called after
+    /// host's own awaiter or another host's on the same deployment. Called after
     /// a rank write's commit has landed.
     fn notify_group_settled(&self, group_key: &str) {
         settlement_notify::notify_group_settled(&self.settlement_key, group_key);

@@ -218,7 +218,10 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
     assert_eq!(parked.session_id(), session_id);
     drop(parked);
     let store = lash_sqlite_store::Store::open_with_clock(
-        &store_factory.catalog_path(),
+        &data_dir
+            .path()
+            .join("lash-sessions")
+            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
         Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
     )
     .await
@@ -371,7 +374,10 @@ async fn same_worker_successor_waits_for_dead_boot_ttl() {
         .expect("park restart-gate session before simulating process loss");
 
     let store = lash_sqlite_store::Store::open_with_clock(
-        &store_factory.catalog_path(),
+        &data_dir
+            .path()
+            .join("lash-sessions")
+            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
         Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
     )
     .await

@@ -7,6 +7,7 @@ pub use super::attachment_store::*;
 pub use super::await_event_cold::*;
 pub use super::cancelled_turn_withheld_input::*;
 pub use super::completion_routing::*;
+pub use super::deployment::*;
 pub use super::direct_turn_acceptance::*;
 pub use super::drain_end::*;
 pub use super::durable_queued_drain_wait::*;

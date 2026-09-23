@@ -647,6 +647,7 @@ pub use triggers::{
 };
 
 pub(crate) mod facade_ops {}
+pub use lash_core_execution::Deployment;
 pub use lash_core_execution::{
     DriverAction, DriverContextView, Effect, HostTurnProtocol, PreparedTurnMachine,
     ProjectorContext, ProtocolDriverState, SansIoTurnInput, TurnDriverConfig, TurnDriverPreamble,

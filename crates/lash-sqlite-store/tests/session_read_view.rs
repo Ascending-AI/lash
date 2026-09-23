@@ -10,18 +10,6 @@ use std::sync::Arc;
 use lash_core_execution::SessionStoreFactory as _;
 use lash_sqlite_store::SqliteSessionStoreFactory;
 
-lash_conformance::session_read_view_tests!({
-    let dir = tempfile::tempdir().expect("read-view tempdir");
-    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
-        1_800_000_000_000,
-    ));
-    let factory = Arc::new(
-        SqliteSessionStoreFactory::new(dir.path())
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
-    );
-    (dir, factory, move || clock.advance(1))
-});
-
 fn catalog_state(root: &Path) -> std::collections::BTreeMap<String, (u64, std::time::SystemTime)> {
     std::fs::read_dir(root)
         .expect("read catalog directory")
@@ -131,7 +119,9 @@ async fn sqlite_session_read_view_materializes_sidecars_for_a_cold_wal_catalog()
     drop(writer);
     wait_for_cold_catalog(dir.path()).await;
 
-    let database = factory.catalog_path();
+    let database = dir
+        .path()
+        .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
     let wal = PathBuf::from(format!("{}-wal", database.display()));
     let shm = PathBuf::from(format!("{}-shm", database.display()));
     let database_before = std::fs::read(&database).expect("read cold database bytes");
@@ -218,7 +208,11 @@ async fn sqlite_session_read_view_reports_cold_read_only_media_as_backend_error(
     drop(writer);
     wait_for_cold_catalog(dir.path()).await;
 
-    let _database_permissions = PermissionRestore::set(factory.catalog_path(), 0o444);
+    let _database_permissions = PermissionRestore::set(
+        dir.path()
+            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+        0o444,
+    );
     let _directory_permissions = PermissionRestore::set(dir.path(), 0o555);
     let error = factory
         .open_read_only(&SessionId::from(SESSION_ID))

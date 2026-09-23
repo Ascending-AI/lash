@@ -34,16 +34,16 @@ pub(crate) async fn reclaim(
         .await
         .map_err(failed_before_any_work)?;
     let effect_journal = factory
-        .effect_journal_path
+        .effect_journal
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let journal_attached = if let Some(path) = effect_journal {
-        let path = path.to_string_lossy().into_owned();
+    let journal_attached = if let Some(journal) = effect_journal {
+        let name = journal.open_name();
         store
             .conn
             .call(move |connection| {
-                connection.execute(crate::connection_sql::ATTACH_EFFECT_JOURNAL, params![path])
+                connection.execute(crate::connection_sql::ATTACH_EFFECT_JOURNAL, params![name])
             })
             .await
             .map_err(|error| failed_before_any_work(sqlite_error(error)))?;
@@ -51,13 +51,12 @@ pub(crate) async fn reclaim(
     } else {
         false
     };
-    let registry_attached = if let Some(path) = factory.process_registry_path.as_deref() {
-        lifecycle::attach_process_registry(&store.conn, path, factory.options.connection_policy)
+    let registry_attached = if let Some(registry) = factory.process_registry.as_ref() {
+        lifecycle::attach_process_registry(&store.conn, registry, factory.options.connection_policy)
             .await
             .map_err(|error| {
                 failed_before_any_work(lash_core_execution::StoreError::Backend(format!(
-                    "evidence retention aborted: process registry {} could not be attached: {error}",
-                    path.display()
+                    "evidence retention aborted: process registry {registry} could not be attached: {error}"
                 )))
             })?;
         true
@@ -264,19 +263,18 @@ impl SqliteSessionStoreFactory {
         operation: &str,
         attach_process_registry: bool,
     ) -> Result<Store, lash_core_execution::StoreError> {
-        let path = self.catalog_path();
-        if !path.exists() {
+        let catalog = self.core.target();
+        if !catalog.exists() {
             return Err(lash_core_execution::StoreError::Backend(format!(
-                "maintenance {operation} aborted: durable-core catalog {} does not exist",
-                path.display()
+                "maintenance {operation} aborted: durable-core catalog {catalog} does not exist"
             )));
         }
-        Store::open_with_options_clock_and_process_registry(
-            &path,
+        Store::open_at(
+            &self.core,
             self.options,
             Arc::clone(&self.clock),
-            self.process_registry_path
-                .as_deref()
+            self.process_registry
+                .as_ref()
                 .filter(|_| attach_process_registry),
             self.turn_cancel_closure_owner_binding(),
             #[cfg(feature = "testing")]
@@ -285,8 +283,7 @@ impl SqliteSessionStoreFactory {
         .await
         .map_err(|err| {
             lash_core_execution::StoreError::Backend(format!(
-                "maintenance {operation} aborted: durable-core catalog {} could not be opened: {err}",
-                path.display()
+                "maintenance {operation} aborted: durable-core catalog {catalog} could not be opened: {err}"
             ))
         })
     }

@@ -9,12 +9,13 @@ use std::sync::Arc;
 
 use lash_core::SessionStoreFactory as _;
 use lash_core::store::RuntimePersistence;
-use lash_sqlite_store::SqliteSessionStoreFactory;
-use tempfile::TempDir;
 
-async fn sqlite_withheld_input_store(dir: &TempDir) -> Arc<dyn RuntimePersistence> {
-    let factory = SqliteSessionStoreFactory::new(dir.path().to_path_buf());
-    factory
+use super::SUBSTRATE;
+use crate::deployment_fixture::TestDeployment;
+
+async fn sqlite_withheld_input_store(deployment: &TestDeployment) -> Arc<dyn RuntimePersistence> {
+    deployment
+        .session_store_factory()
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(lash_conformance::CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID),
@@ -26,7 +27,7 @@ async fn sqlite_withheld_input_store(dir: &TempDir) -> Arc<dyn RuntimePersistenc
 }
 
 lash_conformance::cancelled_turn_withheld_input_tests!({
-    let dir = tempfile::tempdir().expect("cancelled-turn withheld-input tempdir");
-    let store = sqlite_withheld_input_store(&dir).await;
-    (dir, "sqlite", store)
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let store = sqlite_withheld_input_store(&deployment).await;
+    (deployment, "sqlite", store)
 });

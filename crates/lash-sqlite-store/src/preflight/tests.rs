@@ -233,9 +233,10 @@ async fn a_preflight_connection_refuses_to_write_even_if_asked() {
     let path = root.path().join("durable-core.db");
     Store::open(&path).await.expect("provision the database");
 
-    let conn = crate::conn::SqliteConnection::open_readonly(&path)
-        .await
-        .expect("open read-only");
+    let conn =
+        crate::conn::SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(path))
+            .await
+            .expect("open read-only");
     let refusal = conn
         .call(|c| {
             c.pragma_update(None, "query_only", true)?;

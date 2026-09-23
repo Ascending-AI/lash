@@ -11,11 +11,23 @@
 //! that file is its one commit point, the journal purge that follows being an
 //! idempotent cleanup. Admission reads both tables.
 //!
+//! ## Lock order across attached databases
+//!
+//! A connection that reaches more than one database takes their locks in one
+//! global order: durable core, then effect journal, then process registry.
+//! Every transaction or statement that spans two of them runs under
+//! `BEGIN IMMEDIATE`, which takes every write lock up front in that order; a
+//! read that must see two of them reads each in a statement of its own and
+//! never holds one while it waits for the other. A `memdb` reader cannot take
+//! a shared lock while any writer holds a database's write lock (ADR 0102),
+//! so a read holding the journal while it waits for a registry some writer
+//! holds would wait out the busy timeout against that writer's commit.
+//!
 //! This module is the SQLite owner of `effect_scope_retirements`: its
 //! dialect-only statements, and the rendered form of the shared ones, for
 //! every schema a SQLite connection addresses the table through.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::LazyLock;
 
 use lash_store_sql::effect::scope_retirement::ScopeRetirementStatements;
@@ -23,6 +35,7 @@ use lash_store_sql::{Dialect, SchemaTables, TableLayout};
 use rusqlite::params;
 
 use crate::conn::SqliteConnection;
+use crate::location::DatabaseTarget;
 
 /// A database a SQLite connection in this crate addresses a shared table
 /// through.
@@ -253,6 +266,31 @@ impl FenceLocations {
         Ok(false)
     }
 
+    /// The journal's own fence table alone.
+    pub(crate) const fn journal_only(self) -> Self {
+        Self {
+            journal: self.journal,
+            registry: None,
+        }
+    }
+
+    /// Whether the attached registry fences `scope_id`; `false` when no
+    /// registry is attached.
+    pub(crate) fn is_fenced_in_registry(
+        self,
+        connection: &rusqlite::Connection,
+        scope_id: &str,
+    ) -> rusqlite::Result<bool> {
+        match self.registry {
+            Some(registry) => connection.query_row(
+                fence_sql(registry).shared.exists.sql(),
+                params![scope_id],
+                |row| row.get(0),
+            ),
+            None => Ok(false),
+        }
+    }
+
     /// Delete the fence of `scope_id` everywhere it may be recorded.
     pub(crate) fn lift(
         self,
@@ -269,9 +307,9 @@ impl FenceLocations {
     }
 }
 
-/// The bound process registry's file, attached to the journal connection on
-/// first use so process-scope fences are read from and written to the file
-/// whose transaction registers processes.
+/// The bound process registry's database, attached to the journal connection
+/// on first use so process-scope fences are read from and written to the
+/// database whose transaction registers processes.
 ///
 /// `ATTACH` cannot run inside a transaction, so the attach is a separate
 /// serialized step ahead of the write that needs it; once attached it stays
@@ -287,33 +325,37 @@ pub(crate) struct RegistryAttachment {
 enum RegistryAttachmentState {
     #[default]
     Unbound,
-    Requested(PathBuf),
+    Requested(DatabaseTarget),
     Attached {
-        path: PathBuf,
+        registry: DatabaseTarget,
         locations: FenceLocations,
     },
 }
 
 impl RegistryAttachment {
-    /// Record the registry file to attach; a later request naming a
-    /// different file than the one already attached is refused with a
-    /// warning, because one journal connection reaches one registry.
-    pub(crate) fn request(&self, path: PathBuf) {
+    /// Record the registry to attach; a later request naming a different
+    /// database than the one already attached is refused with a warning,
+    /// because one journal connection reaches one registry.
+    pub(crate) fn request(&self, registry: DatabaseTarget) {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         match &*state {
-            RegistryAttachmentState::Attached { path: attached, .. } if *attached == path => {}
-            RegistryAttachmentState::Attached { path: attached, .. } => {
+            RegistryAttachmentState::Attached {
+                registry: attached, ..
+            } if *attached == registry => {}
+            RegistryAttachmentState::Attached {
+                registry: attached, ..
+            } => {
                 tracing::warn!(
-                    attached = %attached.display(),
-                    requested = %path.display(),
+                    attached = %attached,
+                    requested = %registry,
                     "effect journal already attached a different process registry; the later \
                      registry's process-scope fences stay in the journal file"
                 );
             }
-            _ => *state = RegistryAttachmentState::Requested(path),
+            _ => *state = RegistryAttachmentState::Requested(registry),
         }
     }
 
@@ -332,10 +374,11 @@ impl RegistryAttachment {
             match &*state {
                 RegistryAttachmentState::Unbound => return Ok(FenceLocations::JOURNAL_ONLY),
                 RegistryAttachmentState::Attached { locations, .. } => return Ok(*locations),
-                RegistryAttachmentState::Requested(path) => path.clone(),
+                RegistryAttachmentState::Requested(registry) => registry.clone(),
             }
         };
-        let path = requested.clone();
+        let registry_file = requested.file_path().map(Path::to_path_buf);
+        let registry_name = requested.open_name();
         let locations = conn
             .call(move |connection| {
                 let main_file: Option<String> = connection
@@ -346,15 +389,18 @@ impl RegistryAttachment {
                     )
                     .ok()
                     .flatten();
+                // A `memdb` main reports no file, and a registry that is
+                // not a file is never the journal's own database.
                 if main_file
                     .as_deref()
-                    .is_some_and(|main| !main.is_empty() && Path::new(main) == path)
+                    .zip(registry_file.as_deref())
+                    .is_some_and(|(main, registry)| !main.is_empty() && Path::new(main) == registry)
                 {
                     return Ok(FenceLocations::JOURNAL_ONLY);
                 }
                 connection.execute(
                     crate::connection_sql::ATTACH_PROCESS_REGISTRY,
-                    params![path.to_string_lossy().into_owned()],
+                    params![registry_name],
                 )?;
                 Ok(FenceLocations::attached(Schema::Main))
             })
@@ -376,7 +422,7 @@ impl RegistryAttachment {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *state = RegistryAttachmentState::Attached {
-            path: requested,
+            registry: requested,
             locations,
         };
         Ok(locations)

@@ -4,8 +4,6 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
-#[path = "effect_group_conformance.rs"]
-mod effect_group_conformance;
 #[path = "graph_sequence_cutover.rs"]
 mod graph_sequence_cutover;
 #[path = "parent_end_payload.rs"]
@@ -16,30 +14,21 @@ mod parent_end_registration_race;
 mod process_definitions_registry;
 #[path = "process_event_time_cutover.rs"]
 mod process_event_time_cutover;
-#[path = "process_prune_reclaim.rs"]
-mod process_prune_reclaim;
 #[path = "release_stamp.rs"]
 mod release_stamp;
 #[path = "required_constraints.rs"]
 mod required_constraints;
-#[path = "session_meta.rs"]
-mod session_meta;
 #[path = "session_read_view.rs"]
 mod session_read_view;
 #[path = "storage_fixes.rs"]
 mod storage_fixes;
-#[path = "store_effect_group_drain_conformance.rs"]
-mod store_effect_group_drain_conformance;
 #[path = "store_gc.rs"]
 mod store_gc;
-#[path = "store_maintenance_outcome.rs"]
-mod store_maintenance_outcome;
 #[path = "tool_attempt_store_fault.rs"]
 mod tool_attempt_store_fault;
-#[path = "tool_child_invocation.rs"]
-mod tool_child_invocation;
 #[path = "turn_control_binding.rs"]
 mod turn_control_binding;
 
 mod attachment_owner_proof;
 mod boundary_retry;
+mod deployment_binding_compat;

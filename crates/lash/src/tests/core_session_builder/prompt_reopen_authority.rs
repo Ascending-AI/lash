@@ -387,7 +387,7 @@ async fn sqlite_store_from_literal_legacy_head()
         lash_core::PromptLayer::new(),
     )
     .await;
-    let raw = rusqlite::Connection::open(factory.catalog_path()).expect("open SQLite catalog");
+    let raw = rusqlite::Connection::open(factory.catalog_uri()).expect("open SQLite catalog");
     // The literal keeps the pre-prompt config bytes for the field-defaulting
     // probe, while the real store decoder still requires this binary's exact
     // session-head envelope generation.

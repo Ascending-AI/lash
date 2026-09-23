@@ -501,7 +501,7 @@ fn count_session_list_statement(event: rusqlite::trace::TraceEvent<'_>) {
 }
 
 async fn traced_session_list(factory: &SqliteSessionStoreFactory) -> (Vec<SessionSummary>, usize) {
-    let conn = SqliteConnection::open_readonly(&factory.catalog_path())
+    let conn = SqliteConnection::open_readonly(factory.core.target())
         .await
         .expect("open session catalog for statement tracing");
     SESSION_LIST_STATEMENT_COUNT.store(0, Ordering::Relaxed);
@@ -648,7 +648,11 @@ async fn durable_state(
 }
 
 lash_conformance::checkpoint_claim_probe_tests!({
-    let store = Arc::new(Store::memory().await.expect("open counter store"));
+    let store = Arc::new(
+        crate::test_support::memory_store()
+            .await
+            .expect("open counter store"),
+    );
     let counting_store = Arc::clone(&store);
     (
         (),
@@ -664,7 +668,11 @@ lash_conformance::checkpoint_claim_probe_tests!({
 async fn checkpoint_component_statement_count_is_depth_invariant() {
     let mut observed = Vec::new();
     for depth in [10, 100, 1_000, 4_000] {
-        let store = Arc::new(Store::memory().await.expect("open depth-invariance store"));
+        let store = Arc::new(
+            crate::test_support::memory_store()
+                .await
+                .expect("open depth-invariance store"),
+        );
         let mut state = durable_state(
             &store,
             &SessionId::from(format!("sqlite-checkpoint-depth-{depth}")),
@@ -790,7 +798,7 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
     std::fs::create_dir_all(&root).expect("mkdir sessions");
     let factory = SqliteSessionStoreFactory::new(&root);
 
-    let catalog = factory.catalog_path();
+    let catalog = root.join(crate::SqliteDatabase::DurableCore.file_name());
     let attachment_id =
         lash_core_execution::AttachmentId::parse("a".repeat(64)).expect("valid attachment id");
     {
@@ -838,7 +846,11 @@ async fn live_attachment_refs_aborts_on_unreadable_catalog() {
     std::fs::create_dir_all(&root).expect("mkdir sessions");
     let factory = SqliteSessionStoreFactory::new(&root);
 
-    std::fs::write(factory.catalog_path(), b"corrupt not-a-db").expect("write corrupt");
+    std::fs::write(
+        root.join(crate::SqliteDatabase::DurableCore.file_name()),
+        b"corrupt not-a-db",
+    )
+    .expect("write corrupt");
 
     let result = lash_core_execution::AttachmentRootSet::live_attachment_refs(&factory, 0).await;
     assert!(
@@ -978,7 +990,12 @@ async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
         .await
         .expect("initialize factory catalog");
     drop(store);
-    std::fs::remove_file(factory.catalog_path()).expect("remove catalog for operator reset");
+    std::fs::remove_file(
+        dir.path()
+            .join("sessions")
+            .join(crate::SqliteDatabase::DurableCore.file_name()),
+    )
+    .expect("remove catalog for operator reset");
     let backend = lash_core_execution::attachments::InMemoryAttachmentStore::new();
 
     let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
@@ -1040,7 +1057,7 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
         .await
         .expect("create requested session");
     drop(store);
-    let raw = rusqlite::Connection::open(factory.catalog_path()).expect("open raw catalog");
+    let raw = rusqlite::Connection::open(factory.catalog_uri()).expect("open raw catalog");
     // `ck_session_meta_relation_kind` forbids this row on any ordinary write.
     // The refusal below is still the contract for a catalog that carries one
     // anyway — restored from a pre-CHECK dump, or ALTERed by a host.
@@ -1065,9 +1082,10 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
 
 #[tokio::test]
 async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
-    let registry = SqliteProcessRegistry::memory()
+    let registry = crate::SqliteDeployment::memory()
         .await
-        .expect("memory registry");
+        .expect("memory registry")
+        .process_registry();
     registry
         .register_process(registration("segment-crash"))
         .await
@@ -1108,9 +1126,10 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
 
 #[tokio::test]
 async fn terminal_segment_handover_cleanup_removes_continuation_state() {
-    let registry = SqliteProcessRegistry::memory()
+    let registry = crate::SqliteDeployment::memory()
         .await
-        .expect("memory registry");
+        .expect("memory registry")
+        .process_registry();
     registry
         .register_process(registration("segment-terminal"))
         .await
@@ -1144,7 +1163,9 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
 
 #[tokio::test]
 async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() {
-    let store = Store::memory().await.expect("memory store");
+    let store = crate::test_support::memory_store()
+        .await
+        .expect("memory store");
     // process scan(root: str) -> str { finish root }
     let module = one_process_module("scan", "root");
     let linked = lashlang::LinkedModule::link(
@@ -1329,9 +1350,12 @@ async fn concurrent_admission_loser_leaves_no_metadata() {
         ),
     };
 
-    let rejected = Store::open_bound_readonly(&path, &rejected_id)
-        .await
-        .expect("open rejected session read-only");
+    let rejected = Store::open_bound_readonly(
+        &crate::location::DatabaseLocation::standalone_file(&path),
+        &rejected_id,
+    )
+    .await
+    .expect("open rejected session read-only");
     assert!(
         rejected
             .load_session_meta()

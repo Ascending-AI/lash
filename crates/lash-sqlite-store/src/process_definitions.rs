@@ -22,7 +22,8 @@ use rusqlite::OptionalExtension;
 
 use super::apply_pragmas;
 use super::conn::TxOutcome;
-use super::{SqliteConnection, SqliteDatabase, StoreBacking, ensure_versioned_schema};
+use super::{SqliteConnection, SqliteDatabase, ensure_versioned_schema};
+use crate::location::DatabaseLocation;
 
 fn sqlite_plugin_error(err: rusqlite::Error) -> PluginError {
     PluginError::Session(format!(
@@ -54,6 +55,9 @@ fn encode_owner(owner_scope: &TriggerOwnerScope) -> Result<String, rusqlite::Err
 /// SQLite-backed process-definition registry.
 pub struct SqliteProcessDefinitionRegistry {
     conn: SqliteConnection,
+    /// Held so a registry opened on a memory deployment keeps its database
+    /// alive.
+    _location: DatabaseLocation,
     clock: Arc<dyn Clock>,
 }
 
@@ -70,21 +74,23 @@ impl SqliteProcessDefinitionRegistry {
         path: &Path,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        let conn = SqliteConnection::open(path).await?;
-        ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
-        apply_pragmas(&conn, StoreBacking::File).await?;
-        Ok(Self { conn, clock })
+        crate::location::validate_file_database_path(path, "SqliteProcessDefinitionRegistry")?;
+        Self::open_at(&DatabaseLocation::standalone_file(path), clock).await
     }
 
-    pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_clock(Arc::new(lash_core_execution::facade_support::SystemClock)).await
-    }
-
-    pub async fn memory_with_clock(clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
-        let conn = SqliteConnection::open_in_memory().await?;
+    /// The registry over the durable-core database at `location`.
+    pub(crate) async fn open_at(
+        location: &DatabaseLocation,
+        clock: Arc<dyn Clock>,
+    ) -> tokio_rusqlite::Result<Self> {
+        let conn = SqliteConnection::open(location.target()).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
-        apply_pragmas(&conn, StoreBacking::Memory).await?;
-        Ok(Self { conn, clock })
+        apply_pragmas(&conn).await?;
+        Ok(Self {
+            conn,
+            _location: location.clone(),
+            clock,
+        })
     }
 }
 

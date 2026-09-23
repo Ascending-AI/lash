@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 153,
+  "cargo_target_count": 154,
   "feature_lane_units": [
     {
       "features": [],
@@ -12956,6 +12956,16 @@
         "testing"
       ],
       "kind": "test",
+      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_0054d240",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "default",
+        "lashlang",
+        "testing"
+      ],
+      "kind": "test",
       "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_0054d240",
       "package": "lash-internal-sqlite-store"
     },
@@ -17407,7 +17417,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 212,
+  "generated_label_count": 213,
   "packages": [
     {
       "declared_features": [
@@ -19426,6 +19436,12 @@
           "tags": []
         },
         {
+          "cargo": "conformance_memory",
+          "kind": "test",
+          "label": "//crates/lash-sqlite-store:conformance_memory__test",
+          "tags": []
+        },
+        {
           "cargo": "fencing_backstop",
           "kind": "test",
           "label": "//crates/lash-sqlite-store:fencing_backstop__test",
@@ -19447,6 +19463,7 @@
       "test_batch": {
         "label": "//crates/lash-sqlite-store:test_batch",
         "members": [
+          "//crates/lash-sqlite-store:conformance_memory__test",
           "//crates/lash-sqlite-store:durable_read_fixture__test",
           "//crates/lash-sqlite-store:fencing_backstop__test",
           "//crates/lash-sqlite-store:lash-sqlite-store__unit_test",

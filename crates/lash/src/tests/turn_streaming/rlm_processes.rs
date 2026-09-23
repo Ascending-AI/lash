@@ -208,7 +208,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
 
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
-            let conn = rusqlite::Connection::open(sqlite_store_factory.catalog_path())
+            let conn = rusqlite::Connection::open(sqlite_store_factory.catalog_uri())
                 .expect("open SQLite session catalog");
             let owner = conn
                 .query_row(
@@ -544,8 +544,8 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
         "follow turn replay keys should include {follow_turn_id}: {replay_keys:?}"
     );
 
-    let conn = rusqlite::Connection::open(store_factory.catalog_path())
-        .expect("open session sqlite store");
+    let conn =
+        rusqlite::Connection::open(store_factory.catalog_uri()).expect("open session sqlite store");
     let mut stmt = conn
         .prepare(
             "SELECT turn_id FROM runtime_turn_commits

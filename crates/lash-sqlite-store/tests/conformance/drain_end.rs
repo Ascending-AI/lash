@@ -8,27 +8,20 @@
 //! so L7's closing group holds a lease foreign to the draining runtime and
 //! `resume_closing_groups` answers `Pending`.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use lash_conformance::{DrainEndWorld, DrainEndWorldFactory};
 use lash_core_execution::store::RuntimePersistence;
 use lash_core_execution::{EffectHost, ProcessRegistry, SessionStoreFactory};
 use lash_sansio::SessionId;
-use lash_sqlite_store::{SqliteEffectHost, SqliteProcessRegistry, SqliteSessionStoreFactory};
-async fn sqlite_drain_end_host(effects_db: &std::path::Path) -> Arc<dyn EffectHost> {
-    let host = SqliteEffectHost::open(effects_db)
-        .await
-        .expect("open the effect host");
-    lash_conformance::install_drain_end_executors(Arc::new(host))
-}
 
-async fn sqlite_drain_end_world(dir: &std::path::Path) -> DrainEndWorld {
-    let store_factory = SqliteSessionStoreFactory::new_with_process_registry(
-        dir.to_path_buf(),
-        dir.join("processes.db"),
-    );
-    let store = store_factory
+use super::{Retained, SUBSTRATE};
+use crate::deployment_fixture::TestDeployment;
+
+async fn sqlite_drain_end_world(retained: Retained) -> DrainEndWorld {
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let store = deployment
+        .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
@@ -39,31 +32,32 @@ async fn sqlite_drain_end_world(dir: &std::path::Path) -> DrainEndWorld {
         })
         .await
         .expect("create the drain-end session store");
-    DrainEndWorld {
+    let group_host = deployment.reopen().await.effect_host();
+    let world = DrainEndWorld {
         store: store as Arc<dyn RuntimePersistence>,
-        registry: Arc::new(
-            SqliteProcessRegistry::open(&dir.join("processes.db"), dir.join("sessions"))
-                .await
-                .expect("open the drain-end process registry"),
-        ) as Arc<dyn ProcessRegistry>,
-        session_factory: Arc::new(store_factory) as Arc<dyn SessionStoreFactory>,
-        effect_host: sqlite_drain_end_host(&dir.join("effects.db")).await,
-        group_host: Some(sqlite_drain_end_host(&dir.join("effects.db")).await),
-    }
+        registry: deployment.process_registry() as Arc<dyn ProcessRegistry>,
+        session_factory: deployment.session_store_factory() as Arc<dyn SessionStoreFactory>,
+        effect_host: lash_conformance::install_drain_end_executors(
+            deployment.effect_host() as Arc<dyn EffectHost>
+        ),
+        group_host: Some(lash_conformance::install_drain_end_executors(
+            group_host as Arc<dyn EffectHost>,
+        )),
+    };
+    // The store connections the world returns read and write the deployment
+    // for the whole law, not just for the factory call.
+    retained.keep(&deployment);
+    world
 }
 
 lash_conformance::drain_end_tests!({
+    let retained = Retained::default();
+    let worlds = retained.clone();
     (
-        (),
+        retained,
         "sqlite-drain-end",
-        Arc::new(|_label| {
-            Box::pin(async move {
-                // `keep` leaves the durable files behind: the store
-                // connections the world returns read and write them for the
-                // whole law, not just for the factory call.
-                let dir: PathBuf = tempfile::tempdir().expect("drain-end tempdir").keep();
-                sqlite_drain_end_world(&dir).await
-            })
+        Arc::new(move |_label| {
+            Box::pin(sqlite_drain_end_world(worlds.clone()))
                 as std::pin::Pin<Box<dyn std::future::Future<Output = DrainEndWorld> + Send>>
         }) as DrainEndWorldFactory,
     )

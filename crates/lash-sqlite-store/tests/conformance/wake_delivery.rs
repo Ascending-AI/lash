@@ -1,7 +1,7 @@
 use super::*;
 
 struct SqliteWakeDeliveryOrderingGroupFaultInjector {
-    path: PathBuf,
+    deployment: TestDeployment,
 }
 
 #[async_trait::async_trait]
@@ -9,8 +9,7 @@ impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
     for SqliteWakeDeliveryOrderingGroupFaultInjector
 {
     async fn discard_without_reason(&self, delivery_id: &str) {
-        let conn = rusqlite::Connection::open(&self.path)
-            .expect("open SQLite process registry for reasonless discard injection");
+        let conn = self.deployment.raw(SqliteDatabase::ProcessRegistry);
         assert_eq!(
             conn.execute(
                 "UPDATE process_wake_deliveries
@@ -25,35 +24,29 @@ impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
 }
 
 lash_conformance::wake_delivery_crash_tests!({
-    let dir = tempfile::tempdir().expect("tempdir");
-    let process_registry_path = dir.path().join("processes.db");
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(
         1_800_000_000_000,
     ));
-    let registry = Arc::new(
-        SqliteProcessRegistry::open_with_clock(
-            &process_registry_path,
-            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-            dir.path().join("sessions"),
-        )
-        .await
-        .expect("open process registry")
-        .with_wake_delivery_config(
-            lash_core_execution::WakeDeliveryConfig::new(10_000)
+    let deployment = TestDeployment::open_with(
+        SUBSTRATE,
+        |options| SqliteDeploymentOptions {
+            wake_delivery: lash_core_execution::WakeDeliveryConfig::new(10_000)
                 .expect("valid test retention")
                 .with_enqueuing_stale_after_ms(25)
                 .expect("valid short stale-claim age"),
-        ),
-    ) as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
-    let factory = Arc::new(
-        SqliteSessionStoreFactory::new_with_process_registry(dir.path(), process_registry_path)
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
-    ) as Arc<dyn SessionStoreFactory>;
+            ..options
+        },
+        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+    )
+    .await;
+    let registry =
+        deployment.process_registry() as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
+    let factory = deployment.session_store_factory() as Arc<dyn SessionStoreFactory>;
     let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
-        dir,
+        deployment,
         factory,
         registry,
         clock,
@@ -65,22 +58,15 @@ lash_conformance::wake_delivery_crash_tests!({
 });
 
 lash_conformance::wake_delivery_ordering_tests!({
-    let dir = tempfile::tempdir().expect("tempdir");
-    let process_registry_path = dir.path().join("processes.db");
-    let registry = Arc::new(
-        SqliteProcessRegistry::open(&process_registry_path, dir.path().join("sessions"))
-            .await
-            .expect("open process registry"),
-    );
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let registry = deployment.process_registry();
     let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
-        dir,
+        deployment.clone(),
         registry as Arc<dyn ProcessRegistry>,
-        Arc::new(SqliteWakeDeliveryOrderingGroupFaultInjector {
-            path: process_registry_path,
-        }),
+        Arc::new(SqliteWakeDeliveryOrderingGroupFaultInjector { deployment }),
         process_work,
         lash_conformance::ProcessTerminalWaitWitness::Direct,
         || async {},

@@ -3,9 +3,8 @@
 //!
 //! A SQL store exposes two public types: a deployment-level effect host and a
 //! scoped controller, both thin handles on one shared driver. Every method of
-//! the three ports those types answer is a forward to the driver plus two
-//! backend facts ([`EffectReplayCapabilities`]) — so the forwards live here,
-//! once: the [`AwaitEventResolver`] port is one shared implementation macro
+//! the three ports those types answer is a forward to the driver — so the
+//! forwards live here, once: the [`AwaitEventResolver`] port is one shared implementation macro
 //! (the trait lives in `lash-core-effect`, so a blanket impl over the
 //! integration traits would violate coherence), and the other two ports are
 //! blanket impls, all keyed on three integration traits, and a store
@@ -142,13 +141,6 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreRep
     }
 }
 
-#[doc(hidden)]
-pub fn store_replay_capabilities<T: StoreReplayAdapter + ?Sized>(
-    adapter: &T,
-) -> EffectReplayCapabilities {
-    adapter.replay_driver().row_store.capabilities()
-}
-
 #[macro_export]
 macro_rules! impl_store_replay_await_event_resolver {
     ($($impl_head:tt)*) => {
@@ -159,10 +151,7 @@ macro_rules! impl_store_replay_await_event_resolver {
             }
             async fn prepare_completion_key(&self, scope: &$crate::ExecutionScope, wait: $crate::AwaitEventWaitIdentity, may_defer: bool) -> Result<$crate::CompletionKeyPreparation, $crate::RuntimeError> {
                 if !may_defer { return Ok($crate::CompletionKeyPreparation::NotNeeded); }
-                match $crate::facade_support::effect_replay_driver::store_replay_capabilities(self).completion_keys {
-                    $crate::facade_support::effect_replay_driver::CompletionKeys::Unsupported => Ok($crate::CompletionKeyPreparation::Unsupported),
-                    $crate::facade_support::effect_replay_driver::CompletionKeys::Issued => $crate::AwaitEventResolver::await_event_key(self, scope, wait).await.map($crate::CompletionKeyPreparation::Issued),
-                }
+                $crate::AwaitEventResolver::await_event_key(self, scope, wait).await.map($crate::CompletionKeyPreparation::Issued)
             }
             async fn await_event_key(&self, scope: &$crate::ExecutionScope, wait: $crate::AwaitEventWaitIdentity) -> Result<$crate::AwaitEventKey, $crate::RuntimeError> {
                 $crate::facade_support::effect_replay_driver::StoreReplayAdapter::replay_driver(self).await_event_key(scope, wait).await

@@ -821,9 +821,14 @@ impl AttachmentManifest for Store {
             let attachment_id = attachment_id.as_str().to_string();
             let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
             let sql = live_root_sql(self.process_registry_attached);
+            // With the registry attached the probe reads the catalog and the
+            // registry in one statement. It runs under `BEGIN IMMEDIATE` so it
+            // takes both in the global lock order (catalog, then registry)
+            // rather than holding the catalog while it waits for a registry a
+            // multi-database writer holds; see `scope_fence.rs`.
             self.conn
-                .call(move |conn| {
-                    conn.query_row(sql, params![attachment_id, cutoff], |_| Ok(()))
+                .write(move |tx| {
+                    tx.query_row(sql, params![attachment_id, cutoff], |_| Ok(()))
                         .optional()
                         .map(|found| found.is_some())
                 })

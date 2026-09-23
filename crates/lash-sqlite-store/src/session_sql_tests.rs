@@ -58,7 +58,9 @@ fn every_session_core_statement_renders_unqualified() {
 /// the text below instead of passing silently.
 #[tokio::test]
 async fn every_named_filter_shape_keeps_its_query_plan() {
-    let store = Store::memory().await.expect("open plan-probe store");
+    let store = crate::test_support::memory_store()
+        .await
+        .expect("open plan-probe store");
     let sql = session_sql();
     let plans = store
         .conn

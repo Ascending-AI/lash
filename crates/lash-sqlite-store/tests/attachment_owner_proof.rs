@@ -42,10 +42,6 @@ async fn attachment_constructors_warn_exactly_once_with_fields() {
         "Store::open_with_clock",
         "Store::open_with_options",
         "Store::open_with_options_and_clock",
-        "Store::memory",
-        "Store::memory_with_clock",
-        "Store::memory_with_options",
-        "Store::memory_with_options_and_clock",
         "SqliteSessionStoreFactory::new",
         "SqliteSessionStoreFactory::with_options",
     ] {
@@ -69,22 +65,6 @@ async fn attachment_constructors_warn_exactly_once_with_fields() {
                 }
                 "Store::open_with_options_and_clock" => {
                     Store::open_with_options_and_clock(&db, StoreOptions::default(), clock)
-                        .await
-                        .unwrap();
-                }
-                "Store::memory" => {
-                    Store::memory().await.unwrap();
-                }
-                "Store::memory_with_clock" => {
-                    Store::memory_with_clock(clock).await.unwrap();
-                }
-                "Store::memory_with_options" => {
-                    Store::memory_with_options(StoreOptions::default())
-                        .await
-                        .unwrap();
-                }
-                "Store::memory_with_options_and_clock" => {
-                    Store::memory_with_options_and_clock(StoreOptions::default(), clock)
                         .await
                         .unwrap();
                 }

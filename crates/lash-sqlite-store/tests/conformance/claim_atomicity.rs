@@ -1,15 +1,18 @@
 use lash_core_execution::{RuntimePersistence, SessionStoreFactory};
-use lash_sqlite_store::SqliteSessionStoreFactory;
+use lash_sqlite_store::SqliteDatabase;
 use std::sync::Arc;
+
+use super::SUBSTRATE;
+use crate::deployment_fixture::TestDeployment;
 #[path = "../../../lash-core/tests/support/queued_claim_atomicity.rs"]
 mod law;
 
 #[tokio::test]
 async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() {
     for entry in law::ENTRIES {
-        let dir = tempfile::tempdir().unwrap();
-        let factory = SqliteSessionStoreFactory::new(dir.path());
-        let store = factory
+        let deployment = TestDeployment::open(SUBSTRATE).await;
+        let store = deployment
+            .session_store_factory()
             .create_store(&lash_core_execution::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: "root".into(),
@@ -21,7 +24,7 @@ async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() 
             .await
             .unwrap();
         let case = law::prepare(store as Arc<dyn RuntimePersistence>, entry).await;
-        let conn = rusqlite::Connection::open(factory.catalog_path()).unwrap();
+        let conn = deployment.raw(SqliteDatabase::DurableCore);
         let second = case.ids[1].replace('\'', "''");
         conn.execute_batch(&format!("CREATE TRIGGER lose_second_claim BEFORE UPDATE OF claim_token ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
         assert!(
@@ -48,9 +51,9 @@ async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() 
 
 #[tokio::test]
 async fn sqlite_queued_work_claimability_verdict_holds_over_a_displaced_generation() {
-    let dir = tempfile::tempdir().unwrap();
-    let factory = SqliteSessionStoreFactory::new(dir.path());
-    let store = factory
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let store = deployment
+        .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: "root".into(),

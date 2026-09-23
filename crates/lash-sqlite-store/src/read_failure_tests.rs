@@ -147,7 +147,9 @@ fn turn_failure_settlement_query_filters_receipts_without_evidence() {
 /// receipt row into `runtime_turn_commits` under the `bad-evidence-receipt`
 /// operation key so a refusal can be asserted against that exact row.
 async fn seed_failure_evidence_session(session_id: &str, bad_result_json: &str) -> Store {
-    let store = Store::memory().await.expect("open receipt store");
+    let store = crate::test_support::memory_store()
+        .await
+        .expect("open receipt store");
     store
         .bind_session(&SessionId::from(session_id))
         .expect("bind receipt store");
@@ -271,7 +273,9 @@ async fn turn_failure_reopen_refuses_a_newer_receipt_version() {
 
 #[tokio::test]
 async fn absent_rows_remain_honest_successful_outcomes() {
-    let store = Store::memory().await.expect("open store");
+    let store = crate::test_support::memory_store()
+        .await
+        .expect("open store");
     store
         .bind_session(&SessionId::from("absent"))
         .expect("bind store");
@@ -334,7 +338,9 @@ async fn absent_rows_remain_honest_successful_outcomes() {
 
 #[tokio::test]
 async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
-    let store = Store::memory().await.expect("open store");
+    let store = crate::test_support::memory_store()
+        .await
+        .expect("open store");
     let blob_ref = BlobRef("corrupt-non-msgpack-blob".to_string());
     let blob_hash = blob_ref.as_str().to_string();
     let raw_content = b"bare blob body is not an artifact envelope".to_vec();
@@ -644,7 +650,9 @@ async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
 
 #[tokio::test]
 async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
-    let store = Store::memory().await.expect("open store");
+    let store = crate::test_support::memory_store()
+        .await
+        .expect("open store");
     store
         .bind_session(&SessionId::from("closed"))
         .expect("bind store");
@@ -682,7 +690,7 @@ async fn readonly_store_for_blob_write_failure() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("readonly.db");
     Store::open(&path).await.expect("provision store");
-    let store = Store::open_readonly(&path)
+    let store = Store::open_readonly(&crate::location::DatabaseLocation::standalone_file(&path))
         .await
         .expect("open read-only store");
     (dir, store)
@@ -817,8 +825,8 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
     let path = dir.path().join("queued-work-snapshot.db");
     let injector = crate::testing::SqliteFaultInjector::default();
     let store = Arc::new(
-        Store::open_with_options_clock_and_process_registry(
-            &path,
+        Store::open_at(
+            &crate::location::DatabaseLocation::standalone_file(&path),
             StoreOptions::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
             None,

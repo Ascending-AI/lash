@@ -155,7 +155,12 @@ fn head_revision_cas_holds_across_two_connections() {
 // the commit while doing so.
 #[tokio::test]
 async fn gc_keeps_live_committed_checkpoint_blobs() {
-    let store = Store::memory().await.expect("store");
+    let store = lash_sqlite_store::SqliteDeployment::memory()
+        .await
+        .expect("memory deployment")
+        .open_store()
+        .await
+        .expect("store");
     let orphan = store
         .put_unrooted_artifact_blob_for_testing(
             lash_sqlite_store::BlobArtifactDescriptor::checkpoint_component(),
@@ -277,7 +282,12 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
 // SQLite lane independently sensitive to both production claim-id spellings.
 #[tokio::test]
 async fn sqlite_claims_pin_both_production_claim_id_spellings() {
-    let store = Store::memory().await.expect("store");
+    let store = lash_sqlite_store::SqliteDeployment::memory()
+        .await
+        .expect("memory deployment")
+        .open_store()
+        .await
+        .expect("store");
     let session_id = "sqlite-claim-id-dialects";
     let queued = store
         .enqueue_queued_work(exclusive_draft(&SessionId::from(session_id), "work"))
@@ -338,7 +348,12 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
 // get `None`.
 #[tokio::test]
 async fn second_claim_on_held_batch_is_not_won() {
-    let store = Store::memory().await.expect("store");
+    let store = lash_sqlite_store::SqliteDeployment::memory()
+        .await
+        .expect("memory deployment")
+        .open_store()
+        .await
+        .expect("store");
     store
         .enqueue_queued_work(exclusive_draft(&SessionId::from("root"), "work"))
         .await

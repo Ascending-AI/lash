@@ -4,50 +4,29 @@
 //! rank write ([`EffectReplayRowStore::discharge_child`],
 //! [`EffectReplayRowStore::decide_cancel`], a grouped
 //! [`EffectReplayRowStore::finalize`]) wakes the notifier for
-//! (database file, group) after its commit, and two hosts over the same file
+//! (deployment, group) after its commit, and two hosts on the same deployment
 //! in one process share that notifier because the registry keys on the
-//! canonical path rather than the connection.
+//! deployment's identity rather than the connection.
 //!
 //! [`EffectReplayRowStore`]: lash_core_execution::facade_support::effect_replay_driver::EffectReplayRowStore
 
 use std::collections::HashMap;
-use std::path::Path;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 
 use tokio::sync::Notify;
 
-/// What a notifier belongs to, beneath the group key.
-///
-/// `File` is the resolved database path the opener already computed — the
-/// same canonical identity the replay binding and turn-control binding are
-/// keyed on — so two hosts opened on the same file through different
-/// spellings share one notifier without this module touching the filesystem.
-/// `Memory` is a per-open token: two in-memory connections never share a
-/// file, so sharing a key between them would only name a wake that can never
-/// happen.
+/// What a notifier belongs to, beneath the group key: the identity of the
+/// deployment whose journal the group lives in (`sqlite:<canonical path>` or
+/// `sqlite-memory:<id>`), the same identity the turn-control binding is keyed
+/// on. Two hosts opened on one deployment through different spellings share
+/// one notifier without this module touching the filesystem.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum SettlementNotifierKey {
-    /// The resolved path of the journal's database file, as the opener
-    /// canonicalized it.
-    File(PathBuf),
-    /// A fresh identity for an in-memory journal; scoped to the open.
-    Memory(u64),
-}
+pub(crate) struct SettlementNotifierKey(Arc<str>);
 
 impl SettlementNotifierKey {
-    /// Key for a file-backed journal. `resolved` is the canonical path the
-    /// open already computed for the binding identity — this type performs no
-    /// filesystem access of its own (FIG-2971).
-    pub(crate) fn for_file(resolved: &Path) -> Self {
-        Self::File(resolved.to_path_buf())
-    }
-
-    /// Key for the in-memory backing: never shared, by construction.
-    pub(crate) fn for_memory() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        Self::Memory(NEXT.fetch_add(1, Ordering::Relaxed))
+    /// Key for the journal of the deployment named `identity`.
+    pub(crate) fn for_deployment(identity: &Arc<str>) -> Self {
+        Self(Arc::clone(identity))
     }
 }
 

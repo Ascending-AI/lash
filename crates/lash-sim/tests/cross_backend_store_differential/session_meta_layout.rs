@@ -726,10 +726,11 @@ pub(super) async fn verify_independent_session_meta_layout(
     postgres: &PostgresStorage,
 ) {
     let cases = session_meta_layout_cases();
-    let sqlite_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(
-        sqlite_root.join("session-meta-relational-contract"),
-    );
-    let sqlite_path = sqlite_factory.catalog_path();
+    let sqlite_case_root = sqlite_root.join("session-meta-relational-contract");
+    let sqlite_factory =
+        lash_sqlite_store::SqliteSessionStoreFactory::new(sqlite_case_root.clone());
+    let sqlite_path =
+        sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
     let postgres_factory = postgres.session_store_factory();
     delete_postgres_session_meta_rows(postgres.pool(), &cases).await;
 

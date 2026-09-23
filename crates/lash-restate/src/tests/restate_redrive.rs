@@ -1471,11 +1471,10 @@ pub(super) async fn register_fig811_subscription(
 
 #[tokio::test]
 pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order() {
-    let store = Arc::new(
-        lash_sqlite_store::SqliteTriggerStore::memory()
-            .await
-            .expect("open SQLite trigger store"),
-    );
+    let store = lash_sqlite_store::SqliteDeployment::memory()
+        .await
+        .expect("open SQLite trigger store")
+        .trigger_store();
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
     let _alpha_id = register_fig811_subscription(

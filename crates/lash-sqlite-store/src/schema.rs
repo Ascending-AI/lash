@@ -11,12 +11,6 @@
 use super::*;
 use crate::schema_fragments::{AWAIT_EVENT_TABLES, SCOPE_RETIREMENT_TABLE};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StoreBacking {
-    File,
-    Memory,
-}
-
 #[derive(Clone, Copy)]
 struct SqliteDatabaseDefinition {
     name: &'static str,
@@ -45,6 +39,35 @@ pub enum SqliteDatabase {
 }
 
 impl SqliteDatabase {
+    /// Every database a deployment holds.
+    pub(crate) const ALL: [Self; 4] = [
+        Self::DurableCore,
+        Self::ProcessRegistry,
+        Self::Triggers,
+        Self::EffectReplay,
+    ];
+
+    /// The file this database is kept in under a file deployment's root.
+    pub const fn file_name(self) -> &'static str {
+        match self {
+            Self::DurableCore => crate::DURABLE_CORE_DB_FILE,
+            Self::ProcessRegistry => "process-registry.db",
+            Self::Triggers => "triggers.db",
+            Self::EffectReplay => "effect-replay.db",
+        }
+    }
+
+    /// The last segment of this database's `memdb` name in a memory
+    /// deployment.
+    pub(crate) const fn memory_name(self) -> &'static str {
+        match self {
+            Self::DurableCore => "core",
+            Self::ProcessRegistry => "registry",
+            Self::Triggers => "triggers",
+            Self::EffectReplay => "effects",
+        }
+    }
+
     const fn definition(self) -> SqliteDatabaseDefinition {
         match self {
             Self::DurableCore => SqliteDatabaseDefinition {
@@ -1438,15 +1461,9 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// journal is rejected at open and recreated.
 pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 34;
 
-pub(crate) async fn apply_pragmas(
-    conn: &SqliteConnection,
-    backing: StoreBacking,
-) -> rusqlite::Result<()> {
-    // WAL + busy_timeout are already applied in `SqliteConnection::open` /
-    // `open_in_memory`. The remaining tuning PRAGMAs match the prior store. The
-    // `backing` argument is retained so the lifecycle call sites read the same
-    // as the prior store port; WAL is only meaningful for file-backed databases.
-    let _ = backing;
+pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<()> {
+    // WAL + busy_timeout are already applied in `SqliteConnection::open`. The
+    // remaining tuning PRAGMAs match the prior store.
     conn.call(|c| {
         c.execute_batch(
             "PRAGMA synchronous = NORMAL;

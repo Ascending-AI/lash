@@ -296,9 +296,10 @@ mod tests {
 
     #[tokio::test]
     async fn candidate_tombstone_divergence_rolls_back_all_prune_mutations() {
-        let registry = SqliteProcessRegistry::memory()
+        let registry = crate::SqliteDeployment::memory()
             .await
-            .expect("open prune rollback registry");
+            .expect("open prune rollback registry")
+            .process_registry();
         let process_id = ProcessId::from(format!("prune-rollback:{}", uuid::Uuid::new_v4()));
         let ghost_id = format!("prune-rollback-ghost:{}", uuid::Uuid::new_v4());
         registry

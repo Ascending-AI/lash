@@ -554,9 +554,12 @@ class RealTreeTests(unittest.TestCase):
                 ("effect_controller_response_derivation_terminals", "effect-controller-response-derivation-terminals"),
             },
         )
-        for label in (
-            "//crates/lash-sqlite-store:conformance__test",
-            "//crates/lash-postgres-store:conformance__test",
+        # The SQLite suite is one module mounted by two binaries, one per
+        # deployment substrate (ADR 0102), so each claims it under its own path.
+        for label, claimant in (
+            ("//crates/lash-sqlite-store:conformance__test", "conformance::suite"),
+            ("//crates/lash-sqlite-store:conformance_memory__test", "conformance_memory::suite"),
+            ("//crates/lash-postgres-store:conformance__test", "conformance"),
         ):
             invocations = [
                 invocation
@@ -564,7 +567,7 @@ class RealTreeTests(unittest.TestCase):
                 for invocation in MODULE.invocations_in_root(root, prefix)
             ]
             expected = MODULE.expected_from_invocations(invocations, macros)
-            self.assertEqual({pair for pair in expected["conformance"] if pair in laws}, laws)
+            self.assertEqual({pair for pair in expected[claimant] if pair in laws}, laws)
         invocations = [
             invocation
             for prefix, root in MODULE.resolve_label(

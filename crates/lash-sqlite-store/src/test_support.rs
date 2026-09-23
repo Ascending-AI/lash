@@ -99,3 +99,27 @@ impl ConformanceSessionStoreFactory for SqliteSessionStoreFactory {
             .map(|store| store as Arc<dyn ConformancePersistence>))
     }
 }
+
+/// An unbound durable-core store on a fresh memory deployment. The store holds
+/// the deployment's anchors, so the database lives as long as it does.
+#[cfg(test)]
+pub(crate) async fn memory_store() -> tokio_rusqlite::Result<Store> {
+    memory_store_with_options(crate::SqliteDeploymentOptions::memory().store).await
+}
+
+/// [`memory_store`] with explicit store options.
+#[cfg(test)]
+pub(crate) async fn memory_store_with_options(
+    options: StoreOptions,
+) -> tokio_rusqlite::Result<Store> {
+    crate::SqliteDeployment::memory_with_options_and_clock(
+        crate::SqliteDeploymentOptions {
+            store: options,
+            ..crate::SqliteDeploymentOptions::memory()
+        },
+        Arc::new(lash_core_execution::facade_support::SystemClock),
+    )
+    .await?
+    .open_store()
+    .await
+}

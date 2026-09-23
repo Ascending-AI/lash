@@ -2,11 +2,8 @@ use super::*;
 
 #[tokio::test]
 async fn sqlite_await_event_discovery_refuses_inconsistent_persisted_rows() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("inconsistent-await-event-discovery.db");
-    let host = SqliteEffectHost::open(&path)
-        .await
-        .expect("SQLite effect host");
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let host = deployment.effect_host();
 
     let inconsistent_session = SessionId::from("inconsistent-discovery-session");
     let inconsistent_scope = durable_turn_scope(&inconsistent_session, "turn");
@@ -21,7 +18,7 @@ async fn sqlite_await_event_discovery_refuses_inconsistent_persisted_rows() {
             .expect("materialize inconsistent-row witness"),
         ResolveOutcome::Accepted
     );
-    let connection = rusqlite::Connection::open(&path).expect("open raw effect database");
+    let connection = deployment.raw(SqliteDatabase::EffectReplay);
     connection
         .execute(
             "UPDATE await_event_waits
@@ -48,7 +45,7 @@ async fn sqlite_await_event_discovery_refuses_inconsistent_persisted_rows() {
     host.revoke_await_events_for_session(&revoked_session)
         .await
         .expect("tombstone revoked-row witness session");
-    let connection = rusqlite::Connection::open(&path).expect("open raw effect database");
+    let connection = deployment.raw(SqliteDatabase::EffectReplay);
     connection
         .execute(
             "INSERT INTO await_event_waits (

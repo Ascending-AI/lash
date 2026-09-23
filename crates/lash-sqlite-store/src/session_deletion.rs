@@ -11,16 +11,15 @@ pub(super) fn warn_process_registry_not_wired(path: &'static str) {
 }
 
 pub(super) async fn delete_session_from_catalog(
-    root: &Path,
+    catalog: &DatabaseLocation,
     session_id: &SessionId,
     policy: SqliteConnectionPolicy,
 ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
-    let path = root.join(DURABLE_CORE_DB_FILE);
-    if !path.exists() {
+    if !catalog.target().exists() {
         return Ok(lash_core_execution::SessionBlobReclaimReport::default());
     }
     let session_id = SessionId::from(session_id.to_string());
-    let conn = SqliteConnection::open_with_policy(&path, policy)
+    let conn = SqliteConnection::open_with_policy(catalog.target(), policy)
         .await
         .map_err(|err| {
             lash_core_execution::MaintenanceFailure::failed_before_any_work(
@@ -280,14 +279,14 @@ pub(super) async fn delete_session_from_catalog(
 }
 
 pub(super) async fn delete_wake_allocation_floors_from_process_registry(
-    process_registry_path: &Path,
+    process_registry: &DatabaseTarget,
     target_session_id: &SessionId,
     policy: SqliteConnectionPolicy,
 ) -> Result<(), String> {
-    if !process_registry_path.exists() {
+    if !process_registry.exists() {
         return Ok(());
     }
-    let conn = SqliteConnection::open_with_policy(process_registry_path, policy)
+    let conn = SqliteConnection::open_with_policy(process_registry, policy)
         .await
         .map_err(|err| err.to_string())?;
     ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry)

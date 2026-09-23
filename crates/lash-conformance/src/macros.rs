@@ -874,6 +874,29 @@ macro_rules! process_change_horizon_tests {
     };
 }
 
+/// Register the laws every `Deployment` implementation answers (ADR 0102).
+///
+/// The fixture yields `(guard, Arc<dyn Deployment>)`.
+#[macro_export]
+macro_rules! deployment_tests {
+    ($fixture:block) => {
+        $crate::deployment_tests!(@catalogue $fixture; [
+            (a_deployment_binds_its_effect_host_to_its_identity, "deployment-binding-identity"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, deployment) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(deployment).await;
+                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+            }
+        )*
+    };
+}
+
 /// Register the leased-completion projection-repair law.
 #[macro_export]
 macro_rules! process_projection_repair_tests {

@@ -158,13 +158,13 @@ pub async fn replay_trace_to_sqlite(
         report_path,
     )
     .await?;
+    let database_path = db_path.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
     let reopened_sessions = outcome
         .reopened_sessions
         .into_iter()
         .map(|observation| SqliteReopenedSessionEvidence {
             session_id: observation.session_id,
-            database_path: lash_sqlite_store::SqliteSessionStoreFactory::new(db_path.to_path_buf())
-                .catalog_path(),
+            database_path: database_path.clone(),
             turn_index: observation.turn_index,
             graph_node_count: observation.graph_node_count,
             transcript_message_count: observation.transcript_message_count,

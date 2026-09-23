@@ -52,7 +52,7 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
         .expect("settle retention evidence");
 
     let gc_store = Arc::new(
-        Store::open(&factory.catalog_path())
+        Store::open(&session_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()))
             .await
             .expect("maintenance store"),
     );
@@ -145,7 +145,7 @@ async fn scheduled_retention_refuses_a_witnessed_empty_attachment_root_set() {
         &process_registry_path,
     ));
     let gc_store = Arc::new(
-        Store::open(&factory.catalog_path())
+        Store::open(&session_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()))
             .await
             .expect("maintenance store"),
     );

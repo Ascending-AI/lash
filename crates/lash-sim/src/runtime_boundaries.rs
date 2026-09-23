@@ -1468,16 +1468,20 @@ impl RuntimeBoundaryHarness {
         let scope = ExecutionScope::runtime_operation(EFFECT_SCOPE_ID);
         let controller: Arc<dyn RuntimeEffectController> = match &self.effect_replay_store {
             RuntimeEffectReplayStore::Memory => Arc::new(
-                lash_sqlite_store::SqliteRuntimeEffectController::memory_with_clock(
-                    scope,
-                    self.clock.clone(),
-                )
-                .await
-                .map_err(|err| {
-                    RuntimeBoundaryError::new(format!(
-                        "open in-memory effect replay controller failed: {err}"
-                    ))
-                })?,
+                lash_sqlite_store::SqliteDeployment::memory_with_clock(self.clock.clone())
+                    .await
+                    .map_err(|err| {
+                        RuntimeBoundaryError::new(format!(
+                            "open in-memory SQLite deployment failed: {err}"
+                        ))
+                    })?
+                    .open_effect_controller(scope)
+                    .await
+                    .map_err(|err| {
+                        RuntimeBoundaryError::new(format!(
+                            "open in-memory effect replay controller failed: {err}"
+                        ))
+                    })?,
             ),
             RuntimeEffectReplayStore::SqliteFile(path) => {
                 if let Some(parent) = path.parent() {

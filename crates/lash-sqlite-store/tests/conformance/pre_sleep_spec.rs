@@ -72,14 +72,11 @@ fn rewrite_sleep_command_to_resolved_duration(canonical_json: &str) -> String {
 
 #[tokio::test]
 async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-sleep-spec-effects.db");
-    let controller = SqliteRuntimeEffectController::open(
-        &path,
-        durable_turn_scope("cutover-session", "cutover-turn"),
-    )
-    .await
-    .expect("create current effect store");
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let controller = deployment
+        .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))
+        .await
+        .expect("create current effect store");
     let outcome = controller
         .execute_effect(
             sleep_effect_envelope(),
@@ -90,7 +87,7 @@ async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
     assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
     drop(controller);
 
-    let conn = rusqlite::Connection::open(&path).expect("open raw effect store");
+    let conn = deployment.raw(SqliteDatabase::EffectReplay);
     let envelope_json: String = conn
         .query_row(
             "SELECT envelope_json FROM runtime_effect_replay WHERE replay_key = ?1",
@@ -115,12 +112,7 @@ async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
         .expect("stamp the pre-SleepSpec effect generation");
     drop(conn);
 
-    let error = match SqliteRuntimeEffectController::open(
-        &path,
-        durable_turn_scope("cutover-session", "cutover-turn"),
-    )
-    .await
-    {
+    let error = match deployment.try_reopen().await {
         Ok(_) => panic!("a pre-SleepSpec effect journal must be refused at open"),
         Err(error) => error,
     };
@@ -132,14 +124,11 @@ async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
 
 #[tokio::test]
 async fn sqlite_fresh_effect_journal_round_trips_a_sleep_across_reopen() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("fresh-sleep-spec-effects.db");
-    let controller = SqliteRuntimeEffectController::open(
-        &path,
-        durable_turn_scope("cutover-session", "cutover-turn"),
-    )
-    .await
-    .expect("create current effect store");
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let controller = deployment
+        .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))
+        .await
+        .expect("create current effect store");
     let outcome = controller
         .execute_effect(
             sleep_effect_envelope(),
@@ -150,12 +139,12 @@ async fn sqlite_fresh_effect_journal_round_trips_a_sleep_across_reopen() {
     assert!(matches!(outcome, RuntimeEffectOutcome::Sleep));
     drop(controller);
 
-    let reopened = SqliteRuntimeEffectController::open(
-        &path,
-        durable_turn_scope("cutover-session", "cutover-turn"),
-    )
-    .await
-    .expect("a journal this build wrote reopens at the current generation");
+    let reopened = deployment
+        .reopen()
+        .await
+        .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))
+        .await
+        .expect("a journal this build wrote reopens at the current generation");
     reopened.start_replay();
     let replayed = reopened
         .execute_effect(sleep_effect_envelope(), failing_executor())

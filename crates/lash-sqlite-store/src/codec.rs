@@ -194,7 +194,7 @@ mod tests {
         let content = vec![b'x'; 8192];
         let expected = BlobRef::for_content(&content);
         for blob_profile in [BuiltinBlobProfile::LowLatency, BuiltinBlobProfile::Compact] {
-            let store = Store::memory_with_options(StoreOptions {
+            let store = crate::test_support::memory_store_with_options(StoreOptions {
                 blob_profile,
                 ..StoreOptions::default()
             })

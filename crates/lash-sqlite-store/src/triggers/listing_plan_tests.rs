@@ -49,9 +49,10 @@ const FIXTURE: &str = "WITH RECURSIVE n(i) AS (
 
 /// The plan SQLite chooses for `sql` with `values` bound, as one line.
 async fn plan_for(sql: &'static str, values: Vec<rusqlite::types::Value>) -> String {
-    let store = SqliteTriggerStore::memory()
+    let store = crate::SqliteDeployment::memory()
         .await
-        .expect("open an in-memory trigger store");
+        .expect("open an in-memory trigger store")
+        .trigger_store();
     store
         .conn
         .call(move |conn| {

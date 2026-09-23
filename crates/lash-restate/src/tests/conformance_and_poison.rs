@@ -1424,30 +1424,33 @@ where
 }
 
 pub(super) fn process_registry() -> Arc<dyn ProcessRegistry> {
-    Arc::new(sync_await(async {
-        lash_sqlite_store::SqliteProcessRegistry::memory()
+    sync_await(async {
+        lash_sqlite_store::SqliteDeployment::memory()
             .await
             .expect("sqlite registry")
-    }))
+            .process_registry()
+    })
 }
 
 pub(super) fn continuation_store() -> Arc<dyn lash_core::ProcessContinuationStore> {
-    Arc::new(sync_await(async {
-        lash_sqlite_store::SqliteProcessRegistry::memory()
+    sync_await(async {
+        lash_sqlite_store::SqliteDeployment::memory()
             .await
             .expect("sqlite continuation store")
-    }))
+            .process_registry()
+    })
 }
 
 pub(super) fn process_stores() -> (
     Arc<dyn ProcessRegistry>,
     Arc<dyn lash_core::ProcessContinuationStore>,
 ) {
-    let storage = Arc::new(sync_await(async {
-        lash_sqlite_store::SqliteProcessRegistry::memory()
+    let storage = sync_await(async {
+        lash_sqlite_store::SqliteDeployment::memory()
             .await
             .expect("sqlite process stores")
-    }));
+            .process_registry()
+    });
     (
         Arc::clone(&storage) as Arc<dyn ProcessRegistry>,
         storage as Arc<dyn lash_core::ProcessContinuationStore>,

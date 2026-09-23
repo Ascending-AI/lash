@@ -2,11 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn deployment_drain_status_keeps_waiting_process_non_drained() {
-    let registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::memory()
-            .await
-            .expect("open in-memory process registry"),
-    );
+    let registry = lash_sqlite_store::SqliteDeployment::memory()
+        .await
+        .expect("open in-memory process registry")
+        .process_registry();
     let core = explicit_ephemeral_facets(
         LashCore::standard_builder(crate::TurnBudget::Unbounded)
             .model(mock_model_spec())

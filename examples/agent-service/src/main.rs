@@ -260,9 +260,11 @@ async fn async_main() -> anyhow_like::Result<()> {
     // deliberately uses separately opened, session-bound handles in the
     // retention pass below.
     let maintenance_store = Arc::new(
-        lash_sqlite_store::Store::open(&store_factory.catalog_path())
-            .await
-            .map_err(|err| err.to_string())?,
+        lash_sqlite_store::Store::open(
+            &session_store_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+        )
+        .await
+        .map_err(|err| err.to_string())?,
     );
     // Deployment-level Lashlang artifact store (compiled module cache), shared
     // across the session tree and durable in SQLite.

@@ -288,7 +288,7 @@ fn sqlite_head_and_max_generation(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     session_id: &SessionId,
 ) -> (String, i64) {
-    let conn = rusqlite::Connection::open(store_factory.catalog_path())
+    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
         .expect("open SQLite session catalog");
     let leaf = conn
         .query_row(
@@ -312,7 +312,7 @@ fn sqlite_nodes(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     session_id: &SessionId,
 ) -> Vec<lash_core::SessionNodeRecord> {
-    let conn = rusqlite::Connection::open(store_factory.catalog_path())
+    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
         .expect("open SQLite session catalog");
     let mut stmt = conn
         .prepare(
@@ -721,7 +721,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .run()
         .await?;
 
-    let conn = rusqlite::Connection::open(store_factory.catalog_path())
+    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
         .expect("open SQLite session catalog");
     let first_threshold_parent = conn
         .query_row(
@@ -826,7 +826,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .turn_id("standard-compaction-reopened")
         .run()
         .await?;
-    let conn = rusqlite::Connection::open(store_factory.catalog_path())
+    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
         .expect("reopen SQLite session catalog");
     let reopened_first_parent = conn
         .query_row(
@@ -1203,7 +1203,7 @@ async fn standard_compaction_threshold_continue_as_extends_the_pre_switch_durabl
         Some(&serde_json::json!("continued"))
     );
 
-    let conn = rusqlite::Connection::open(store_factory.catalog_path())
+    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
         .expect("open SQLite session catalog");
     let first_switch_parent = conn
         .query_row(
@@ -1225,7 +1225,7 @@ fn sqlite_node_rows(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     session_id: &SessionId,
 ) -> Vec<(String, Option<String>, i64)> {
-    let conn = rusqlite::Connection::open(store_factory.catalog_path())
+    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
         .expect("open SQLite session catalog");
     let mut stmt = conn
         .prepare(

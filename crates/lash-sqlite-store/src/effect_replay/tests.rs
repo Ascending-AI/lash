@@ -37,27 +37,38 @@ const SCOPE: &str =
 const GROUP: &str = "session:s1/group-1";
 
 async fn row_store() -> SqliteEffectReplayRowStore {
-    let conn = SqliteConnection::open_in_memory()
+    // The row store's own connection keeps the named memory journal alive.
+    let location = crate::SqliteLocation::fresh_memory();
+    let conn = SqliteConnection::open(&location.target(SqliteDatabase::EffectReplay))
         .await
         .expect("open the in-memory effect database");
     ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay)
         .await
         .expect("provision the effect schema");
     SqliteEffectReplayRowStore {
-        completion_keys: CompletionKeys::Unsupported,
         conn,
         clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
-        settlement_key: super::settlement_notify::SettlementNotifierKey::for_memory(),
+        settlement_key: super::settlement_notify::SettlementNotifierKey::for_deployment(
+            &Arc::from(location.identity()),
+        ),
     }
+}
+
+/// A controller scoped to `scope` over a fresh memory deployment's journal.
+async fn memory_controller(scope: ExecutionScope) -> SqliteRuntimeEffectController {
+    crate::SqliteDeployment::memory()
+        .await
+        .expect("open the memory deployment")
+        .open_effect_controller(scope)
+        .await
+        .expect("open the in-memory effect journal")
 }
 
 #[tokio::test]
 async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution() {
     let scope = ExecutionScope::turn("cutover-session", "cutover-turn");
-    let controller = SqliteRuntimeEffectController::memory(scope.clone())
-        .await
-        .expect("open the in-memory effect journal");
+    let controller = memory_controller(scope.clone()).await;
     let v2_identity = lash_core_execution::derive_tool_intent_identity(
         &SessionId::from("cutover-session"),
         "cutover-turn",
@@ -976,7 +987,7 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
     // process leaves. Pause admission before the claim reads or writes it.
     let injector = SqliteFaultInjector::default();
     let conn = SqliteConnection::open_with_fault_injector(
-        &path,
+        &DatabaseTarget::File(path.clone()),
         crate::conn::SqliteConnectionPolicy::default(),
         Some(injector.clone()),
     )
@@ -987,9 +998,10 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
         options,
         clock.clone(),
         vec![0; 32],
-        CompletionKeys::Issued,
         std::sync::Arc::new(crate::scope_fence::RegistryAttachment::default()),
-        super::settlement_notify::SettlementNotifierKey::for_file(&path),
+        super::settlement_notify::SettlementNotifierKey::for_deployment(
+            DatabaseLocation::standalone_file(&path).identity(),
+        ),
     );
     let pause = injector.pause(SqliteFaultPoint::AfterBegin);
     let completing = tokio::spawn(async move {
@@ -1029,7 +1041,7 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
         let dir = tempfile::tempdir().expect("effect journal directory");
         let injector = SqliteFaultInjector::default();
         let conn = SqliteConnection::open_with_fault_injector(
-            &dir.path().join("effects.db"),
+            &DatabaseTarget::File(dir.path().join("effects.db")),
             crate::SqliteConnectionPolicy::default(),
             Some(injector.clone()),
         )
@@ -1040,12 +1052,11 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
             .expect("provision effect schema");
         let clock = Arc::new(lash_core_execution::testing::TestClock::new(1_000));
         let store = Arc::new(SqliteEffectReplayRowStore {
-            completion_keys: CompletionKeys::Issued,
             conn,
             clock: clock.clone(),
             registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
-            settlement_key: super::settlement_notify::SettlementNotifierKey::for_file(
-                &dir.path().join("effects.db"),
+            settlement_key: super::settlement_notify::SettlementNotifierKey::for_deployment(
+                DatabaseLocation::standalone_file(&dir.path().join("effects.db")).identity(),
             ),
         });
         let mut request = claim("queued-write", "owner");
@@ -1334,13 +1345,14 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
         .await
         .expect("open the drain host");
     let store = SqliteEffectReplayRowStore {
-        completion_keys: CompletionKeys::Unsupported,
-        conn: SqliteConnection::open(&path)
+        conn: SqliteConnection::open(&DatabaseTarget::File(path.clone()))
             .await
             .expect("open the staging connection"),
         clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
-        settlement_key: super::settlement_notify::SettlementNotifierKey::for_file(&path),
+        settlement_key: super::settlement_notify::SettlementNotifierKey::for_deployment(
+            DatabaseLocation::standalone_file(&path).identity(),
+        ),
     };
     store
         .open_group(&group_record(), &membership())
@@ -1397,14 +1409,14 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
 #[tokio::test]
 async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row() {
     let scope = ExecutionScope::process("trigger-driver-process");
-    let controller = SqliteRuntimeEffectController::memory(scope.clone())
+    let deployment = crate::SqliteDeployment::memory()
+        .await
+        .expect("open the memory deployment");
+    let controller = deployment
+        .open_effect_controller(scope.clone())
         .await
         .expect("open the in-memory effect journal");
-    let triggers: Arc<dyn lash_core_execution::TriggerStore> = Arc::new(
-        crate::SqliteTriggerStore::memory()
-            .await
-            .expect("open the in-memory trigger store"),
-    );
+    let triggers: Arc<dyn lash_core_execution::TriggerStore> = deployment.trigger_store();
     let owner_scope = lash_core_execution::TriggerOwnerScope::host("trigger-driver")
         .expect("trigger owner scope");
     let envelope = || {
@@ -1448,4 +1460,49 @@ async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row()
         serde_json::to_value(replayed).expect("encode the replayed outcome"),
         serde_json::to_value(recorded).expect("encode the recorded outcome")
     );
+}
+
+/// Two hosts on one memory deployment park and wake on one settlement
+/// notifier: the notifier is keyed on the deployment's identity, which every
+/// host opened on the deployment shares, while a second deployment's hosts
+/// share nothing with the first (ADR 0102).
+#[tokio::test]
+async fn hosts_on_one_memory_deployment_wake_each_other_and_no_other() {
+    use super::settlement_notify::{
+        SettlementNotifierKey, notify_group_settled, settlement_notifier,
+    };
+
+    let deployment = crate::SqliteDeployment::memory()
+        .await
+        .expect("open the memory deployment");
+    let parked_host = deployment.effect_host();
+    let settling_host = deployment
+        .reopen()
+        .await
+        .expect("reopen the memory deployment")
+        .effect_host();
+    let stranger_host = crate::SqliteDeployment::memory()
+        .await
+        .expect("open a second memory deployment")
+        .effect_host();
+    let key =
+        |host: &SqliteEffectHost| SettlementNotifierKey::for_deployment(host.journal.identity());
+
+    let parked = settlement_notifier(&key(&parked_host), "group-wake");
+    let woken = parked.notified();
+    tokio::pin!(woken);
+    woken.as_mut().enable();
+
+    notify_group_settled(&key(&stranger_host), "group-wake");
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), woken.as_mut())
+            .await
+            .is_err(),
+        "another deployment's settlement must not wake this deployment's waiter"
+    );
+
+    notify_group_settled(&key(&settling_host), "group-wake");
+    tokio::time::timeout(std::time::Duration::from_secs(1), woken)
+        .await
+        .expect("a settlement by a second host on the same deployment wakes the parked host");
 }

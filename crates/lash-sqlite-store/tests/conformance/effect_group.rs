@@ -3,54 +3,33 @@
 //!
 //! The suite itself lives in `lash-core` and is the same one the in-memory
 //! reference host answers, so the two tiers are held to one contract rather
-//! than two copies of it. It sits in its own integration test rather than
-//! alongside the process-registry conformance run because the group laws open
-//! and close many hosts over one database file, which is a different fixture
-//! shape — and because the shared file has a line budget the laws would push
-//! past.
+//! than two copies of it. The group laws open and close many hosts over one
+//! deployment's journal: each host is a fresh reopen of the deployment.
 
-use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use lash_core_execution::{EffectHost, GroupExecutors};
-use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
+use lash_sqlite_store::{SqliteDatabase, SqliteEffectHost};
 
-/// Blocks on `future` from a synchronous context.
-///
-/// The suite's host factory is synchronous by design — a host is a value, not
-/// an await — so opening a store-backed one needs a runtime of its own.
-fn sync_await<T, F>(future: F) -> T
-where
-    T: Send + 'static,
-    F: Future<Output = T> + Send + 'static,
-{
-    std::thread::spawn(move || {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(future)
-    })
-    .join()
-    .expect("runtime thread")
-}
+use super::{SUBSTRATE, with_lease_timings};
+use crate::deployment_fixture::{TestDeployment, sync_await, system_clock};
 
-/// One host over `path`, registered with the suite's executor resolver.
+/// One host over `deployment`'s journal, registered with the suite's executor
+/// resolver.
 ///
 /// Registration is what makes the host support groups at all: since FIG-1578 a
 /// group carries envelopes, and what runs a child is the resolver its host was
 /// built with. `None` builds the unregistered host the suite's first two laws
 /// are about — the same database, so "a refused open journals nothing" is asked
 /// of the journal the wired hosts read.
-fn host(path: &std::path::Path, executors: Option<Arc<dyn GroupExecutors>>) -> SqliteEffectHost {
-    let path = path.to_path_buf();
-    let host = sync_await(async move {
-        SqliteEffectHost::open(&path)
-            .await
-            .expect("SQLite effect-group host")
-    });
+fn host(
+    deployment: &TestDeployment,
+    executors: Option<Arc<dyn GroupExecutors>>,
+) -> Arc<SqliteEffectHost> {
+    let deployment = deployment.clone();
+    let host = sync_await(async move { deployment.reopen().await.effect_host() });
     if let Some(executors) = executors {
         host.register_group_executors(executors)
             .expect("a freshly opened host has no resolver yet");
@@ -61,20 +40,20 @@ fn host(path: &std::path::Path, executors: Option<Arc<dyn GroupExecutors>>) -> S
 // The durable SQLite tier answers the effect-group contract the same way the
 // in-memory reference host does (FIG-1564).
 lash_conformance::effect_group_host_tests!({
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("effect-groups.db");
-    (dir, move |executors| {
-        Arc::new(host(&path, executors)) as Arc<dyn EffectHost>
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let hosts = deployment.clone();
+    (deployment, move |executors| {
+        host(&hosts, executors) as Arc<dyn EffectHost>
     })
 });
 
 // A cancelled child's cancellation is journaled as its terminal, and a host
 // that was not running when the close happened reads it back (FIG-1564).
 lash_conformance::effect_group_cancelled_child_terminal_tests!({
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("cancelled-child-terminal.db");
-    (dir, move |executors| {
-        Arc::new(host(&path, executors)) as Arc<dyn EffectHost>
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let hosts = deployment.clone();
+    (deployment, move |executors| {
+        host(&hosts, executors) as Arc<dyn EffectHost>
     })
 });
 
@@ -82,15 +61,14 @@ lash_conformance::effect_group_cancelled_child_terminal_tests!({
 // transaction and leaves the fence, while an in-flight operation keeps every
 // row (FIG-2500).
 lash_conformance::effect_group_runtime_retirement_tests!({
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("runtime-operation-retirement.db");
-    let make_path = path.clone();
-    let verify_path = path;
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let hosts = deployment.clone();
+    let verify = deployment.clone();
     (
-        dir,
-        move |executors| Arc::new(host(&make_path, executors)) as Arc<dyn EffectHost>,
+        deployment,
+        move |executors| host(&hosts, executors) as Arc<dyn EffectHost>,
         move |(retired, in_flight): (String, String)| async move {
-            let conn = rusqlite::Connection::open(&verify_path).expect("open the effect journal");
+            let conn = verify.raw(SqliteDatabase::EffectReplay);
             let count = |sql: &str, scope_id: &str| -> i64 {
                 conn.query_row(sql, [scope_id], |row| row.get(0))
                     .expect("count journal rows")
@@ -152,9 +130,8 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
         }
     }
 
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("registration-race.db");
-    let host = Arc::new(host(&path, None));
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let host = host(&deployment, None);
     // Before any registration the host does no groups, and says so through the
     // group surface itself rather than through a capability flag (FIG-2266).
     let unwired_view = host
@@ -264,22 +241,25 @@ async fn open_race_group(
 /// test waits it out, long enough that the claim is observed first.
 const CRASH_LEASE_MS: u64 = 900;
 
-/// One host over `path` with the drain suite's lease window, so a killed
-/// process's claims lapse on a scale a test can wait out.
-fn host_with_lease(path: &std::path::Path, executors: Arc<dyn GroupExecutors>) -> SqliteEffectHost {
-    let path = path.to_path_buf();
+/// One host over `deployment`'s journal with the drain suite's lease window,
+/// so a killed process's claims lapse on a scale a test can wait out.
+fn host_with_lease(
+    deployment: &TestDeployment,
+    executors: Arc<dyn GroupExecutors>,
+) -> Arc<SqliteEffectHost> {
+    let deployment = deployment.clone();
     let host = sync_await(async move {
         let ttl = Duration::from_millis(CRASH_LEASE_MS);
-        SqliteEffectHost::open_with_options(
-            &path,
-            SqliteEffectReplayOptions {
-                lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
-                    .expect("the ttl is at least three renew intervals wide"),
-                drain_budget: Default::default(),
-            },
-        )
-        .await
-        .expect("SQLite effect-group host")
+        deployment
+            .reopen_with(
+                with_lease_timings(
+                    lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
+                        .expect("the ttl is at least three renew intervals wide"),
+                ),
+                system_clock(),
+            )
+            .await
+            .effect_host()
     });
     host.register_group_executors(executors)
         .expect("a freshly opened host has no resolver yet");
@@ -397,11 +377,10 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
     const KEY: &str = "canonical-reopen";
     const CHILD_KEY: &str = "canonical-reopen:child:0";
 
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("canonical-reopen.db");
+    let deployment = TestDeployment::open(SUBSTRATE).await;
 
     // Process A: open the group, observe the claim row, die with the runtime.
-    let crash_path = path.clone();
+    let crash_deployment = deployment.clone();
     std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -411,7 +390,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
         runtime.block_on(async move {
             let entered = Arc::new(AtomicUsize::new(0));
             let host = host_with_lease(
-                &crash_path,
+                &crash_deployment,
                 Arc::new(ParkingExecutors {
                     entered: Arc::clone(&entered),
                 }),
@@ -425,7 +404,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
                 .open_effect_group(group)
                 .await
                 .expect("the group opens");
-            let conn = rusqlite::Connection::open(&crash_path).expect("the effect journal");
+            let conn = crash_deployment.raw(SqliteDatabase::EffectReplay);
             let deadline = std::time::Instant::now() + Duration::from_secs(30);
             loop {
                 let claimed = conn
@@ -463,7 +442,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
     .expect("process A runs its phase before dying");
 
     // Reformat the retained membership row: same JSON value, different bytes.
-    let conn = rusqlite::Connection::open(&path).expect("the effect journal");
+    let conn = deployment.raw(SqliteDatabase::EffectReplay);
     let retained: String = conn
         .query_row(
             "SELECT envelope_json FROM runtime_effect_group_child WHERE group_key = ?1",
@@ -514,10 +493,13 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    // Process B: a fresh host over the same file, a one-shot resolver, and the
-    // identical honest group.
+    // Process B: a fresh host over the same journal, a one-shot resolver, and
+    // the identical honest group.
     let executors = Arc::new(OneShotExecutors::default());
-    let host = host_with_lease(&path, Arc::clone(&executors) as Arc<dyn GroupExecutors>);
+    let host = host_with_lease(
+        &deployment,
+        Arc::clone(&executors) as Arc<dyn GroupExecutors>,
+    );
     let scoped = host
         .scoped(lash_core_execution::AdmittedScope::runtime_operation(KEY))
         .expect("a scope binds");
@@ -566,15 +548,14 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
 // fences nothing; once the drain settles it removes the rows and leaves the
 // fence (FIG-2499 fix round 1).
 lash_conformance::effect_group_quiescent_retirement_tests!({
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("quiescent-retirement.db");
-    let make_path = path.clone();
-    let verify_path = path;
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let hosts = deployment.clone();
+    let verify = deployment.clone();
     (
-        dir,
-        move |executors| Arc::new(host(&make_path, executors)) as Arc<dyn EffectHost>,
+        deployment,
+        move |executors| host(&hosts, executors) as Arc<dyn EffectHost>,
         move |scope_id| async move {
-            let conn = rusqlite::Connection::open(&verify_path).expect("open the effect journal");
+            let conn = verify.raw(SqliteDatabase::EffectReplay);
             let count = |sql: &str| -> i64 {
                 conn.query_row(sql, [&scope_id], |row| row.get(0))
                     .expect("count journal rows")
