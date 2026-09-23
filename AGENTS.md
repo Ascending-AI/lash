@@ -1,10 +1,10 @@
 ## Efficient build and test loop
 
-Use one normal Kiln fork per agent: `F=$(kiln fork lash <name>)`, then
-`cd "$F" && . ./env.sh` before **any** Cargo command. Start a short-lived branch
-from current `origin/main`. Remove a clean fork after merge with
-`kiln rm lash <name>`; never write under `/workspace/kiln/*/golden-*` or remove
-a fork with `rm -rf`.
+Use one Kiln fork per agent: `F=$(kiln fork lash <name>)` cuts a git worktree
+at freshly fetched `origin/main` (detached HEAD), then `cd "$F" && . ./env.sh`
+before **any** Cargo command. Start a short-lived branch there. Remove a clean
+fork after merge with `kiln rm lash <name>`, which also stops its Bazel server
+and any process still running inside it; never remove a fork with `rm -rf`.
 
 During an edit, run the narrowest command that proves the change:
 
@@ -53,10 +53,11 @@ Keep one heavy build request in flight per fork. Check `kiln cgroup status`
 before optional broad gates on the shared host; if it is pressured, defer
 another full suite rather than stacking builds. Do not raise job budgets,
 set `CARGO_*` by hand, or purge shared caches. Cargo on PATH is a cgroup shim,
-not NativeLink: reserve it for semantics Bazel does not cover, such as
-`just seal`/trybuild, nested-Cargo fault matrices, service gates without a Bazel
-route, publishing, and nightly fuzzing. Preserve the workspace feature graph with
-`--workspace --all-targets` when a local Cargo compile is required.
+not NativeLink: in a fork it routes workspace `build`/`check`/`clippy`/`test`/
+`nextest run` to the matching `kiln` command and refuses workspace forms it
+cannot translate. Reserve real Cargo for semantics Bazel does not cover, such as
+`just seal`/trybuild, nested-Cargo fault matrices, package-scoped service
+gates, publishing, and nightly fuzzing.
 
 ## Commits, PRs, published text
 
