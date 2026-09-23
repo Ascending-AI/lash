@@ -286,10 +286,20 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
+    /// Installs the parent invocation. The context attributes its work to
+    /// the session that invocation's scope names, so the scope it admits and
+    /// the session it attributes to are one fact (a group child's retained
+    /// request refuses the two disagreeing).
     pub fn runtime_parent_invocation(
         mut self,
         parent_invocation: crate::RuntimeInvocation,
     ) -> Self {
+        if let Some(session_id) = parent_invocation
+            .effect_address()
+            .and_then(|address| address.execution_scope.session_id())
+        {
+            self.session_id = session_id.clone();
+        }
         self.runtime_parent_invocation = Some(parent_invocation);
         self
     }
