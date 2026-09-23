@@ -377,12 +377,14 @@ floor:
     'npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types' \
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
+    'python3 scripts/check_format_registry.py' \
     'python3 scripts/check_checkpoint_component_flatten.py' \
     | scripts/gate-table.sh
 
-# The store-bump gates only: both version-bump checks, the store SQL ownership
-# gate, the lash-sim schema congruence target, and the lash-core-store unit
-# target that holds the runtime-error classification exhaustiveness test.
+# The store-bump gates only: both version-bump checks, the durable format
+# registry, the store SQL ownership gate, the lash-sim schema congruence
+# target, and the lash-core-store unit target that holds the runtime-error
+# classification exhaustiveness test.
 bump-check:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -390,6 +392,7 @@ bump-check:
   printf '%s\n' \
     'python3 scripts/check_version_bumps.py --base origin/main' \
     'python3 scripts/check_version_bump_fixtures.py' \
+    'python3 scripts/check_format_registry.py' \
     'python3 scripts/check-store-sql-ownership.py' \
     'kiln test //crates/lash-sim:schema_congruence__test //crates/lash-core-store:lash-core-store__unit_test' \
     | scripts/gate-table.sh

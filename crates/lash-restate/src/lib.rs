@@ -98,15 +98,17 @@ pub use bindings::{
     bound_service_names,
 };
 pub use controller::{
-    RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
+    PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, RestateEffectControllerOptions, RestateEffectError,
+    RestateRuntimeEffectController,
 };
 pub use durable_wait::{
-    DURABLE_WAIT_REQUEST_VERSION, LashDurableWaitIndex, LashDurableWaitIndexClient,
-    LashDurableWaitIndexImpl, LashDurableWaitWorkflow, LashDurableWaitWorkflowClient,
-    LashDurableWaitWorkflowImpl, RestateDurableWaitAddress, RestateDurableWaitAwaitInput,
-    RestateDurableWaitAwaitRequest, RestateDurableWaitAwakeableRequest,
-    RestateDurableWaitClassification, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
-    RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
+    DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION, LashDurableWaitIndex,
+    LashDurableWaitIndexClient, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
+    LashDurableWaitWorkflowClient, LashDurableWaitWorkflowImpl, RestateDurableWaitAddress,
+    RestateDurableWaitAwaitInput, RestateDurableWaitAwaitRequest,
+    RestateDurableWaitAwakeableRequest, RestateDurableWaitClassification,
+    RestateDurableWaitDeadline, RestateDurableWaitEffectRequest, RestateDurableWaitGroupRequest,
+    RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
     RestateDurableWaitResolveRequest, RestateDurableWaitScope, RestateDurableWaitSettleRequest,
     ServeLashDurableWaitIndex, ServeLashDurableWaitWorkflow,
 };

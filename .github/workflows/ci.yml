@@ -485,6 +485,7 @@ jobs:
           python3 scripts/test_bazel_diagnostics.py
           python3 scripts/check_feature_coverage.py check
           python3 scripts/test_check_version_bumps.py
+          python3 scripts/test_check_format_registry.py
           python3 scripts/test_generate_workflow_schemas.py
           python3 scripts/test_schema_validation.py
           python3 scripts/test_dev_test.py
@@ -1551,6 +1552,9 @@ jobs:
 
       - name: Check checkpoint-component flatten boundary
         run: python3 scripts/check_checkpoint_component_flatten.py
+
+      - name: Check durable format registry
+        run: python3 scripts/check_format_registry.py
 
   unicode-tests:
     name: Test deferred Unicode suites

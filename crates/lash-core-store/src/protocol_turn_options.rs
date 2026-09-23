@@ -150,7 +150,8 @@ fn parse_protocol_turn_options_schema_version(
     Ok(actual)
 }
 
-pub(crate) const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
+/// Schema version stamped on the persisted protocol turn-options envelope.
+pub const PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION: u32 = 1;
 fn ensure_protocol_turn_options_schema_version(
     actual: u32,
 ) -> Result<(), ProtocolTurnOptionsError> {

@@ -1,3 +1,19 @@
+# The registry of versioned formats: every durable format version this
+# repository writes, and every other version-shaped constant, is accounted for
+# here and nowhere else. scripts/check_format_registry.py holds it exhaustive:
+#
+# - every `*_VERSION` / `*_EPOCH` constant in non-test Rust under crates/ and
+#   examples/ is a [[surface]] below, a member of an [[excluded_class]], or an
+#   [[unregistered]] entry that says why it versions no durable format;
+# - every [[surface]] names its row in the format manifest
+#   (`manifest = "<DurableFormat variant>"`, crates/lash/src/formats.rs), states
+#   why it is outside it (`outside_manifest = "<reason>"`), or is covered by an
+#   excluded class; and every manifest row is claimed by exactly one surface.
+#
+# The manifest re-exports the constants rather than copying them, so this file
+# never repeats a version number; it only says which constants exist and what
+# they version. The rest of this header is about the bump check.
+#
 # Versioned wire/persistence surface inventory for check_version_bumps.py.
 #
 # A `file` guard compares the complete file and may require literal
@@ -29,6 +45,7 @@
 constant = "REMOTE_PROTOCOL_VERSION"
 constant_path = "crates/lash-remote-protocol/src/lib.rs"
 description = "JSON wire structs and enums exchanged by Lash remote peers"
+outside_manifest = "wire protocol: gates a live remote peer, not bytes a store parks"
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
@@ -39,6 +56,7 @@ must_cover = ["RemoteLlmRequest", "RemoteProcessInput", "RemoteTurnEvent", "Remo
 constant = "DURABLE_WAIT_REQUEST_VERSION"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
 description = "Restate durable-wait nested workflow request wire"
+manifest = "RestateDurableWaitRequest"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -49,6 +67,7 @@ symbols = ["RestateDurableWaitAwaitRequest", "RestateDurableWaitDeadline"]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 description = "PostgreSQL tables, indexes, constraints, and persisted column shapes"
+outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
 # PostgreSQL's schema is intentionally a whole-file guard: schema.sql is the
 # authoritative shape, so even a comment-only edit fails closed.
@@ -109,6 +128,7 @@ symbols = [
 constant = "TRACE_SCHEMA_VERSION"
 constant_path = "crates/lash-trace/src/lib.rs"
 description = "NDJSON trace records, event variants, contexts, and graph payloads"
+outside_manifest = "trace wire: gates a trace reader, not state lash reopens"
 
 # The trace crate is itself a serialization package. All of its Serde carriers
 # share one schema version, including private decode probes.
@@ -183,6 +203,7 @@ must_cover = ["TraceLanguageExecutionFailure"]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
 description = "SQLite session-store DDL and stored blob envelopes"
+outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -230,6 +251,7 @@ symbols = [
 constant = "PROCESS_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
 description = "SQLite process-registry tables, columns, constraints, and unique indexes"
+outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -244,6 +266,7 @@ elide = "sql_idempotent_index"
 constant = "TRIGGER_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
 description = "SQLite trigger-store tables, columns, constraints, and unique indexes"
+outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -255,6 +278,7 @@ elide = "sql_idempotent_index"
 constant = "EFFECT_SCHEMA_VERSION"
 constant_path = "crates/lash-sqlite-store/src/schema.rs"
 description = "SQLite runtime-effect and await-event tables, columns, constraints, and unique indexes"
+outside_manifest = "store DDL stamp: owned by its backend and read from the deployment through StorePreflight::schema_status, not reported from the build"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -283,6 +307,7 @@ symbols = [
 constant = "PROCESS_WAKE_DELIVERY_FORMAT_VERSION"
 constant_path = "crates/lash-core-store/src/process_identity.rs"
 description = "serialized ProcessWakeDelivery outbox payload"
+manifest = "ProcessWakeDelivery"
 
 # The payload struct and the stamped constant both live in `lash-core-store`;
 # `lash-core` re-exports the constant at its outbox-writer path.
@@ -295,6 +320,7 @@ symbols = ["ProcessWakeDelivery"]
 constant = "FRAME_KEY_VERSION"
 constant_path = "crates/lash-sansio/src/frame_key.rs"
 description = "stable agent-frame key hash preimage"
+outside_manifest = "hash-domain tag of the agent-frame key preimage: the *_FAMILY_VERSION class under another name (see [[excluded_class]])"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -305,6 +331,7 @@ symbols = ["derive"]
 constant = "APPEND_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/commit_identity.rs"
 description = "stable append-request identity byte projection"
+manifest = "AppendRequestIdentity"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -345,6 +372,7 @@ symbols = [
 constant = "RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
 description = "canonical record-config semantic-boundary request encoding (FIG-2480)"
+manifest = "RecordConfigRequestIdentity"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -359,6 +387,7 @@ symbols = [
 constant = "CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
 description = "canonical create-session semantic-boundary request encoding (FIG-2480)"
+manifest = "CreateSessionRequestIdentity"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -373,6 +402,7 @@ symbols = [
 constant = "USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
 description = "canonical usage-ledger semantic-boundary request encoding (FIG-2480)"
+manifest = "UsageLedgerRequestIdentity"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -529,6 +559,7 @@ symbols = [
 constant = "TOOL_CHILD_REQUEST_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_child.rs"
 description = "retained tool-child request of a durable effect group (ADR 0099 section 3)"
+manifest = "ToolChildRequest"
 
 # The request is journaled inside a group child's envelope and read back by a
 # reopen, so a field added, retired or retyped in any of these items changes
@@ -608,6 +639,7 @@ must_cover = ["string_identity!", "SessionId", "ProcessId", "TurnId"]
 constant = "TOOL_SETTLEMENT_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
 description = "the semantic settlement a tool child of a durable effect group carries on its outcome (ADR 0099 sections 6 and 13)"
+manifest = "ToolSettlement"
 
 # The settlement is journaled inside a `ToolInvocation` outcome and read back
 # by a replay, so a field added, retired or retyped anywhere in its serialized
@@ -698,6 +730,7 @@ must_cover = ["tool_intent_variants"]
 constant = "TOOL_PRESENTATION_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_presentation.rs"
 description = "the journaled product of one tool result's ordered presentation chain — the model-facing return plus every retained artifact ref (ADR 0099 section 6, FIG-3420)"
+manifest = "ToolPresentation"
 
 # The presentation is journaled inside a `PresentToolResult` outcome and read
 # back verbatim on replay, so a field added, retired or retyped anywhere in
@@ -759,6 +792,7 @@ must_cover = ["string_identity!", "SessionId", "ProcessId"]
 constant = "TOOL_ATTEMPT_CAPTURE_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/effect/tool_settlement.rs"
 description = "the semantic facts one atomic tool attempt journaled with its outcome (ADR 0099 section 13)"
+manifest = "ToolAttemptCapture"
 
 # The attempt capture rides `RuntimeEffectOutcome::ToolAttempt` — including the
 # ungrouped arm — and is restored into the dispatch buffers when a recorded
@@ -822,6 +856,7 @@ must_cover = ["string_identity!", "SessionId", "ProcessId", "TurnId", "InputId"]
 constant = "TOOL_CHILD_REBIND_VERSION"
 constant_path = "crates/lash-core-execution/src/tool_dispatch/context.rs"
 description = "the tool-child rebind checklist: every ToolDispatchContext field's recorded/lent/fresh ruling (ADR 0099 section 3)"
+outside_manifest = "versions a reviewed in-process checklist (REBIND_FIELDS), not stored bytes: nothing durable carries it"
 
 # REBIND_FIELDS is the contract a tool-child driver answers to when it rebuilds
 # a lent opener context for a retained child. `ToolDispatchContext` is named
@@ -904,6 +939,7 @@ symbols = ["usage_payload_identity_bytes"]
 constant = "PRODUCT_EVENT_LOG_FORMAT_VERSION"
 constant_path = "examples/agent-workbench/src/main_sections/state.rs"
 description = "agent-workbench product-event log JSON snapshot"
+outside_manifest = "written by the agent-workbench example host, not by a lash build"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -914,6 +950,7 @@ symbols = ["ProductEvent", "ProductEventHistory", "PersistedProductEventLog"]
 constant = "PROCESS_LEASE_SCHEMA_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/model/lease.rs"
 description = "persisted ProcessLease wire record"
+manifest = "ProcessLease"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -942,6 +979,7 @@ symbols = [
 constant = "SESSION_CHECKPOINT_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/store/checkpoint.rs"
 description = "persisted session checkpoint manifest"
+manifest = "SessionCheckpointManifest"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -952,6 +990,7 @@ symbols = ["SessionCheckpoint"]
 constant = "TURN_CHECKPOINT_SCHEMA_VERSION"
 constant_path = "crates/lash-sansio/src/sansio/machine_state.rs"
 description = "serialized sans-IO turn checkpoint and pending host-effect vocabulary"
+manifest = "TurnCheckpoint"
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
@@ -984,6 +1023,7 @@ symbols = ["Part", "FlatPart", "FlatPartRef", "PluginMessage"]
 constant = "CHECKPOINT_COMPONENT_ENCODING_VERSION"
 constant_path = "crates/lash-core-store/src/store/checkpoint.rs"
 description = "logical bytes stored behind checkpoint component descriptors"
+manifest = "CheckpointComponentEncoding"
 
 # Component bodies are owned by multiple runtime/plugin crates. The descriptor
 # contract is the checkable shared boundary; codec-specific changes must add a
@@ -997,6 +1037,7 @@ symbols = ["CheckpointComponentDescriptor", "HydratedCheckpointComponent"]
 constant = "SESSION_HEAD_META_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/store/mod.rs"
 description = "persisted JSON session-head payload"
+manifest = "SessionHeadMeta"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -1058,6 +1099,7 @@ symbols = [
 constant = "SESSION_NODE_BODY_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/session_graph.rs"
 description = "persisted JSON graph-node body in lash_graph_nodes.node_json"
+manifest = "SessionNodeBody"
 
 # The node body is the session graph's durable history shape, so its guard
 # follows the shape rather than one file: everything the body can reach and
@@ -1207,6 +1249,7 @@ symbols = ["MediaType", "AttachmentRef"]
 constant = "PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION"
 constant_path = "crates/lash-core-store/src/protocol_turn_options.rs"
 description = "persisted protocol-specific turn options envelope"
+manifest = "ProtocolTurnOptions"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -1230,6 +1273,7 @@ symbols = [
 constant = "RLM_SNAPSHOT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/executor/snapshot.rs"
 description = "canonical typed MessagePack RLM execution snapshot for globals and deferred resolutions"
+manifest = "RlmSnapshotEnvelope"
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
@@ -1284,6 +1328,7 @@ symbols = [
 constant = "BYTECODE_FORMAT_VERSION"
 constant_path = "crates/lashlang/src/lib.rs"
 description = "compiled Lashlang instruction and durable VM-continuation contract"
+manifest = "Bytecode"
 
 # `Instruction` is only the outer half of the instruction stream's vocabulary.
 # `Instruction::Intrinsic(IntrinsicOp)` carries no discriminant of its own, so
@@ -1358,6 +1403,7 @@ must_cover = ["VmContinuation"]
 constant = "LASHLANG_SNAPSHOT_VERSION"
 constant_path = "crates/lashlang/src/runtime/state.rs"
 description = "canonical MessagePack Lashlang snapshot: globals, heap, and value leaves"
+manifest = "LashlangSnapshot"
 
 # Every Serde carrier in the state module belongs to the canonical snapshot
 # family, so state.rs and its submodules are swept whole and fail closed on a
@@ -1407,6 +1453,7 @@ symbols = ["ImageValue", "ResourceHandle"]
 constant = "VM_CONTINUATION_FORMAT_VERSION"
 constant_path = "crates/lashlang/src/runtime/vm/continuation.rs"
 description = "durable Lashlang VM continuation: frames, heap restore wire, and value leaves"
+manifest = "VmContinuation"
 
 # continuation.rs holds the continuation and its inline wire module; types.rs
 # holds the handler, finally, iterator, and profile sub-shapes it carries. Both
@@ -1504,6 +1551,7 @@ constant = "LASHLANG_VM_ABI_VERSION"
 constant_path = "crates/lashlang/src/artifact.rs"
 version_regex = '\bLASHLANG_VM_ABI_VERSION\b\s*:\s*&str\s*=\s*"lashlang-vm-abi-v([0-9]+)"'
 description = "in-process VM-to-host ability contract: the ops a compiled program performs and the results a host returns"
+manifest = "VmAbi"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -1525,6 +1573,7 @@ symbols = [
 constant = "LASHLANG_SEGMENT_STATE_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/process.rs"
 description = "persisted Restate Lashlang segment handover JSON"
+manifest = "LashlangSegmentHandover"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -1586,6 +1635,7 @@ must_cover = ["SegmentHandover", "PersistedSegmentHandover"]
 constant = "WORKFLOW_GRAPH_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph.rs"
 description = "serialized Lashlang workflow graph document"
+manifest = "WorkflowGraphSchema"
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
@@ -1713,6 +1763,7 @@ symbols = ["WorkflowExecutionSite"]
 constant = "WORKFLOW_TYPE_FACET_SCHEMA_VERSION"
 constant_path = "crates/lashlang/src/workflow_graph/facets.rs"
 description = "serialized optional workflow type-facet projection"
+manifest = "WorkflowTypeFacet"
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
@@ -1754,6 +1805,7 @@ constant = "LASHLANG_SEMANTIC_HASH_VERSION"
 constant_path = "crates/lash-sansio/src/lib.rs"
 version_regex = '\bLASHLANG_SEMANTIC_HASH_VERSION\b\s*:\s*&str\s*=\s*"lashlang-semantic-v([0-9]+)"'
 description = "identity-verified Lashlang and TypeScript module-artifact identity"
+manifest = "ModuleArtifact"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -1799,21 +1851,11 @@ kind = "rust_items"
 paths = ["crates/lashlang/src/builtins.rs"]
 symbols = ["SOURCE_BUILTINS", "TYPESCRIPT_BUILTINS", "Builtin", "Arity"]
 
-# Sweep exclusions: APP_VERSION and LASHLANG_COMPILER_VERSION mirror package
-# versions; MCP_PROTOCOL_VERSION, ANTHROPIC_VERSION, and CODE_ASSIST_API_VERSION
-# pin upstream protocols; GENERATOR_VERSION versions a generated test artifact;
-# SOURCE_CACHE_VERSION identifies a process-local cache rather than a serialized
-# shape. LASHLANG_SEMANTIC_HASH_VERSION and LASHLANG_VM_ABI_VERSION are not
-# exclusions: they are identity strings rather than counters, and both are
-# registered surfaces above under an explicit `version_regex`.
-# TOOL_INTENT_PROTOCOL_V3 is a permanently named v3 discriminator, not a mutable
-# current-version constant: each protocol version keeps its own named constant
-# and the predecessors are refused by number, never rewritten in place.
-
 [[surface]]
 constant = "NATIVE_DRIVER_STATE_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/native/state.rs"
 description = "native RLM parked driver state"
+manifest = "NativeRlmDriverState"
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
@@ -1824,6 +1866,7 @@ must_cover = ["RlmDriverState", "Envelope"]
 constant = "NATIVE_TRANSPORT_VERSION"
 constant_path = "crates/lash-protocol-rlm/src/native/transport.rs"
 description = "native RLM durable provider call and repair envelopes"
+manifest = "NativeRlmTransport"
 
 [[surface.guard]]
 kind = "rust_serde_shapes"
@@ -1834,6 +1877,7 @@ must_cover = ["Envelope", "Transport"]
 constant = "CURRENT_SESSION_STATE_VERSION"
 constant_path = "crates/lash-core-store/src/store/state_version.rs"
 description = "complete session continuation generation including mediated plugin state"
+manifest = "SessionStateGeneration"
 
 [[surface.guard]]
 kind = "rust_items"
@@ -1844,6 +1888,7 @@ symbols = ["PluginState", "PluginNamespaceState"]
 constant = "DURABLE_READ_FIXTURE_SCHEMA_VERSION"
 constant_path = "crates/lash-core/tests/support/durable_read_fixture.rs"
 description = "checked-in durable-read fixture databases, dumps, and expectations"
+outside_manifest = "versions checked-in test fixtures, not bytes a lash build writes"
 
 # The fixtures are the authoritative bytes a durable-read regression replays,
 # so this is a whole-file guard over the entire tree: the SQLite databases, the
@@ -1860,3 +1905,179 @@ must_cover = [
   "\"fixture_schema_version\"",
   "\"durable_core\"",
 ]
+
+[[surface]]
+constant = "HEAP_SIZE_SCHEDULE_VERSION"
+constant_path = "crates/lashlang/src/runtime/heap.rs"
+description = "byte-charge schedule a persisted Lashlang heap's live_logical_bytes was computed under"
+manifest = "HeapSizeSchedule"
+
+# The schedule is arithmetic, not a serde shape: the per-slot and per-object
+# charges and the value charge function. Charges spelled inline elsewhere in
+# the heap (reference assignment growth) are a stated boundary, not coverage.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/runtime/heap/object.rs"]
+symbols = ["OBJECT_HEADER_BYTES", "VALUE_SLOT_BYTES", "value_logical_bytes"]
+
+[[surface]]
+constant = "PARENT_SCOPE_STORAGE_PAYLOAD_VERSION"
+constant_path = "crates/lash-core-execution/src/runtime/process/model/lifecycle.rs"
+description = "versioned typed parent scope persisted beside a ledger row's (kind, id) index projection"
+manifest = "ParentScopeStoragePayload"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/process/model/lifecycle.rs"]
+symbols = ["ParentScope", "ParentScopeStoragePayload"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/effect_opener.rs"]
+symbols = ["EffectOpener"]
+
+[[surface]]
+constant = "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION"
+constant_path = "crates/lash-restate/src/controller/process_command.rs"
+description = "Restate-journaled process-command admission payload"
+manifest = "RestateProcessCommandJournal"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/controller/process_command.rs"]
+symbols = ["JournaledCancelCommandIdentity", "JournaledCancelAdmission"]
+
+[[surface]]
+constant = "DURABLE_WAIT_INDEX_IDENTITY_EPOCH"
+constant_path = "crates/lash-restate/src/durable_wait.rs"
+description = "identity epoch of the Restate durable-wait index object state"
+manifest = "RestateDurableWaitIndexEpoch"
+
+# Object state survives a deployment and is refused at open under a foreign
+# epoch. The guard projects the state the index persists and the keys it
+# persists it under.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/durable_wait.rs"]
+symbols = [
+  "RestateDurableWaitIndexMetadata",
+  "RestateDurableWaitAwakeableRequest",
+  "RestateDurableWaitClassification",
+  "DURABLE_WAIT_INDEX_EPOCH_KEY",
+  "DURABLE_WAIT_INDEX_METADATA_KEY",
+  "DURABLE_WAIT_INDEX_WAIT_PREFIX",
+  "DURABLE_WAIT_INDEX_RESOLUTION_PREFIX",
+  "DURABLE_WAIT_INDEX_EFFECT_PREFIX",
+  "DURABLE_WAIT_INDEX_GROUP_PREFIX",
+  "DURABLE_WAIT_INDEX_GROUP_CHILD_PREFIX",
+  "DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX",
+]
+
+# Hash-domain family tags. A `*_FAMILY_VERSION` names the preimage family
+# inside a content-addressed key, fingerprint, or retry identity; it is an
+# identity component, not a format stamp a reader compares. A moved tag mints
+# different identities for the same inputs, and where it is stored at all it is
+# stored as part of such an identity or uniqueness key, compared for equality,
+# never read back as "this was written by version N". Families whose preimage
+# carries a guarded shape are registered surfaces above so their bumps stay
+# checked; the class exclusion covers the unguarded remainder for the sweep and
+# every family for the manifest, which reports formats a probe or an operator
+# compares.
+[[excluded_class]]
+suffix = "_FAMILY_VERSION"
+reason = "hash-domain family tag: an identity-preimage component, not a durable format stamp"
+
+# Durable formats without their own guarded surface, and constants whose names
+# look like versions but version nothing durable. TOOL_INTENT_PROTOCOL_V3 sits
+# outside the swept name pattern by design: it is a permanently named v3
+# discriminator, not a mutable current-version constant, and predecessors are
+# refused by number rather than rewritten in place.
+[[unregistered]]
+constant = "QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION"
+constant_path = "crates/lash-core-store/src/store/queued_work.rs"
+reason = "tags the identity encoding of newly minted claim-lease tokens; stored tokens are opaque at release, settlement and recovery and never re-derived, so a bump strands no stored bytes and no reader fences on it"
+
+[[unregistered]]
+constant = "OLDEST_SUPPORTED_SESSION_STATE_VERSION"
+constant_path = "crates/lash-core-store/src/store/state_version.rs"
+reason = "lower bound of the admission window for the registered CURRENT_SESSION_STATE_VERSION, not a format of its own"
+
+[[unregistered]]
+constant = "JOURNAL_IDENTITY_VERSION"
+constant_path = "crates/lash-sansio/src/effect_identity.rs"
+reason = "hash-domain tag of ExecutionScope journal keys: the *_FAMILY_VERSION class under another name"
+
+[[unregistered]]
+constant = "NUMBER_WIRE_VERSION"
+constant_path = "crates/lashlang/src/runtime/vm/continuation.rs"
+reason = "inner stamp of the continuation's number wire; the whole of continuation.rs is swept by the VM_CONTINUATION_FORMAT_VERSION guard, which owes the bump"
+
+[[unregistered]]
+constant = "SESSION_SCHEMA_VERSION"
+constant_path = "crates/lash-sqlite-store/src/lib.rs"
+reason = "public alias of the registered SQLite schema::SCHEMA_VERSION"
+
+[[unregistered]]
+constant = "SELECT_USER_VERSION"
+constant_path = "crates/lash-sqlite-store/src/connection_sql.rs"
+reason = "SQL text that reads a store stamp, not a version"
+
+[[unregistered]]
+constant = "SELECT_PROCESS_REGISTRY_USER_VERSION"
+constant_path = "crates/lash-sqlite-store/src/connection_sql.rs"
+reason = "SQL text that reads a store stamp, not a version"
+
+[[unregistered]]
+constant = "SELECT_COMPONENT_VERSION"
+constant_path = "crates/lash-postgres-store/src/postgres/schema.rs"
+reason = "SQL text that reads a store stamp, not a version"
+
+[[unregistered]]
+constant = "LASH_TRACE_SCHEMA_VERSION"
+constant_path = "crates/lash-trace/src/otel/attribute_keys.rs"
+reason = "OpenTelemetry attribute key name, not a version"
+
+[[unregistered]]
+constant = "LASH_TRACE_END_SCHEMA_VERSION"
+constant_path = "crates/lash-trace/src/otel/attribute_keys.rs"
+reason = "OpenTelemetry attribute key name, not a version"
+
+[[unregistered]]
+constant = "APP_VERSION"
+constant_path = "crates/lash-perf/src/main.rs"
+reason = "mirrors the package version"
+
+[[unregistered]]
+constant = "LASHLANG_COMPILER_VERSION"
+constant_path = "crates/lashlang/src/artifact.rs"
+reason = "mirrors the package version"
+
+[[unregistered]]
+constant = "HISTORY_RECORD_VERSION"
+constant_path = "crates/lash-perf/src/runtime_perf/duration_trend.rs"
+reason = "versions lash-perf's own benchmark history records, developer tooling rather than state a lash build writes"
+
+[[unregistered]]
+constant = "MCP_PROTOCOL_VERSION"
+constant_path = "crates/lash-plugin-mcp/src/host.rs"
+reason = "pins an upstream protocol"
+
+[[unregistered]]
+constant = "ANTHROPIC_VERSION"
+constant_path = "crates/lash-provider-anthropic/src/policy.rs"
+reason = "pins an upstream protocol"
+
+[[unregistered]]
+constant = "CODE_ASSIST_API_VERSION"
+constant_path = "crates/lash-provider-google/src/config.rs"
+reason = "pins an upstream protocol"
+
+[[unregistered]]
+constant = "GENERATOR_VERSION"
+constant_path = "crates/lash-sim/src/generator.rs"
+reason = "versions a generated test artifact"
+
+[[unregistered]]
+constant = "SOURCE_CACHE_VERSION"
+constant_path = "crates/lashlang/src/runtime/cache.rs"
+reason = "identifies a process-local cache rather than a serialized shape"

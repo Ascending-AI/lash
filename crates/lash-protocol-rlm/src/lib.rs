@@ -13,7 +13,10 @@ mod executor;
 mod feedback;
 mod native;
 mod plugin;
-pub use native::{NATIVE_EXECUTE_TOOL_NAME, RlmNativeToolPlugin};
+pub use native::{
+    NATIVE_DRIVER_STATE_VERSION, NATIVE_EXECUTE_TOOL_NAME, NATIVE_TRANSPORT_VERSION,
+    RlmNativeToolPlugin,
+};
 mod projection;
 mod protocol;
 mod rlm_support;

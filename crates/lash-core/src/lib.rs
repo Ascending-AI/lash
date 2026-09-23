@@ -21,13 +21,20 @@ pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
 pub use lash_core_execution::impl_store_replay_await_event_resolver;
 pub(crate) use lash_core_execution::model_clamp;
+/// Durable tool-effect format versions, re-exported for the format manifest.
+pub use lash_core_execution::runtime::{
+    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_CHILD_REQUEST_VERSION, TOOL_PRESENTATION_VERSION,
+    TOOL_SETTLEMENT_VERSION,
+};
 pub(crate) use lash_core_ids::operational_metrics;
 pub use lash_core_llm::llm;
 pub(crate) use lash_core_llm::model;
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
 pub use lash_core_store::impl_noop_attachment_manifest;
-pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
+pub use lash_core_store::protocol_turn_options::{
+    PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, ProtocolTurnOptions, ProtocolTurnOptionsError,
+};
 pub(crate) use model_clamp::ModelGenerationClamp;
 /// Re-exported so every `RuntimeEffectController` implementation can spell
 /// `await_next_settlement`'s cancellation parameter without taking a direct

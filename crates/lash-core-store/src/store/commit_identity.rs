@@ -24,7 +24,9 @@ pub struct OperationId {
     pub key: String,
 }
 
-pub(super) const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 6;
+/// Encoding version of the append-request identity bytes a retried commit must
+/// reproduce exactly.
+pub const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 6;
 
 /// Frozen durable-identity family domains minted by this module (ADR 0097).
 /// These are `FAMILY_DOMAINS`-registered names whose preimages carry no

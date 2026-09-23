@@ -303,6 +303,13 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+    # FIG-3521: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION widened from pub(crate) to
+    # pub (and gained a doc comment) so the format manifest re-exports the one
+    # definition instead of copying the integer. Its type (u32) and value (1)
+    # are unchanged, so `serialize_u32` emits the same stamp and the envelope
+    # bytes are identical; the version stays 1.
+    'crates/lash-core-store/src/protocol_turn_options.rs:PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION': 'sha256:591c95fb0981dd1af20f7a922eea6961ef3dd81943814720db5204a920f894be',
+
     # FIG-3469: `AstString` replaced the `CompactString` alias with a local
     # transparent wrapper. Its serde and schema agreement test pins the same
     # JSON string bytes, and the process wire DTO agreement tests pin the

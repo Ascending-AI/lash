@@ -1457,6 +1457,7 @@ async fn execute_restate_journaled_effect(
 }
 
 mod process_command;
+pub use process_command::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION;
 use process_command::execute_restate_process_command;
 async fn signal_ordinal_for_event(
     registry: &dyn ProcessRegistry,

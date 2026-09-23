@@ -2,7 +2,9 @@ use super::*;
 use crate::process_attach::RestateProcessAttachRequest;
 use restate_sdk::serde::Json;
 
-const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 1;
+/// Version stamped on the Restate-journaled process-command admission payload;
+/// a replay refuses any other version.
+pub const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
