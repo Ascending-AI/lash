@@ -61,10 +61,11 @@ pub(crate) use heap::{
     canonical_regexp_flags, regexp_source, regexp_string,
 };
 pub use host::{
-    AbilityOp, AbilityResult, DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH,
-    ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
-    ExecutionMode, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ResourceOperation,
-    ResourceOperationBatch, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
+    AbilityOp, AbilityResult, AggregateConsumer, DEFAULT_HOST_MEMORY_LIMIT_BYTES,
+    DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds, ExecutionEnvironment,
+    ExecutionHost, ExecutionHostError, ExecutionMode, ProcessEvent, ProcessEventKind,
+    ProcessSignal, ProcessStart, ResourceOperation, ResourceOperationBatch,
+    ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
     SleepKind,
 };
 #[allow(unused_imports)]

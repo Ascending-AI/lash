@@ -174,6 +174,7 @@ pub(super) fn instruction_heap_plan(
             .resource_operation_batches[batch]
             .stack_value_count)),
         I::ResourceOperationListBatch(_) => InstructionHeapPlan::stack(Top(1)),
+        I::PendingTimer => InstructionHeapPlan::stack(Top(1)),
         I::AwaitArray { .. }
         | I::AwaitPending
         | I::Print

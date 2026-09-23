@@ -5,15 +5,16 @@ use crate::span::Span;
 
 use super::super::access::prototype_chain_data_key_error;
 use super::super::host::{
-    AbilityOp, AbilityResult, ProcessEvent, ProcessEventKind, ResourceOperation,
-    ResourceOperationBatch, ResourceOperationResult, Sleep, SleepKind,
+    AbilityOp, AbilityResult, AggregateConsumer, ProcessEvent, ProcessEventKind, ResourceOperation,
+    ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchResult,
+    ResourceOperationResult, Sleep, SleepKind,
 };
 use super::super::ops::value_type_name;
 use super::super::{
     CompiledAggregateAwaitShape, CompiledResourceOperationBatch,
-    CompiledResourceOperationBatchLeaf, ExecutionHost, ExecutionHostError, RuntimeError, Value,
-    execution_host_error_value, is_process_handle, parse_handle_record, record_with_capacity,
-    success, unwrap_tool_result,
+    CompiledResourceOperationBatchLeaf, ErrorKind, ExecutionHost, ExecutionHostError, RuntimeError,
+    Value, execution_host_error_value, is_process_handle, parse_handle_record,
+    record_with_capacity, success, unwrap_tool_result,
 };
 use super::control::VmOutcome;
 use super::pending_tools::{
@@ -26,7 +27,7 @@ use super::{ActiveLashlangExecutionNode, Vm};
 pub(super) enum VmEffect {
     ResourceCall { operation: usize, argc: usize },
     ResourceCallUnwrap { operation: usize, argc: usize },
-    AwaitArray { settle: bool },
+    AwaitArray { consumer: AggregateConsumer },
     AwaitPending,
     ResourceOperationBatch(usize),
     ResourceOperationListBatch(usize),
@@ -122,8 +123,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .map_err(|source| RuntimeError::UnwrappedModuleOperationFailed { source })?;
                 self.stack.push(value);
             }
-            VmEffect::AwaitArray { settle } => {
-                self.await_pending_array(settle, instruction_ip).await?;
+            VmEffect::AwaitArray { consumer } => {
+                self.await_pending_array(consumer, instruction_ip).await?;
             }
             VmEffect::AwaitPending => {
                 let value = self.pop_stack()?;
@@ -142,7 +143,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             return Err(self.unsettleable_handle(&id));
                         }
                         self.stack.push(Value::List(vec![value].into()));
-                        self.await_pending_array(false, instruction_ip).await?;
+                        self.await_pending_array(AggregateConsumer::All, instruction_ip)
+                            .await?;
                         let Value::List(values) = self.pop_stack()? else {
                             unreachable!()
                         };
@@ -270,16 +272,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
             shape,
             stack_value_count: expanded_values.len(),
             aggregate_unwrap: batch.aggregate_unwrap,
-            first_settled_rejection: batch.first_settled_rejection,
+            consumer: batch.consumer,
         };
         self.resolve_batch_spec(&expanded, expanded_values, instruction_ip)
             .await
     }
 
-    /// Settles one aggregate await as a single host batch.
+    /// Settles one aggregate await as a single host batch under its consumer
+    /// mode (ADR 0099 §10).
     ///
-    /// Every leaf the aggregate has to settle is a resource operation, so there
-    /// is one recorded settlement order for the whole aggregate and no second
+    /// Every leaf the aggregate has to settle is a pending operation, so there
+    /// is one durable settlement order for the whole aggregate and no second
     /// phase to sequence against it. Non-leaf positions are plain values and
     /// are carried through untouched (ADR 0096: settlement is shallow, over
     /// element positions only).
@@ -302,14 +305,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
         }
 
-        let leaf_values = if batch.leaves.is_empty() {
-            Vec::new()
-        } else {
-            self.settle_tool_leaves(batch, &values, instruction_ip)
-                .await?
+        let mut value = match batch.consumer {
+            AggregateConsumer::Race | AggregateConsumer::Any => {
+                self.settle_selecting_aggregate(batch, &values, instruction_ip)
+                    .await?
+            }
+            AggregateConsumer::All | AggregateConsumer::AllSettled => {
+                let leaf_values = if batch.leaves.is_empty() {
+                    Vec::new()
+                } else {
+                    self.settle_tool_leaves(batch, &values, instruction_ip)
+                        .await?
+                };
+                build_aggregate_await_shape(&batch.shape, &values, &leaf_values, self)?
+            }
         };
-
-        let mut value = build_aggregate_await_shape(&batch.shape, &values, &leaf_values, self)?;
         if batch.aggregate_unwrap {
             value = unwrap_tool_result(value)?;
         }
@@ -317,14 +327,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    /// Returns each leaf's value in leaf order, or the rejection the batch reports (first
-    /// settled for `Promise.all`, first written otherwise).
-    async fn settle_tool_leaves(
+    /// One host operation per unique leaf, in leaf order, with each leaf's
+    /// execution node begun.
+    fn batch_leaf_operations(
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
         values: &[Value],
-        instruction_ip: usize,
-    ) -> Result<Vec<Value>, RuntimeError> {
+    ) -> Result<
+        (
+            Vec<ResourceOperationBatchLeaf>,
+            Vec<Option<ActiveLashlangExecutionNode>>,
+        ),
+        RuntimeError,
+    > {
         let mut operations = Vec::with_capacity(batch.leaves.len());
         let mut active_nodes = Vec::with_capacity(batch.leaves.len());
         for leaf in batch.leaves.iter() {
@@ -336,38 +351,240 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .get(leaf.receiver_stack_index)
                 .cloned()
                 .ok_or(RuntimeError::ResourceBatchReceiverOutOfRange)?;
-            let args_start = leaf.receiver_stack_index + 1;
-            let args_end = args_start + leaf.argc;
-            let args = values
-                .get(args_start..args_end)
-                .ok_or(RuntimeError::ResourceBatchArgumentOutOfRange)?
-                .to_vec();
-            operations.push(ResourceOperation {
-                receiver,
-                operation: self.chunk.names[leaf.operation].text.to_string(),
-                args,
-                call_site: active.as_ref().map(lashlang_execution_call_site),
-            });
+            let call_site = active.as_ref().map(lashlang_execution_call_site);
+            if leaf.timer {
+                operations.push(ResourceOperationBatchLeaf::Timer(Sleep {
+                    kind: SleepKind::For,
+                    value: receiver,
+                    call_site,
+                }));
+            } else {
+                let args_start = leaf.receiver_stack_index + 1;
+                let args_end = args_start + leaf.argc;
+                let args = values
+                    .get(args_start..args_end)
+                    .ok_or(RuntimeError::ResourceBatchArgumentOutOfRange)?
+                    .to_vec();
+                operations.push(ResourceOperationBatchLeaf::Operation(ResourceOperation {
+                    receiver,
+                    operation: self.chunk.names[leaf.operation].text.to_string(),
+                    args,
+                    call_site,
+                }));
+            }
             active_nodes.push(active);
         }
+        Ok((operations, active_nodes))
+    }
 
+    /// Returns each leaf's value in leaf order for an all-results aggregate,
+    /// or raises the rejection it reports: the first *consumed* rejection for
+    /// `Promise.all`, which the host answers as soon as it is consumed rather
+    /// than after every leaf settles, and the first *written* unwrapped
+    /// rejection for a Lashlang-native aggregate (ADR 0099 §10 L2, L7).
+    async fn settle_tool_leaves(
+        &mut self,
+        batch: &super::super::CompiledResourceOperationBatch,
+        values: &[Value],
+        instruction_ip: usize,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        let (operations, active_nodes) = self.batch_leaf_operations(batch, values)?;
         let occurrence = self.next_aggregate_occurrence(instruction_ip);
-        let settled = self
+        let reply = self
             .perform_resource_operation_batch(
                 operations,
+                instruction_ip,
                 occurrence,
                 &active_nodes,
-                batch.first_settled_rejection,
+                batch.consumer,
+                None,
             )
             .await?;
-        self.settle_resource_operation_leaves(
-            batch
-                .leaves
-                .iter()
-                .map(|leaf| (leaf.unwrap, leaf.source_span)),
-            settled,
-            &active_nodes,
-        )
+        match reply {
+            ResourceOperationBatchResult::AllResults(results) => self
+                .settle_resource_operation_leaves(
+                    batch
+                        .leaves
+                        .iter()
+                        .map(|leaf| (leaf.unwrap, leaf.source_span)),
+                    results,
+                    &active_nodes,
+                ),
+            ResourceOperationBatchResult::Selected {
+                leaf,
+                result: ResourceOperationResult::Error(source),
+            } => {
+                let error = RuntimeError::UnwrappedModuleOperationFailed { source };
+                if let Some(Some(active)) = active_nodes.get(leaf) {
+                    self.fail_lashlang_execution(active, &error);
+                }
+                self.pending_error_span = batch.leaves.get(leaf).and_then(|leaf| leaf.source_span);
+                Err(error)
+            }
+            other => Err(self.fail_resource_operation_batch(
+                &active_nodes,
+                RuntimeError::ResourceBatchReply {
+                    problem: format!(
+                        "a {:?} aggregate cannot be answered with {}",
+                        batch.consumer,
+                        reply_shape_name(&other)
+                    ),
+                },
+            )),
+        }
+    }
+
+    /// Settles a `Promise.race` or `Promise.any` (ADR 0099 §10, §11).
+    ///
+    /// The aggregate resolves with one settlement; the losers keep running
+    /// under the opener, exactly as losing promises do, and no loser's value
+    /// is ever synthesized (L6). The immediate prefix — operands that are
+    /// already plain values and leaves the host settled during preparation —
+    /// answers in source order ahead of any dispatched settlement (L5), and
+    /// every pending leaf is admitted before it may answer (§11 clause 3).
+    async fn settle_selecting_aggregate(
+        &mut self,
+        batch: &super::super::CompiledResourceOperationBatch,
+        values: &[Value],
+        instruction_ip: usize,
+    ) -> Result<Value, RuntimeError> {
+        let CompiledAggregateAwaitShape::List(elements) = &batch.shape else {
+            return Err(RuntimeError::InvalidAggregateAwaitRecordShape);
+        };
+        let first_value = elements.iter().find_map(|element| match element {
+            CompiledAggregateAwaitShape::Value(index) => Some(*index),
+            _ => None,
+        });
+        let aggregate = match batch.consumer {
+            AggregateConsumer::Race => "Promise.race",
+            _ => "Promise.any",
+        };
+        if batch.leaves.is_empty() {
+            // Nothing is pending, so nothing is admitted and no group opens
+            // (ADR 0065 refuses an empty group). A plain operand decides; with
+            // no operand at all, `race` can never settle (§11 clause 5) and
+            // `any` rejects with an empty `AggregateError` (clause 6).
+            return match first_value {
+                Some(index) => values
+                    .get(index)
+                    .cloned()
+                    .ok_or(RuntimeError::AggregateAwaitValueOutOfRange),
+                None if batch.consumer == AggregateConsumer::Race => {
+                    Err(RuntimeError::AggregateAwaitUnsettled {
+                        aggregate: aggregate.to_string(),
+                    })
+                }
+                None => Err(self.aggregate_error(elements, &[], instruction_ip)?),
+            };
+        }
+        // How many leaves first appear before the first plain operand: leaves
+        // are numbered in first-appearance order, so that count is the highest
+        // leaf index seen before it, plus one.
+        let mut leaves_before = 0usize;
+        let mut settled_value_after = None;
+        for element in elements.iter() {
+            match element {
+                CompiledAggregateAwaitShape::BatchLeaf(index) => {
+                    leaves_before = leaves_before.max(index + 1);
+                }
+                CompiledAggregateAwaitShape::Value(_) => {
+                    settled_value_after = Some(leaves_before);
+                    break;
+                }
+                _ => return Err(RuntimeError::InvalidAggregateAwaitRecordShape),
+            }
+        }
+        let (operations, active_nodes) = self.batch_leaf_operations(batch, values)?;
+        let occurrence = self.next_aggregate_occurrence(instruction_ip);
+        let reply = self
+            .perform_resource_operation_batch(
+                operations,
+                instruction_ip,
+                occurrence,
+                &active_nodes,
+                batch.consumer,
+                settled_value_after,
+            )
+            .await?;
+        match reply {
+            ResourceOperationBatchResult::Selected { leaf, result } => match result {
+                ResourceOperationResult::Value(value) => {
+                    if let Some(Some(active)) = active_nodes.get(leaf) {
+                        self.complete_lashlang_execution(active);
+                    }
+                    Ok(value)
+                }
+                ResourceOperationResult::Error(source) => {
+                    let error = RuntimeError::UnwrappedModuleOperationFailed { source };
+                    if let Some(Some(active)) = active_nodes.get(leaf) {
+                        self.fail_lashlang_execution(active, &error);
+                    }
+                    self.pending_error_span =
+                        batch.leaves.get(leaf).and_then(|leaf| leaf.source_span);
+                    Err(error)
+                }
+            },
+            ResourceOperationBatchResult::SettledValue => first_value
+                .and_then(|index| values.get(index).cloned())
+                .ok_or(RuntimeError::AggregateAwaitValueOutOfRange),
+            ResourceOperationBatchResult::ExhaustedRejections(errors) => {
+                for (active, error) in active_nodes.iter().zip(&errors) {
+                    if let Some(active) = active {
+                        self.fail_lashlang_execution(
+                            active,
+                            &RuntimeError::UnwrappedModuleOperationFailed {
+                                source: error.clone(),
+                            },
+                        );
+                    }
+                }
+                Err(self.aggregate_error(elements, &errors, instruction_ip)?)
+            }
+            ResourceOperationBatchResult::AllResults(_) => Err(self.fail_resource_operation_batch(
+                &active_nodes,
+                RuntimeError::ResourceBatchReply {
+                    problem: format!("a {aggregate} cannot be answered with every result"),
+                },
+            )),
+        }
+    }
+
+    /// The `AggregateError` a `Promise.any` rejects with when no operand
+    /// fulfils. Its `errors` are in **input-position** order, one per position
+    /// — a leaf written twice contributes its rejection twice — never in
+    /// settlement order (ADR 0099 §10 L2, §11 clauses 6 and 8). Each element is
+    /// the same value a caught rejection of that leaf would bind.
+    fn aggregate_error(
+        &mut self,
+        elements: &[CompiledAggregateAwaitShape],
+        errors: &[ExecutionHostError],
+        instruction_ip: usize,
+    ) -> Result<RuntimeError, RuntimeError> {
+        let mut items = Vec::with_capacity(elements.len());
+        for element in elements {
+            let CompiledAggregateAwaitShape::BatchLeaf(index) = element else {
+                return Err(RuntimeError::ResourceBatchReply {
+                    problem: "an exhausted Promise.any holds a plain operand, which fulfils"
+                        .to_string(),
+                });
+            };
+            let source = errors
+                .get(*index)
+                .cloned()
+                .ok_or(RuntimeError::AggregateAwaitLeafOutOfRange)?;
+            items.push(self.runtime_error_value(
+                &RuntimeError::UnwrappedModuleOperationFailed { source },
+                instruction_ip,
+            )?);
+        }
+        let errors = self.heap.allocate_list(items)?;
+        let value = self.heap.allocate_error(
+            ErrorKind::AggregateError,
+            "All promises were rejected".to_string(),
+            None,
+            Some(errors),
+        )?;
+        Ok(RuntimeError::UncaughtException { value })
     }
 
     /// An empty comprehension never reaches the host.
@@ -399,25 +616,45 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .site
                 .clone()
                 .map(|site| self.begin_lashlang_execution_site(site));
-            operations.push(ResourceOperation {
+            operations.push(ResourceOperationBatchLeaf::Operation(ResourceOperation {
                 receiver: receiver.clone(),
                 operation: operation.clone(),
                 args,
                 call_site: active.as_ref().map(lashlang_execution_call_site),
-            });
+            }));
             active_nodes.push(active);
         }
 
+        // The standalone list batch keeps its all-results wait and reports
+        // its first *written* rejection (ADR 0099 §10 L7).
         let leaf_values = if operations.is_empty() {
             Vec::new()
         } else {
             let occurrence = self.next_aggregate_occurrence(instruction_ip);
-            let settled = self
-                .perform_resource_operation_batch(operations, occurrence, &active_nodes, false)
+            let reply = self
+                .perform_resource_operation_batch(
+                    operations,
+                    instruction_ip,
+                    occurrence,
+                    &active_nodes,
+                    AggregateConsumer::AllSettled,
+                    None,
+                )
                 .await?;
+            let ResourceOperationBatchResult::AllResults(results) = reply else {
+                return Err(self.fail_resource_operation_batch(
+                    &active_nodes,
+                    RuntimeError::ResourceBatchReply {
+                        problem: format!(
+                            "a list batch cannot be answered with {}",
+                            reply_shape_name(&reply)
+                        ),
+                    },
+                ));
+            };
             self.settle_resource_operation_leaves(
                 std::iter::repeat_n((batch.unwrap, batch.source_span), calls.len()),
-                settled,
+                results,
                 &active_nodes,
             )?
         };
@@ -430,25 +667,32 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    /// Any refusal fails every leaf's execution node before it is returned.
+    /// The one host call an aggregate makes, with its reply validated against
+    /// the consumer mode that asked for it. Any refusal fails every leaf's
+    /// execution node before it is returned: a malformed reply fails closed
+    /// rather than being repaired into a plausible answer.
     async fn perform_resource_operation_batch(
         &mut self,
-        operations: Vec<ResourceOperation>,
+        leaves: Vec<ResourceOperationBatchLeaf>,
+        instruction_ip: usize,
         occurrence: u64,
         active_nodes: &[Option<ActiveLashlangExecutionNode>],
-        first_settled_rejection: bool,
-    ) -> Result<SettledResourceOperationBatch, RuntimeError> {
-        let expected = operations.len();
+        consumer: AggregateConsumer,
+        settled_value_after: Option<usize>,
+    ) -> Result<ResourceOperationBatchResult, RuntimeError> {
+        let expected = leaves.len();
         let result = self
             .host
             .perform(AbilityOp::ResourceOperationBatch(ResourceOperationBatch {
-                operations,
+                leaves,
+                consumer,
+                settled_value_after,
+                site: instruction_ip as u64,
                 occurrence,
-                first_settled_rejection,
             }))
             .await;
-        let result = match result {
-            Ok(AbilityResult::ResourceOperationBatch(result)) => result,
+        let reply = match result {
+            Ok(AbilityResult::ResourceOperationBatch(reply)) => reply,
             Ok(AbilityResult::Value(_)) | Ok(AbilityResult::Unit) => {
                 return Err(self.fail_resource_operation_batch(
                     active_nodes,
@@ -458,49 +702,79 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Err(error) => {
                 return Err(self.fail_resource_operation_batch(
                     active_nodes,
-                    RuntimeError::ResourceBatchFailed { source: error },
+                    RuntimeError::AggregateHostControl { source: error },
                 ));
             }
         };
         // The value-entry guard, on the one ability whose values arrive in
-        // bulk. Like the malformed shapes below, a batch carrying a
+        // bulk. Like the malformed shapes below, a reply carrying a
         // prototype-chain data key fails the whole batch closed rather than
         // handing one leaf a value nothing can read.
-        if let Some(rejection) = result.results.iter().find_map(|result| match result {
+        let carried = match &reply {
+            ResourceOperationBatchResult::AllResults(results) => results.iter().collect(),
+            ResourceOperationBatchResult::Selected { result, .. } => vec![result],
+            ResourceOperationBatchResult::SettledValue
+            | ResourceOperationBatchResult::ExhaustedRejections(_) => Vec::new(),
+        };
+        if let Some(rejection) = carried.into_iter().find_map(|result| match result {
             ResourceOperationResult::Value(value) => prototype_chain_data_key_error(value),
             ResourceOperationResult::Error(_) => None,
         }) {
             return Err(self.fail_resource_operation_batch(active_nodes, rejection));
         }
-        if result.results.len() != expected {
+        let problem = match (&reply, consumer) {
+            (ResourceOperationBatchResult::AllResults(results), _) if results.len() != expected => {
+                return Err(self.fail_resource_operation_batch(
+                    active_nodes,
+                    RuntimeError::ResourceBatchResultCount {
+                        actual: results.len(),
+                        expected,
+                    },
+                ));
+            }
+            (
+                ResourceOperationBatchResult::AllResults(_),
+                AggregateConsumer::All | AggregateConsumer::AllSettled,
+            ) => None,
+            (ResourceOperationBatchResult::Selected { leaf, .. }, _) if *leaf >= expected => Some(
+                format!("selected leaf {leaf} is out of range for {expected} leaves"),
+            ),
+            (ResourceOperationBatchResult::Selected { .. }, AggregateConsumer::Race) => None,
+            (
+                ResourceOperationBatchResult::Selected {
+                    result: ResourceOperationResult::Value(_),
+                    ..
+                },
+                AggregateConsumer::Any,
+            ) => None,
+            (
+                ResourceOperationBatchResult::Selected {
+                    result: ResourceOperationResult::Error(_),
+                    ..
+                },
+                AggregateConsumer::All,
+            ) => None,
+            (
+                ResourceOperationBatchResult::SettledValue,
+                AggregateConsumer::Race | AggregateConsumer::Any,
+            ) if settled_value_after.is_some() => None,
+            (ResourceOperationBatchResult::ExhaustedRejections(errors), AggregateConsumer::Any)
+                if errors.len() == expected =>
+            {
+                None
+            }
+            (other, consumer) => Some(format!(
+                "a {consumer:?} aggregate cannot be answered with {}",
+                reply_shape_name(other)
+            )),
+        };
+        if let Some(problem) = problem {
             return Err(self.fail_resource_operation_batch(
                 active_nodes,
-                RuntimeError::ResourceBatchResultCount {
-                    actual: result.results.len(),
-                    expected,
-                },
+                RuntimeError::ResourceBatchReply { problem },
             ));
         }
-        // A batch that selects by settlement order needs a usable order. A host
-        // that reports a malformed one fails closed rather than being silently
-        // read as input order, which is the behaviour this replaces.
-        let selection = if first_settled_rejection {
-            match result.settlement_sequence() {
-                Ok(order) => order.to_vec(),
-                Err(problem) => {
-                    return Err(self.fail_resource_operation_batch(
-                        active_nodes,
-                        RuntimeError::ResourceBatchSettlementOrder { problem },
-                    ));
-                }
-            }
-        } else {
-            (0..expected).collect()
-        };
-        Ok(SettledResourceOperationBatch {
-            results: result.results,
-            selection,
-        })
+        Ok(reply)
     }
 
     fn fail_resource_operation_batch(
@@ -514,25 +788,22 @@ impl<H: ExecutionHost> Vm<'_, H> {
         error
     }
 
-    /// Turns settled results into per-leaf values: an unwrapped leaf takes the
+    /// Turns every leaf's result into a value: an unwrapped leaf takes the
     /// value and records its rejection, a wrapped leaf becomes a result record.
-    /// The first rejection in the batch's selection order fails the aggregate.
-    ///
-    /// `Promise.all` reports the rejection that settled first (ADR 0096), so a
-    /// batch that can propagate a rejection scans the host's settlement order;
-    /// `allSettled` never propagates one and keeps leaf order.
+    /// The first unwrapped rejection in **written** order fails the aggregate
+    /// — the Lashlang-native rule (ADR 0099 §10 L7); `allSettled` never
+    /// unwraps a leaf, and `Promise.all` has its rejection selected by the
+    /// host before it gets here.
     fn settle_resource_operation_leaves(
         &mut self,
         leaves: impl Iterator<Item = (bool, Option<Span>)>,
-        settled: SettledResourceOperationBatch,
+        results: Vec<ResourceOperationResult>,
         active_nodes: &[Option<ActiveLashlangExecutionNode>],
     ) -> Result<Vec<Value>, RuntimeError> {
-        let mut unwrapped_errors = vec![None; settled.results.len()];
-        let mut leaf_values = Vec::with_capacity(settled.results.len());
-        for (leaf_index, (((unwrap, source_span), result), active)) in leaves
-            .zip(settled.results)
-            .zip(active_nodes.iter())
-            .enumerate()
+        let mut first_rejection = None;
+        let mut leaf_values = Vec::with_capacity(results.len());
+        for (((unwrap, source_span), result), active) in
+            leaves.zip(results).zip(active_nodes.iter())
         {
             match result {
                 ResourceOperationResult::Value(value) => {
@@ -543,7 +814,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 ResourceOperationResult::Error(error) => {
                     if unwrap {
-                        unwrapped_errors[leaf_index] = Some((error.clone(), source_span));
                         if let Some(active) = active {
                             self.fail_lashlang_execution(
                                 active,
@@ -552,6 +822,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                                 },
                             );
                         }
+                        first_rejection.get_or_insert((error, source_span));
                         leaf_values.push(Value::Null);
                     } else {
                         leaf_values.push(execution_host_error_value(error, "resource_batch"));
@@ -562,11 +833,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
             }
         }
-        for index in settled.selection {
-            if let Some((source, span)) = unwrapped_errors.get_mut(index).and_then(Option::take) {
-                self.pending_error_span = span;
-                return Err(RuntimeError::UnwrappedModuleOperationFailed { source });
-            }
+        if let Some((source, span)) = first_rejection {
+            self.pending_error_span = span;
+            return Err(RuntimeError::UnwrappedModuleOperationFailed { source });
         }
         Ok(leaf_values)
     }
@@ -764,11 +1033,14 @@ fn collect_awaited_process_ids(value: &Value, process_ids: &mut Vec<lash_sansio:
     }
 }
 
-/// One host batch reply after validation: the per-leaf results and the order
-/// in which unwrapped rejections are considered.
-struct SettledResourceOperationBatch {
-    results: Vec<ResourceOperationResult>,
-    selection: Vec<usize>,
+/// The name of a reply shape, for the refusal that names what arrived.
+fn reply_shape_name(reply: &ResourceOperationBatchResult) -> &'static str {
+    match reply {
+        ResourceOperationBatchResult::AllResults(_) => "every result",
+        ResourceOperationBatchResult::Selected { .. } => "a selected settlement",
+        ResourceOperationBatchResult::SettledValue => "a settled plain value",
+        ResourceOperationBatchResult::ExhaustedRejections(_) => "exhausted rejections",
+    }
 }
 
 /// The stack-value positions written at the aggregate's own element positions.

@@ -53,7 +53,7 @@ use crate::runtime::effect::RuntimeEffectControllerError;
 use crate::runtime::effect::await_event_coordinator::AwaitEventBackend;
 use crate::runtime::effect::group::LoserPolicy;
 use crate::runtime::effect::group_closing::{
-    GroupFinalizationReport, OpenerFinalizationSteps, StoreEffectGroupClosing,
+    GroupFinalizationReport, OpenerFinalizationSteps, StoreEffectGroupClosing, UnsettledEffectGroup,
 };
 
 /// The [`StoreEffectGroupClosing`] handed out by both SQL effect hosts — the
@@ -89,6 +89,90 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreEff
         self.driver.finalize_group_record(group_key, steps).await
     }
 
+    async fn read_unsettled_groups(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<Vec<UnsettledEffectGroup>, RuntimeEffectControllerError> {
+        let scope_id = scope
+            .journal_identity()
+            .map_err(RuntimeEffectControllerError::from)?
+            .key()
+            .to_string();
+        Ok(self
+            .driver
+            .row_store
+            .read_unsettled_groups(&scope_id)
+            .await?
+            .into_iter()
+            .map(|record| UnsettledEffectGroup {
+                closing: matches!(record.lifecycle, EffectGroupLifecycle::Closing { .. }),
+                group_key: record.group_key,
+                children: record.expected_children,
+            })
+            .collect())
+    }
+
+    async fn read_session_pins(
+        &self,
+        session_id: &crate::SessionId,
+    ) -> Result<Vec<String>, RuntimeEffectControllerError> {
+        Ok(self
+            .driver
+            .row_store
+            .read_session_group_lifecycle_pins(session_id.as_str())
+            .await?
+            .into_iter()
+            .map(|(group_key, _)| group_key)
+            .collect())
+    }
+
+    async fn recover_live_groups(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<usize, RuntimeEffectControllerError> {
+        let scope_id = scope
+            .journal_identity()
+            .map_err(RuntimeEffectControllerError::from)?
+            .key()
+            .to_string();
+        let mut driving = 0;
+        for record in self
+            .driver
+            .row_store
+            .read_unsettled_groups(&scope_id)
+            .await?
+            .into_iter()
+            .filter(|record| matches!(record.lifecycle, EffectGroupLifecycle::Live))
+        {
+            // A group this process holds open or is still running has an
+            // executor; recovery is for the children whose executor is gone.
+            if self
+                .driver
+                .groups
+                .local_drain_conflict(&record.group_key)
+                .is_some()
+            {
+                continue;
+            }
+            let driver = Arc::clone(&self.driver);
+            let group_key = record.group_key;
+            crate::task::spawn(async move {
+                if let Err(error) = driver
+                    .drain_effect_group(&group_key, &CancellationToken::new())
+                    .await
+                {
+                    tracing::warn!(
+                        group_key = %group_key,
+                        %error,
+                        "recovering a live group's children failed; the opener's end closes it"
+                    );
+                }
+            });
+            driving += 1;
+        }
+        Ok(driving)
+    }
+
     async fn resume_closing_groups(
         &self,
         scope: &ExecutionScope,
@@ -99,9 +183,16 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static> StoreEff
             .map_err(RuntimeEffectControllerError::from)?
             .key()
             .to_string();
-        let records = self.driver.row_store.read_closing_groups(&scope_id).await?;
+        let records = self
+            .driver
+            .row_store
+            .read_unsettled_groups(&scope_id)
+            .await?;
         let mut reports = Vec::with_capacity(records.len());
-        for record in records {
+        for record in records
+            .into_iter()
+            .filter(|record| matches!(record.lifecycle, EffectGroupLifecycle::Closing { .. }))
+        {
             reports.push(
                 self.driver
                     .finalize_group_record(&record.group_key, steps)

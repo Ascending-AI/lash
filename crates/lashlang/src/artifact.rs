@@ -30,7 +30,10 @@ use crate::linker::{
 
 pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v10";
+/// v11: `ResourceOperationBatch` carries the aggregate's consumer mode, timer
+/// leaves and the immediate-prefix boundary, and its result is the response
+/// algebra of ADR 0099 §10 L2 instead of a settlement order.
+pub const LASHLANG_VM_ABI_VERSION: &str = "lashlang-vm-abi-v11";
 
 /// Durability tier established by the execution path's concrete store or host.
 #[derive(

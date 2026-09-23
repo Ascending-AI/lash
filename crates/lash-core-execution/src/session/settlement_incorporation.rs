@@ -59,10 +59,25 @@ pub struct UsageDeltaIdentity {
 /// What the opener has incorporated so far: the once-only set and the usage
 /// identities already charged. Travels with the execution context across
 /// segment handover beside `started_process_ids`.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncorporationLedger {
     pub incorporated: BTreeSet<SettlementSource>,
     pub usage_charged: BTreeSet<UsageDeltaIdentity>,
+}
+
+impl IncorporationLedger {
+    /// Whether nothing has been incorporated.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.incorporated.is_empty() && self.usage_charged.is_empty()
+    }
+
+    /// Adopt everything `other` incorporated. Incorporation only ever grows a
+    /// ledger, so a restored snapshot is merged, never assigned.
+    pub fn absorb(&mut self, other: Self) {
+        self.incorporated.extend(other.incorporated);
+        self.usage_charged.extend(other.usage_charged);
+    }
 }
 
 /// What one incorporation applied, in counts. A source already in the ledger
@@ -410,19 +425,11 @@ impl<'run> RuntimeExecutionContext<'run> {
 /// Step 3 — the parent's end record — is the exit path's own; when it supplies
 /// `parent_end` this delegates to it, and without one the step is the no-op a
 /// group with no opener record owes.
-#[expect(
-    dead_code,
-    reason = "FIG-3397's exit path constructs this; the seam is delivered ahead of its caller"
-)]
 pub struct ContextFinalizationSteps<'a, 'run> {
     context: &'a RuntimeExecutionContext<'run>,
     parent_end: Option<&'a dyn crate::runtime::effect::OpenerFinalizationSteps>,
 }
 
-#[expect(
-    dead_code,
-    reason = "FIG-3397's exit path constructs this; the seam is delivered ahead of its caller"
-)]
 impl<'a, 'run> ContextFinalizationSteps<'a, 'run> {
     pub fn new(context: &'a RuntimeExecutionContext<'run>) -> Self {
         Self {

@@ -874,7 +874,9 @@ async fn fixed_script_timeout_proofs_preserve_timeout_envelopes() {
 
 #[tokio::test]
 async fn runtime_facade_turn_uses_scripted_transport_and_checks_invariants() {
-    let proof = prove_runtime_facade_turn().await.expect("runtime proof");
+    let proof = Box::pin(prove_runtime_facade_turn())
+        .await
+        .expect("runtime proof");
 
     assert_eq!(proof.provider_kind, "openai-compatible");
     assert_eq!(proof.session_id, "sim-runtime-session");

@@ -67,7 +67,7 @@ pub use group::{
 };
 pub use group_closing::{
     GroupFinalizationReport, GroupOnlyFinalization, OpenerFinalizationSteps,
-    StoreEffectGroupClosing,
+    StoreEffectGroupClosing, UnsettledEffectGroup,
 };
 pub use group_drain::{
     ChildDrainOutcome, DrainedChild, GroupDrainReport, GroupExecutors, StoreEffectGroupDrain,

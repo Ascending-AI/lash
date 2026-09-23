@@ -124,6 +124,10 @@ pub struct RuntimeControlConfig {
     /// config change re-registers the recorded value instead of conflicting.
     /// Defaults to [`DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS`].
     pub engine_child_max_attempts: std::num::NonZeroU32,
+    /// How much effect-group work one logical opener may retain at once
+    /// (ADR 0099 §9). Read when an opener's state is created; a group already
+    /// accepted is never refused by a later change to it.
+    pub opener_work_bound: crate::session::OpenerWorkBound,
     /// This deployment's tool-child wiring: the live-opener registry a turn or
     /// process incarnation registers itself in, and the resolver that routes a
     /// journaled tool child of an effect group to the handler-level driver
@@ -204,6 +208,7 @@ impl RuntimeHostConfig {
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 tool_surface_open_mode: crate::ToolSurfaceOpenMode::default(),
                 engine_child_max_attempts: DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS,
+                opener_work_bound: crate::session::OpenerWorkBound::default(),
                 tool_children,
             },
             tracing: RuntimeTracingConfig {
@@ -374,6 +379,13 @@ impl RuntimeHostConfig {
     /// after it and never for one already on the registry.
     pub fn with_engine_child_max_attempts(mut self, max_attempts: std::num::NonZeroU32) -> Self {
         self.control.engine_child_max_attempts = max_attempts;
+        self
+    }
+
+    /// Set how much effect-group work one logical opener may retain at once
+    /// (ADR 0099 §9). Groups already accepted keep their reservation.
+    pub fn with_opener_work_bound(mut self, bound: crate::session::OpenerWorkBound) -> Self {
+        self.control.opener_work_bound = bound;
         self
     }
 }

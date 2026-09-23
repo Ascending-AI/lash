@@ -874,11 +874,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         }
     }
 
-    async fn read_closing_groups(
+    async fn read_unsettled_groups(
         &self,
         scope_id: &str,
     ) -> Result<Vec<EffectGroupRecord>, RuntimeEffectControllerError> {
-        let rows = sqlx::query(effect_sql().group_postgres.select_closing_by_scope.sql())
+        let rows = sqlx::query(effect_sql().group_postgres.select_unsettled_by_scope.sql())
             .bind(scope_id)
             .fetch_all(&self.pool)
             .await

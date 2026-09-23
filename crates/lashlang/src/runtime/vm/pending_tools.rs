@@ -1,6 +1,6 @@
 use super::super::{
-    CompiledAggregateAwaitShape, ExecutionHost, RuntimeError, Value, parse_handle_record,
-    record_with_capacity, success, value_contains_tool_handle,
+    AggregateConsumer, CompiledAggregateAwaitShape, ExecutionHost, RuntimeError, Value,
+    parse_handle_record, record_with_capacity, success, value_contains_tool_handle,
 };
 use super::Vm;
 use lash_sansio::handle::{HANDLE_FIELD, HANDLE_KIND, HandleId, HandleTarget};
@@ -131,18 +131,57 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
-    /// Settle an awaited array as **one** resource-operation batch.
+    /// Mint a pending timer handle for an unawaited `sleep(ms)` (ADR 0099 §11).
     ///
-    /// Every leaf that has to settle is a pending tool call, so the host
-    /// records one settlement order over all of them and that order is
-    /// authoritative: it decides which rejection an unwrapping aggregate
-    /// reports. A durable process wait is a leaf like any other, because
-    /// `processes.await` is a tool that parks on it (ADR 0095) — which is what
-    /// retired ADR 0087's second phase, where process leaves settled after the
-    /// batch and a tool rejection therefore always won.
+    /// A timer is a pending operation like a tool call and shares its one
+    /// handle encoding (clause 1: "One pending-operation handle for tools and
+    /// timers"). Its entry is `["timer", site, duration]`; the duration is only
+    /// recorded here — the timer's start point is its **admission**, when the
+    /// aggregate that awaits it is formed and the host records its deadline.
+    pub(super) fn create_pending_timer(&mut self) -> Result<(), RuntimeError> {
+        let duration = self.pop_stack()?;
+        let request =
+            u32::try_from(self.pending_tools.len()).map_err(|_| RuntimeError::PendingTool {
+                problem: "this cell launched more pending operations than one execution can hold"
+                    .into(),
+            })?;
+        let id = HandleId::tool(self.execution_nonce, request);
+        self.pending_tools.insert(
+            id.clone(),
+            Some(Value::List(
+                [
+                    Value::String(PENDING_TIMER_TAG.into()),
+                    Value::Number(self.current_instruction_ip() as f64),
+                    duration,
+                ]
+                .into_iter()
+                .collect(),
+            )),
+        );
+        let mut handle = record_with_capacity(2);
+        handle.insert(HANDLE_FIELD.to_string(), Value::String(HANDLE_KIND.into()));
+        handle.insert("id".to_string(), Value::String(id.as_str().into()));
+        self.stack.push(Value::Record(Arc::new(handle)));
+        Ok(())
+    }
+
+    /// Settle an awaited array as **one** resource-operation batch under
+    /// `consumer` (ADR 0099 §10, §11).
+    ///
+    /// Every leaf that has to settle is a pending operation — a tool call or a
+    /// timer — so the host consumes one durable settlement order over all of
+    /// them and that order is authoritative: it decides which settlement a
+    /// `race` resolves with, which fulfilment an `any` resolves with, and which
+    /// rejection an `all` reports. A durable process wait is a leaf like any
+    /// other, because `processes.await` is a tool that parks on it (ADR 0095,
+    /// ADR 0099 §12).
+    ///
+    /// A handle written at two positions is one leaf: execution deduplicates,
+    /// positions never do (§10 L4, §11 clause 1). Operands were evaluated once,
+    /// in source order, before this runs (clause 2).
     pub(super) async fn await_pending_array(
         &mut self,
-        settle: bool,
+        consumer: AggregateConsumer,
         instruction_ip: usize,
     ) -> Result<(), RuntimeError> {
         use super::super::{CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf};
@@ -151,6 +190,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 problem: "Promise aggregate requires an array".into(),
             });
         };
+        let settle = consumer == AggregateConsumer::AllSettled;
         let mut values = Vec::new();
         let mut leaves = Vec::new();
         let mut shape = Vec::new();
@@ -170,18 +210,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             problem: SETTLED_HANDLE.into(),
                         });
                     };
-                    let Value::Number(operation) = call[0] else {
-                        unreachable!()
-                    };
                     let Value::Number(site) = call[1] else {
                         unreachable!()
                     };
                     let site = site as usize;
                     let index = leaves.len();
                     seen.insert(id.clone(), index);
+                    let (timer, operation, argc) = match &call[0] {
+                        Value::Number(operation) => (false, *operation as usize, call.len() - 3),
+                        _ => (true, 0, 0),
+                    };
                     leaves.push(CompiledResourceOperationBatchLeaf {
-                        operation: operation as usize,
-                        argc: call.len() - 3,
+                        timer,
+                        operation,
+                        argc,
                         receiver_stack_index: values.len(),
                         unwrap: !settle,
                         site: self
@@ -217,12 +259,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
             shape: CompiledAggregateAwaitShape::List(shape.into_boxed_slice()),
             stack_value_count: values.len(),
             aggregate_unwrap: false,
-            first_settled_rejection: !settle,
+            consumer,
         };
         self.resolve_batch_spec(&batch, values, instruction_ip)
             .await
     }
 }
+
+/// The first element of a pending timer's entry, where a tool's entry holds
+/// its operation index.
+pub(super) const PENDING_TIMER_TAG: &str = "timer";
 
 /// A pending handle inside a tool's arguments would reach the host as its
 /// marker record and the call would run with it; refused before dispatch so the

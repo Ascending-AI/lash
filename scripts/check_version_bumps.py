@@ -410,7 +410,15 @@ IDENTIFIER_RENAME_BASELINES = {
     # re-encodes to the same bytes. No column or CHECK moved, so the stamp
     # stays (PostgreSQL 116, SQLite 75). Superseded:
     # sha256:b35533b82dd6a0ebe7b53aecc81628a7c59963690956e906edb44165af19aaf1.
-    'crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION': 'sha256:6316b508dd69074999dccc3c4b8ca3f5dd64d254dcd0037d4f56fa44da1a68ee',
+    # FIG-3397 PR C supersedes this reading: two RuntimeErrorCode variants are
+    # added (aggregate_await_unsettled, effect_group_opener_bound_exceeded).
+    # Addition only: every existing code keeps its wire spelling, no stored row
+    # can hold a new one before this build writes it, and an older reader
+    # decodes a new spelling verbatim as RuntimeErrorCode::ForeignCode and
+    # re-encodes it to the same bytes. No column or CHECK moved, so the stamp
+    # stays (PostgreSQL 118, SQLite 77). Superseded:
+    # sha256:6316b508dd69074999dccc3c4b8ca3f5dd64d254dcd0037d4f56fa44da1a68ee.
+    'crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION': 'sha256:92c2074dae0baa5fa79c72480790752b8e174d1ed3b25a94f4d3114e64f22f74',
 
     # FIG-1102: the workbench include! splice became real modules, so every
     # item in state.rs gained pub(crate) and one line was rewrapped. Serde
@@ -756,7 +764,15 @@ IDENTIFIER_RENAME_BASELINES = {
     # re-encodes to the same bytes. No column or CHECK moved, so the stamp
     # stays (PostgreSQL 116, SQLite 75). Superseded:
     # sha256:2955b2a75bc5f7b21d5d90181e45998022dd1162ee3a0c499b8fc0bba2c47b2e.
-    'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:5b44c05846f0c1d9c7fd96e375d3e6cac38a16a2b07ad2dd96fd6e7d2fe5a472',
+    # FIG-3397 PR C supersedes this reading: two RuntimeErrorCode variants are
+    # added (aggregate_await_unsettled, effect_group_opener_bound_exceeded).
+    # Addition only: every existing code keeps its wire spelling, no stored row
+    # can hold a new one before this build writes it, and an older reader
+    # decodes a new spelling verbatim as RuntimeErrorCode::ForeignCode and
+    # re-encodes it to the same bytes. No column or CHECK moved, so the stamp
+    # stays (PostgreSQL 118, SQLite 77). Superseded:
+    # sha256:5b44c05846f0c1d9c7fd96e375d3e6cac38a16a2b07ad2dd96fd6e7d2fe5a472.
+    'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:6f5c10194bb742f138c6753a040b9d4f8b53258db52ddcba0a9ec4084caa29c1',
     'crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION': 'sha256:c47b1c80a5d170e70556653319621cc219a493ba54bea2ccdee7317fc9f850b9',
     # FIG-3418: the guarded surface moved for two reasons, neither of which
     # reaches a serialized byte. `EffectOpener` gained a `schemars::JsonSchema`

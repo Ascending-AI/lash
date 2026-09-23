@@ -1647,8 +1647,10 @@ paths = ["crates/lashlang/src/runtime/host.rs"]
 symbols = [
   "AbilityOp",
   "AbilityResult",
+  "AggregateConsumer",
   "ResourceOperation",
   "ResourceOperationBatch",
+  "ResourceOperationBatchLeaf",
   "ResourceOperationBatchResult",
   "ResourceOperationResult",
   "ProcessEvent",

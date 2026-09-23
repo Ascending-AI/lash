@@ -798,13 +798,14 @@ pub use runtime::{
     TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
     TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
     TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-    TurnInputStateKind, UnclaimedTurnInputs, UnreportedLedgerAttempt, UsageDispositionError,
-    WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
-    WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy, artifact_destination_owner_retired_error,
-    artifact_owner_retired_error, artifact_staging_edge_missing_error, artifact_store_plugin_error,
-    effect_groups_unsupported, ensure_process_lease_schema_version, tool_failure_code,
+    TurnInputStateKind, UnclaimedTurnInputs, UnreportedLedgerAttempt, UnsettledEffectGroup,
+    UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
+    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind,
+    WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
+    artifact_destination_owner_retired_error, artifact_owner_retired_error,
+    artifact_staging_edge_missing_error, artifact_store_plugin_error, effect_groups_unsupported,
+    ensure_process_lease_schema_version, tool_failure_code,
 };
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 #[allow(unused_imports)]

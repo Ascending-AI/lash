@@ -14,7 +14,7 @@ use crate::{
     AbilityOp, AbilityResult, CompiledProgram, ExecutionEnvironment, ExecutionHost,
     ExecutionHostError, ExecutionOutcome, LashlangAbilities, LashlangExecutionSite,
     LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures, LinkedModule,
-    ProcessType, Program, ProjectedBindings, ResourceOperation, ResourceOperationBatchResult,
+    ProcessType, Program, ProjectedBindings, ResourceOperation, ResourceOperationBatchLeaf,
     ResourceOperationResult, RuntimeError, RuntimeFailure, State, TypeExpr, TypeField, Value,
 };
 
@@ -57,19 +57,25 @@ impl ExecutionHost for EchoHost {
             AbilityOp::ResourceOperation(operation) => {
                 Self::perform_resource_operation(*operation).map(AbilityResult::Value)
             }
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_input_order(
-                    batch
-                        .operations
-                        .into_iter()
-                        .map(|operation| {
+            AbilityOp::ResourceOperationBatch(batch) => {
+                let results = batch
+                    .leaves
+                    .iter()
+                    .map(|leaf| match leaf {
+                        ResourceOperationBatchLeaf::Operation(operation) => {
                             ResourceOperationResult::from_result(Self::perform_resource_operation(
-                                operation,
+                                operation.clone(),
                             ))
-                        })
-                        .collect(),
-                ),
-            )),
+                        }
+                        ResourceOperationBatchLeaf::Timer(_) => {
+                            ResourceOperationResult::Value(Value::Undefined)
+                        }
+                    })
+                    .collect();
+                Ok(AbilityResult::ResourceOperationBatch(
+                    batch.answer_in_leaf_order(results),
+                ))
+            }
             AbilityOp::Await(handle) => match handle {
                 Value::Record(_) => Ok(AbilityResult::Value(Value::Null)),
                 _ => Err(ExecutionHostError::new("expected handle record")),

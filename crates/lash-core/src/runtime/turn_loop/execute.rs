@@ -742,6 +742,9 @@ impl LashRuntime {
             observes_durable_cancel_after_llm,
             protocol_reply: Default::default(),
             live_opener: std::sync::Mutex::new(None),
+            opener_state: crate::session::OpenerState::new(
+                self.host.core.control.opener_work_bound,
+            ),
             cooperative_cancel: CancellationToken::new(),
         });
         let protocol_run_offset = 0;

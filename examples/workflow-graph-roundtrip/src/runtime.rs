@@ -7,11 +7,11 @@ use anyhow::{Context, Result, anyhow};
 use lash::rlm::{
     LanguageTraceHost,
     lang::{
-        AbilityOp, AbilityResult, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
-        LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
-        LinkedModule, OperationContract, ResourceOperation, ResourceOperationBatchResult,
-        ResourceOperationResult, Sleep, State, Value, WorkflowGraph, compile_linked_process,
-        from_json,
+        AbilityOp, AbilityResult, AggregateConsumer, ExecutionEnvironment, ExecutionHost,
+        ExecutionHostError, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
+        LashlangLanguageFeatures, LinkedModule, OperationContract, ResourceOperation,
+        ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
+        State, Value, WorkflowGraph, compile_linked_process, from_json,
     },
 };
 use lash::tracing::TraceLanguageExecutionPayload;
@@ -277,15 +277,24 @@ impl ExecutionHost for RunHost {
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 let results = batch
-                    .operations
-                    .into_iter()
-                    .map(|operation| {
-                        ResourceOperationResult::from_result(self.apply_operation(operation))
+                    .leaves
+                    .iter()
+                    .map(|leaf| match leaf {
+                        ResourceOperationBatchLeaf::Operation(operation) => {
+                            ResourceOperationResult::from_result(
+                                self.apply_operation(operation.clone()),
+                            )
+                        }
+                        ResourceOperationBatchLeaf::Timer(_) => {
+                            ResourceOperationResult::Value(Value::Undefined)
+                        }
                     })
                     .collect();
-                Ok(AbilityResult::ResourceOperationBatch(
-                    ResourceOperationBatchResult::settled_in_input_order(results),
-                ))
+                Ok(AbilityResult::ResourceOperationBatch(answer_sequentially(
+                    batch.consumer,
+                    batch.settled_value_after.is_some(),
+                    results,
+                )))
             }
             AbilityOp::Sleep(sleep) => self.perform_sleep(sleep).await,
             AbilityOp::WaitSignal { name, .. } => {
@@ -301,6 +310,52 @@ impl ExecutionHost for RunHost {
                 "the toy workflow host does not support this ability",
             )),
         }
+    }
+}
+
+/// The toy host resolves an aggregate's leaves one after another, in leaf
+/// order, so the first leaf to settle is the first one written. This is the
+/// answer that settlement order gives each consumer mode (ADR 0099 §10): a
+/// plain operand answers a `race` or an `any` ahead of every dispatched leaf.
+fn answer_sequentially(
+    consumer: AggregateConsumer,
+    holds_plain_value: bool,
+    results: Vec<ResourceOperationResult>,
+) -> ResourceOperationBatchResult {
+    let first = |fulfilled: bool| {
+        results
+            .iter()
+            .position(|result| matches!(result, ResourceOperationResult::Value(_)) == fulfilled)
+    };
+    let selected = |leaf: usize| ResourceOperationBatchResult::Selected {
+        leaf,
+        result: results[leaf].clone(),
+    };
+    match consumer {
+        AggregateConsumer::AllSettled => ResourceOperationBatchResult::AllResults(results),
+        AggregateConsumer::All => match first(false) {
+            Some(leaf) => selected(leaf),
+            None => ResourceOperationBatchResult::AllResults(results),
+        },
+        AggregateConsumer::Race | AggregateConsumer::Any if holds_plain_value => {
+            ResourceOperationBatchResult::SettledValue
+        }
+        AggregateConsumer::Race => match results.is_empty() {
+            false => selected(0),
+            true => ResourceOperationBatchResult::AllResults(results),
+        },
+        AggregateConsumer::Any => match first(true) {
+            Some(leaf) => selected(leaf),
+            None => ResourceOperationBatchResult::ExhaustedRejections(
+                results
+                    .into_iter()
+                    .filter_map(|result| match result {
+                        ResourceOperationResult::Error(error) => Some(error),
+                        ResourceOperationResult::Value(_) => None,
+                    })
+                    .collect(),
+            ),
+        },
     }
 }
 

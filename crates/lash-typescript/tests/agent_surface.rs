@@ -884,10 +884,11 @@ impl ExecutionHost for AggregateHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_input_order(
+                batch.answer_in_leaf_order(
                     batch
-                        .operations
+                        .leaves
                         .iter()
+                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                         .enumerate()
                         .map(|(index, _)| {
                             ResourceOperationResult::Value(Value::Number(index as f64 + 1.0))
@@ -907,10 +908,11 @@ impl ExecutionHost for SettledHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_input_order(
+                batch.answer_in_leaf_order(
                     batch
-                        .operations
+                        .leaves
                         .iter()
+                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                         .enumerate()
                         .map(|(index, _)| {
                             if index == 0 {
@@ -1320,10 +1322,11 @@ impl ExecutionHost for ProcessDurabilityHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_input_order(
+                batch.answer_in_leaf_order(
                     batch
-                        .operations
+                        .leaves
                         .iter()
+                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                         .map(|operation| {
                             ResourceOperationResult::Value(
                                 operation
@@ -1554,7 +1557,7 @@ fn contains_return(expr: &Expr) -> bool {
 }
 
 fn contains_aggregate_await(expr: &Expr, unwrap: bool) -> bool {
-    matches!(expr, Expr::BuiltinCall { name, args } if name.as_str() == "__typescript_await_array" && matches!(args.last(), Some(Expr::Bool(settle)) if *settle != unwrap))
+    matches!(expr, Expr::BuiltinCall { name, args } if name.as_str() == "__typescript_await_array" && matches!(args.last(), Some(Expr::String(method)) if (method.as_ref() == "allSettled") != unwrap))
         || expr
             .children()
             .any(|child| contains_aggregate_await(child, unwrap))
@@ -1563,29 +1566,39 @@ fn contains_aggregate_await(expr: &Expr, unwrap: bool) -> bool {
 /// The decisive case from the FIG-1305 report.
 ///
 /// Leaf 0 rejects late with `late-A`; leaf 1 rejects early with `early-B`. The
-/// host reports that leaf 1 settled first. ECMA rejects `Promise.all` at the
-/// first settled rejection, so the surfaced reason must be `early-B` — the
-/// input-order scan surfaces `late-A`.
+/// host consumed leaf 1's rejection first. ECMA rejects `Promise.all` at the
+/// first settled rejection, and under ADR 0099 §10 the host answers `all`
+/// with exactly that settlement — so the surfaced reason must be `early-B`,
+/// and the VM never sees `late-A` at all. `allSettled` asks the same host for
+/// every result, in input order.
 struct FirstSettledRejectionHost;
 
 impl ExecutionHost for FirstSettledRejectionHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => {
-                assert_eq!(
-                    batch.operations.len(),
-                    2,
-                    "the decisive case has two leaves"
-                );
+                assert_eq!(batch.leaves.len(), 2, "the decisive case has two leaves");
                 Ok(AbilityResult::ResourceOperationBatch(
-                    ResourceOperationBatchResult::settled_in_order(
-                        vec![
-                            ResourceOperationResult::Error(ExecutionHostError::new("late-A")),
-                            ResourceOperationResult::Error(ExecutionHostError::new("early-B")),
-                        ],
+                    match batch.consumer {
                         // Leaf 1 settled first.
-                        vec![1, 0],
-                    ),
+                        lashlang::AggregateConsumer::All => {
+                            ResourceOperationBatchResult::Selected {
+                                leaf: 1,
+                                result: ResourceOperationResult::Error(ExecutionHostError::new(
+                                    "early-B",
+                                )),
+                            }
+                        }
+                        lashlang::AggregateConsumer::AllSettled => {
+                            ResourceOperationBatchResult::AllResults(vec![
+                                ResourceOperationResult::Error(ExecutionHostError::new("late-A")),
+                                ResourceOperationResult::Error(ExecutionHostError::new("early-B")),
+                            ])
+                        }
+                        other => {
+                            panic!("the decisive case asks for all or allSettled, not {other:?}")
+                        }
+                    },
                 ))
             }
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
@@ -1624,7 +1637,7 @@ fn mixed_aggregate_environment() -> lashlang::LashlangHostEnvironment {
 }
 
 #[test]
-fn promise_all_rejects_with_the_first_settled_rejection() {
+fn promise_all_rejects_with_the_rejection_its_host_consumed_first() {
     let environment = two_leaf_web_environment();
     let linked = lash_typescript::link(
         "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
@@ -1640,7 +1653,7 @@ fn promise_all_rejects_with_the_first_settled_rejection() {
     let rendered = error.to_string();
     assert!(
         rendered.contains("early-B"),
-        "Promise.all must surface the first-settled rejection: {rendered}"
+        "Promise.all must surface the rejection the host consumed first: {rendered}"
     );
     assert!(
         !rendered.contains("late-A"),
@@ -1649,8 +1662,8 @@ fn promise_all_rejects_with_the_first_settled_rejection() {
 }
 
 /// `Promise.allSettled` is specified to preserve *input* order regardless of
-/// when each leaf settled, so the same out-of-order settlement metadata must
-/// leave the result array alone.
+/// when each leaf settled: the host answers it with every result, in input
+/// order.
 #[test]
 fn promise_all_settled_stays_input_ordered_under_out_of_order_settlement() {
     let environment = two_leaf_web_environment();
@@ -1680,23 +1693,27 @@ fn promise_all_settled_stays_input_ordered_under_out_of_order_settlement() {
     );
 }
 
-/// A host that reports an order that is not an ordering of its own results
-/// must be refused, not read as input order.
-struct MalformedSettlementHost;
+/// A host whose reply does not fit the aggregate that asked — a selected leaf
+/// that does not exist, or a shape the consumer mode cannot produce — must be
+/// refused, never repaired into a plausible answer (ADR 0099 §10 L2).
+struct MisfitReplyHost;
 
-impl ExecutionHost for MalformedSettlementHost {
+impl ExecutionHost for MisfitReplyHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_order(
-                    batch
-                        .operations
-                        .iter()
-                        .map(|_| ResourceOperationResult::Error(ExecutionHostError::new("boom")))
-                        .collect(),
-                    // Two leaves, but the same one named twice.
-                    vec![1, 1],
-                ),
+                match batch.consumer {
+                    // Two leaves, but the host names a fifth.
+                    lashlang::AggregateConsumer::All => ResourceOperationBatchResult::Selected {
+                        leaf: 5,
+                        result: ResourceOperationResult::Error(ExecutionHostError::new("boom")),
+                    },
+                    // `race` is decided by one settlement, never by every one.
+                    _ => ResourceOperationBatchResult::AllResults(vec![
+                        ResourceOperationResult::Value(Value::Null);
+                        batch.leaves.len()
+                    ]),
+                },
             )),
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
             _ => Err(ExecutionHostError::new("unexpected malformed ability")),
@@ -1705,28 +1722,35 @@ impl ExecutionHost for MalformedSettlementHost {
 }
 
 #[test]
-fn a_settlement_order_that_is_not_a_permutation_fails_closed() {
+fn a_reply_that_does_not_fit_its_aggregate_fails_closed() {
     let environment = two_leaf_web_environment();
-    let linked = lash_typescript::link(
-        "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
-        &environment,
-    )
-    .expect("Promise.all should link");
-    let error = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
-        &mut State::new(),
-        &MalformedSettlementHost,
-    ))
-    .expect_err("a malformed settlement order is refused");
-    let rendered = error.to_string();
-    assert!(
-        rendered.contains("settled position 1 was reported twice"),
-        "the refusal names the offending position, not just a length: {rendered}"
-    );
+    for (source, expected) in [
+        (
+            "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
+            "selected leaf 5 is out of range for 2 leaves",
+        ),
+        (
+            "finish(await Promise.race([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]));",
+            "cannot be answered with every result",
+        ),
+    ] {
+        let linked = lash_typescript::link(source, &environment).expect("the aggregate links");
+        let error = futures::executor::block_on(lashlang::execute(
+            &lash_typescript::compile_linked(&linked),
+            &mut State::new(),
+            &MisfitReplyHost,
+        ))
+        .expect_err("a reply that does not fit its aggregate is refused");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains(expected),
+            "the refusal names what did not fit: {rendered}"
+        );
+    }
 }
 
-/// Selecting by settlement order must be a pure function of the journaled
-/// result: replaying the same recorded batch selects the same reason, with no
+/// The reported rejection must be a pure function of the host's recorded
+/// answer: replaying the same answer reports the same reason, with no
 /// re-sampling of anything.
 #[test]
 fn the_selected_rejection_is_replay_deterministic() {
@@ -1750,7 +1774,7 @@ fn the_selected_rejection_is_replay_deterministic() {
     let first = &reasons[0];
     assert!(
         first.contains("early-B"),
-        "the recorded order selects the early rejection: {first}"
+        "the recorded answer selects the early rejection: {first}"
     );
     assert!(
         reasons.iter().all(|reason| reason == first),
@@ -1758,18 +1782,16 @@ fn the_selected_rejection_is_replay_deterministic() {
     );
 }
 
-// `lashlang_aggregates_still_select_in_input_order` was deleted with the second
-// dialect (ADR 0096): aggregates now always select by settlement order.
-/// Settlement order is consumed inside a single `perform` and never persisted.
-/// Snapshot v7 is independently required by the substrate-minted error brands.
-/// The ABI is at v10 because sleep and signal waits carry compiler call sites.
-/// v9 carried a batch occurrence ordinal across the boundary (FIG-3394),
-/// and, before that, ADR 0095's one handle
-/// kind changed the handle record and the pending-request keying. Neither is
-/// the aggregate rule moving: settlement order still never reaches the
-/// continuation format.
+/// The consumer mode rides the ability boundary and the bytecode, never the
+/// saved state (ADR 0099 §10 L1: it is a caller-side decision and is never
+/// journaled). The VM ABI is at v11 because `ResourceOperationBatch` now
+/// carries the consumer mode, timer leaves and the immediate-prefix boundary,
+/// and its reply is the four-way response algebra instead of a settlement
+/// order. The snapshot stays at v7: nothing about an aggregate is persisted
+/// in a session snapshot. The continuation moved separately, for the timer
+/// entries in its pending-request map and the refusals it can carry.
 #[test]
-fn settlement_order_does_not_reach_the_continuation_format() {
+fn the_consumer_mode_moves_the_vm_abi_and_not_the_snapshot() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
         7,
@@ -1777,8 +1799,8 @@ fn settlement_order_does_not_reach_the_continuation_format() {
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v10",
-        "sleep and signal call sites moved the VM ABI"
+        "lashlang-vm-abi-v11",
+        "the aggregate consumer mode moved the VM ABI"
     );
 }
 
@@ -1999,31 +2021,25 @@ fn for_of_bodies_reject_mutation_in_patterns_without_rejecting_legal_patterns() 
 
 /// A leaf that fails before the batch runs settles first.
 ///
-/// This is the only reachable "leading" case in the host translation from
-/// invocation positions to leaf positions — a journaled runtime value cannot be
-/// a batch leaf, because an aggregate containing one is rejected before it ever
-/// reaches a host. Without this the translation is unexercised.
+/// It is part of the immediate prefix ahead of every dispatched settlement
+/// (ADR 0099 §10 L5), so a host answers `Promise.all` with it; the VM reports
+/// the leaf the host selected, whatever its input position.
 struct PreparationFailureHost;
 
 impl ExecutionHost for PreparationFailureHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => {
-                assert_eq!(batch.operations.len(), 2);
+                assert_eq!(batch.leaves.len(), 2);
                 // Leaf 1 never entered the batch: it failed while being
                 // prepared, so it had already settled when the batch started.
                 Ok(AbilityResult::ResourceOperationBatch(
-                    ResourceOperationBatchResult::settled_in_order(
-                        vec![
-                            ResourceOperationResult::Error(ExecutionHostError::new(
-                                "ran-and-failed",
-                            )),
-                            ResourceOperationResult::Error(ExecutionHostError::new(
-                                "never-prepared",
-                            )),
-                        ],
-                        vec![1, 0],
-                    ),
+                    ResourceOperationBatchResult::Selected {
+                        leaf: 1,
+                        result: ResourceOperationResult::Error(ExecutionHostError::new(
+                            "never-prepared",
+                        )),
+                    },
                 ))
             }
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),
@@ -2343,7 +2359,7 @@ fn typescript_host_catalog_composition_refuses_duplicate_operations() {
 }
 
 #[test]
-fn runtime_array_rejections_use_recorded_settlement_order() {
+fn runtime_array_rejections_report_the_selected_rejection() {
     let environment = two_leaf_web_environment();
     for array in [
         "['a', 'b'].map(url => web.fetch({url}))",
@@ -2424,8 +2440,13 @@ impl ExecutionHost for MixedAggregateHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_input_order(
-                    batch.operations.iter().map(Self::settle).collect(),
+                batch.answer_in_leaf_order(
+                    batch
+                        .leaves
+                        .iter()
+                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                        .map(Self::settle)
+                        .collect(),
                 ),
             )),
             AbilityOp::ResourceOperation(call) if call.operation == "start" => {

@@ -258,12 +258,13 @@ UPDATE main.runtime_effect_group
                AND json_extract(lifecycle, '$.type') IN (
                    SELECT value FROM json_each(?3))
              RETURNING lifecycle
-=== main | sqlite::GroupSqliteStatements | effect_group.select_closing_by_scope
+=== main | sqlite::GroupSqliteStatements | effect_group.select_unsettled_by_scope
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
                     expected_children, lifecycle, created_at_ms
              FROM main.runtime_effect_group
              WHERE scope_id = ?1
-               AND json_extract(lifecycle, '$.type') = 'closing'
+               AND json_extract(lifecycle, '$.type') != 'settled'
+             ORDER BY created_at_ms, group_key
 === main | sqlite::GroupSqliteStatements | effect_group.select_session_pins
 SELECT group_key, lifecycle
              FROM main.runtime_effect_group
@@ -569,12 +570,13 @@ UPDATE effect_journal.runtime_effect_group
                AND json_extract(lifecycle, '$.type') IN (
                    SELECT value FROM json_each(?3))
              RETURNING lifecycle
-=== effect_journal | sqlite::GroupSqliteStatements | effect_group.select_closing_by_scope
+=== effect_journal | sqlite::GroupSqliteStatements | effect_group.select_unsettled_by_scope
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
                     expected_children, lifecycle, created_at_ms
              FROM effect_journal.runtime_effect_group
              WHERE scope_id = ?1
-               AND json_extract(lifecycle, '$.type') = 'closing'
+               AND json_extract(lifecycle, '$.type') != 'settled'
+             ORDER BY created_at_ms, group_key
 === effect_journal | sqlite::GroupSqliteStatements | effect_group.select_session_pins
 SELECT group_key, lifecycle
              FROM effect_journal.runtime_effect_group
@@ -880,12 +882,13 @@ UPDATE process_registry.runtime_effect_group
                AND json_extract(lifecycle, '$.type') IN (
                    SELECT value FROM json_each(?3))
              RETURNING lifecycle
-=== process_registry | sqlite::GroupSqliteStatements | effect_group.select_closing_by_scope
+=== process_registry | sqlite::GroupSqliteStatements | effect_group.select_unsettled_by_scope
 SELECT group_key, scope_id, session_id, wake, loser_disposition,
                     expected_children, lifecycle, created_at_ms
              FROM process_registry.runtime_effect_group
              WHERE scope_id = ?1
-               AND json_extract(lifecycle, '$.type') = 'closing'
+               AND json_extract(lifecycle, '$.type') != 'settled'
+             ORDER BY created_at_ms, group_key
 === process_registry | sqlite::GroupSqliteStatements | effect_group.select_session_pins
 SELECT group_key, lifecycle
              FROM process_registry.runtime_effect_group

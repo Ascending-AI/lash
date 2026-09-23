@@ -403,14 +403,19 @@ impl Lowerer {
             (AgentPrimitive::Sleep, [milliseconds]) if self.position.await_depth > 0 => {
                 Ok(LashExpr::SleepFor(Box::new(self.lower_expr(milliseconds)?)))
             }
+            // An unawaited `sleep(ms)` is a pending timer: one handle like a
+            // pending tool call, settled by the aggregate that awaits it, whose
+            // start point is that aggregate's admission (ADR 0099 §11).
+            (AgentPrimitive::Sleep, [milliseconds]) => Ok(LashExpr::BuiltinCall {
+                name: "__typescript_pending_timer".into(),
+                args: vec![self.lower_expr(milliseconds)?],
+            }),
             (AgentPrimitive::WaitSignal, [Expr::String(name)]) if self.position.await_depth > 0 => {
                 Ok(LashExpr::WaitSignal {
                     name: name.as_str().into(),
                 })
             }
-            (AgentPrimitive::Sleep | AgentPrimitive::WaitSignal, _)
-                if self.position.await_depth == 0 =>
-            {
+            (AgentPrimitive::WaitSignal, _) if self.position.await_depth == 0 => {
                 Err(Diagnostic::new(
                     DiagnosticCode::AwaitRequired,
                     format!("agent primitive `{}` requires await", primitive.name()),
@@ -483,15 +488,6 @@ impl Lowerer {
             && !self.has_binding("Promise")
         {
             match method {
-                "race" | "any" => {
-                    return Err(Diagnostic::refusal(
-                        DiagnosticCode::MethodUnsupported,
-                        format!(
-                            "Unsupported: Promise.{method} requires durable partial-settlement ordering (FIG-1416). Use Promise.all/Promise.allSettled, or await durable sleep for timeout patterns."
-                        ),
-                        None,
-                    ));
-                }
                 "resolve" | "reject" => {
                     return Err(Diagnostic::refusal(
                         DiagnosticCode::MethodUnsupported,
@@ -501,7 +497,7 @@ impl Lowerer {
                         None,
                     ));
                 }
-                "all" | "allSettled" if self.position.await_depth == 0 => {
+                "all" | "allSettled" | "race" | "any" if self.position.await_depth == 0 => {
                     return Err(Diagnostic::new(
                         DiagnosticCode::AwaitRequired,
                         format!("Promise.{method} must be awaited directly"),

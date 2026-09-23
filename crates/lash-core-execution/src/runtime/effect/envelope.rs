@@ -751,6 +751,18 @@ pub struct CheckpointClaimSet {
     pub queued_work_claims: Vec<crate::QueuedWorkClaim>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_input_claim: Option<crate::TurnInputClaim>,
+    /// What the turn's opener had incorporated when this checkpoint committed
+    /// (ADR 0099 §6, §13). Replay serves a completed cell from the journal
+    /// without re-running the incorporations it made, and the checkpoint that
+    /// followed already delivered their facts; the replaying turn restores
+    /// this ledger so its end does not incorporate those ranks a second time.
+    /// Outcomes written by older binaries carry none: such a turn's groups
+    /// predate the opener ledger.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::session::IncorporationLedger::is_empty"
+    )]
+    pub incorporation: crate::session::IncorporationLedger,
 }
 
 impl ProcessCommand {
@@ -1382,18 +1394,9 @@ impl RuntimeEffectOutcome {
 
     pub fn into_checkpoint(
         self,
-    ) -> Result<
-        (
-            CheckpointOutcome,
-            Vec<crate::QueuedWorkClaim>,
-            Option<crate::TurnInputClaim>,
-        ),
-        RuntimeEffectControllerError,
-    > {
+    ) -> Result<(CheckpointOutcome, CheckpointClaimSet), RuntimeEffectControllerError> {
         match self {
-            Self::Checkpoint { result, claims } => {
-                Ok((result, claims.queued_work_claims, claims.turn_input_claim))
-            }
+            Self::Checkpoint { result, claims } => Ok((result, *claims)),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::Checkpoint,
                 other.kind(),

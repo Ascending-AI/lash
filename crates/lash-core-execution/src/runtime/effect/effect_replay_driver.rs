@@ -1187,10 +1187,11 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         to: &EffectGroupLifecycle,
     ) -> Result<EffectGroupLifecycle, RuntimeEffectControllerError>;
 
-    /// Every group recorded under `scope_id` whose lifecycle is `closing` —
-    /// the resumable finalization set a redriven opener drains
-    /// (ADR 0099 §7, `resume_closing_groups`).
-    async fn read_closing_groups(
+    /// Every group recorded under `scope_id` whose lifecycle is not
+    /// `settled` — `live` groups an opener's end still has to close and
+    /// `closing` groups it resumes finalizing (ADR 0099 §7,
+    /// `read_unsettled_groups` and `resume_closing_groups`).
+    async fn read_unsettled_groups(
         &self,
         scope_id: &str,
     ) -> Result<Vec<EffectGroupRecord>, RuntimeEffectControllerError>;

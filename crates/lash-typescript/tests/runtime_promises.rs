@@ -1,6 +1,6 @@
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ResourceOperation, ResourceOperationBatchResult, ResourceOperationResult, State, Value,
+    ResourceOperation, ResourceOperationResult, State, Value,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -18,10 +18,12 @@ impl ExecutionHost for Host {
         match op {
             AbilityOp::ResourceOperation(call) => echo_or_fail(*call).map(AbilityResult::Value),
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_input_order(
+                batch.answer_in_leaf_order(
                     batch
-                        .operations
-                        .into_iter()
+                        .leaves
+                        .iter()
+                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                        .cloned()
                         .map(|call| ResourceOperationResult::from_result(echo_or_fail(call)))
                         .collect(),
                 ),

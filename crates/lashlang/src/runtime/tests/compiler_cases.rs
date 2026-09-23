@@ -315,12 +315,13 @@ async fn aggregate_await_mixed_pure_values_batch_resource_leaves_and_reconstruct
             match op {
                 AbilityOp::ResourceOperationBatch(batch) => {
                     self.batch_len
-                        .store(batch.operations.len(), std::sync::atomic::Ordering::SeqCst);
+                        .store(batch.leaves.len(), std::sync::atomic::Ordering::SeqCst);
                     Ok(AbilityResult::ResourceOperationBatch(
-                        ResourceOperationBatchResult::settled_in_input_order(
+                        batch.answer_in_leaf_order(
                             batch
-                                .operations
-                                .into_iter()
+                                .leaves
+                                .iter()
+                                .filter_map(crate::ResourceOperationBatchLeaf::operation)
                                 .map(|operation| {
                                     ResourceOperationResult::Value(
                                         operation
@@ -473,8 +474,9 @@ async fn aggregate_await_evaluates_arguments_once_in_source_order_before_batch()
                 }
                 AbilityOp::ResourceOperationBatch(batch) => {
                     let values = batch
-                        .operations
+                        .leaves
                         .iter()
+                        .filter_map(crate::ResourceOperationBatchLeaf::operation)
                         .map(Self::echo_value)
                         .collect::<Vec<_>>();
                     self.events.lock_recover().push(format!(
@@ -486,7 +488,7 @@ async fn aggregate_await_evaluates_arguments_once_in_source_order_before_batch()
                             .join(",")
                     ));
                     Ok(AbilityResult::ResourceOperationBatch(
-                        ResourceOperationBatchResult::settled_in_input_order(
+                        batch.answer_in_leaf_order(
                             values
                                 .into_iter()
                                 .map(ResourceOperationResult::Value)
@@ -540,12 +542,13 @@ async fn aggregate_await_leaf_unwrap_waits_for_all_siblings_then_reports_first_e
             match op {
                 AbilityOp::ResourceOperationBatch(batch) => {
                     self.batch_len
-                        .store(batch.operations.len(), std::sync::atomic::Ordering::SeqCst);
+                        .store(batch.leaves.len(), std::sync::atomic::Ordering::SeqCst);
                     Ok(AbilityResult::ResourceOperationBatch(
-                        ResourceOperationBatchResult::settled_in_input_order(
+                        batch.answer_in_leaf_order(
                             batch
-                                .operations
-                                .into_iter()
+                                .leaves
+                                .iter()
+                                .filter_map(crate::ResourceOperationBatchLeaf::operation)
                                 .map(|operation| {
                                     if operation.operation == "err" {
                                         ResourceOperationResult::Error(ExecutionHostError::new(

@@ -286,8 +286,9 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
     /// The `Sleep`/`AwaitEvent` executors are built with turn-cancel
     /// observation off: a group child's cancellation is the group's — the
     /// group dispatch passes its own token into `execute_effect_cancellable`
-    /// (ADR 0099 §4) — and the wait deadline the group stamps at admission is
-    /// PR C's, when a product producer of such children exists.
+    /// (ADR 0099 §4). A timer child already carries the deadline its
+    /// aggregate recorded at admission (`SleepSpec::Until`, §11 clause 4), so
+    /// the executor waits on an instant rather than restarting a duration.
     fn executor_for(
         &self,
         envelope: &RuntimeEffectEnvelope,
@@ -306,9 +307,9 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
             // A group child's cancellation is the group's (ADR 0099 §4: the
             // group dispatch passes its own token into the child's
             // `execute_effect_cancellable`), so turn-cancel observation is off
-            // on both arms. The §11 deadline-at-admission rule and the
-            // durable-wait deadline are PR C's, when a product producer of
-            // such children exists.
+            // on both arms. A timer child's deadline was recorded when its
+            // aggregate admitted it (§11 clause 4); a losing durable wait is
+            // released by its opener's close, never by selection (§12).
             RuntimeEffectCommand::Sleep { .. } => Some(
                 RuntimeEffectLocalExecutor::sleep_with_clock(
                     CancellationToken::new(),

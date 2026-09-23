@@ -10,12 +10,12 @@ impl ExecutionHost for BenchHost {
                     .unwrap_or(&empty);
                 bench_resource_call(&operation, args).map(AbilityResult::Value)
             }
-            AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                lashlang::ResourceOperationBatchResult::settled_in_input_order(
-                    batch
-                        .operations
-                        .into_iter()
-                        .map(|operation| {
+            AbilityOp::ResourceOperationBatch(batch) => {
+                let results = batch
+                    .leaves
+                    .iter()
+                    .map(|leaf| match leaf {
+                        lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
                             let empty = Record::new();
                             let args = operation
                                 .args
@@ -23,12 +23,18 @@ impl ExecutionHost for BenchHost {
                                 .and_then(Value::as_record)
                                 .unwrap_or(&empty);
                             lashlang::ResourceOperationResult::from_result(bench_resource_call(
-                                &operation, args,
+                                operation, args,
                             ))
-                        })
-                        .collect(),
-                ),
-            )),
+                        }
+                        lashlang::ResourceOperationBatchLeaf::Timer(_) => {
+                            lashlang::ResourceOperationResult::Value(Value::Undefined)
+                        }
+                    })
+                    .collect();
+                Ok(AbilityResult::ResourceOperationBatch(
+                    batch.answer_in_leaf_order(results),
+                ))
+            }
             AbilityOp::Await(handle) => {
                 let record = handle
                     .as_record()

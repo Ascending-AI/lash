@@ -82,13 +82,15 @@ impl RuntimeTurnDriver<'_> {
         run_offset: usize,
     ) -> Result<(crate::MessageSequence, usize), RuntimeError> {
         self.cooperative_cancel = cancel.clone();
+        Box::pin(self.recover_opener_groups(&event_tx)).await;
         // The erasure's reason lives on `EffectLoop`: the alias exists to make
         // the cut a named decision rather than an incidental annotation.
         let result = {
             let effect_loop: EffectLoop<'_> =
-                Box::pin(self.run_effect_loop(messages, event_tx, cancel, run_offset));
+                Box::pin(self.run_effect_loop(messages, event_tx.clone(), cancel, run_offset));
             effect_loop.await
         };
+        let result = Box::pin(self.end_opener_groups(result, &event_tx)).await;
         self.live_opener.lock_recover().take();
         result
     }

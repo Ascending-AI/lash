@@ -1159,8 +1159,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::PendingTool { operation, argc } => {
                 self.create_pending_tool(operation, argc)?;
             }
-            Instruction::AwaitArray { settle } => {
-                return Ok(VmStep::Effect(VmEffect::AwaitArray { settle }));
+            Instruction::PendingTimer => {
+                self.create_pending_timer()?;
+            }
+            Instruction::AwaitArray { consumer } => {
+                return Ok(VmStep::Effect(VmEffect::AwaitArray { consumer }));
             }
             Instruction::AwaitPending => return Ok(VmStep::Effect(VmEffect::AwaitPending)),
             Instruction::ResourceOperationBatch(batch) => {

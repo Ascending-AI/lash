@@ -61,7 +61,7 @@ use super::super::group::{
 };
 use super::super::group_closing::{
     GroupFinalizationReport, GroupOnlyFinalization, OpenerFinalizationSteps,
-    StoreEffectGroupClosing,
+    StoreEffectGroupClosing, UnsettledEffectGroup,
 };
 use super::super::group_drain::GroupExecutors;
 use super::super::group_journal::{
@@ -1735,6 +1735,54 @@ impl NativeEffectGroups {
     }
 }
 
+impl NativeEffectGroups {
+    /// The `live` and `closing` groups under `scope` — what an opener's end
+    /// finishes when it no longer holds their cursor. Sorted by key so the
+    /// end's order does not follow the table's hash order.
+    fn unsettled_groups_under(&self, scope: &ExecutionScope) -> Vec<UnsettledEffectGroup> {
+        let mut unsettled = self
+            .open
+            .read_recover()
+            .values()
+            .filter(|state| state.scope == *scope)
+            .filter_map(|state| {
+                let closing = match state.state.lock_recover().lifecycle {
+                    EffectGroupLifecycle::Live => false,
+                    EffectGroupLifecycle::Closing { .. } => true,
+                    EffectGroupLifecycle::Settled { .. } => return None,
+                };
+                Some(UnsettledEffectGroup {
+                    group_key: state.group_key.clone(),
+                    children: state.children,
+                    closing,
+                })
+            })
+            .collect::<Vec<_>>();
+        unsettled.sort_by(|left, right| left.group_key.cmp(&right.group_key));
+        unsettled
+    }
+
+    /// The non-`settled` groups owned by `session_id`, sorted by key — the
+    /// in-memory twin of the SQL session pins.
+    fn session_pins(&self, session_id: &crate::SessionId) -> Vec<String> {
+        let mut pins = self
+            .open
+            .read_recover()
+            .values()
+            .filter(|state| {
+                state.scope.session_id() == Some(session_id)
+                    && !matches!(
+                        state.state.lock_recover().lifecycle,
+                        EffectGroupLifecycle::Settled { .. }
+                    )
+            })
+            .map(|state| state.group_key.clone())
+            .collect::<Vec<_>>();
+        pins.sort();
+        pins
+    }
+}
+
 /// The [`StoreEffectGroupClosing`] over this tier's in-memory group table —
 /// the same seam the SQL hosts hand out over their driver, so the W9–W12
 /// laws run here too. There is no journal row, so "the durable read" is the
@@ -1780,6 +1828,29 @@ impl StoreEffectGroupClosing for NativeGroupClosing {
         // and a closed one's draining losers stay counted until each records
         // its terminal (the same halves `scope_is_quiescent` covers on SQL).
         Ok(self.groups.unsettled_children_under(scope) == 0)
+    }
+
+    async fn read_unsettled_groups(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<Vec<UnsettledEffectGroup>, RuntimeEffectControllerError> {
+        Ok(self.groups.unsettled_groups_under(scope))
+    }
+
+    async fn read_session_pins(
+        &self,
+        session_id: &crate::SessionId,
+    ) -> Result<Vec<String>, RuntimeEffectControllerError> {
+        Ok(self.groups.session_pins(session_id))
+    }
+
+    /// Nothing to recover: this tier's groups die with the process that held
+    /// them, and a live one here always has its executor (§14).
+    async fn recover_live_groups(
+        &self,
+        _scope: &ExecutionScope,
+    ) -> Result<usize, RuntimeEffectControllerError> {
+        Ok(0)
     }
 
     async fn resume_closing_groups(

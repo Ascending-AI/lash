@@ -478,8 +478,17 @@ pub(super) fn validate_continuation(
     for value in continuation.pending_tools.values().flatten() {
         validate_value(value, "pending tool")?;
         validate_heap_references(validator.heap, std::slice::from_ref(value))?;
-        if !matches!(value, Value::List(call) if call.len() >= 3 && call[..2].iter().all(|v| matches!(v, Value::Number(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0)))
-        {
+        let index = |value: &Value| matches!(value, Value::Number(n) if n.is_finite() && *n >= 0.0 && n.fract() == 0.0);
+        // A tool request is `[operation, site, receiver, args...]`; a timer is
+        // `["timer", site, duration]` (ADR 0099 §11: one pending-operation map
+        // for tools and timers).
+        let tool = |call: &[Value]| call.len() >= 3 && call[..2].iter().all(index);
+        let timer = |call: &[Value]| {
+            call.len() == 3
+                && matches!(&call[0], Value::String(tag) if &**tag == super::super::pending_tools::PENDING_TIMER_TAG)
+                && index(&call[1])
+        };
+        if !matches!(value, Value::List(call) if tool(call) || timer(call)) {
             return Err(ContinuationError::UnserializableValue {
                 location: "pending tool".into(),
                 variant: "invalid pending tool call",

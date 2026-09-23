@@ -272,26 +272,35 @@ handle at an element position is refused, with a repair naming
 passed through untouched.
 
 `Promise.all` rejects with the reason of the leaf that settled **first**, as
-ECMA specifies, and `allSettled` keeps results in input order. Settlement order
-is not re-derived at replay: the host records the order its leaves settled in as
-a required field on the journaled batch result, with no serde default, so an
-entry written before the field existed is refused rather than replayed as input
-order. A host that reports an order that is not an ordering of its own results
-fails closed with a typed error rather than being repaired — a repair that
-produces a valid permutation is indistinguishable downstream from a real one,
-which is exactly how this defect previously read as delivered in three places
-while being false in one.
+ECMA specifies, and `allSettled` keeps results in input order. Since FIG-3397
+the aggregate is a durable effect group whose settlement order is durable
+rank, and the host answers the VM with the one settlement that decided it — or
+with every result — under the aggregate's consumer mode (ADR 0099 §10). The
+answer is not re-derived at replay: the group's ranks are durable facts. A host
+answer that does not fit the consumer mode that asked for it fails closed with a
+typed error rather than being repaired — a repair that produces a plausible
+answer is indistinguishable downstream from a real one, which is exactly how an
+earlier defect read as delivered in three places while being false in one.
 
-The selection rule is recorded per batch at lowering, where the compiler already
-knows the dialect, rather than read from the VM's reference-semantics flag at run
-time. That flag answers a heap-ownership question, and one predicate answering
-two questions is the defect shape that cost an earlier layer three rounds.
+The consumer mode is recorded per aggregate at lowering, where the compiler
+already knows the dialect, rather than read from the VM's reference-semantics
+flag at run time. That flag answers a heap-ownership question, and one predicate
+answering two questions is the defect shape that cost an earlier layer three
+rounds.
+
+`Promise.race` and `Promise.any` join them (FIG-3397). `race` resolves with the
+first settlement and `any` with the first fulfilment, or rejects with an
+`AggregateError` whose `errors` hold one rejection per input position, in input
+order. An unawaited `sleep(ms)` is a pending timer — one handle like a pending
+tool call — so `await Promise.race([call, sleep(ms)])` is the dialect's timeout,
+resolving `undefined` when the timer wins. A plain value in the operand array
+answers ahead of any dispatched settlement, and every pending operand is
+admitted first.
 
 ### Two host lifetime contracts (FIG-3392)
 
-**Decided, not yet implemented.** `Promise.race` and `Promise.any` are still
-refused at lowering with `"Unsupported: Promise.{method} requires durable
-partial-settlement ordering (FIG-1416)."` The full contract is
+**Implemented by FIG-3397.** `Promise.race` and `Promise.any` are accepted. The
+full contract is
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md);
 [ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)
 carries the matching group-side amendment.
@@ -348,11 +357,13 @@ dialect keeps exactly that meaning**: there is no exception to catch, no
 synthesized rejection, and no registered deviation. Because the dialect awaits
 aggregates in place, zero operands open no group at all — ADR 0065 already
 refuses empty groups — so the host detects an await nothing can resolve and
-**fails the cell with a typed host-level unsettled-await error**.
+**fails the cell with a typed host-level unsettled-await error**:
+`RuntimeErrorCode::AggregateAwaitUnsettled` (`aggregate_await_unsettled`), raised
+by the VM as the uncatchable `AggregateAwaitUnsettled` terminal.
 
 That is the analogue of Node exiting with code 13 on an unsettled top-level
 await: the program's semantics are ECMA's, and the host's lifetime ends rather
-than parking a durable execution forever. FIG-3397 names the error code.
+than parking a durable execution forever.
 
 The other empty aggregates need no host rule: `Promise.all([])` and
 `Promise.allSettled([])` return `[]`, and `Promise.any([])` rejects with an
@@ -360,11 +371,10 @@ The other empty aggregates need no host rule: `Promise.all([])` and
 
 #### Register bookkeeping
 
-Neither contract above enters the numbered register. What does move when
-FIG-3397 lands is register entry 15 (aggregate rejection timing), which retires
-in that change because every aggregate is then on first-settlement wake — as ADR
-0065's consequences already anticipate. That move does not happen ahead of the
-code.
+Neither contract above enters the numbered register. Register entry 15
+(aggregate rejection timing) retired with FIG-3397: every aggregate is on
+first-settlement wake, so a rejected `Promise.all` answers as soon as its first
+rejection is consumed — as ADR 0065's consequences anticipated.
 
 ### Parser: SWC, pinned, behind a lash-owned adapter
 
@@ -523,12 +533,11 @@ that each entry is a limit taken knowingly.
     a `__typescript_` name appears in persisted session state. It is dead by any
     turn boundary and filtered out of the bound-variables prompt, so it is never
     shown; a binding that shadows nothing keeps the name its author wrote.
-15. **Aggregate rejection timing.** A rejected `Promise.all` still waits for
-    every leaf to settle before it reports. ECMA specifies which reason
-    surfaces, not when — it has no wall times, and a conforming program cannot
-    observe the difference except through timing — but v1 has no fail-fast
-    cancellation of an in-flight batch leaf, so the aggregate settles at the
-    pace of its slowest leaf while rejecting with its first-settled reason.
+15. **Aggregate rejection timing** — *retired by FIG-3397.* A rejected
+    `Promise.all` used to wait for every leaf to settle before it reported. It
+    now answers at its first consumed rejection, and the leaves still in
+    flight run on as losers under their opener (ADR 0099 §0, §10). The number
+    stays reserved so later entries keep their names.
 16. **`for...of` snapshots.** Arrays and strings are snapshotted before
     iteration, strings by code point. Until a resumable iterator protocol
     exists, a body that mutates, aliases, or passes the iterable itself rejects

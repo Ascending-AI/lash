@@ -2,17 +2,23 @@
 
 ## Status
 
-Decided 2026-09-21 (FIG-3392). **Not yet implemented**: FIG-2266 builds the
-invocation driver, FIG-3396 the accepted-work and protected-close recovery, and
-FIG-3397 the integration landing. FIG-3395 authors the aggregate oracle that
-freezes the pre-cutover baseline.
+Decided 2026-09-21 (FIG-3392). **Implemented.** FIG-2266 built the invocation
+driver; FIG-3396 the accepted-work and protected-close recovery, in four ordered
+parts — FIG-3408 (§3, the retained child request), FIG-3409 (§4/§5, the
+linearization point, commit order and discharge), FIG-3410 (§7, closing and
+deletion exclusion) and FIG-3411 (§6, §8, §12, §13, carriage and handover);
+FIG-3394 the incarnation binding §1 validates; and FIG-3395 the aggregate oracle
+that froze the pre-cutover baseline.
 
-FIG-3396 is delivered as four ordered parts: FIG-3408 (§3, the retained child
-request), FIG-3409 (§4/§5, the linearization point, commit order and
-discharge), FIG-3410 (§7, closing and deletion exclusion) and FIG-3411 (§6, §8,
-§12, §13, carriage and handover). §1's recovery-time incarnation validation
-waits on FIG-3394. **Landed so far: FIG-3408's durable shape** — minted and
-frozen, with no producer or consumer yet; see the §3 amendment.
+FIG-3397 was the integration landing, in three slices. Integration (a) formed
+every product tool batch as a durable group of tool children on all four tiers;
+(b) deleted the batch path the groups replaced; (c) accepted `Promise.race` and
+`Promise.any`, with the consumer mode on the Lashlang ability boundary (§10),
+timer children (§11), the opener's end closing and incorporating its groups at
+turn end, process terminal and session deletion (§6, §7), recovery of a live
+opener's losers after its worker dies (W5), segment reattachment and the
+per-opener bound (§9). The clause statuses below say what each slice
+delivered.
 
 Amends [ADR 0025](0025-bounded-journals-are-an-effect-controller-obligation.md),
 [ADR 0042](0042-tool-attempts-are-atomic.md),
@@ -640,9 +646,16 @@ ADR 0094 governs any process that really started.
 **Losing values stay unreturned.** Incorporation concerns facts the runtime owns —
 possession, trigger evidence, usage — never a value the model did not select.
 
-*Status.* Possession recording and its segment handover **hold today**. The
-opener-owned mapping, its replay-history recording and cross-invocation carriage
-are **new** (FIG-3396, FIG-3397).
+*Status.* **Implemented** (FIG-3411, FIG-3397). A consumer journals the prefix
+it consumed as an `IncorporateGroupSettlements` record before applying it, and
+an opener's phase contexts share one `IncorporationLedger`, so a loser's facts
+incorporated at the opener's end never re-apply the winner's. Losers settle
+while the opener lives and are incorporated at its end (§7 step 2); the ledger
+rides a Lashlang segment handover, and a turn's ledger rides each of its
+journaled checkpoints, so a turn resumed after its worker died — which serves
+its completed cells from the journal and re-runs none of their
+incorporations — restores what those cells incorporated and never incorporates
+a rank twice.
 
 ---
 
@@ -733,9 +746,22 @@ is defined as one applicator call per settled rank —
 `RuntimeExecutionContext::incorporate_tool_settlement` under
 `SettlementSource::GroupRank { group_key, rank, child_replay_key }` (FIG-3411) —
 whose `IncorporationLedger` makes the resumed re-run idempotent. The opener's
-own exit path supplying that applicator to the finalizer remains FIG-3397's
-obligation: the driver's finalizer runs on a `'static` host task and the
-execution context is `'run`-bound to the opener's turn. The queue-drain
+own exit path supplies that applicator (FIG-3397): a turn's terminal checkpoint
+and every final turn exit, and every process terminal, close the groups the
+opener still holds under `Cancel` — a group whose consumer was cancelled among
+them, so a rank that lands after the cancel is still the opener's — close the
+`live` groups the journal holds under its scope whose keys this opener formed,
+resume the `closing` ones an earlier end recorded and never finished, finalize
+each with a `ContextFinalizationSteps` over the opener's own execution context,
+and then incorporate every one's settled ranks — after finalization, because the finalizer `close` spawns carries
+no opener steps and either may record step 2 first; the ledger and the
+journaled prefix record make the second run a no-op. A group under the same
+scope that the opener did not form — one a queue drain's epilogue owns — is not
+the opener's to close or finish. A turn or process segment resumed after its
+worker died recovers the accepted children of its live groups when it starts
+(W5), republishing its content-addressed execution environment first so a
+recovered child resolves the reference its request recorded, and session
+deletion refuses a live or closing group **before** it deletes anything. The queue-drain
 epilogue is the first production caller of `resume_closing_groups`: a drain
 resumes its scope's closing groups before writing its own end
 (FIG-3419, ADR 0094's amendment). When a settled drain's end is withheld by a
@@ -777,9 +803,11 @@ attach is reachable from Rust only through the ingress client. Retention default
 of 24 hours exist in the server configuration; a default is **not** an admitted
 deployment guarantee, so the failure path is normative and the window is not.
 
-*Status.* The group object, cursor and shape fence **hold today**. Retained ids,
-retained results across handover and the typed expired-attachment failure are
-**new** (FIG-3396, FIG-3397).
+*Status.* **Implemented** (FIG-3411, FIG-3397). Retained child ids, the typed
+expired-attachment failure (`RuntimeEffectGroupChildAttachExpired`) and
+retained results are served from the group authority on every tier; a Lashlang
+segment carries each outstanding group's key and consumed cursor, and its
+successor reattaches through `EffectGroupHandle::restored`.
 
 ---
 
@@ -832,9 +860,37 @@ protocol-side: `crates/lash-protocol-standard/src/lib.rs` has `const
 BATCH_MAX_TOOL_CALLS: usize = 25`, and neither it nor the segment budget specifies
 retained-work admission.
 
-*Status.* Segment boundaries, the decline path and the effect budget **hold
-today**. Reattachment, the two-dimensional bound with its reservation contract,
-and group-level retirement under a live opener are **new** (FIG-3397).
+*Status.* **Implemented** (FIG-3397). A boundary is never declined for an
+unsettled child: the handover carries the opener's outstanding group cursors.
+A completed group retires as a whole under a live opener: when a new group
+would pass the bound, the opener retires its oldest held group — its losers run
+to their own terminals, their ranks are incorporated, the group is closed and
+its units released — and tries again, so the bound refuses only when nothing
+is left to retire. The recorded settlements are the identity fence a reopen is
+served from, and the point of retirement is a fact of the opener's own
+deterministic history, so a replay retires the same groups at the same point.
+
+*Amendment (FIG-3397): the accounting units and the bound.* The retained-work
+unit is the **unique child execution** — a tool invocation or a timer — from
+its group's acceptance to the moment its opener no longer depends on it: the
+group was consumed to exhaustion and incorporated, it was retired, or the
+opener ended. Operand
+positions are not host work; the position-to-child mapping lives in the VM
+(§10 L4). An opener reserves a group's units before the group is journaled or
+any child dispatched, reuses the reservation when the same group is formed
+again on replay or reattached across a segment, admits a group the journal
+already accepted whatever the current bound says, and refuses a fresh group
+that does not fit **whole**, with
+`RuntimeErrorCode::EffectGroupOpenerBoundExceeded`. The bound is host
+configuration (`OpenerWorkBound`, 1024 unique children by default). The
+parent-side command units an aggregate costs its opener's journal are
+per group: one open, one clock sample when it holds timers, at most two
+`IncorporateGroupSettlements` records (at decision, and at retirement or the
+opener's end) and one close; per child: one dispatch, one rank read per consumed or incorporated
+rank, and at most one cancel decision; per handover: one carried cursor per
+outstanding group. All are finite in the group's width and the width is bounded
+per opener, so an aggregate adds a bounded number of commands between two
+segment-boundary checks and **mid-aggregate VM suspension is not necessary**.
 
 *Amendment (FIG-3548).* The journal-less native tier retains every reaped group's settled record until its scope retires (`retire_effect_journal` evicts it), so a reopen after close serves the recorded settlements regardless of finalizer timing, in every build.
 
@@ -888,10 +944,23 @@ child that did not settle.
 existing all-results wait and its first-settled rejection selection; ADR 0086's
 comprehension rules are untouched. Changing that surface requires its own ruling.
 
-*Status.* The three-way wake policy, the source-order projection and the
-preparation prefix **hold today**. The total response algebra, the classification
-split and the duplicate mapping are **new** (FIG-3397); FIG-3395 pins the current
-baseline first.
+*Status.* **Implemented** (FIG-3397). `AbilityOp::ResourceOperationBatch`
+carries the consumer mode and answers with `ResourceOperationBatchResult`'s
+four arms — `AllResults`, `Selected`, `SettledValue`, `ExhaustedRejections`;
+infrastructure failure and cancellation are the ability's `Err`, which the VM
+raises as the uncatchable `AggregateHostControl` terminal — no guest `catch`
+sees it — and a live controller error is also recorded as the enclosing
+execution's nested effect error, so the cell aborts and is redriven rather than
+committing an outcome its aggregate never answered. The VM deduplicates a handle
+written twice into one leaf and expands its outcome to every position.
+
+*Amendment (FIG-3397): L7 ruled.* The standalone list-batch had selected its
+rejection in **written** order while this law said "first-settled", and the
+compile-time literal batch had selected by settlement order. One rule now holds
+for every Lashlang-native aggregate, which is what the list-batch already did:
+it asks for every result (`AllSettled` at the boundary) and reports its first
+*written* unwrapped rejection. Only the TypeScript `Promise.*` aggregates carry
+an ECMA consumer mode, and `first_settled_rejection` is deleted.
 
 ---
 
@@ -946,9 +1015,14 @@ second encoding is added for timers.
     that driver. Its census row indexes the deviation; it is **not** executable
     evidence of callback semantics.
 
-*Status.* One handle kind, the raw-handle refusal, operand evaluation order and
-`AggregateError` shape validation **hold today**; `race`/`any` themselves do not.
-Clauses 1–8 land in FIG-3397.
+*Status.* **Implemented** (FIG-3397), clauses 1–8. An unawaited `sleep(ms)`
+mints a pending timer under the one handle encoding; its aggregate records the
+deadline once from a journaled clock sample and admits a `Sleep { Until }`
+child. A timer carries no identity of its own, so an aggregate that holds one
+folds every timer's position and duration, and the instruction that formed it,
+into its group identity: two timer aggregates at two sites are two groups. The clause 5 error code is `RuntimeErrorCode::AggregateAwaitUnsettled`
+(`aggregate_await_unsettled`), raised by the VM as the uncatchable
+`AggregateAwaitUnsettled` terminal.
 
 ---
 
@@ -985,9 +1059,11 @@ Routing is unchanged:
 equivalence it documents, that "`await processes.await({ handle })` answers exactly
 what `await handle`".
 
-*Status.* The Durable Wait routing, the terminal conversion and the released-wait
-semantics **hold today**. Admission as a group child of this kind is **new**
-(FIG-3397).
+*Status.* **Implemented** (FIG-3397). `processes.await` is admitted as a group
+tool child whose attempt parks on the Durable Wait at once, so there is no
+attempt body for a cancel grace to interrupt; selection leaves it admitted, and
+the opener's close cancels and releases the wait without cancelling the
+process.
 
 ---
 
@@ -1028,9 +1104,9 @@ the parent's ledger, so its usage travels as a semantic fact on its settlement.
 **No generic durable trace bus.** Semantic usage rides the existing usage path;
 live trace delivery stays best-effort.
 
-*Status.* The shared ledger and its single commit point **hold today**.
-Cross-boundary attribution, deduplication on attach or redrive, and
-cancellation-surviving usage are **new** (FIG-2266, FIG-3397).
+*Status.* **Implemented** (FIG-2266, FIG-3411, FIG-3397). Usage deltas are
+charged once per `UsageDeltaIdentity`; a loser's usage is incorporated at its
+opener's end, before the opener's accounting commits.
 
 ---
 

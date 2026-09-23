@@ -13,9 +13,9 @@
 //!   `const <name> = async (..) => { .. };`.
 //! * `Print(__typescript_stdlib("__consoleObservationText", x))` prints back as
 //!   `console.log(x)`.
-//! * `__typescript_await_array([..], false)` prints back as
-//!   `await Promise.all([..])`, and the settled flavour as
-//!   `await Promise.allSettled([..])`.
+//! * `__typescript_await_array([..], "all")` prints back as
+//!   `await Promise.all([..])`, and likewise for `allSettled`, `race` and
+//!   `any`; `__typescript_pending_timer(ms)` prints back as `sleep(ms)`.
 //! * The array-callback driver block — generated `__typescript_N_callback_*`
 //!   bindings around a `__typescript_stdlib("__singleCallbackResult", Map { .. })`
 //!   tail — prints back as `receiver.map(fn)` / `receiver.filter(fn)`.
@@ -691,13 +691,18 @@ impl Printer {
         }
         if let Expr::BuiltinCall { name, args } = expression
             && name.as_str() == "__typescript_await_array"
-            && let [items, Expr::Bool(settled)] = args.as_slice()
+            && let [items, Expr::String(method)] = args.as_slice()
         {
-            let method = if *settled { "allSettled" } else { "all" };
             return Ok(Some(format!(
                 "await Promise.{method}({})",
                 self.expression(items)?
             )));
+        }
+        if let Expr::BuiltinCall { name, args } = expression
+            && name.as_str() == "__typescript_pending_timer"
+            && let [duration] = args.as_slice()
+        {
+            return Ok(Some(format!("sleep({})", self.expression(duration)?)));
         }
         if let Some(sugared) = self.array_callback_sugar(expression)? {
             return Ok(Some(sugared));

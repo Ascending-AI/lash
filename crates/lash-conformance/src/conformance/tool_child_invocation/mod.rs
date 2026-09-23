@@ -93,6 +93,11 @@ const LEAF_SPEND_CANCEL: &str = "tool:law_spend_cancel";
 /// The leaf the commit-boundary laws run: returns a terminal that declares a
 /// process start and an event, so the §5 drain is observable intent writes.
 const LEAF_COMMIT: &str = "tool:law_commit";
+/// The leaf the opener-end laws race as a loser: it spends a managed-LLM call,
+/// waits on the same held gate as `law_commit`, then returns a terminal that
+/// declares a process start — so its settlement carries both a spend (§13)
+/// and a possession (§6) its opener must incorporate.
+const LEAF_SPEND_COMMIT: &str = "tool:law_spend_commit";
 /// The leaf the batch-group differential law calls for a tool rejection: its
 /// body always returns an error, so the reply carries a failed output both
 /// paths must reproduce identically.
@@ -351,6 +356,7 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
         LEAF_BILLED,
         LEAF_SPEND_CANCEL,
         LEAF_COMMIT,
+        LEAF_SPEND_COMMIT,
         LEAF_FAIL,
         LEAF_FENCE,
         LEAF_BIG,
@@ -578,6 +584,44 @@ impl crate::ToolProvider for LawLeafProvider {
                             payload: serde_json::json!({ "leaf": "commit", "call_id": call_id }),
                         }),
                     ]),
+                )
+            }
+            name if name == LEAF_SPEND_COMMIT.trim_start_matches("tool:") => {
+                let call_id = context
+                    .tool_call_id()
+                    .unwrap_or("missing-call-id")
+                    .to_string();
+                if let Err(error) = context
+                    .direct_completions()
+                    .complete(
+                        crate::DirectRequest::text("law-model", "spend before the commit"),
+                        "law-spend-commit-leaf",
+                    )
+                    .await
+                {
+                    return crate::ToolOutcome::err_fmt(format!(
+                        "direct completion failed: {error}"
+                    ))
+                    .into();
+                }
+                self.observation.await_released(&call_id).await;
+                crate::ToolAttemptOutcome::done(
+                    crate::ToolOutcomeDone::ok(
+                        serde_json::json!({ "leaf": "spend-commit", "call_id": call_id }),
+                    ),
+                    crate::ToolIntents::v3(vec![crate::ToolIntent::StartProcess(Box::new(
+                        crate::StartProcessIntent {
+                            session_id: self.session_id.clone(),
+                            declaration: crate::ProcessStartDeclaration::external(
+                                crate::ProcessOriginator::host(),
+                                serde_json::json!({ "leaf": "spend-commit", "call_id": call_id }),
+                                crate::ProcessLifecyclePolicy::new(
+                                    crate::ParentScope::Host,
+                                    crate::OnParentEnd::Abandon,
+                                ),
+                            ),
+                        },
+                    ))]),
                 )
             }
             // The admission-fence leaf: the same held gate as `law_commit`,
@@ -1959,6 +2003,7 @@ mod driver;
 mod foreign_opener;
 mod incarnation;
 mod incorporation;
+mod opener_end;
 mod presentation;
 mod recovery;
 mod siblings;
@@ -1972,6 +2017,7 @@ pub use driver::*;
 pub use foreign_opener::*;
 pub use incarnation::*;
 pub use incorporation::*;
+pub use opener_end::*;
 pub use presentation::*;
 pub use recovery::*;
 pub use siblings::*;

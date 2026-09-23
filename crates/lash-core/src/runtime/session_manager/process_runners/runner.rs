@@ -200,7 +200,19 @@ impl RuntimeSessionServices {
             .with_process_execution(&registration_for_runtime, event_context)
             .with_cancellation_token(cancellation_for_runtime.clone())
             .without_turn_cancel_observation()
-            .with_process_work(services.current.host.work.process_wiring().cloned());
+            .with_process_work(services.current.host.work.process_wiring().cloned())
+            .with_opener_state(crate::session::OpenerState::new(
+                services.current.host.core.control.opener_work_bound,
+            ))
+            .with_group_closing(
+                services
+                    .current
+                    .host
+                    .core
+                    .control
+                    .effect_host
+                    .effect_group_closing(),
+            );
             if let Some(issuer) = tool_child_completion_issuer {
                 context = context.with_tool_child_completion_issuer(issuer);
             }

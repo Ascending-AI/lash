@@ -114,11 +114,15 @@ aspirational:
    ADR claimed a snapshot deviation the code does not have.
 3. **Repair-carrying rejection.** Everything still rejected — classes,
    generators as a protocol, getters/setters, prototype surgery, `eval`,
-   labels, locale surfaces, timers, `Promise.race`/`any`
-   until first-settlement durability exists (FIG-1416) — rejects with a
+   labels, locale surfaces, host timer callbacks — rejects with a
    diagnostic that names the construct and the in-dialect rewrite. The
    rejected set shrinks only by evidence: observed collision traffic
    promotes a construct into a ruling, in either direction.
+   `Promise.race` and `Promise.any` left this set once first-settlement
+   durability existed: FIG-3397 accepted them on durable effect groups, with
+   an unawaited `sleep(ms)` as a pending timer
+   ([ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
+   §10, §11).
 
 One safety invariant joins the no-abort guarantee: any operation whose
 allocation size derives from a guest-supplied number bounds the allocation

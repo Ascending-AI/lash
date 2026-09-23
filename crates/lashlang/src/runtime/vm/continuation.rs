@@ -49,9 +49,17 @@ use super::exceptions::PendingErrorOrigin;
 /// v17 carries the replay key with a pending execution-host tool failure so a
 /// resumed segment retains the recorded failure's observation provenance.
 ///
+/// v18 carries pending timers in the pending-request map — an unawaited
+/// `sleep(ms)` is a pending operation like a tool call (ADR 0099 §11) — and the
+/// aggregate refusals `ResourceBatchReply`, `AggregateAwaitUnsettled` and
+/// `AggregateHostControl` (which replaces the catchable `ResourceBatchFailed`)
+/// in its runtime-error vocabulary. A v17 continuation's map could never hold
+/// a timer, but the refusal a parked v17 VM carries names a retired variant,
+/// so the boundary is a version rather than a decode failure.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 17;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 18;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).

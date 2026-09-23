@@ -130,6 +130,19 @@ impl OpenerFinalizationSteps for GroupOnlyFinalization {
     }
 }
 
+/// One group the journal holds unsettled under a scope: what an opener's end
+/// needs to finish a group it no longer holds a cursor for (ADR 0099 §7).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnsettledEffectGroup {
+    /// The group's durable key.
+    pub group_key: String,
+    /// How many children the group was opened with.
+    pub children: usize,
+    /// Whether `closing` is already recorded. A `live` group still has to be
+    /// closed before it is finalized; a `closing` one resumes finalization.
+    pub closing: bool,
+}
+
 /// The host-owned driver that finishes what `close` records.
 ///
 /// A host obtains one beside its [`StoreEffectGroupDrain`](super::group_drain::StoreEffectGroupDrain),
@@ -159,6 +172,52 @@ pub trait StoreEffectGroupClosing: Send + Sync {
         group_key: &str,
         steps: &dyn OpenerFinalizationSteps,
     ) -> Result<GroupFinalizationReport, RuntimeEffectControllerError>;
+
+    /// Every group under `scope` whose lifecycle is not `settled` — `live`
+    /// or `closing` — in journal order.
+    ///
+    /// The opener's end reads this to finish groups whose cursor it no longer
+    /// holds: a turn resumed after a crash serves its completed cells from the
+    /// journal, so a group one of those cells opened — and whose losers are
+    /// still accepted — is known to the journal and not to the resumed
+    /// process (ADR 0099 §7, W5, W9); and an end that recorded `closing` and
+    /// then failed leaves a group its retried end resumes. The opener filters
+    /// the result to the groups it formed.
+    async fn read_unsettled_groups(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<Vec<UnsettledEffectGroup>, RuntimeEffectControllerError>;
+
+    /// The keys of every group owned by `session_id` whose lifecycle is not
+    /// `settled` — the pins session deletion refuses on (ADR 0099 §7, W16).
+    ///
+    /// Deletion asks this **before** it deletes anything: the journal
+    /// retirement refuses the same pins, but it runs after the session's
+    /// processes, subscriptions, waits and store rows are already gone, and a
+    /// refusal there would leave an accepted or closing group's opener deleted
+    /// under it.
+    async fn read_session_pins(
+        &self,
+        session_id: &crate::SessionId,
+    ) -> Result<Vec<String>, RuntimeEffectControllerError>;
+
+    /// Recover the accepted children of every `live` group under `scope` that
+    /// no process here is running, while their opener lives (ADR 0099 §0,
+    /// W3, W5): a turn or process segment resumed after its worker died calls
+    /// this when it starts. The children run on host-owned tasks under the
+    /// group's declared `RunToCompletion` disposition, through the same claim
+    /// fence every drive uses, so a child another executor still holds is
+    /// waited for and replayed rather than run twice; the opener's end closes
+    /// whatever is still unfinished. Answers how many groups it started
+    /// driving.
+    ///
+    /// A dead worker is not a closed opener: recovery never cancels and never
+    /// abandons. The in-memory tier answers zero — nothing it holds survives
+    /// the death of the process that held it (§14).
+    async fn recover_live_groups(
+        &self,
+        scope: &ExecutionScope,
+    ) -> Result<usize, RuntimeEffectControllerError>;
 
     /// Finalize every `closing` group under `scope`, in journal order — the
     /// retained-recovery entry a redriven turn calls at its exit.

@@ -17,22 +17,20 @@
 //! blocks inside its attempt until this test releases it. No case sleeps, and
 //! no case asserts on a duration.
 //!
-//! Three of the current-behaviour pins are deviations or limits rather than
-//! laws, and are named so the FIG-3397 landing re-points them instead of
-//! discovering them:
+//! Three pins the FIG-3397 landing re-pointed rather than discovered:
 //!
-//! * [`a_rejected_aggregate_still_waits_for_every_leaf_adr_0062_deviation_15`]
-//!   pins ADR 0062 deviation 15 — v1 has no fail-fast cancellation of an
-//!   in-flight batch leaf, so a rejected `Promise.all` settles at the pace of
-//!   its slowest leaf while rejecting with its first-settled reason.
+//! * [`sqlite_a_rejected_promise_all_resumes_at_its_first_consumed_rejection`]
+//!   retires ADR 0062 deviation 15: a rejected `Promise.all` resumes at the
+//!   first rejection its consumer takes, while a held sibling is still in
+//!   flight as a loser (ADR 0099 §10 L2).
 //! * [`sqlite_a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf`]
 //!   pins ADR 0099 §5's settlement semantics: group children commit in durable
 //!   commit order, so a held source-first leaf does not block a later sibling's
 //!   terminal and the first-settled selection reports the later leaf's
 //!   rejection.
 //! * [`the_standalone_list_batch_still_selects_the_first_written_rejection`]
-//!   pins the compile-time list-batch path, which passes `false` for
-//!   `first_settled_rejection` and therefore selects in written order.
+//!   pins the ruling that Lashlang-native aggregates wait for every result and
+//!   report their first *written* rejection (ADR 0099 §10 L7).
 //!
 //! The compile-time aggregate paths (`Instruction::ResourceOperationBatch`
 //! and `Instruction::ResourceOperationListBatch`) have had no authored
@@ -59,6 +57,9 @@ const RENDEZVOUS_BUDGET: std::time::Duration = std::time::Duration::from_secs(20
 const INTENT_PROCESS: &str = "aggregate-oracle-intent-target";
 /// The event type a leaf's declared intent emits.
 const INTENT_EVENT: &str = "aggregate.oracle.leaf";
+
+/// An event type the intent target never registered: emitting it is refused.
+const UNREGISTERED_EVENT: &str = "aggregate.oracle.unregistered";
 
 // ---------------------------------------------------------------------------
 // The journaled tier
@@ -295,6 +296,10 @@ struct StepArgs {
     hold: bool,
     #[serde(default)]
     intent: bool,
+    /// Declare an intent the runtime refuses — an event type the target never
+    /// registered — so the call returns a value and still settles rejected.
+    #[serde(default)]
+    refused_intent: bool,
     /// Fail in `prepare_tool_call`, before the batch dispatches anything.
     #[serde(default)]
     prepare_fail: bool,
@@ -331,6 +336,7 @@ fn step_definition() -> lash_core::ToolDefinition {
                 "defer": { "type": "boolean" },
                 "hold": { "type": "boolean" },
                 "intent": { "type": "boolean" },
+                "refused_intent": { "type": "boolean" },
                 "prepare_fail": { "type": "boolean" }
             },
             "required": ["id"],
@@ -409,7 +415,7 @@ impl ToolProvider for OracleTools {
             .into();
         }
         let value = serde_json::json!({ "id": args.id });
-        if !args.intent {
+        if !args.intent && !args.refused_intent {
             return lash_core::ToolOutcome::ok(value).into();
         }
         lash_core::ToolAttemptOutcome::done(
@@ -418,7 +424,11 @@ impl ToolProvider for OracleTools {
                 lash_core::EmitProcessEventIntent {
                     session_id: SessionId::from(self.session_id.clone()),
                     process_id: lash_sansio::ProcessId::from(INTENT_PROCESS),
-                    event_type: INTENT_EVENT.to_string(),
+                    event_type: if args.refused_intent {
+                        UNREGISTERED_EVENT.to_string()
+                    } else {
+                        INTENT_EVENT.to_string()
+                    },
                     payload: serde_json::json!({ "id": args.id }),
                 },
             )]),
@@ -460,6 +470,19 @@ fn oracle_core(
     registry: Arc<TestLocalProcessRegistry>,
     requests: Arc<StdMutex<Vec<String>>>,
 ) -> Result<LashCore> {
+    oracle_builder(tier, session_id, cells, theatre, registry, requests)
+        .build(crate::testing::runtime_lease_owner())
+}
+
+/// [`oracle_core`]'s builder, for a case that swaps one of its parts.
+fn oracle_builder(
+    tier: &JournaledTier,
+    session_id: &str,
+    cells: Vec<String>,
+    theatre: Arc<OracleTheatre>,
+    registry: Arc<TestLocalProcessRegistry>,
+    requests: Arc<StdMutex<Vec<String>>>,
+) -> crate::core::LashCoreBuilder {
     let scripted = Arc::new(TokioMutex::new(VecDeque::from(cells)));
     let provider = crate::testing::TestProvider::builder()
         .kind("aggregate-oracle")
@@ -502,7 +525,6 @@ fn oracle_core(
         .plugin(lash_core::testing::process_engine_plugin_fixture())
         .store_factory(tier.factory())
         .process_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
-        .build(crate::testing::runtime_lease_owner())
 }
 
 /// The process a declared intent is realized against. Registered up front with
@@ -842,9 +864,11 @@ async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -
         driven.theatre.release(second);
         let run = driven.finish().await?;
 
+        // `Promise.all` resumes at its first consumed rejection, so the held
+        // leaf is a loser the turn's end may cancel before it ever settles.
         assert_eq!(
-            run.theatre.settled(),
-            vec![first, second],
+            run.theatre.settled().first().map(String::as_str),
+            Some(first),
             "{}/{label}: the case decided the settlement order",
             tier.name
         );
@@ -916,11 +940,6 @@ async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
     // blocks the later terminal leaf's settlement.
     driven.theatre.await_started("second").await;
     driven.theatre.await_started("first").await;
-    assert!(
-        !driven.turn.is_finished(),
-        "{}: the turn must still be parked on the held leaf",
-        tier.name
-    );
     driven.theatre.await_settled("second").await;
     assert_eq!(
         driven.theatre.settled(),
@@ -933,12 +952,14 @@ async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
     // the held leaf can commit.
     driven.theatre.await_consumed(1).await;
 
+    // `Promise.all` resumed at that first consumed rejection (ADR 0099 §10
+    // L2); the held source-first leaf is a loser the turn's end cancels.
     driven.theatre.release("first");
     let run = driven.finish().await?;
 
     assert_eq!(
-        run.theatre.settled(),
-        vec!["second", "first"],
+        run.theatre.settled().first().map(String::as_str),
+        Some("second"),
         "{}: settlement order is the group's commit order, not source order",
         tier.name
     );
@@ -986,28 +1007,32 @@ async fn a_preparation_failure_leads_the_settlement_order(tier: &JournaledTier) 
     Ok(())
 }
 
-/// ADR 0062 deviation 15, pinned rather than asserted as a law.
-///
-/// A rejected `Promise.all` still waits for every leaf to settle. v1 has no
-/// fail-fast cancellation of an in-flight batch leaf, so the aggregate settles
-/// at the pace of its slowest leaf while rejecting with its first-settled
-/// reason. FIG-3397 re-points this case when the deviation retires.
+/// ADR 0062 deviation 15 retired (FIG-3397): a rejected `Promise.all` resumes
+/// at the first rejection its consumer takes (ADR 0099 §10 L2), and a sibling
+/// still in flight is a loser that runs on under the opener.
 ///
 /// The witness needs no clock. One leaf rejects; the other is held inside its
-/// own attempt by a release only this test can give. At the moment the test
-/// observes the rejection, the held leaf has not settled and the turn *cannot*
-/// have finished — a finished turn at that instant would be the fail-fast
-/// behaviour this deviation says v1 does not have.
-async fn a_rejected_aggregate_still_waits_for_every_leaf(tier: &JournaledTier) -> Result<()> {
+/// own attempt by a release only this test can give. The catch clause calls
+/// another leaf: that leaf starting while the held one has not settled is the
+/// resume the deviation said v1 could not make.
+async fn a_rejected_promise_all_resumes_at_its_first_consumed_rejection(
+    tier: &JournaledTier,
+) -> Result<()> {
     let driven = drive_cells(
         tier,
         "aggregate-oracle-deviation-15",
-        vec![typescript_block(&catching_cell(
-            r#"Promise.all([
-  oracle.step({ id: "rejecting", defer: true }),
-  oracle.step({ id: "held", hold: true })
-])"#,
-        ))],
+        vec![typescript_block(
+            r#"try {
+  await Promise.all([
+    oracle.step({ id: "rejecting", defer: true }),
+    oracle.step({ id: "held", hold: true })
+  ]);
+  finish({ resolved: true });
+} catch (error) {
+  await oracle.step({ id: "after-rejection" });
+  finish({ reason: error.message });
+}"#,
+        )],
     )
     .await?;
 
@@ -1019,33 +1044,19 @@ async fn a_rejected_aggregate_still_waits_for_every_leaf(tier: &JournaledTier) -
             OracleTheatre::rejection("rejecting"),
         )
         .await?;
-    driven.theatre.await_settled("rejecting").await;
-    assert_eq!(
-        driven.theatre.settled(),
-        vec!["rejecting"],
-        "{}: the held leaf is still inside its attempt",
-        tier.name
-    );
+    driven.theatre.await_started("after-rejection").await;
     assert!(
-        !driven.turn.is_finished(),
-        "{}: ADR 0062 deviation 15 — a rejected aggregate may not report while a \
-         leaf is still in flight",
-        tier.name
+        !driven.theatre.settled().contains(&"held".to_string()),
+        "{}: the aggregate resumed while the held leaf was still in flight, saw {:?}",
+        tier.name,
+        driven.theatre.settled()
     );
-    driven.theatre.await_consumed(1).await;
 
     driven.theatre.release("held");
     let run = driven.finish().await?;
-
-    assert_eq!(
-        run.theatre.settled(),
-        vec!["rejecting", "held"],
-        "{}: every leaf settled before the aggregate reported",
-        tier.name
-    );
     assert!(
         reason(&run).contains("step rejecting rejected"),
-        "{}: the first-settled rejection is still the reported one, got {}",
+        "{}: the first consumed rejection is the reported one, got {}",
         tier.name,
         reason(&run)
     );
@@ -1191,6 +1202,19 @@ async fn an_aggregate_leafs_declared_intent_is_realized(tier: &JournaledTier) ->
     Ok(())
 }
 
+/// §10 L3: an aggregate's infrastructure failure is the host-control channel.
+#[path = "aggregate_oracle/host_control.rs"]
+mod host_control;
+/// §9: completed groups retire under a live opener.
+#[path = "aggregate_oracle/opener_bound.rs"]
+mod opener_bound;
+/// `Promise.race` and `Promise.any` on the product path (FIG-3397).
+#[path = "aggregate_oracle/race_any.rs"]
+mod race_any;
+/// §11 clause 4: every timer aggregate is its own group.
+#[path = "aggregate_oracle/timer_identity.rs"]
+mod timer_identity;
+
 // ---------------------------------------------------------------------------
 // SQLite registration of the case list
 // ---------------------------------------------------------------------------
@@ -1225,8 +1249,8 @@ async fn sqlite_a_preparation_failure_leads_the_settlement_order() -> Result<()>
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_rejected_aggregate_still_waits_for_every_leaf_adr_0062_deviation_15() -> Result<()> {
-    a_rejected_aggregate_still_waits_for_every_leaf(&sqlite()).await
+async fn sqlite_a_rejected_promise_all_resumes_at_its_first_consumed_rejection() -> Result<()> {
+    a_rejected_promise_all_resumes_at_its_first_consumed_rejection(&sqlite()).await
 }
 
 #[tokio::test]
@@ -1261,55 +1285,51 @@ async fn sqlite_an_aggregate_leafs_declared_intent_is_realized() -> Result<()> {
 // IR, because FIG-3397 changes both and a landing that only re-points the
 // bridge cases would move these silently.
 //
-// The two paths disagree today, which is the reason the ticket asks for them
-// separately: the literal-array batch derives `first_settled_rejection` from
-// its leaves and selects by the reported settlement order, while the
-// list-comprehension batch hard-codes `false` and selects in written order.
+// The two paths disagreed before FIG-3397: the literal-array batch selected by
+// the reported settlement order and the list-comprehension batch in written
+// order. The ruling puts both on the written-order rule (ADR 0099 §10 L7).
 
 /// A host that records every batch it is handed and answers each leaf with a
-/// rejection, reporting a settlement order the *test* chooses.
-struct RecordedSettlementHost {
-    /// The settled order the host reports, as leaf positions.
-    settlement_order: Vec<usize>,
+/// rejection. It runs its leaves in reverse, so a selection that followed the
+/// order leaves ran in would report leaf 1; the Lashlang-native aggregates ask
+/// it for every result and report in written order (ADR 0099 §10 L7).
+struct AllResultsHost {
     /// The batch sizes the VM asked for, in order.
     batches: StdMutex<Vec<usize>>,
+    /// The consumer mode each batch asked for.
+    consumers: StdMutex<Vec<lashlang::AggregateConsumer>>,
     calls: AtomicUsize,
 }
 
-impl RecordedSettlementHost {
-    fn new(settlement_order: Vec<usize>) -> Self {
+impl AllResultsHost {
+    fn new() -> Self {
         Self {
-            settlement_order,
             batches: StdMutex::new(Vec::new()),
+            consumers: StdMutex::new(Vec::new()),
             calls: AtomicUsize::new(0),
         }
     }
 }
 
-impl lashlang::ExecutionHost for RecordedSettlementHost {
+impl lashlang::ExecutionHost for AllResultsHost {
     async fn perform(
         &self,
         op: lashlang::AbilityOp,
     ) -> std::result::Result<lashlang::AbilityResult, lashlang::ExecutionHostError> {
         match op {
             lashlang::AbilityOp::ResourceOperationBatch(batch) => {
-                self.batches.lock_recover().push(batch.operations.len());
-                self.calls
-                    .fetch_add(batch.operations.len(), Ordering::SeqCst);
-                let results = batch
-                    .operations
-                    .iter()
-                    .enumerate()
-                    .map(|(index, _)| {
-                        lashlang::ResourceOperationResult::Error(lashlang::ExecutionHostError::new(
-                            format!("leaf-{index} rejected"),
-                        ))
-                    })
-                    .collect();
+                self.batches.lock_recover().push(batch.leaves.len());
+                self.consumers.lock_recover().push(batch.consumer);
+                self.calls.fetch_add(batch.leaves.len(), Ordering::SeqCst);
+                let mut results = vec![None; batch.leaves.len()];
+                for index in (0..batch.leaves.len()).rev() {
+                    results[index] = Some(lashlang::ResourceOperationResult::Error(
+                        lashlang::ExecutionHostError::new(format!("leaf-{index} rejected")),
+                    ));
+                }
                 Ok(lashlang::AbilityResult::ResourceOperationBatch(
-                    lashlang::ResourceOperationBatchResult::settled_in_order(
-                        results,
-                        self.settlement_order.clone(),
+                    lashlang::ResourceOperationBatchResult::AllResults(
+                        results.into_iter().flatten().collect(),
                     ),
                 ))
             }
@@ -1337,13 +1357,14 @@ fn literal_array_batch_program() -> lashlang::Program {
     ])))])
 }
 
-/// The literal-array compile-time batch selects the **first settled**
-/// rejection: `compiler/effects.rs` sets `first_settled_rejection` from whether
-/// any leaf unwraps, and both of these do.
+/// The literal-array compile-time batch is a Lashlang-native aggregate: it
+/// asks the host for every result and reports the **first written** rejection
+/// (ADR 0099 §10 L7). Before FIG-3397 it selected the first settled one; the
+/// ruling puts the dialect's own aggregates on one input-order rule, and only
+/// the TypeScript `Promise.*` aggregates carry an ECMA consumer mode.
 #[tokio::test]
-async fn a_literal_array_batch_selects_the_first_settled_rejection() {
-    // Leaf 1 settled first, and both leaves reject.
-    let host = RecordedSettlementHost::new(vec![1, 0]);
+async fn a_literal_array_batch_reports_the_first_written_rejection() {
+    let host = AllResultsHost::new();
     let compiled =
         lashlang::compile_ast(&literal_array_batch_program()).expect("compile the literal batch");
     let error = lashlang::execute(&compiled, &mut lashlang::State::new(), &host)
@@ -1355,14 +1376,19 @@ async fn a_literal_array_batch_selects_the_first_settled_rejection() {
         [2],
         "the literal array forms one batch of two leaves"
     );
+    assert_eq!(
+        host.consumers.lock_recover().as_slice(),
+        [lashlang::AggregateConsumer::AllSettled],
+        "a Lashlang-native aggregate asks for every result"
+    );
     let rendered = error.to_string();
     assert!(
-        rendered.contains("leaf-1 rejected"),
-        "the first-settled rejection is the reported one: {rendered}"
+        rendered.contains("leaf-0 rejected"),
+        "the written-first rejection is the reported one: {rendered}"
     );
     assert!(
-        !rendered.contains("leaf-0 rejected"),
-        "the written-first rejection is not the reported one: {rendered}"
+        !rendered.contains("leaf-1 rejected"),
+        "the leaf the host ran first is not the reported one: {rendered}"
     );
 }
 
@@ -1382,18 +1408,12 @@ fn list_batch_program() -> lashlang::Program {
     )))])
 }
 
-/// The standalone list-batch path selects the **first written** rejection, not
-/// the first settled one: the compiler hard-codes `first_settled_rejection:
-/// false` for it (`compiler/effects.rs`, `ResourceOperationListBatch`), so the
-/// VM never reads the order the host reported.
-///
-/// This is today's behaviour, not a law. FIG-3397 rules the list-batch's
-/// rejection order explicitly and re-points this case; until then a landing
-/// that changed it would be changing an untested path.
+/// The standalone list-batch path keeps its all-results wait and reports the
+/// **first written** rejection — ruled explicitly by FIG-3397 (ADR 0099 §10
+/// L7): the VM asks the host for every result and selects in written order.
 #[tokio::test]
 async fn the_standalone_list_batch_still_selects_the_first_written_rejection() {
-    // Leaf 1 settled first, and both leaves reject.
-    let host = RecordedSettlementHost::new(vec![1, 0]);
+    let host = AllResultsHost::new();
     let compiled = lashlang::compile_ast(&list_batch_program()).expect("compile the list batch");
     let error = lashlang::execute(&compiled, &mut lashlang::State::new(), &host)
         .await
@@ -1411,7 +1431,12 @@ async fn the_standalone_list_batch_still_selects_the_first_written_rejection() {
     );
     assert!(
         !rendered.contains("leaf-1 rejected"),
-        "the first-settled rejection is not consulted on this path: {rendered}"
+        "the leaf the host ran first is not consulted on this path: {rendered}"
+    );
+    assert_eq!(
+        host.consumers.lock_recover().as_slice(),
+        [lashlang::AggregateConsumer::AllSettled],
+        "the list batch asks for every result"
     );
 }
 
@@ -1436,16 +1461,14 @@ fn nested_comprehension_program() -> lashlang::Program {
     )))])
 }
 
-/// The nested-comprehension law: the whole nest is one batch, and the inner
-/// comprehension's compiled template never selects by settlement order
-/// (`compiler/effects.rs` builds it with `first_settled_rejection: false` and
-/// `aggregate_unwrap: false`).
+/// The nested-comprehension law: the whole nest is one batch, and it keeps the
+/// Lashlang-native written rejection order (ADR 0099 §10 L7).
 ///
 /// One host batch of two leaves, and the written-first rejection is the one
-/// reported, even though the host reported the other leaf as first-settled.
+/// reported, even though the host ran the other leaf first.
 #[tokio::test]
 async fn a_nested_comprehension_is_one_batch_that_keeps_written_rejection_order() {
-    let host = RecordedSettlementHost::new(vec![1, 0]);
+    let host = AllResultsHost::new();
     let compiled =
         lashlang::compile_ast(&nested_comprehension_program()).expect("compile the nested shape");
     let error = lashlang::execute(&compiled, &mut lashlang::State::new(), &host)

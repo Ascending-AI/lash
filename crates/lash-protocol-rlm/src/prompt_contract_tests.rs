@@ -327,10 +327,6 @@ fn removed_guardrails_still_have_repair_hints() {
             "function* g() { yield 1; }",
             "build the whole list and return it",
         ),
-        (
-            "await Promise.race([1, 2]);",
-            "Promise.all/Promise.allSettled",
-        ),
     ] {
         let error = lash_typescript::link(source, &host)
             .expect_err("unsupported construct")

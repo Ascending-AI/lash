@@ -26,7 +26,10 @@ mod workflow;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Identity version mixed into every Lashlang and TypeScript module-artifact hash.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v15";
+///
+/// v16: the builtin registry gains `__typescript_pending_timer`, and
+/// `__typescript_await_array` names its aggregate by method (ADR 0099 §11).
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v16";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,

@@ -293,7 +293,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
-    fn runtime_error_value(
+    pub(super) fn runtime_error_value(
         &mut self,
         error: &RuntimeError,
         instruction_ip: usize,

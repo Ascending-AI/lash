@@ -80,6 +80,29 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "race_any_runtime__test",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "race_any_runtime",
+    crate_root = "tests/race_any_runtime.rs",
+    declared_features = [
+        "testing",
+    ],
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    extra_compile_data = [],
+    library = ":lash-typescript",
+    library_crate_name = "lash_typescript",
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    rustc_env = {},
+    tags = [
+        "dev-deferred",
+    ],
+    version = "0.0.0-dev",
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

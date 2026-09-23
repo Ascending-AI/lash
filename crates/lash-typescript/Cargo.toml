@@ -49,3 +49,9 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 [[test]]
 name = "integration"
 path = "tests/main.rs"
+
+# Its own binary: the scripted host is one more instantiation of the generic
+# VM, and the integration binary's compile is already at its memory request.
+[[test]]
+name = "race_any_runtime"
+path = "tests/race_any_runtime.rs"

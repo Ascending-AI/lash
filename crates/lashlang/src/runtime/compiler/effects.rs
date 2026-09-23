@@ -288,17 +288,17 @@ impl Compiler {
         let mut stack_value_count = 0;
         let shape =
             self.compile_aggregate_await_shape(handle, path, &mut leaves, &mut stack_value_count);
-        // Only a batch that can propagate a leaf's rejection selects by
-        // settlement order. `allSettled` reports every leaf as a record and
-        // never unwraps one, so it must not validate — let alone die on —
-        // metadata it does not read.
-        let selects_by_settlement_order = leaves.iter().any(|leaf| leaf.unwrap);
+        // A Lashlang-native aggregate waits for every result and reports its
+        // first *written* unwrapped rejection — one input-order rule for the
+        // dialect's own aggregates, the list-comprehension batch included
+        // (ADR 0099 §10 L7). Only the TypeScript `Promise.*` aggregates carry
+        // an ECMA consumer mode.
         let batch = self.push_resource_operation_batch(CompiledResourceOperationBatch {
             leaves: leaves.into_boxed_slice(),
             shape,
             stack_value_count,
             aggregate_unwrap,
-            first_settled_rejection: selects_by_settlement_order,
+            consumer: AggregateConsumer::AllSettled,
         });
         let instruction = self.code.len();
         self.code.push(Instruction::ResourceOperationBatch(batch));
@@ -348,7 +348,7 @@ impl Compiler {
                         shape: element_shape.expect("comprehension body compiles once"),
                         stack_value_count: element_value_count,
                         aggregate_unwrap: false,
-                        first_settled_rejection: false,
+                        consumer: AggregateConsumer::AllSettled,
                     }),
                 }
             }
@@ -476,6 +476,7 @@ impl Compiler {
         let source_span = self.expression_source_span(site_path);
         let leaf_index = leaves.len();
         leaves.push(CompiledResourceOperationBatchLeaf {
+            timer: false,
             operation: operation_index,
             argc: args.len(),
             receiver_stack_index,
