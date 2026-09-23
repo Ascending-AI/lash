@@ -223,33 +223,29 @@
   {
     "error_return": {
       "placement": "tool-attempt",
-      "outcome": "FIG-3528: an unretried store error from execute_effect(ToolAttempt) is converted into a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
-      "ticket": "FIG-3528",
-      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+      "outcome": "An unretried store error from execute_effect(ToolAttempt) aborts the turn as a controller error (FIG-3528): the typed error reaches the caller and no provider request or durable commit follows.",
+      "violations": []
     }
   },
   {
     "error_return": {
       "placement": "effect-journal-claim",
-      "outcome": "FIG-3528: an unretried store error from the effect journal's claim is converted into a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
-      "ticket": "FIG-3528",
-      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+      "outcome": "An unretried store error from the effect journal's claim aborts the turn as a controller error (FIG-3528): the typed error reaches the caller and no provider request or durable commit follows.",
+      "violations": []
     }
   },
   {
     "error_return": {
       "placement": "effect-journal-finalize",
-      "outcome": "FIG-3528: an unretried store error from the effect journal's finalize is converted into a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
-      "ticket": "FIG-3528",
-      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+      "outcome": "An unretried store error from the effect journal's finalize aborts the turn as a controller error (FIG-3528): the typed error reaches the caller and no provider request or durable commit follows.",
+      "violations": []
     }
   },
   {
     "error_return": {
       "placement": "effect-journal-renew",
-      "outcome": "FIG-3512: an unretried store error from the effect-lease renew aborts the running tool and the attempt becomes a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
-      "ticket": "FIG-3512",
-      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+      "outcome": "An unretried store error from the effect-lease renew aborts the turn as a controller error (FIG-3528): the typed error reaches the caller and no provider request or durable commit follows.",
+      "violations": []
     }
   }
 ]

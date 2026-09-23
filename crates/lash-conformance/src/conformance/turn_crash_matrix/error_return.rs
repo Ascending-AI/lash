@@ -260,6 +260,7 @@ async fn run_error_return_case<F>(
     ))
     .await;
     control.arm_error_return(ruling.placement);
+    let local = effect_controller.effect_journaling() == crate::EffectJournaling::Local;
     let result = Box::pin(drive_turn(runtime, effect_controller, identity)).await;
     invocation.end();
 
@@ -288,21 +289,41 @@ async fn run_error_return_case<F>(
             )
         });
     let continued = &trace[error_index + 1..];
+    let expected_code = journal_faults
+        .as_ref()
+        .map_or(crate::RuntimeErrorCode::RuntimeStore, |faults| {
+            faults.store_code()
+        });
+    // A controller with no effect journal has nothing to redrive an aborted
+    // attempt from, so the turn driver fails the turn with the controller's
+    // typed code instead of aborting it (`fail_or_abort_runtime_effect_controller`).
+    // On that tier the typed error reaches the caller as the failed turn's
+    // issue, and the commits that follow are that failed turn's terminal
+    // record rather than work continuing past the error.
+    let local_typed_failure = local
+        && matches!(&result, Ok(Some(turn)) if turn.errors.iter().any(|issue| {
+            issue.code.as_ref() == Some(&crate::FailureCode::from(&expected_code))
+        }));
     let observation = FailStopObservation {
-        durable_commits: continued.iter().filter(|op| is_commit_seam(op)).count(),
+        durable_commits: if local_typed_failure {
+            0
+        } else {
+            continued.iter().filter(|op| is_commit_seam(op)).count()
+        },
         tool_dispatches: continued.iter().filter(|op| is_dispatch_seam(op)).count(),
         provider_requests: continued
             .iter()
             .filter(|op| matches!(op, TurnSeamOperation::Provider(_)))
             .count(),
-        caller_error: result.err().map(|error| error.code),
+        caller_error: match &result {
+            Err(error) => Some(error.code.clone()),
+            Ok(_) if local_typed_failure => Some(expected_code.clone()),
+            Ok(_) => None,
+        },
         retried: journal_faults
             .as_ref()
             .is_some_and(|faults| faults.calls_after_fire() > 0),
     };
-    let expected_code = journal_faults.map_or(crate::RuntimeErrorCode::RuntimeStore, |faults| {
-        faults.store_code()
-    });
     let violations = fail_stop_violations(&observation, expected_code);
     match &ruling.ticket {
         None => assert!(
@@ -400,10 +421,10 @@ mod tests {
             validate_error_return_rulings(&rulings).is_ok(),
             "the synthetic test must start from valid rulings"
         );
-        let defective = rulings
-            .iter_mut()
-            .find(|ruling| !ruling.violations.is_empty())
-            .expect("a defective ruling fixture");
+        // Every placement is fail-stop today, so the defect is synthesized:
+        // violations pinned on a row that names no fix ticket.
+        let defective = rulings.first_mut().expect("a ruling fixture");
+        defective.violations = vec![FailStopViolation::DurableCommit];
         defective.ticket = None;
         assert!(
             validate_error_return_rulings(&rulings).is_err(),
