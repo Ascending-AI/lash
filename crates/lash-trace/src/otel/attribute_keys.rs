@@ -148,6 +148,7 @@ pub(super) const LASH_COMPACTION_DROPPED_PREFIX_MESSAGES: &str =
 pub(super) const LASH_COMPACTION_INSTRUCTIONS_PRESENT: &str =
     "lash.compaction.instructions_present";
 pub(super) const LASH_COMPACTION_MAX_CONTEXT_TOKENS: &str = "lash.compaction.max_context_tokens";
+pub(super) const LASH_COMPACTION_PRUNED_ATTACHMENTS: &str = "lash.compaction.pruned_attachments";
 pub(super) const LASH_COMPACTION_RETAINED_MESSAGES: &str = "lash.compaction.retained_messages";
 pub(super) const LASH_COMPACTION_SOURCE_MESSAGES: &str = "lash.compaction.source_messages";
 pub(super) const LASH_COMPACTION_SUMMARY_NODES: &str = "lash.compaction.summary_nodes";

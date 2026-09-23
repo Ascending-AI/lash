@@ -115,8 +115,8 @@ fn strip_attachment(part: &mut Part, placeholder: &str) -> bool {
     true
 }
 
-fn prune_old_attachments(messages: &mut [Message]) -> bool {
-    let mut changed = false;
+fn prune_old_attachments(messages: &mut [Message]) -> usize {
+    let mut pruned = 0usize;
     let mut recent_user_turns = 0usize;
 
     'scan: for msg_idx in (0..messages.len()).rev() {
@@ -130,11 +130,11 @@ fn prune_old_attachments(messages: &mut [Message]) -> bool {
             continue;
         }
         for part in std::sync::Arc::make_mut(&mut messages[msg_idx].parts).iter_mut() {
-            changed |= strip_attachment(part, PRUNED_ATTACHMENT_PLACEHOLDER);
+            pruned += usize::from(strip_attachment(part, PRUNED_ATTACHMENT_PLACEHOLDER));
         }
     }
 
-    changed
+    pruned
 }
 
 fn strip_all_attachments(messages: &mut [Message], placeholder: &str) -> bool {
@@ -788,7 +788,19 @@ impl TurnContextTransform for StandardCompactionTurnTransform {
         let messages = input.messages.make_mut();
 
         if needs_pruning {
-            prune_old_attachments(messages);
+            let pruned_attachments = prune_old_attachments(messages);
+            if pruned_attachments > 0 {
+                ctx.session_graph
+                    .emit_trace_event(
+                        trace_context.clone(),
+                        lash_core::TraceEvent::PromptViewAttachmentsPruned {
+                            used_tokens: pressure.used_tokens,
+                            max_context_tokens: pressure.max_context_tokens,
+                            pruned_attachments,
+                        },
+                    )
+                    .await?;
+            }
         }
 
         if !needs_compaction {
