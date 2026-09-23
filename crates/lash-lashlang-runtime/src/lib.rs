@@ -13,6 +13,14 @@ pub use error::{
 };
 mod host_identity;
 pub use host_identity::LashlangHostIdentities;
+mod replay_commands;
+pub use replay_commands::{CommandInFlight, ReplayCommands, retype_replay_mismatch};
+mod replay_run;
+pub use replay_run::{
+    CommandAdmission, CommandShape, DispatchedOrdinalsDigest, IssuedCommand,
+    LASHLANG_REPLAY_KEY_GRAMMAR_VERSION, LashlangReplayNamespace, LashlangReplayRun,
+    LashlangRunOrdinals, ReplayDivergence, RunSeal, SealAttribution,
+};
 mod language_trace_host;
 pub use language_trace_host::{LanguageTraceHost, trace_failure};
 mod process_identity;
@@ -22,7 +30,10 @@ mod trigger_commands;
 pub use trace_waits::TraceWaitBookkeeping;
 pub use trigger_commands::execute_trigger_operation;
 mod typescript_runtime;
-pub use typescript_runtime::{is_typescript_runtime_receiver, journaled_typescript_runtime_value};
+pub use typescript_runtime::{
+    is_typescript_runtime_receiver, journaled_typescript_runtime_value,
+    typescript_runtime_operation,
+};
 
 pub use lash_trace::{
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,
@@ -1159,6 +1170,10 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         LASHLANG_ENGINE_KIND
     }
 
+    fn replay_key_grammar(&self) -> Option<u32> {
+        Some(LASHLANG_REPLAY_KEY_GRAMMAR_VERSION)
+    }
+
     async fn run(
         &self,
         context: lash_core::ProcessEngineRunContext<'_>,
@@ -1344,5 +1359,7 @@ pub use typed_output::parse_output_schema;
 
 #[cfg(test)]
 mod lib_tests;
+#[cfg(test)]
+mod process_grammar_tests;
 #[cfg(test)]
 mod session_surface_tests;

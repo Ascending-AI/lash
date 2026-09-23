@@ -121,6 +121,7 @@ pub(crate) async fn execute_parked_cell_for_tests(
         other => return Err(format!("unsupported parked-cell dialect {other}")),
     };
     let bridge = HostBridge::new(HostBridgeConfig {
+        cell: std::sync::Arc::new(super::cell_run::CellRun::open(&ctx)),
         ctx,
         print_projector: Arc::new(crate::rlm_support::print_history_projector()),
         lashlang_execution_trace: None,

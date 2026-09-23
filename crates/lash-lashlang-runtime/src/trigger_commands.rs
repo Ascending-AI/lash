@@ -346,7 +346,15 @@ async fn execute_trigger_command(
     let outcome = ctx
         .execute_trigger_effect(effect_id, command)
         .await
-        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+        .map_err(|err| {
+            // A replay mismatch is the run's, not the program's: recorded on
+            // the execution so the bridge stops the run at this command
+            // instead of handing the program a catchable failure (FIG-3586).
+            if err.code.is_replay_mismatch() {
+                ctx.record_nested_runtime_effect_error(err.clone());
+            }
+            ExecutionHostError::new(err.to_string())
+        })?;
     *recorded = Some(match &outcome {
         Ok(_) => (lash_core::ProcessEffectOutcomeClass::Success, None),
         Err(error) => (

@@ -330,6 +330,30 @@ paths = ["crates/lash-core-store/src/turn_input_vocabulary.rs"]
 symbols = ["turn_input_submission_preimage", "TurnInput", "InputItem"]
 
 [[surface]]
+constant = "LASHLANG_REPLAY_KEY_GRAMMAR_VERSION"
+constant_path = "crates/lash-lashlang-runtime/src/replay_run.rs"
+description = "issue-ordinal replay-key grammar lashlang cells and process bodies journal their nested effects under (FIG-3586)"
+outside_manifest = "a key grammar, not a payload: the grammar a journal was written under rides the execution-environment sync outcome and the ProcessStarted record, and a run under any other grammar is refused before it issues a command"
+
+# The keys a run journals and reads back: its namespace, the ordinal and seal
+# spelling, the sub-keys each command shape writes, the dispatched-ordinals
+# digest the seal carries, and the call and child ids minted from ordinals.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-lashlang-runtime/src/replay_run.rs"]
+symbols = ["LashlangReplayNamespace", "CommandShape", "DispatchedOrdinalsDigest"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-lashlang-runtime/src/host_identity.rs"]
+symbols = ["LashlangHostIdentities"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/causal.rs"]
+symbols = ["CommandReplayKey"]
+
+[[surface]]
 constant = "FRAME_KEY_VERSION"
 constant_path = "crates/lash-sansio/src/frame_key.rs"
 description = "stable agent-frame key hash preimage"

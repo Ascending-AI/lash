@@ -451,10 +451,11 @@ async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()
     let replay_rows = backend.replay_rows(&process_id).await;
     let mut expected_rows = std::collections::BTreeSet::new();
     for occurrence in &occurrences {
-        // The tool coordinator journals each atomic attempt beneath the stable
-        // call ID; every other effect journals its replay key directly.
+        // The tool coordinator journals each atomic attempt beneath the
+        // call's command key (FIG-3586); every other effect journals its
+        // replay key directly.
         let row_key = if occurrence.operation == "tool:start_process" {
-            format!("tool:{}:attempt:1", occurrence.replay_key)
+            format!("{}:attempt:1", occurrence.replay_key)
         } else {
             occurrence.replay_key.clone()
         };
@@ -532,14 +533,16 @@ async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()
 /// process scope are sub-effects of those (a tool's presentation step and the
 /// Start it issued) or the host's own Start of this process.
 fn is_program_effect_row(key: &str) -> bool {
-    if let Some(call) = key.strip_prefix("tool:") {
-        return call.starts_with("lashlang:")
-            && call
+    if key.starts_with("lashlang:") {
+        // A tool attempt journals at `{command}:attempt:{a}` (FIG-3586); what
+        // it issued in turn — its retry sleep, the Start it made — journals
+        // beneath that key and is not a node's own effect.
+        return !key.ends_with(":present")
+            && key
                 .rsplit_once(":attempt:")
-                .is_some_and(|(_, attempt)| attempt.parse::<u32>().is_ok());
+                .is_none_or(|(_, attempt)| attempt.parse::<u32>().is_ok());
     }
-    (key.starts_with("lashlang:") && !key.ends_with(":present"))
-        || (key.starts_with("process:process:") && key.contains(":sleep:"))
+    key.starts_with("process:process:") && key.contains(":sleep:")
 }
 
 fn capped_program() -> lashlang::Program {

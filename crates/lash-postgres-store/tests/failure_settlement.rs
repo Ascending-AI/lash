@@ -43,6 +43,30 @@ impl lash_core::plugin::ProtocolSessionPlugin for RefusingBeforeLlmCall {
     }
 }
 
+/// A protocol whose `before_llm_call` meets a replay refusal every time, as a
+/// code cell does when its re-execution diverges from its journal (FIG-3586).
+#[derive(Default)]
+struct DivergingBeforeLlmCall {
+    calls: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::ProtocolSessionPlugin for DivergingBeforeLlmCall {
+    async fn before_llm_call(
+        &self,
+        _ctx: lash_core::plugin::ProtocolBeforeLlmCallContext,
+        _request: &LlmRequest,
+    ) -> Result<Option<lash_core::ProtocolLlmCallAction>, lash_core::PluginError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(lash_core::PluginError::RuntimeEffectController(
+            lash_core::RuntimeEffectControllerError::new(
+                lash_core::RuntimeErrorCode::LashlangCellReplayDivergence,
+                "lashlang run diverged from its journal at issue ordinal 0",
+            ),
+        ))
+    }
+}
+
 fn text_response(text: &str) -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::Text {
@@ -681,5 +705,54 @@ async fn a_drive_whose_outcome_was_lost_still_binds_its_input()
         .await?;
     assert!(cancelled.is_cancelled(), "{cancelled:?}");
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    Ok(())
+}
+
+/// FIG-3586, FIG-3600 on PostgreSQL: a replay refusal parks the direct turn —
+/// aborted, never recorded failed, its input held — `drain_status` counts the
+/// park, every redrive refuses again, and withdrawing the input settles it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn()
+-> Result<(), Box<dyn std::error::Error>> {
+    let Some(backend) = PostgresBackend::open().await else {
+        return Ok(());
+    };
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let protocol = Arc::new(DivergingBeforeLlmCall::default());
+    let core = backend.core(
+        counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
+        Some(protocol.clone()),
+    );
+    let session = core.session("pg-direct-replay-refusal").open().await?;
+    for attempt in 1..=2 {
+        let error = session
+            .turn(TurnInput::text(STRANDED_WORDS))
+            .turn_id("pg-parked-turn")
+            .run()
+            .await
+            .expect_err("a replay refusal aborts the turn");
+        let lash::EmbedError::Runtime(runtime_error) = &error else {
+            panic!("the abort is the typed runtime error: {error:?}");
+        };
+        assert_eq!(
+            runtime_error.code,
+            lash_core::RuntimeErrorCode::LashlangCellReplayDivergence
+        );
+        assert_eq!(protocol.calls.load(Ordering::SeqCst), attempt);
+        let status = core.drain_status(false).await?;
+        assert_eq!((status.parked_turns, status.in_flight_turns), (1, 1));
+        assert!(!status.drained());
+    }
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    let pending = session.durable().pending_turn_inputs().await?;
+    assert_eq!(pending.len(), 1, "the parked turn holds its input");
+    let cancelled = session
+        .durable()
+        .cancel_pending_turn_input(&pending[0].input.input_id)
+        .await?;
+    assert!(cancelled.is_cancelled(), "{cancelled:?}");
+    let status = core.drain_status(false).await?;
+    assert_eq!((status.parked_turns, status.in_flight_turns), (0, 0));
+    assert!(status.drained());
     Ok(())
 }

@@ -747,12 +747,14 @@ where
                 "effect group {group_key} child {position} ({replay_key}) has no registered executor; refusing before group state is created"
             )));
         }
+        let content_checked = group.reopen() == lash_core::GroupReopen::RetainedContent;
         let opened = self
             .context
             .effect_group_open(
                 group_key.clone(),
                 EffectGroupOpenRequest {
                     shape: shape.clone(),
+                    content_checked,
                 },
             )
             .await
@@ -809,9 +811,24 @@ where
             EffectGroupOpenResponse::Retired => Err(group_shape_error(format!(
                 "effect group {group_key} is retired"
             ))),
+            EffectGroupOpenResponse::ShapeMismatch if content_checked => Err(
+                crate::effect_group::content_checked_shape_mismatch(&group_key),
+            ),
             EffectGroupOpenResponse::ShapeMismatch => Err(group_shape_error(format!(
                 "effect group {group_key} was reopened with a different durable shape"
             ))),
+            // The engine tier's replay-mismatch code, exactly as a recorded
+            // run whose envelope drifted reports it.
+            EffectGroupOpenResponse::ContentMismatch { position } => {
+                Err(RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::WorkerReplacementAbort,
+                    format!(
+                        "effect group {group_key} was reopened with a child at position \
+                         {position} that is not the retained one; the group head refuses a \
+                         redrive whose aggregate differs from the recorded one"
+                    ),
+                ))
+            }
         }
     }
 
@@ -1008,6 +1025,18 @@ where
             .effect_group_drain_blocked(group_key.to_string(), commit_seq)
             .await
             .map_err(|error| effect_group_engine_error("EffectGroupIndex/drain_blocked", error))
+    }
+
+    /// Restate replays the invocation journal by position and compares each
+    /// entry's run name as it goes (JOURNAL_MISMATCH 570): a command issued
+    /// out of recorded order meets a recorded entry of another name before
+    /// anything is dispatched, so that check is the recorded-frontier fence
+    /// here (FIG-3586).
+    async fn read_recorded_journal(
+        &self,
+        _range: &lash_core::RecordedKeyRange,
+    ) -> Result<lash_core::RecordedJournal, RuntimeEffectControllerError> {
+        Ok(lash_core::RecordedJournal::Positional)
     }
 
     fn effect_journaling(&self) -> EffectJournaling {

@@ -469,6 +469,22 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         })
     }
 
+    /// Count the deployment's turns that are not settled yet: parked turns
+    /// and every turn in flight (FIG-3586). `drain_status` reads it, so a
+    /// deployment with a parked turn — or one whose claims a crashed driver
+    /// still holds — never reports drained.
+    ///
+    /// Factories that cannot answer refuse rather than report zero: an
+    /// inferred zero would let a host retire a deployment with turns still in
+    /// flight.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::count_unsettled_turns",
+        })
+    }
+
     /// Open an existing session when only its durable routing identity is
     /// known, without creating one.
     ///

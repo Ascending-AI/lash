@@ -333,6 +333,11 @@ pub enum LashlangProcessFailureCode {
     ProcessRuntimeError,
     /// Lashlang exhausted its configured instruction or active-time bound.
     ProcessExecutionBoundExhausted,
+    /// The incarnation was started under an earlier replay-key grammar
+    /// (FIG-3586): its journal holds keys this build cannot reach, so its body
+    /// is refused rather than re-run. Spelled as the runtime error code a code
+    /// cell refuses with, so both surfaces name one cutover.
+    ReplayKeyFormatCutover,
 }
 
 impl LashlangProcessFailureCode {
@@ -352,6 +357,7 @@ impl LashlangProcessFailureCode {
             Self::ProcessFailed => "process_failed",
             Self::ProcessRuntimeError => "process_runtime_error",
             Self::ProcessExecutionBoundExhausted => "process_execution_bound_exhausted",
+            Self::ReplayKeyFormatCutover => "lashlang_cell_replay_key_format_cutover",
         }
     }
 }

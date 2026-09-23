@@ -569,11 +569,13 @@ async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect
         tokio_util::sync::CancellationToken::new(),
     );
 
-    let reply = Box::pin(execution.call_tool_by_id(
-        "fixed-intent-call".to_string(),
-        crate::ToolId::from("tool:fixed_intent_law"),
-        json!({"value": "drive"}),
-        0,
+    let reply = Box::pin(execution.call_command_tool(
+        &crate::CommandReplayKey::new("fixed-intent-call"),
+        crate::session::ToolInvocation::new(
+            "fixed-intent-call",
+            crate::ToolId::from("tool:fixed_intent_law"),
+            json!({"value": "drive"}),
+        ),
     ))
     .await;
 
@@ -635,11 +637,13 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
     let cancellation = tokio_util::sync::CancellationToken::new();
     let execution = runtime_execution_for_intent_law(context, &world, cancellation.clone());
     let run = crate::task::spawn(async move {
-        Box::pin(execution.call_tool_by_id(
-            "fixed-intent-call".to_string(),
-            crate::ToolId::from("tool:fixed_intent_law"),
-            json!({"value": "drive"}),
-            0,
+        Box::pin(execution.call_command_tool(
+            &crate::CommandReplayKey::new("fixed-intent-call"),
+            crate::session::ToolInvocation::new(
+                "fixed-intent-call",
+                crate::ToolId::from("tool:fixed_intent_law"),
+                json!({"value": "drive"}),
+            ),
         ))
         .await
     });

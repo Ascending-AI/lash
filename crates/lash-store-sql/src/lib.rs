@@ -146,6 +146,7 @@ pub const TABLES: &[&str] = &[
     turn_ingress::retired_scopes::TABLE,
     turn_ingress::session_execution_leases::TABLE,
     turn_ingress::tool_intent_submissions::TABLE,
+    turn_ingress::turn_parks::TABLE,
     wait::waits::TABLE,
     wait::meta::TABLE,
     wait::revoked_sessions::TABLE,
@@ -227,6 +228,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(
         turn_ingress::tool_intent_submissions::ToolIntentSubmissionStatements::NEUTRAL,
     );
+    statements.extend_from_slice(turn_ingress::turn_parks::TurnParkStatements::NEUTRAL);
     statements
 }
 

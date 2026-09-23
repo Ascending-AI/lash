@@ -103,34 +103,6 @@ pub struct ResourceOperationBatch {
     /// admitted before it answers (§11 clause 3). `None` when no plain value
     /// is present, and always `None` for the all-results consumers.
     pub settled_value_after: Option<usize>,
-    /// The instruction that formed the aggregate: stable for a given compiled
-    /// program, which `BYTECODE_FORMAT_VERSION` guarantees and a restored
-    /// continuation's own instruction pointer already depends on.
-    ///
-    /// With [`occurrence`](Self::occurrence) it names the aggregate within its
-    /// execution. A host that keys a group on the leaves' own identities needs
-    /// it only for leaves that have none: two timer aggregates at two sites,
-    /// each reached once, carry the same timers and the same occurrence, and
-    /// only the site tells them apart (ADR 0099 §11 clause 4).
-    pub site: u64,
-    /// How many times this VM has reached this aggregate, counting from 1.
-    ///
-    /// The host needs it because a batch's content is not its identity: two
-    /// textually identical aggregates in one cell present the same operations
-    /// with the same arguments, and a host that keys the group on their content
-    /// alone mints one key twice (ADR 0065, "Group identity carries an
-    /// occurrence discriminator"). A leaf's own `call_site` cannot stand in for
-    /// it — the compiler records execution sites for `main` only, so every leaf
-    /// of an aggregate inside a function body arrives with `call_site: None`,
-    /// which is exactly the case the position fallback could not separate.
-    ///
-    /// It is always present, unlike a leaf's site: the VM counts the
-    /// aggregate's own instruction, so an aggregate that no site describes
-    /// still has an ordinal. The counter lives in the VM's occurrence
-    /// counters and therefore rides the continuation (ADR 0025), so the same
-    /// aggregate reached once before a park and once after gets 1 and then 2
-    /// rather than 1 twice.
-    pub occurrence: u64,
 }
 
 #[cfg(any(test, feature = "testing"))]

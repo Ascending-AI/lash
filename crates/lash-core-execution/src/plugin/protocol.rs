@@ -269,6 +269,29 @@ pub trait CodeExecutorPlugin: Send + Sync {
         false
     }
 
+    /// The replay-key grammar this executor journals its cells' nested
+    /// effects under (FIG-3586), stamped onto every execution-environment
+    /// sync so a cell re-executed on replay can tell whether its iteration's
+    /// journal was written under the grammar it mints. `None` for an executor
+    /// whose cells journal nothing by a versioned grammar.
+    fn replay_key_grammar(&self) -> Option<u32> {
+        None
+    }
+
+    /// Refuses to run a cell whose iteration's journaled sync names
+    /// `served` when that is not the grammar this executor mints (FIG-3586):
+    /// the iteration's journal was written under keys this executor cannot
+    /// reach, and re-running the cell would re-issue its nested effects live.
+    /// The default admits every cell — an executor that keys nothing by a
+    /// versioned grammar has nothing to refuse.
+    fn admit_replay_key_grammar(
+        &self,
+        served: Option<u32>,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let _ = served;
+        Ok(())
+    }
+
     async fn snapshot_execution_state(
         &self,
         _ctx: ProtocolSessionContext<'_>,

@@ -4,7 +4,31 @@ pub(super) struct LanguageRuntimeValueRunner {
     pub(super) clock: Arc<dyn crate::Clock>,
 }
 
+/// The operation prefix a replayed language run's seal is journaled under
+/// (FIG-3586): `{prefix}:{facts}`, where the facts are the run's issued
+/// count and dispatched-ordinals digest. They are part of the envelope, so a
+/// redrive that issued a different run refuses at the seal.
+pub const RUN_SEAL_OPERATION: &str = "lashlang-run-seal";
+
+/// Records the value the language run supplied for its seal: the producer
+/// that wrote the journal. Replay serves the recorded value, never this one —
+/// which is what makes it attribution rather than a check.
+pub(super) struct RunSealRunner {
+    value: serde_json::Value,
+}
+
 impl RuntimeEffectLocalExecutor<'_> {
+    /// Builds the executor a language run's seal journals `value` through
+    /// (FIG-3586).
+    pub fn run_seal(value: serde_json::Value) -> RuntimeEffectLocalExecutor<'static> {
+        RuntimeEffectLocalExecutor {
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(Box::new(
+                RunSealRunner { value },
+            ))),
+            replay_trace: None,
+        }
+    }
+
     /// Builds a journaled language-runtime value executor using the host clock.
     pub fn language_runtime_value(
         clock: Arc<dyn crate::Clock>,
@@ -46,5 +70,27 @@ impl RuntimeEffectLocalRunner for LanguageRuntimeValueRunner {
             }
         };
         Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value })
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectLocalRunner for RunSealRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: RuntimeEffectEnvelope,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        match envelope.command {
+            RuntimeEffectCommand::LanguageRuntimeValue { operation }
+                if operation
+                    .strip_prefix(RUN_SEAL_OPERATION)
+                    .is_some_and(|facts| facts.starts_with(':')) =>
+            {
+                Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: self.value })
+            }
+            _ => Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "a run-seal executor requires a run-seal language_runtime_value command",
+            )),
+        }
     }
 }

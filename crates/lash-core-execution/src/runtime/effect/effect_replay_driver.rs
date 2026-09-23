@@ -743,6 +743,36 @@ pub fn decide_effect_claim(
     }
 }
 
+/// A closed range of journal keys, compared bytewise.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RecordedKeyRange {
+    /// The smallest key the range admits.
+    pub lower: String,
+    /// The largest key the range admits.
+    pub upper: String,
+    /// The prefix the opener's group keys carry ahead of the command key they
+    /// name (`{scope}:group:`, ADR 0099 §1): group rows are read in
+    /// `[prefix + lower, prefix + upper]` and reported with it stripped, so a
+    /// group reads back as the command that formed it.
+    pub group_key_prefix: String,
+}
+
+/// What [`EffectReplayRowStore::recorded_keys_in_range`] found: the replay
+/// rows and the group rows of one scope inside one range, each in ascending
+/// byte order. Two lists rather than one, because the two tables are two facts
+/// — a group can be recorded before any of its children claims a replay row.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RecordedKeys {
+    /// Replay keys of `runtime_effect_replay` rows.
+    pub replay_keys: Vec<String>,
+    /// Group keys of `runtime_effect_group` rows.
+    pub group_keys: Vec<String>,
+    /// The recorded outcome of the completed replay row at the range's upper
+    /// bound, when there is one: a namespace closes on a seal whose outcome
+    /// names who wrote the journal, which a refusal reports for attribution.
+    pub closing_outcome: Option<String>,
+}
+
 /// The seal on [`EffectReplayRowStore`].
 ///
 /// Effect journaling is not an extension point. lash's own SQL stores are the
@@ -811,6 +841,23 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         scope_id: &str,
         replay_key: &str,
     ) -> Result<bool, RuntimeEffectControllerError>;
+
+    /// Every replay key and every group key recorded under `scope_id` inside
+    /// the closed range `[range.lower, range.upper]`, each list in ascending
+    /// byte order, and the outcome of the completed replay row at
+    /// `range.upper`, if one exists.
+    ///
+    /// The recorded-frontier read (FIG-3586). Byte order is the contract, not
+    /// an accident of the backend: SQLite compares `TEXT` with its default
+    /// `BINARY` collation, and PostgreSQL's replay and group key columns are
+    /// `COLLATE "C"`, so a range bounded by a sentinel that sorts after every
+    /// key of a namespace answers the same on both, whatever the database
+    /// locale. A read, never a claim: nothing is locked or written.
+    async fn recorded_keys_in_range(
+        &self,
+        scope_id: &str,
+        range: &RecordedKeyRange,
+    ) -> Result<RecordedKeys, RuntimeEffectControllerError>;
 
     /// Delete the ungrouped row at `(scope_id, replay_key)`, if there is one.
     ///

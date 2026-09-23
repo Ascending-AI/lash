@@ -2284,7 +2284,16 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
             tokio::join!(
                 execute_code_with_channel_and_bounds(
                     &mut state,
-                    ctx,
+                    // Turn N+1's cell is its own code-execution effect: its
+                    // nested effects are keyed under its own replay key.
+                    ctx.with_parent_invocation(lash_core::testing::exec_code_invocation(
+                        "test-session",
+                        "test-turn",
+                        0,
+                        1,
+                        "exec-code-turn-n-plus-one",
+                        "test-session:test-turn:0:1:exec_code:1",
+                    )),
                     ExecRequest {
                         language: "typescript".to_string(),
                         code: "finish(await handle);".to_string(),

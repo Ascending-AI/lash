@@ -1,0 +1,182 @@
+{
+  "format": "lash-protocol-rlm cell replay corpus v1: one SQLite effect journal, one turn per scenario",
+  "grammar": 2,
+  "dispatched": 13,
+  "scenarios": {
+    "aggregates": {
+      "finishes": [
+        {
+          "all": [
+            {
+              "args": {
+                "n": 1
+              },
+              "tool": "app_a"
+            },
+            {
+              "args": {
+                "n": 2
+              },
+              "tool": "app_b"
+            }
+          ],
+          "raced": {
+            "args": {
+              "n": 5
+            },
+            "tool": "app_b"
+          },
+          "settled": [
+            {
+              "status": "fulfilled",
+              "value": {
+                "args": {
+                  "n": 3
+                },
+                "tool": "app_a"
+              }
+            },
+            {
+              "status": "fulfilled",
+              "value": {
+                "args": {
+                  "n": 4
+                },
+                "tool": "app_b"
+              }
+            }
+          ]
+        }
+      ],
+      "replay_keys": [
+        "aggregates:group:exec-code:cell-0:lk2:0000000000:child:0",
+        "aggregates:group:exec-code:cell-0:lk2:0000000000:child:1",
+        "aggregates:group:exec-code:cell-0:lk2:0000000001:child:0",
+        "aggregates:group:exec-code:cell-0:lk2:0000000001:child:1",
+        "aggregates:group:exec-code:cell-0:lk2:0000000002:child:0",
+        "aggregates:group:exec-code:cell-0:lk2:0000000002:child:1",
+        "effect-group-incorporate:aggregates:group:exec-code:cell-0:lk2:0000000000:1-2",
+        "effect-group-incorporate:aggregates:group:exec-code:cell-0:lk2:0000000001:1-2",
+        "effect-group-incorporate:aggregates:group:exec-code:cell-0:lk2:0000000002:1-1",
+        "exec-code:cell-0:deferred-tool-resolution",
+        "exec-code:cell-0:lk2:0000000000:child:0:attempt:1",
+        "exec-code:cell-0:lk2:0000000000:child:1:attempt:1",
+        "exec-code:cell-0:lk2:0000000001:child:0:attempt:1",
+        "exec-code:cell-0:lk2:0000000001:child:1:attempt:1",
+        "exec-code:cell-0:lk2:0000000002:child:0:attempt:1",
+        "exec-code:cell-0:lk2:0000000002:timers-admitted",
+        "exec-code:cell-0:lk2:~seal",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000000:child:0:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000000:child:1:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000001:child:0:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000001:child:1:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:10:aggregates:16:exec-code:cell-0:0000000002:child:0:present"
+      ],
+      "group_keys": [
+        "aggregates:group:exec-code:cell-0:lk2:0000000000",
+        "aggregates:group:exec-code:cell-0:lk2:0000000001",
+        "aggregates:group:exec-code:cell-0:lk2:0000000002"
+      ]
+    },
+    "loop": {
+      "finishes": [
+        [
+          0,
+          1,
+          2
+        ]
+      ],
+      "replay_keys": [
+        "exec-code:cell-0:deferred-tool-resolution",
+        "exec-code:cell-0:lk2:0000000000:attempt:1",
+        "exec-code:cell-0:lk2:0000000001:attempt:1",
+        "exec-code:cell-0:lk2:0000000002:attempt:1",
+        "exec-code:cell-0:lk2:~seal",
+        "lashlang:v2:turn:18:cell-replay-corpus:4:loop:16:exec-code:cell-0:0000000000:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:4:loop:16:exec-code:cell-0:0000000001:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:4:loop:16:exec-code:cell-0:0000000002:present"
+      ],
+      "group_keys": []
+    },
+    "scalar-calls-and-runtime-values": {
+      "finishes": [
+        {
+          "first": {
+            "args": {
+              "n": 1
+            },
+            "tool": "app_a"
+          },
+          "now": 1790215090820,
+          "roll": 0.057493207110245526,
+          "second": {
+            "args": {
+              "after": 1,
+              "n": 2
+            },
+            "tool": "app_b"
+          }
+        }
+      ],
+      "replay_keys": [
+        "exec-code:cell-0:deferred-tool-resolution",
+        "exec-code:cell-0:lk2:0000000000:attempt:1",
+        "exec-code:cell-0:lk2:0000000001",
+        "exec-code:cell-0:lk2:0000000002",
+        "exec-code:cell-0:lk2:0000000003:attempt:1",
+        "exec-code:cell-0:lk2:~seal",
+        "lashlang:v2:turn:18:cell-replay-corpus:31:scalar-calls-and-runtime-values:16:exec-code:cell-0:0000000000:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:31:scalar-calls-and-runtime-values:16:exec-code:cell-0:0000000003:present"
+      ],
+      "group_keys": []
+    },
+    "sleeps": {
+      "finishes": [
+        {
+          "args": {
+            "n": 1
+          },
+          "tool": "app_a"
+        }
+      ],
+      "replay_keys": [
+        "exec-code:cell-0:deferred-tool-resolution",
+        "exec-code:cell-0:lk2:0000000000:sleep",
+        "exec-code:cell-0:lk2:0000000001:attempt:1",
+        "exec-code:cell-0:lk2:0000000002:sleep",
+        "exec-code:cell-0:lk2:~seal",
+        "lashlang:v2:turn:18:cell-replay-corpus:6:sleeps:16:exec-code:cell-0:0000000001:present"
+      ],
+      "group_keys": []
+    },
+    "two-cells-one-turn": {
+      "finishes": [
+        null,
+        {
+          "carried": {
+            "args": {
+              "n": 1
+            },
+            "tool": "app_a"
+          },
+          "next": {
+            "args": {
+              "n": 2
+            },
+            "tool": "app_b"
+          }
+        }
+      ],
+      "replay_keys": [
+        "exec-code:cell-0:deferred-tool-resolution",
+        "exec-code:cell-0:lk2:0000000000:attempt:1",
+        "exec-code:cell-0:lk2:~seal",
+        "exec-code:cell-1:lk2:0000000000:attempt:1",
+        "exec-code:cell-1:lk2:~seal",
+        "lashlang:v2:turn:18:cell-replay-corpus:18:two-cells-one-turn:16:exec-code:cell-0:0000000000:present",
+        "lashlang:v2:turn:18:cell-replay-corpus:18:two-cells-one-turn:16:exec-code:cell-1:0000000000:present"
+      ],
+      "group_keys": []
+    }
+  }
+}

@@ -603,4 +603,11 @@ impl RuntimeEffectController for LayeredController {
             .group_child_drain_blocked(group_key, commit_seq)
             .await
     }
+
+    async fn read_recorded_journal(
+        &self,
+        range: &crate::RecordedKeyRange,
+    ) -> Result<crate::RecordedJournal, crate::RuntimeEffectControllerError> {
+        self.inner.read_recorded_journal(range).await
+    }
 }

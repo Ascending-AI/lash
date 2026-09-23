@@ -1023,6 +1023,34 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .map_err(sqlite_error)
     }
 
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<lash_core_execution::store::UnsettledTurnCounts, StoreError> {
+        if !self.core.target().exists() {
+            return Ok(lash_core_execution::store::UnsettledTurnCounts::default());
+        }
+        let conn = SqliteConnection::open_readonly(self.core.target())
+            .await
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let (parked, in_flight): (i64, i64) = conn
+            .call(|conn| {
+                conn.query_row(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .family
+                        .count_unsettled_turns
+                        .sql(),
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(lash_core_execution::store::UnsettledTurnCounts {
+            parked_turns: usize::try_from(parked).unwrap_or_default(),
+            in_flight_turns: usize::try_from(in_flight).unwrap_or_default(),
+        })
+    }
+
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,

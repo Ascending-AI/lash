@@ -157,14 +157,13 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
         .into_runtime();
         let tool_id = definition.manifest.id.clone();
         async move {
-            Box::pin(context.execute_tool_call_by_id(
-                "present-1".to_string(),
-                tool_id,
-                serde_json::json!({"value": "sample"}),
-                0,
-                None,
-                None,
-                None,
+            Box::pin(context.execute_command_tool(
+                &crate::CommandReplayKey::new("present-1"),
+                crate::session::ToolInvocation::new(
+                    "present-1",
+                    tool_id,
+                    serde_json::json!({"value": "sample"}),
+                ),
             ))
             .await
         }

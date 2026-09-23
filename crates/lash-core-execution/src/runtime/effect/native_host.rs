@@ -616,6 +616,13 @@ impl RuntimeEffectController for FencedNativeController {
         self.host.effect_journaling()
     }
 
+    async fn read_recorded_journal(
+        &self,
+        range: &crate::RecordedKeyRange,
+    ) -> Result<crate::RecordedJournal, RuntimeEffectControllerError> {
+        self.host.read_recorded_journal(range).await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -715,6 +722,13 @@ impl RuntimeEffectController for NativeEffectHost {
 
     fn effect_journaling(&self) -> EffectJournaling {
         self.controller.effect_journaling()
+    }
+
+    async fn read_recorded_journal(
+        &self,
+        range: &crate::RecordedKeyRange,
+    ) -> Result<crate::RecordedJournal, RuntimeEffectControllerError> {
+        self.controller.read_recorded_journal(range).await
     }
 
     async fn execute_effect(

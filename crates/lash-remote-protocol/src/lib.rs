@@ -268,7 +268,12 @@ pub use usage_activity::*;
 // to trace schema 34, keyed by the carrier IR's node ids. A window-93 peer
 // refuses a schema-34 record at its trace version gate, and the published v93
 // item document names schema 33, so peers must adopt 94.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 94;
+// Window 97: FIG-3586 stamps `RemoteProcessStarted.replay_grammar`, the
+// replay-key grammar a lashlang process began its journal under, and adds the
+// lashlang replay refusal codes; an earlier peer drops the stamp, so peers
+// must adopt 97. (Windows 95 and 96 are claimed by FIG-3588 and FIG-3571
+// phase 2a.)
+pub const REMOTE_PROTOCOL_VERSION: u32 = 97;
 
 /// One versioned remote-protocol message.
 ///

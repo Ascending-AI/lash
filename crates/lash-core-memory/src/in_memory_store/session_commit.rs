@@ -926,6 +926,14 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         }
         drop(runtime_turn_commits);
         turn_cancel_closure::consume(self, commit);
+        // A turn's commit settles its park (FIG-3586); another turn's commit
+        // leaves it.
+        if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
+            let mut park = self.turn_park.lock_recover();
+            if park.as_ref().is_some_and(|park| park.turn_id == *turn_id) {
+                park.take();
+            }
+        }
         if let Some(completion) = commit.release_session_execution_lease.as_ref() {
             let _release_was_current =
                 self.release_session_execution_lease_in_memory(completion, false);
@@ -967,5 +975,26 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         &self,
     ) -> Result<Option<crate::store::SessionMeta>, crate::store::StoreError> {
         Ok(self.session_meta.lock_recover().clone())
+    }
+
+    async fn record_turn_park(
+        &self,
+        park: &crate::store::TurnPark,
+    ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(&park.session_id)?;
+        *self.turn_park.lock_recover() = Some(park.clone());
+        Ok(())
+    }
+
+    async fn load_turn_park(
+        &self,
+        session_id: &crate::SessionId,
+    ) -> Result<Option<crate::store::TurnPark>, crate::store::StoreError> {
+        Ok(self
+            .turn_park
+            .lock_recover()
+            .clone()
+            .filter(|park| park.session_id == *session_id))
     }
 }

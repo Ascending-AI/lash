@@ -114,17 +114,28 @@ fingerprint (accepted, not yet implemented: no envelope carries one today), so a
 which is replaying it — same build means a lash bug, different build means
 this obligation was violated — as the lashlang program hash already does one
 layer down. The stamp never gates replay; tolerance of mismatched journals
-stays rejected.
+stays rejected. For re-executed lashlang runs the fingerprint is carried on the
+run's seal (FIG-3586, ADR 0103): the seal's outcome records the compiler
+version, VM ABI and linked module ref that wrote the journal, and a divergence
+message names them beside the replaying build's. It is attribution only —
+nothing compares it, and replay is gated by the issue-ordinal journal, never by
+the producer.
 
 Lash does not decide deployment routing or retirement, but it now exposes the
 authoritative `LashCore::drain_status(accepting_new_work)` read. After the host
 closes admission, the read counts every retained non-terminal process row,
-including waiting/suspended and retrying work, and returns `drained` only when
-that count is zero. A host must keep the old deployment registered while the
+including waiting/suspended and retrying work, and every in-flight turn — a
+turn that holds claimed input or a pending queued run — with parked turns
+(a turn stopped by a replay refusal, its claims held; FIG-3586) counted
+separately as well, and returns `drained` only when all of them are zero. A
+parked turn never drains by itself: the operator redeploys the build that wrote
+its journal, cancels it, or forks it. A host must keep the old deployment registered while the
 read is not drained; the read supplies verification, while deployment
 discipline and retirement timing remain host policy.
 
 Written after three independent reviews of separate subsystems each discovered
 this assumption and none found it stated. Amended 2026-08-14 after a
 reference-benchmarking round corrected the Restate characterization and the
-marker argument, and recorded the fork clause.
+marker argument, and recorded the fork clause. Amended 2026-09-23 (FIG-3586):
+the producer fingerprint is the seal-carried attribution above, and
+`drain_status` counts parked and in-flight turns.

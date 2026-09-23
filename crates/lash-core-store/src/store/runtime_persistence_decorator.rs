@@ -41,6 +41,8 @@ macro_rules! persistence_operations {
                 fn admit_and_bind_session(&self, binding: &SessionBinding) -> Result<SessionAdmission, StoreError>;
                 fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
                 fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;
+                fn record_turn_park(&self, park: &crate::store::TurnPark) -> Result<(), StoreError>;
+                fn load_turn_park(&self, session_id: &SessionId) -> Result<Option<crate::store::TurnPark>, StoreError>;
             }
             TurnInputStore {
                 sync fn turn_cancellation_authority(&self) -> Option<std::sync::Arc<dyn crate::StoreTurnCancellationAuthority>>;

@@ -341,6 +341,13 @@ CREATE TABLE IF NOT EXISTS turn_cancel_retired_scopes (
     scope_id TEXT PRIMARY KEY
 );
 
+CREATE TABLE IF NOT EXISTS turn_parks (
+    session_id TEXT PRIMARY KEY,
+    turn_id TEXT NOT NULL,
+    reason_json TEXT NOT NULL,
+    parked_at_ms INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS session_execution_leases (
     session_id               TEXT PRIMARY KEY,
     lease_owner_id           TEXT,
@@ -824,7 +831,13 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `ck_pending_turn_inputs_bound_claim_is_next_turn` holding the pair
 /// all-or-none and a binding to an open next-turn claim. A pre-80 database is rejected at open and
 /// recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 80;
+/// Bumped to 81 for FIG-3586: the catalog gains `turn_parks`, the typed
+/// parked state of a driver-run turn that `drain_status` counts, and the
+/// durable `RuntimeErrorCode` vocabulary gains
+/// `lashlang_cell_replay_divergence`, `lashlang_cell_replay_key_format_cutover`
+/// and `recorded_journal_read_unsupported`. A pre-81 database is rejected at
+/// open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 81;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

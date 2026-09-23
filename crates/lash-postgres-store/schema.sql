@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 120.
+-- lash-postgres-store schema, component version 121.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -240,6 +240,13 @@ CREATE TABLE IF NOT EXISTS lash_turn_cancel_closure_authorizations (
 
 CREATE TABLE IF NOT EXISTS lash_turn_cancel_retired_scopes (
     scope_id TEXT PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS lash_turn_parks (
+    session_id TEXT PRIMARY KEY,
+    turn_id TEXT NOT NULL,
+    reason_json TEXT NOT NULL,
+    parked_at_ms BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS lash_session_execution_leases (
@@ -574,8 +581,12 @@ CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
 -- declared; actual cardinality is COUNT of membership rows. `lifecycle` is
 -- the enum-per-phase column — live today; closing/settled are FIG-3410's
 -- writes on this column, not new columns.
+-- Replay and group keys use byte order on every host locale (FIG-3586): a
+-- lashlang run reads its key namespace as one range bounded by a sentinel
+-- that must sort after every ordinal, and a locale collation that ignores
+-- punctuation would move it.
 CREATE TABLE IF NOT EXISTS lash_runtime_effect_group (
-    group_key TEXT PRIMARY KEY,
+    group_key TEXT COLLATE "C" PRIMARY KEY,
     scope_id TEXT NOT NULL,
     session_id TEXT,
     wake TEXT NOT NULL,
@@ -604,9 +615,9 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_effect_group_scope
 -- (ADR 0065 N2), so a recorded group always has discoverable complete input.
 -- No scope_id: the group row owns that fact.
 CREATE TABLE IF NOT EXISTS lash_runtime_effect_group_child (
-    group_key        TEXT NOT NULL,
+    group_key        TEXT COLLATE "C" NOT NULL,
     position         BIGINT NOT NULL,
-    replay_key       TEXT NOT NULL,
+    replay_key       TEXT COLLATE "C" NOT NULL,
     envelope_json    TEXT NOT NULL,
     command_version  BIGINT NOT NULL,
     created_at_ms    BIGINT NOT NULL,
@@ -624,7 +635,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_lash_runtime_effect_group_child_replay_key
 CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
     scope_id TEXT NOT NULL,
     session_id TEXT,
-    replay_key TEXT NOT NULL,
+    replay_key TEXT COLLATE "C" NOT NULL,
     envelope_hash TEXT NOT NULL,
     envelope_json TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -634,7 +645,7 @@ CREATE TABLE IF NOT EXISTS lash_runtime_effect_replay (
     lease_token TEXT,
     lease_expires_at_ms BIGINT NOT NULL DEFAULT 0,
     due_at_ms BIGINT,
-    group_key TEXT,
+    group_key TEXT COLLATE "C",
     settlement_seq BIGINT,
     commit_state TEXT NOT NULL DEFAULT 'pending',
     commit_seq BIGINT,
@@ -844,7 +855,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 120)
+VALUES ('lash-postgres-store', 121)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

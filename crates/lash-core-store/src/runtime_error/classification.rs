@@ -19,6 +19,11 @@ pub(crate) enum RuntimeErrorClass {
     /// Retrying cannot succeed without changing input, configuration,
     /// wiring, or corrupted durable state: a redrive reproduces it.
     Terminal,
+    /// A re-executed program refused a replay its journal does not support
+    /// (FIG-3586). A redrive by this build reproduces the refusal with zero
+    /// dispatch, but the turn is not failed either: redeploying the build
+    /// that wrote the journal serves it, so the turn waits for an operator.
+    Parked,
 }
 
 /// How a turn failure settles, decided by its cause.
@@ -37,6 +42,24 @@ pub enum TurnFailureCause {
     /// aborted direct turn returns its acceptance receipt; a queued run stays
     /// pending for its retry budget.
     LiveFault,
+    /// A re-executed lashlang run refused to replay a journal it cannot serve
+    /// (FIG-3586): its commands no longer match the recorded ones, or the
+    /// journal predates this build's key grammar. Nothing was dispatched and
+    /// nothing is recorded as the turn's outcome. The invocation aborts with
+    /// `Err` exactly as a live fault does — claims held, receipt returned —
+    /// and the park is recorded, but a queued run spends no retry budget on
+    /// it: every redrive by this build refuses again with zero dispatch, and
+    /// what serves the turn is an operator redeploying the build that wrote
+    /// its journal, cancelling it, or forking it.
+    Parked,
+}
+
+impl TurnFailureCause {
+    /// Whether a turn failing with this cause aborts its invocation with
+    /// `Err` rather than recording a failed turn.
+    pub const fn aborts_invocation(self) -> bool {
+        matches!(self, Self::LiveFault | Self::Parked)
+    }
 }
 
 impl RuntimeErrorCode {
@@ -45,7 +68,7 @@ impl RuntimeErrorCode {
     /// This is the single classification site: the match is exhaustive, so a
     /// new variant does not compile until it is deliberately classified.
     pub(crate) const fn classification(&self) -> RuntimeErrorClass {
-        use RuntimeErrorClass::{Redrivable, Retryable, Terminal};
+        use RuntimeErrorClass::{Parked, Redrivable, Retryable, Terminal};
         match self {
             // the attachment policy judges the recorded attachment, so it refuses it again.
             Self::AttachmentSourcePolicyDenied => Terminal,
@@ -237,6 +260,12 @@ impl RuntimeErrorCode {
             Self::WorkerReplacementAbort => Redrivable,
             // replay met a retired key format; a redrive meets it again.
             Self::ToolIntentReplayKeyFormatCutover => Terminal,
+            // the re-executed program no longer issues its recorded commands; only the build that wrote the journal serves it.
+            Self::LashlangCellReplayDivergence => Parked,
+            // the journal predates this build's replay-key grammar; only a pre-cutover build serves it.
+            Self::LashlangCellReplayKeyFormatCutover => Parked,
+            // the controller cannot answer the frontier read; wiring, not the attempt.
+            Self::RecordedJournalReadUnsupported => Terminal,
             // the host runs outside a handler scope; wiring, not the attempt.
             Self::RestateEffectHostRequiresHandlerScope => Terminal,
             // the give-up is journaled, so replay reproduces it.
@@ -443,6 +472,7 @@ impl RuntimeErrorCode {
             RuntimeErrorClass::Retryable | RuntimeErrorClass::Redrivable => {
                 TurnFailureCause::LiveFault
             }
+            RuntimeErrorClass::Parked => TurnFailureCause::Parked,
         }
     }
 }

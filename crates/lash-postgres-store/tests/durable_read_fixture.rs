@@ -135,6 +135,9 @@ const TURN_BOUND_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const CARRIER_CUTOVER_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-113-709567432/postgres-expected.json",
 ];
+const REPLAY_ORDINAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-114-363e43724/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -279,7 +282,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 120);
+    assert_eq!(PostgresStorage::schema_version(), 121);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -652,6 +655,9 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // Component 120 (FIG-3589) adds the nullable turn binding pair. The
     // refusal fixture's pending input is unclaimed, so it is unbound.
     add_prior_fixture_turn_binding_column(&pool).await;
+    // Component 121 (FIG-3586) gives the effect journal's key columns `C`
+    // collation and adds the parked-turn table.
+    add_prior_fixture_replay_key_collation_and_parks(&pool).await;
     // The enclosing catalog uses the current session-metadata constraints;
     // only the deliberately obsolete checkpoint component remains historical.
     for constraint in
@@ -766,6 +772,28 @@ async fn add_prior_fixture_turn_binding_column(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("add the component-120 turn binding to the refusal fixture catalog");
+}
+
+// Author-time refresh only: the component-121 key collation and parked-turn
+// table.
+async fn add_prior_fixture_replay_key_collation_and_parks(pool: &sqlx::PgPool) {
+    sqlx::raw_sql(
+        "ALTER TABLE lash_runtime_effect_group
+             ALTER COLUMN group_key TYPE TEXT COLLATE \"C\";
+         ALTER TABLE lash_runtime_effect_group_child
+             ALTER COLUMN group_key TYPE TEXT COLLATE \"C\",
+             ALTER COLUMN replay_key TYPE TEXT COLLATE \"C\";
+         ALTER TABLE lash_runtime_effect_replay
+             ALTER COLUMN replay_key TYPE TEXT COLLATE \"C\",
+             ALTER COLUMN group_key TYPE TEXT COLLATE \"C\";",
+    )
+    .execute(pool)
+    .await
+    .expect("give the refusal fixture's journal key columns the component-121 collation");
+    sqlx::raw_sql(schema_table_ddl("lash_turn_parks"))
+        .execute(pool)
+        .await
+        .expect("create the component-121 parked-turn table from the authoritative DDL");
 }
 
 // Author-time refresh only: backfill the component-116 submission columns.

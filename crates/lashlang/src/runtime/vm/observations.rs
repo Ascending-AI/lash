@@ -46,29 +46,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         Some(self.begin_lashlang_execution_site(site))
     }
 
-    /// Aggregates are counted in the same map as execution sites, under a key
-    /// no site can mint: node ids are `{kind}:{24 hex}` and this key is not.
-    /// That map is what rides the VM continuation, so the count survives a park
-    /// and a process segment handover, which a counter held beside the VM would
-    /// not — two identical aggregates straddling a snapshot would both be the
-    /// first (ADR 0065).
-    ///
-    /// The instruction is the key rather than an execution site because an
-    /// aggregate in a function body has no site at all: `lashlang_execution_paths`
-    /// walks `program.main`, so nothing inside a declaration is described. An
-    /// instruction pointer is defined for every aggregate, and it is stable for
-    /// a given compiled program — the guarantee `BYTECODE_FORMAT_VERSION`
-    /// exists to make, and the one a restored continuation's own `ip` already
-    /// depends on.
-    pub(super) fn next_aggregate_occurrence(&mut self, instruction_ip: usize) -> u64 {
-        let occurrence = self
-            .lashlang_execution_occurrences
-            .entry(format!("aggregate@{instruction_ip}"))
-            .and_modify(|value| *value += 1)
-            .or_insert(1);
-        *occurrence
-    }
-
     pub(super) fn begin_lashlang_execution_site(
         &mut self,
         site: LashlangExecutionSite,

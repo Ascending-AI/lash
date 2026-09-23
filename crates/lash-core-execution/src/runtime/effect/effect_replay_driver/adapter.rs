@@ -482,4 +482,21 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
             .drain_blocked(group_key, commit_seq)
             .await
     }
+
+    /// The journal rows this controller's scope holds in `range`, read from
+    /// both tables in byte order (FIG-3586).
+    async fn read_recorded_journal(
+        &self,
+        range: &RecordedKeyRange,
+    ) -> Result<crate::RecordedJournal, RuntimeEffectControllerError> {
+        let identity = self
+            .execution_scope()
+            .journal_identity()
+            .map_err(RuntimeEffectControllerError::from)?;
+        self.replay_driver()
+            .row_store
+            .recorded_keys_in_range(identity.key(), range)
+            .await
+            .map(crate::RecordedJournal::Keys)
+    }
 }

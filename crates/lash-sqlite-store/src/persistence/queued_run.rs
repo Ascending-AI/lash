@@ -302,6 +302,15 @@ impl Store {
                         return Ok(next);
                     }
                     settle_run_members_conn(tx, &fence, &settlement.scope)?;
+                    // Settling the run settles the turn it had parked (FIG-3586).
+                    tx.execute(
+                        crate::turn_ingress::turn_ingress_sql()
+                            .turn_parks
+                            .delete_by_session
+                            .sql(),
+                        params![fence.session_id.as_str()],
+                    )
+                    .map_err(sqlite_error)?;
                     if matches!(settlement.progress, QueuedRunProgress::ForgetUnworked) {
                         let scope_key = scope_key(&settlement.scope)?;
                         tx.execute(

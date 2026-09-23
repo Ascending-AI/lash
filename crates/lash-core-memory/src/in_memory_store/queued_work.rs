@@ -580,6 +580,8 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             _ => return Err(conflict()),
         }
         let settled = run.advance(&settlement, &[])?;
+        // Settling the run settles the turn it had parked (FIG-3586).
+        self.turn_park.lock_recover().take();
         if run.terminal.is_some() {
             return Ok(settled);
         }

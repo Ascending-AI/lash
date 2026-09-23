@@ -333,6 +333,36 @@ impl<'run> RuntimeExecutionContext<'run> {
             .into_language_runtime_value()
     }
 
+    /// Journals a replayed language run's seal at `key` (FIG-3586): the
+    /// run's facts ride in `facts` and so in the envelope, and `producer` is
+    /// the outcome — served back on replay, so the answer names who wrote the
+    /// journal, never who is replaying it.
+    pub async fn journal_run_seal(
+        &self,
+        key: String,
+        facts: String,
+        producer: serde_json::Value,
+    ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
+        let invocation = self.language_runtime_invocation(&key);
+        self.dispatch
+            .effect_controller
+            .scoped()
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::LanguageRuntimeValue {
+                        operation: format!(
+                            "{}:{facts}",
+                            crate::runtime::effect::RUN_SEAL_OPERATION
+                        ),
+                    },
+                ),
+                crate::RuntimeEffectLocalExecutor::run_seal(producer),
+            )
+            .await?
+            .into_language_runtime_value()
+    }
+
     /// Journals the link-scoped deferred-resolution decision without inheriting
     /// the live caller attribution. The admitted parent address supplies the
     /// durable identity; attribution and descriptive parent labels are not part
@@ -838,6 +868,76 @@ impl<'run> RuntimeExecutionContext<'run> {
         pending.get_or_insert(error);
     }
 
+    /// The recorded nested effect error, when it reports a replay divergence
+    /// (FIG-3586): a language runtime inspects it after each command it
+    /// issued, so a mismatch at a recorded entry stops the run there instead
+    /// of reaching the program as a catchable failure.
+    pub fn nested_replay_mismatch(&self) -> Option<crate::RuntimeEffectControllerError> {
+        self.nested_effect_error
+            .lock_recover()
+            .as_ref()
+            .filter(|error| error.code.is_replay_mismatch())
+            .cloned()
+    }
+
+    /// Records `error` as the nested effect error, replacing whatever was
+    /// recorded before: a language runtime re-types the replay mismatch its
+    /// command met into the run's own divergence, which carries the ordinal
+    /// and attribution the substrate's mismatch cannot.
+    pub fn replace_nested_effect_error(&self, error: crate::RuntimeEffectControllerError) {
+        *self.nested_effect_error.lock_recover() = Some(error);
+    }
+
+    /// Whether a nested effect error is recorded: the enclosing execution
+    /// aborts, so it writes nothing further of its own.
+    pub fn has_nested_effect_error(&self) -> bool {
+        self.nested_effect_error.lock_recover().is_some()
+    }
+
+    /// This context with `command`'s invocation as the parent every nested
+    /// effect it issues descends from (FIG-3586): a process command journals
+    /// at `{command}:{effect id}`, under the command's own key.
+    pub fn under_command(&self, command: &crate::CommandReplayKey) -> Self {
+        let invocation = crate::runtime::command_invocation(
+            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.effect_attribution(),
+            self.parent_invocation.as_ref(),
+            command,
+        )
+        .into_runtime_invocation();
+        self.clone().with_parent_invocation(invocation)
+    }
+
+    /// This context serving one replayed language command (FIG-3586): every
+    /// journal write the command makes — a tool attempt, a runtime value, a
+    /// trigger operation, a sleep, a group open, a process command — asks
+    /// `guard` first.
+    pub fn with_command_journal_guard(&self, guard: Arc<crate::CommandJournalGuard>) -> Self {
+        let mut dispatch = (*self.dispatch).clone();
+        dispatch.effect_controller = dispatch.effect_controller.with_journal_guard(guard);
+        let mut context = self.clone();
+        context.dispatch = Arc::new(dispatch);
+        context
+    }
+
+    /// The recorded-frontier read of this execution's scope (FIG-3586): the
+    /// journal rows its controller holds in `range`, with this opener's group
+    /// keys read back as the commands that formed them.
+    pub async fn read_recorded_journal(
+        &self,
+        range: &crate::RecordedKeyRange,
+    ) -> Result<crate::RecordedJournal, crate::RuntimeEffectControllerError> {
+        let range = crate::RecordedKeyRange {
+            group_key_prefix: self.own_group_key_prefix(),
+            ..range.clone()
+        };
+        self.dispatch
+            .effect_controller
+            .controller()
+            .read_recorded_journal(&range)
+            .await
+    }
+
     /// Shares the session-scoped attachment store with code-executor implementors so code-produced
     /// artifacts follow the same durable ownership contract as turn input.
     pub fn attachment_store(&self) -> Arc<crate::SessionAttachmentStore> {
@@ -1093,6 +1193,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// await-event seam rather than polling the registry.
     pub async fn await_process_signal_event(
         &self,
+        command: &crate::CommandReplayKey,
         process_id: &ProcessId,
         signal_name: &str,
         event_ordinal: u64,
@@ -1111,16 +1212,21 @@ impl<'run> RuntimeExecutionContext<'run> {
                 ),
             )
             .await?;
-        let invocation = crate::runtime::causal::process_await_event_invocation(
+        // The wait is addressed by name and per-name ordinal, because outside
+        // signallers address it; the journaled await is addressed by the
+        // command's issue ordinal, like every other effect of the run
+        // (FIG-3586).
+        let invocation = crate::runtime::causal::child_effect_invocation(
             self.dispatch.effect_controller.scoped().execution_scope(),
-            self.parent_invocation
-                .as_ref()
-                .map(|parent| parent.attribution.clone())
-                .unwrap_or_else(crate::RuntimeAttribution::none),
-            self.parent_invocation.as_ref(),
-            process_id,
-            signal_name,
-            event_ordinal,
+            &crate::runtime::command_invocation(
+                self.dispatch.effect_controller.scoped().execution_scope(),
+                self.effect_attribution(),
+                self.parent_invocation.as_ref(),
+                command,
+            )
+            .into_runtime_invocation(),
+            command.signal(),
+            "signal",
         );
         let outcome = self
             .dispatch
@@ -1266,41 +1372,45 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    fn process_sleep_invocation(
+    #[expect(
+        clippy::expect_used,
+        reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
+    )]
+    fn command_sleep_invocation(
         &self,
-        scope: &str,
-        sequence: u64,
+        command: &crate::CommandReplayKey,
     ) -> crate::RuntimeEffectInvocation {
-        crate::runtime::causal::process_sleep_invocation(
-            self.dispatch.effect_controller.scoped().execution_scope(),
+        crate::RuntimeEffectInvocation::new(
+            crate::EffectAddress::new(
+                self.dispatch
+                    .effect_controller
+                    .scoped()
+                    .execution_scope()
+                    .clone(),
+                command.sleep(),
+            )
+            .expect("a command sleep uses the already admitted controller scope"),
+            self.effect_attribution(),
+            command.sleep(),
+        )
+        .with_caused_by(
             self.parent_invocation
                 .as_ref()
-                .map(|parent| parent.attribution.clone())
-                .unwrap_or_else(crate::RuntimeAttribution::none),
-            self.parent_invocation.as_ref(),
-            scope,
-            sequence,
+                .and_then(crate::RuntimeInvocation::causal_ref),
         )
     }
 
-    /// The stable replay key [`Self::sleep_process`] journals the sleep under
-    /// for the same `scope` and `sequence`.
-    pub fn process_sleep_replay_key(&self, scope: &str, sequence: u64) -> String {
-        self.process_sleep_invocation(scope, sequence)
-            .replay_key()
-            .to_owned()
-    }
-
-    /// Sleeps process execution through the effect-host seam for code-executor implementors so
-    /// cancellation and replay semantics remain durable.
-    pub async fn sleep_process(
+    /// Sleeps under the command key a replayed language program issued the
+    /// sleep at (FIG-3586), through the effect-host seam so cancellation and
+    /// replay semantics remain durable. The intent is journaled at
+    /// [`CommandReplayKey::sleep`](crate::CommandReplayKey::sleep).
+    pub async fn sleep_command(
         &self,
-        scope: &str,
-        sequence: u64,
+        command: &crate::CommandReplayKey,
         spec: crate::SleepSpec,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let cancellation = self.cancellation_token.clone().unwrap_or_default();
-        let invocation = self.process_sleep_invocation(scope, sequence);
+        let invocation = self.command_sleep_invocation(command);
         let command = crate::RuntimeEffectCommand::Sleep { spec };
         let outcome = self
             .dispatch

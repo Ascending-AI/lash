@@ -169,10 +169,11 @@ process_id }` with no incarnation, while
 `crates/lash-core-store/src/process_identity.rs` defines `ProcessRef {
 process_id, incarnation }` precisely to "Pin a reusable process name to one
 store-minted incarnation", and ADR 0094 renders a process Parent Scope as
-`process_id#incarnation`. A group key's documented shape —
-`{scope_id}:group:{batch_id}:{occurrence}` in
-`crates/lash-core-execution/src/runtime/effect/group.rs` and
-`.../group_journal.rs` — is a string shape, not an incarnation binding. Reusing
+`process_id#incarnation`. A group key — for a lashlang aggregate
+`{scope_id}:group:` then the issuing command's positional key
+`{namespace}:lk2:{k:010}` (FIG-3586), for any other caller
+`{scope_id}:group:{parent_effect_id}:{batch_id}` — is a string shape,
+not an incarnation binding. Reusing
 a process name can therefore alias a prior close, cancellation fence or group.
 **FIG-3394 binds the incarnation into the shared group and child identity;
 FIG-3396 validates it during recovery.**
@@ -226,17 +227,18 @@ process is still working is refused outright", and then immediately limits it �
 process is not distinguishable from a closed one here, which is why closedness is
 the caller's knowledge".
 
-**Occurrence carriage.** The occurrence ordinal rides the VM continuation, so two
-identical `race` calls straddling a segment boundary do not both derive
-occurrence 0. It lives in `crates/lashlang/src/runtime/vm/continuation.rs` as
-`VmContinuation::occurrence_counters`, embedded in the `LashlangSegmentState` the
-Lashlang runtime serializes at a boundary; the sibling `ReplayOrdinalsState`
-carries the separate sleep, event and signal ordinals and is not where aggregate
-occurrences live.
+**Ordinal carriage.** A lashlang aggregate is addressed by the issue ordinal of
+the command that formed it (ADR 0103, FIG-3586), which rides the VM
+continuation: a process body's ordinals live in `ReplayOrdinalsState::commands`
+inside the `LashlangSegmentState` its runtime serializes at a boundary, so two
+identical `race` calls straddling a segment boundary take different ordinals.
+The aggregate's instruction pointer, its occurrence and the opener occurrence
+that earlier keys carried are gone from every key; `occurrence_counters` stays
+on the continuation as trace and graph metadata only.
 
-*Status.* The group-key shape and the continuation carriage hold. **Implemented**
-(FIG-3394): the product path mints the occurrence, and the opener identity
-above is validated at recovery.
+*Status.* The positional group key and its continuation carriage hold
+(FIG-3586). **Implemented** (FIG-3394): the opener identity above is
+validated at recovery.
 
 ---
 
@@ -1306,3 +1308,33 @@ needs its rank, discharge and projection authority (§4).
 - **The bound is a reservation protocol, not a number.** FIG-3397 names the
   accounting units and their release conditions before mid-aggregate suspension is
   considered.
+
+## Amendment (FIG-3586): the aggregate group key is positional
+
+Amended 2026-09-23. A lashlang aggregate's group key is the opener's group
+prefix followed by the issuing command's key: `{scope_id}:group:P:{k:010}`,
+`P` the run's replay namespace (ADR 0103). It is positional, with no content,
+compiler output or parent effect id in it, and it keeps the opener's
+`{scope_id}:group:` prefix, so the opener's end finishes the groups a crashed
+cell formed exactly as it finishes any other it owns. A recorded-frontier read
+asks for the group rows under that prefix and reads them back as the commands
+that formed them. Its children are
+`P:{k:010}:child:{i}`, `i` the leaf's first-appearance index; its timers'
+admission sample is `P:{k:010}:timers-admitted`. The earlier key embedded
+`batch_id` and an occurrence, so an aggregate whose arguments, grant or timer
+layout changed missed the journal, opened a fresh group and ran every child
+live.
+
+`batch_id` stays on the group as a **checked fact**: a content digest
+(identity family `lash.aggregate-content`) over the tool calls and the timers'
+positions and durations, with no instruction pointer or call site. The
+lashlang caller opens its group with `GroupReopen::RetainedContent`: a reopen
+must match the recorded shape (§3, W1) **and** every offered child must be the
+retained child at its position, compared as canonical envelopes, or the open
+refuses before any child is claimed — re-typed by the run to
+`lashlang_cell_replay_divergence`. Other callers keep `RetainedShape` and the
+`{scope_id}:group:{parent_effect_id}:{batch_id}` key, whose batch id is
+`TOOL_BATCH_FAMILY_VERSION` 3. Both key shapes carry the opener's scope, so no
+two openers share a group row although the group table is keyed by the group
+key alone. The native tier
+(§14) does not yet run the content check: it fences a reopen by shape only.

@@ -2197,7 +2197,13 @@ fn drive_rlm_to_second_llm_request(
                 } else {
                     Ok(None)
                 };
-                machine.handle_response(Response::ExecutionEnvironmentSynced { id, result });
+                machine.handle_response(Response::ExecutionEnvironmentSynced {
+                    id,
+                    result,
+                    cell_replay_grammar: Some(
+                        lash_lashlang_runtime::LASHLANG_REPLAY_KEY_GRAMMAR_VERSION,
+                    ),
+                });
             }
             Effect::LlmCall { id, request } => {
                 requests.push((*request).clone());

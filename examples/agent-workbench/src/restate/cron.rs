@@ -309,13 +309,13 @@ impl CronTickCancelSurface for RestateCronTickCancelSurface<'_, '_> {
         scheduled_for: String,
         outcome: lash::triggers::TriggerOccurrenceOutcome,
     ) -> HandlerResult<String> {
-        record_cron_tick_outcome(
+        Box::pin(record_cron_tick_outcome(
             self.app_state.clone(),
             request,
             scheduled_for,
             outcome,
             self.controller,
-        )
+        ))
         .await
     }
 

@@ -2291,6 +2291,8 @@ mod race_recovery;
 #[cfg(feature = "rlm")]
 mod rebuild_conformance;
 #[cfg(feature = "rlm")]
+mod replay_park;
+#[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;
 #[cfg(feature = "rlm")]
 mod stack_budget;

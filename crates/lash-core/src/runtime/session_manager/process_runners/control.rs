@@ -228,6 +228,9 @@ impl<'scope> ProcessCommandRunner<'scope> {
     ) -> Result<crate::ProcessEffectOutcome, crate::PluginError> {
         let effect_id = command.effect_id();
         let scoped = self.effect_controller_handle.scoped();
+        scoped
+            .admit_journal_write()
+            .map_err(crate::PluginError::RuntimeEffectController)?;
         let attribution = self
             .parent_invocation
             .as_ref()

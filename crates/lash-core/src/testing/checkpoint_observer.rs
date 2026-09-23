@@ -374,6 +374,10 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
         self.inner.list_sessions(filter).await
     }
 
+    async fn count_unsettled_turns(&self) -> Result<crate::store::UnsettledTurnCounts, StoreError> {
+        self.inner.count_unsettled_turns().await
+    }
+
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         self.inner.session_was_deleted(session_id).await
     }

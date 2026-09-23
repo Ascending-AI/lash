@@ -21,36 +21,14 @@ pub fn is_typescript_runtime_receiver(receiver: &lashlang::Value) -> bool {
 /// one its durable effect-summary record carries.
 pub(crate) const TYPESCRIPT_RUNTIME_HOST_OPERATION: &str = "typescript.runtime";
 
-pub async fn journaled_typescript_runtime_value(
-    ctx: &lash_core::RuntimeExecutionContext<'_>,
-    effect_id: String,
+/// The TypeScript runtime operation a call names, checked before anything
+/// reaches the journal: `None` when `receiver` is not the runtime, a refusal
+/// for arguments or an operation the runtime does not have.
+pub fn typescript_runtime_operation<'op>(
     receiver: &lashlang::Value,
-    operation: &str,
+    operation: &'op str,
     args: &[lashlang::Value],
-) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
-    let mut journaled = false;
-    journaled_typescript_runtime_value_recording(
-        ctx,
-        effect_id,
-        receiver,
-        operation,
-        args,
-        &mut journaled,
-    )
-    .await
-}
-
-/// As [`journaled_typescript_runtime_value`], also reporting through
-/// `journaled` whether the effect produced a journaled value — the outcome a
-/// process incorporates into its effect summary.
-pub(crate) async fn journaled_typescript_runtime_value_recording(
-    ctx: &lash_core::RuntimeExecutionContext<'_>,
-    effect_id: String,
-    receiver: &lashlang::Value,
-    operation: &str,
-    args: &[lashlang::Value],
-    journaled: &mut bool,
-) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
+) -> Option<Result<&'op str, lashlang::ExecutionHostError>> {
     let lashlang::Value::Resource(handle) = receiver else {
         return None;
     };
@@ -72,19 +50,26 @@ pub(crate) async fn journaled_typescript_runtime_value_recording(
             "unknown TypeScript runtime operation `{operation}`"
         ))));
     }
+    Some(Ok(operation))
+}
+
+/// Journals one checked TypeScript runtime operation at `key` and answers
+/// its value. The outer error is the journal's — a replay mismatch among
+/// them, which a bridge stops the run on — and the inner one the value's.
+pub async fn journaled_typescript_runtime_value(
+    ctx: &lash_core::RuntimeExecutionContext<'_>,
+    key: String,
+    operation: &str,
+) -> Result<
+    Result<lashlang::Value, lashlang::ExecutionHostError>,
+    lash_core::RuntimeEffectControllerError,
+> {
     let value = ctx
-        .journaled_language_runtime_value(effect_id, operation.to_string())
-        .await;
-    *journaled = value.is_ok();
-    Some(
-        value
-            .map_err(|error| lashlang::ExecutionHostError::new(error.to_string()))
-            .and_then(|value| {
-                value.as_f64().map(lashlang::Value::Number).ok_or_else(|| {
-                    lashlang::ExecutionHostError::new(format!(
-                        "journaled TypeScript runtime `{operation}` returned a non-number"
-                    ))
-                })
-            }),
-    )
+        .journaled_language_runtime_value(key, operation.to_string())
+        .await?;
+    Ok(value.as_f64().map(lashlang::Value::Number).ok_or_else(|| {
+        lashlang::ExecutionHostError::new(format!(
+            "journaled TypeScript runtime `{operation}` returned a non-number"
+        ))
+    }))
 }

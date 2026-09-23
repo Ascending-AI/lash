@@ -159,11 +159,14 @@ mod tests {
         let (context, orchestration_executions) = granted_call_context(event_tx).await;
 
         let reply = context
-            .call_tool_with_execution_grant(
-                "scalar-granted".to_string(),
-                granted_call(),
-                serde_json::json!({}),
-                0,
+            .call_command_tool(
+                &crate::CommandReplayKey::new("scalar-granted"),
+                ToolInvocation::new(
+                    "scalar-granted",
+                    crate::ToolId::from("tool:granted_orchestration_probe"),
+                    serde_json::json!({}),
+                )
+                .with_execution_grant(granted_call()),
             )
             .await;
 
@@ -184,17 +187,14 @@ mod tests {
         let (context, orchestration_executions) = granted_call_context(event_tx).await;
 
         let replies = context
-            .call_tool_batch(
-                vec![
-                    ToolInvocation::new(
-                        "batch-granted",
-                        crate::ToolId::from("tool:granted_orchestration_probe"),
-                        serde_json::json!({}),
-                    )
-                    .with_execution_grant(granted_call()),
-                ],
-                crate::session::ToolGroupOccurrence::Opener(1),
-            )
+            .call_tool_batch(vec![
+                ToolInvocation::new(
+                    "batch-granted",
+                    crate::ToolId::from("tool:granted_orchestration_probe"),
+                    serde_json::json!({}),
+                )
+                .with_execution_grant(granted_call()),
+            ])
             .await;
 
         assert_eq!(
@@ -253,29 +253,26 @@ mod tests {
             .with_tracing(Some(tracing));
 
         context
-            .call_tool_batch(
-                vec![
-                    ToolInvocation::new(
-                        "missing-call-a",
-                        crate::ToolId::from("tool:missing-a"),
-                        serde_json::json!({}),
-                    )
-                    .with_issuing_language_node_id("node-a"),
-                    ToolInvocation::new(
-                        "missing-call-b",
-                        crate::ToolId::from("tool:missing-b"),
-                        serde_json::json!({}),
-                    )
-                    .with_issuing_language_node_id("node-b"),
-                    ToolInvocation::new(
-                        "invalid-prepared",
-                        crate::ToolId::from("tool:batch_failure"),
-                        serde_json::Value::Null,
-                    )
-                    .with_issuing_language_node_id("node-invalid"),
-                ],
-                crate::session::ToolGroupOccurrence::Opener(1),
-            )
+            .call_tool_batch(vec![
+                ToolInvocation::new(
+                    "missing-call-a",
+                    crate::ToolId::from("tool:missing-a"),
+                    serde_json::json!({}),
+                )
+                .with_issuing_language_node_id("node-a"),
+                ToolInvocation::new(
+                    "missing-call-b",
+                    crate::ToolId::from("tool:missing-b"),
+                    serde_json::json!({}),
+                )
+                .with_issuing_language_node_id("node-b"),
+                ToolInvocation::new(
+                    "invalid-prepared",
+                    crate::ToolId::from("tool:batch_failure"),
+                    serde_json::Value::Null,
+                )
+                .with_issuing_language_node_id("node-invalid"),
+            ])
             .await;
 
         // A call that settles before provider dispatch is still a complete
@@ -585,14 +582,11 @@ mod tests {
     async fn failed_group_formation_returns_empty_settlement_order() {
         let context = batch_failure_context(Arc::new(BatchFailureEffectController));
         let replies = context
-            .call_tool_batch(
-                vec![ToolInvocation::new(
-                    "call",
-                    crate::ToolId::from("tool:batch_failure"),
-                    serde_json::json!({}),
-                )],
-                crate::session::ToolGroupOccurrence::Opener(1),
-            )
+            .call_tool_batch(vec![ToolInvocation::new(
+                "call",
+                crate::ToolId::from("tool:batch_failure"),
+                serde_json::json!({}),
+            )])
             .await;
 
         assert_eq!(replies.replies.len(), 1, "one reply per input call");

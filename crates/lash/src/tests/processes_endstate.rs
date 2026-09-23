@@ -1468,7 +1468,10 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
 
     let first_wait = wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
     let lash_core::WaitKind::Signal { ordinal, .. } =
-        first_wait.wait.expect("first wait facet").kind;
+        first_wait.wait.expect("first wait facet").kind
+    else {
+        panic!("the first wait is a signal wait");
+    };
     assert_eq!(ordinal, 1, "first wait must use ordinal 1");
     core.processes()
         .signal(
@@ -1499,7 +1502,10 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     .await;
     let lash_core::WaitKind::Signal {
         key: second_key, ..
-    } = second_wait.wait.expect("second wait facet").kind;
+    } = second_wait.wait.expect("second wait facet").kind
+    else {
+        panic!("the second wait is a signal wait");
+    };
     assert!(
         second_key.ends_with(":2"),
         "second wait key must carry ordinal 2: {second_key}"

@@ -83,7 +83,12 @@ fn call(session_id: &crate::SessionId, name: &str, tool: &str) -> crate::ToolInv
     )
 }
 
+/// One aggregate, addressed by its command key (FIG-3586). The key names the
+/// session, as a production cell's does through its own replay key; the group
+/// it forms is keyed under the opener's `{scope}:group:` prefix, so the
+/// opener's end finishes it.
 fn aggregate(
+    session_id: &crate::SessionId,
     consumer: crate::session::ToolAggregateConsumer,
     calls: Vec<crate::ToolInvocation>,
 ) -> crate::session::ToolAggregateRequest {
@@ -94,8 +99,7 @@ fn aggregate(
             .collect(),
         consumer,
         settled_value_after: None,
-        site: 0,
-        occurrence: crate::session::ToolGroupOccurrence::Opener(1),
+        command: crate::CommandReplayKey::new(format!("{session_id}:aggregate:lk2:0000000000")),
     }
 }
 
@@ -221,6 +225,7 @@ pub async fn a_cancelled_aggregates_committed_loser_is_incorporated_by_its_opene
     scenario.observation.hold(&spender);
     let consumer = context.clone();
     let request = aggregate(
+        &session_id,
         crate::session::ToolAggregateConsumer::Any,
         vec![
             call(&session_id, "rejected", LEAF_FAIL),
@@ -295,6 +300,7 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
     let spender = format!("{session_id}-spender");
     let race = || {
         aggregate(
+            &session_id,
             crate::session::ToolAggregateConsumer::Race,
             vec![
                 call(&session_id, "winner", LEAF_PLAIN),

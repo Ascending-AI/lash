@@ -166,16 +166,12 @@ impl RuntimeExecutionContext<'_> {
     /// The batch opens as a durable effect group of `ToolInvocation` children
     /// (ADR 0099 §3); replies stay input-ordered, but `settlement_order` is the
     /// group's durable final-commit order, not source order (§5).
-    pub async fn call_tool_batch(
-        &self,
-        calls: Vec<ToolInvocation>,
-        occurrence: crate::session::ToolGroupOccurrence,
-    ) -> ToolBatchReplies {
+    pub async fn call_tool_batch(&self, calls: Vec<ToolInvocation>) -> ToolBatchReplies {
         if calls.is_empty() {
             return ToolBatchReplies::default();
         }
 
-        let batch_id = deterministic_tool_invocation_batch_id(&calls, occurrence);
+        let batch_id = deterministic_tool_invocation_batch_id(&calls);
         let mut replies = vec![None; calls.len()];
         // A failed batch reports an empty settlement order by construction: downstream
         // settlement-selecting aggregates treat the order as evidence of what settled.
@@ -224,7 +220,14 @@ impl RuntimeExecutionContext<'_> {
                 .collect::<Vec<_>>();
             let consumer = ToolAggregateConsumer::AllSettled;
             let handle = match self
-                .open_tool_child_group(group_invocation, &batch_id, &leaves, consumer.wake())
+                .open_tool_child_group(
+                    group_invocation,
+                    self.tool_child_group_key(&batch_id),
+                    &batch_id,
+                    &leaves,
+                    consumer.wake(),
+                    crate::GroupReopen::RetainedShape,
+                )
                 .await
             {
                 Ok(handle) => handle,

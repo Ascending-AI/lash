@@ -61,6 +61,16 @@ crate::statements! {
              WHERE group_key = ?1
              RETURNING next_commit_seq";
 
+        /// Every group key recorded under `?1` (scope) in the closed range
+        /// `[?2, ?3]`, in ascending byte order: the group half of the
+        /// recorded-frontier read, whose replay half is
+        /// `ReplayStatements::select_keys_in_range`. A group can be recorded
+        /// before any of its children claims a replay row, so the frontier
+        /// must see the group row itself.
+        select_keys_in_range = "SELECT group_key FROM runtime_effect_group
+             WHERE scope_id = ?1 AND group_key >= ?2 AND group_key <= ?3
+             ORDER BY group_key";
+
         delete_by_session = "DELETE FROM runtime_effect_group WHERE session_id = ?1";
 
         delete_by_scope = "DELETE FROM runtime_effect_group WHERE scope_id = ?1";

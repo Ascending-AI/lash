@@ -209,15 +209,17 @@ pub(super) async fn typescript_runtime_values_replay_from_the_journal_after_reop
                 "replay:runtime-values",
             ));
         let number = async |operation: &str| {
+            let operation =
+                lash_lashlang_runtime::typescript_runtime_operation(receiver, operation, &[])
+                    .expect("the linked runtime receiver is recognised")
+                    .expect("the runtime has the operation");
             let value = lash_lashlang_runtime::journaled_typescript_runtime_value(
                 &ctx,
                 format!("typescript.runtime:{operation}"),
-                receiver,
                 operation,
-                &[],
             )
             .await
-            .expect("the linked runtime receiver is recognised")
+            .unwrap_or_else(|error| panic!("journaled `{operation}` journals: {error}"))
             .unwrap_or_else(|error| panic!("journaled `{operation}` resolves: {error}"));
             match value {
                 lashlang::Value::Number(number) => number,

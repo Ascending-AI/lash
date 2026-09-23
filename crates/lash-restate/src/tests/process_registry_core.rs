@@ -738,9 +738,11 @@ finish(await handle);
     // committed before the crash but whose `PresentToolResult` had not yet
     // landed appends its presentation on the resume — here the `start_process`
     // and resumed `replay_pending_input` boundaries — before the checkpoint.
+    // FIG-3586: the cell the crash interrupted seals its run once it answers,
+    // which the pre-crash run never reached.
     assert_eq!(
         replayed_envelopes.len(),
-        recorded_effect_count + 3,
+        recorded_effect_count + 4,
         "the resumed invocation may append only its previously uncommitted effects; appended: {:?}",
         appended_envelopes
             .iter()
@@ -756,8 +758,9 @@ finish(await handle);
             RuntimeEffectKind::PresentToolResult,
             RuntimeEffectKind::PresentToolResult,
             RuntimeEffectKind::Checkpoint,
+            RuntimeEffectKind::LanguageRuntimeValue,
         ],
-        "the replay prefix must consume every pre-crash journal entry and append only the uncommitted presentations plus the checkpoint"
+        "the replay prefix must consume every pre-crash journal entry and append only the uncommitted presentations, the checkpoint and the cell's seal"
     );
     let replayed_scalar = replayed_envelopes
         .iter()

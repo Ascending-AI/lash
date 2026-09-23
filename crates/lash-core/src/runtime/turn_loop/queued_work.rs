@@ -687,8 +687,10 @@ impl LashRuntime {
     /// Dispose of a queued run's error by its cause (FIG-3575).
     ///
     /// A live fault keeps the run for its retry budget: a retryable one
-    /// passes through, any other stays pending. An outcome settles the run
-    /// failed once; a deterministic failure is never retried.
+    /// passes through, any other stays pending. A refusal that parks the turn
+    /// (FIG-3586) is never retryable, so its run stays pending without
+    /// spending the budget. An outcome settles the run failed once; a
+    /// deterministic failure is never retried.
     async fn retain_or_settle_queued_error(
         &mut self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
@@ -697,7 +699,7 @@ impl LashRuntime {
         anonymous_caller: bool,
         error: RuntimeError,
     ) -> RuntimeError {
-        if error.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+        if error.turn_failure_cause().aborts_invocation() {
             if error.is_retryable() {
                 return error;
             }

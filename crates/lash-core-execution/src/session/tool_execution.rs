@@ -12,49 +12,23 @@ use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// v2 folds the opener's occurrence ordinal into the batch identity.
+/// v3 (FIG-3586) retires the opener occurrence ordinal v2 folded into the
+/// batch identity.
 ///
-/// v1 hashed the calls and nothing else, so a batch *was* its content: two
-/// textually identical aggregates raised by one opener produced one identity,
-/// one effect replay key and one journalled outcome, and the second aggregate
-/// read the first one's result (ADR 0065, "Group identity carries an
-/// occurrence discriminator"). The ordinal is the discriminator content cannot
-/// supply, so it joins the hashed preimage rather than being appended to the
-/// rendered id: a batch identity is one hash of everything that makes the batch
-/// that batch.
-const TOOL_BATCH_FAMILY_VERSION: u8 = 2;
-
-/// How many times the opener has reached the aggregate this batch settles.
+/// v1 hashed the calls and nothing else, so two textually identical
+/// aggregates raised by one opener shared one identity; v2 folded the VM's
+/// per-instruction occurrence in to separate them (ADR 0065). That ordinal was
+/// compiler output — an instruction pointer's reach count — and moved with
+/// lowering. A lashlang aggregate is now addressed by the issue ordinal its
+/// runtime mints ([`CommandReplayKey`](crate::CommandReplayKey)), so a batch
+/// identity is the batch's content again, and on the aggregate path it names
+/// nothing durable: it is a digest the group head checks, never a key.
 ///
-/// A batch's content is not its identity. The ordinal that separates two
-/// structurally identical batches is a fact only the opener holds, so it
-/// crosses the seam as an argument instead of being inferred here: the
-/// Lashlang hosts read it off the VM's occurrence counters, which ride the
-/// continuation, so the ordinal is stable across a replay and keeps counting
-/// across a park and a process segment handover.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolGroupOccurrence {
-    /// The ordinal the opener minted for this aggregate, counting from 1.
-    Opener(u64),
-    /// An opener that keeps no occurrence counter of its own: a provider or
-    /// orchestrating-tool body, which is ordinary host code rather than a
-    /// replayed program, so there is no deterministic count of how many times
-    /// it has reached this batch. Two structurally identical batches raised
-    /// from one such body still share an identity; that is a separate defect
-    /// from the one this ordinal closes, and naming it here keeps it visible
-    /// rather than hidden behind a zero.
-    Uncounted,
-}
-
-impl ToolGroupOccurrence {
-    fn identity_tag(self) -> u64 {
-        match self {
-            Self::Opener(ordinal) => ordinal,
-            // Distinct from every `Opener` ordinal, which counts from 1.
-            Self::Uncounted => 0,
-        }
-    }
-}
+/// The host-code batch path (`call_tool_batch` from a provider or
+/// orchestrating-tool body) keeps content identity. Two structurally
+/// identical batches raised from one such body still share an identity; that
+/// body is ordinary host code with no deterministic count of its own.
+const TOOL_BATCH_FAMILY_VERSION: u8 = 3;
 
 enum ToolCallAuthorization {
     Catalog(crate::ToolId),
@@ -212,31 +186,22 @@ mod tests {
     #[test]
     fn deterministic_batch_identity_is_stable_and_content_addressed() {
         let calls = vec![invocation("a", 1), invocation("b", 2)];
-        let first = deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1));
-        let retry = deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1));
+        let first = deterministic_tool_invocation_batch_id(&calls);
+        let retry = deterministic_tool_invocation_batch_id(&calls);
         assert_eq!(first, retry);
         assert_eq!(
             first,
-            "tool-batch:v2:blake3:2506ef842e2e5214ee5b3cbfce7596d3cf85f2f0dfd8560179f7b5f1b2c45639"
+            "tool-batch:v3:blake3:487c96dd97c200501345a95f547a956a34cd2784884d3c0c0590f7c48689c657"
         );
         assert_eq!(
-            hex(&tool_invocation_batch_preimage(
-                &calls,
-                ToolGroupOccurrence::Opener(1)
-            )),
-            "6c6173682d737461626c652d6964656e746974790202000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d6261746368000000000000000100000000000000020000000000000001610000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a317d000000000000000001620000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a327d00"
+            hex(&tool_invocation_batch_preimage(&calls)),
+            "6c6173682d737461626c652d6964656e746974790203000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d626174636800000000000000020000000000000001610000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a317d000000000000000001620000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a327d00"
         );
 
         let changed_args = vec![invocation("a", 1), invocation("b", 3)];
         let reordered = vec![invocation("b", 2), invocation("a", 1)];
-        assert_ne!(
-            first,
-            deterministic_tool_invocation_batch_id(&changed_args, ToolGroupOccurrence::Opener(1))
-        );
-        assert_ne!(
-            first,
-            deterministic_tool_invocation_batch_id(&reordered, ToolGroupOccurrence::Opener(1))
-        );
+        assert_ne!(first, deterministic_tool_invocation_batch_id(&changed_args));
+        assert_ne!(first, deterministic_tool_invocation_batch_id(&reordered));
     }
 
     #[test]
@@ -245,43 +210,28 @@ mod tests {
         let attributed = vec![invocation("a", 1).with_issuing_language_node_id("node:issuer")];
 
         assert_eq!(
-            tool_invocation_batch_preimage(&plain, ToolGroupOccurrence::Opener(1)),
-            tool_invocation_batch_preimage(&attributed, ToolGroupOccurrence::Opener(1)),
+            tool_invocation_batch_preimage(&plain),
+            tool_invocation_batch_preimage(&attributed),
             "trace attribution must not enter the durable tool-batch preimage"
         );
         assert_eq!(
-            deterministic_tool_invocation_batch_id(&plain, ToolGroupOccurrence::Opener(1)),
-            deterministic_tool_invocation_batch_id(&attributed, ToolGroupOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&plain),
+            deterministic_tool_invocation_batch_id(&attributed),
         );
     }
 
-    /// The defect this family version exists to close: identical content, one
-    /// opener, two reaches.
+    /// v3 is content identity again (FIG-3586): the same calls mint one
+    /// identity, and it is none a v1 or v2 journal holds, so no predecessor
+    /// generation shares a key with this one.
     #[test]
-    fn one_opener_reaching_the_same_aggregate_twice_mints_two_identities() {
+    fn content_identity_mints_no_predecessor_identity() {
         let calls = vec![invocation("a", 1), invocation("b", 2)];
-        let identities = (1..=3)
-            .map(|occurrence| {
-                deterministic_tool_invocation_batch_id(
-                    &calls,
-                    ToolGroupOccurrence::Opener(occurrence),
-                )
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-
-        assert_eq!(
-            identities.len(),
-            3,
-            "the same calls reached three times must mint three batch identities"
-        );
-        assert!(
-            !identities.contains(PREDECESSOR_BATCH_ID),
-            "no occurrence may re-mint the v1 identity of the same calls"
-        );
+        let minted = deterministic_tool_invocation_batch_id(&calls);
+        assert_ne!(minted, PREDECESSOR_BATCH_ID);
         assert_ne!(
-            deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Uncounted),
-            deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1)),
-            "an uncounted opener must not collide with a counted first reach"
+            minted,
+            "tool-batch:v2:blake3:2506ef842e2e5214ee5b3cbfce7596d3cf85f2f0dfd8560179f7b5f1b2c45639",
+            "the v2 identity of the same calls at occurrence 1 must not be re-minted"
         );
     }
 
@@ -305,15 +255,12 @@ mod tests {
             .with_execution_grant(grant),
         ];
         assert_eq!(
-            hex(&tool_invocation_batch_preimage(
-                &calls,
-                ToolGroupOccurrence::Opener(1)
-            )),
-            "6c6173682d737461626c652d6964656e746974790202000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d626174636800000000000000010000000000000001000000000000000a6772616e740063616c6c000000000000000c746f6f6c3a6772616e746564000000000000000e7b2276616c7565223a747275657d01000000000000000c746f6f6c3a6772616e74656401000000000000000c706c7567696e00726f75746500000000000000147b22726f757465223a5b22cebb222c302e305d7d"
+            hex(&tool_invocation_batch_preimage(&calls)),
+            "6c6173682d737461626c652d6964656e746974790203000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d62617463680000000000000001000000000000000a6772616e740063616c6c000000000000000c746f6f6c3a6772616e746564000000000000000e7b2276616c7565223a747275657d01000000000000000c746f6f6c3a6772616e74656401000000000000000c706c7567696e00726f75746500000000000000147b22726f757465223a5b22cebb222c302e305d7d"
         );
         assert_eq!(
-            deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1)),
-            "tool-batch:v2:blake3:e945970a262115423bccbf2462bef53df3fd8301dc07122dd23a11a027b5552f"
+            deterministic_tool_invocation_batch_id(&calls),
+            "tool-batch:v3:blake3:6f304c2ae6527a194e82af6ffe53d6777d405ded66b0809bf74758e8d3de9262"
         );
 
         let without_source =
@@ -334,8 +281,8 @@ mod tests {
             .with_execution_grant(without_source),
         ];
         assert_ne!(
-            deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1)),
-            deterministic_tool_invocation_batch_id(&without_source, ToolGroupOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&calls),
+            deterministic_tool_invocation_batch_id(&without_source),
             "grant source presence must occupy a distinct option arm"
         );
     }
@@ -446,15 +393,11 @@ fn cancelled_completed_tool_call(
 /// Grant presence uses the universal option tags 0/1. Grant manifest and
 /// contract fields outside the explicit execution-address allowlist are
 /// exhaustively ignored below. Retired tags remain burned.
-fn tool_invocation_batch_preimage(
-    calls: &[ToolInvocation],
-    occurrence: ToolGroupOccurrence,
-) -> Vec<u8> {
+fn tool_invocation_batch_preimage(calls: &[ToolInvocation]) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.tool-invocation-batch",
         TOOL_BATCH_FAMILY_VERSION,
     );
-    identity.u64(occurrence.identity_tag());
     identity.sequence(calls, |identity, call| {
         let ToolInvocation {
             id,
@@ -497,14 +440,11 @@ fn tool_invocation_batch_preimage(
     identity.finish()
 }
 
-pub fn deterministic_tool_invocation_batch_id(
-    calls: &[ToolInvocation],
-    occurrence: ToolGroupOccurrence,
-) -> String {
+pub(crate) fn deterministic_tool_invocation_batch_id(calls: &[ToolInvocation]) -> String {
     crate::stable_identity::rendered_hash(
         "tool-batch",
         TOOL_BATCH_FAMILY_VERSION,
-        &tool_invocation_batch_preimage(calls, occurrence),
+        &tool_invocation_batch_preimage(calls),
     )
 }
 
@@ -913,23 +853,6 @@ impl RuntimeExecutionContext<'_> {
         outcome
     }
 
-    async fn await_pending_tool_dispatch_outcome(
-        &self,
-        call_id: &str,
-        parent_invocation: Option<crate::RuntimeInvocation>,
-        pending: crate::tool_dispatch::PendingToolDispatchOutcome,
-        cancellation: Option<tokio_util::sync::CancellationToken>,
-    ) -> ToolDispatchOutcome {
-        self.await_pending_tool_dispatch_outcome_with_suffix(
-            call_id,
-            parent_invocation,
-            format!("{call_id}:await"),
-            pending,
-            cancellation,
-        )
-        .await
-    }
-
     #[expect(
         clippy::expect_used,
         reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
@@ -1122,20 +1045,57 @@ impl RuntimeExecutionContext<'_> {
         .await
     }
 
-    /// Executes one catalog-authorized tool by stable ID for code-executor implementors.
-    pub async fn call_tool_by_id(
+    /// Executes one tool call a replayed language program issued as a command
+    /// (FIG-3586), for code-executor implementors.
+    ///
+    /// `command` is the command's replay key: every attempt, retry sleep and
+    /// deferred-completion await of the call is journaled under it, and
+    /// nothing about the call itself — its id, tool name, or the site that
+    /// issued it — is key material. The invocation's grant, when it carries
+    /// one, authorizes a call outside Tool Catalog membership; its trace hook,
+    /// when present, reports nested child execution.
+    pub async fn call_command_tool(
         &self,
-        call_id: String,
-        tool_id: crate::ToolId,
-        args: serde_json::Value,
-        _index: usize,
+        command: &crate::CommandReplayKey,
+        invocation: ToolInvocation,
     ) -> ToolInvocationReply {
-        let executed = Box::pin(
-            self.execute_tool_call_by_id(call_id, tool_id, args, _index, None, None, None),
-        )
-        .await;
+        let executed = Box::pin(self.execute_command_tool(command, invocation)).await;
         let reply = ToolInvocationReply::from_output(executed.completed.output);
         reply.with_record(executed.record)
+    }
+
+    pub(crate) async fn execute_command_tool(
+        &self,
+        command: &crate::CommandReplayKey,
+        mut invocation: ToolInvocation,
+    ) -> CompletedProtocolToolCall {
+        let authorization = ToolCallAuthorization::from_invocation(&mut invocation);
+        let ToolInvocation {
+            id,
+            args,
+            child_execution_trace_hook,
+            issuing_language_node_id,
+            ..
+        } = invocation;
+        let context = match issuing_language_node_id {
+            Some(node_id) => self.clone().with_issuing_language_node_id(node_id),
+            None => self.clone(),
+        };
+        let command = crate::runtime::command_invocation(
+            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.effect_attribution(),
+            self.parent_invocation.as_ref(),
+            command,
+        )
+        .into_runtime_invocation();
+        Box::pin(context.execute_tool_call(
+            command,
+            id,
+            authorization,
+            args,
+            child_execution_trace_hook,
+        ))
+        .await
     }
 
     /// Delivers cancellation to a deferred tool handle for code-executor implementors.
@@ -1156,39 +1116,15 @@ impl RuntimeExecutionContext<'_> {
         self.await_process_handle(call_id, handle).await
     }
 
-    /// Executes one catalog-authorized tool for code-executor implementors and reports nested child
-    /// execution through the supplied trace hook.
-    pub async fn call_tool_by_id_with_child_execution_trace_hook(
-        &self,
-        call_id: String,
-        tool_id: crate::ToolId,
-        args: serde_json::Value,
-        _index: usize,
-        trace_hook: crate::ToolChildExecutionTraceHook,
-    ) -> ToolInvocationReply {
-        let executed = Box::pin(self.execute_tool_call_by_id(
-            call_id,
-            tool_id,
-            args,
-            _index,
-            None,
-            None,
-            Some(trace_hook),
-        ))
-        .await;
-        let reply = ToolInvocationReply::from_output(executed.completed.output);
-        reply.with_record(executed.record)
-    }
-
     async fn execute_tool_call(
         &self,
+        command: crate::RuntimeInvocation,
         call_id: String,
         authorization: ToolCallAuthorization,
         args: serde_json::Value,
-        replay: Option<crate::llm::types::ProviderReplayMeta>,
-        parent_invocation: Option<crate::RuntimeInvocation>,
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     ) -> CompletedProtocolToolCall {
+        let replay = None;
         let tool_correlation_id = tool_activity_id(&call_id);
         let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
             let tool_id = authorization.tool_id();
@@ -1222,7 +1158,7 @@ impl RuntimeExecutionContext<'_> {
         )
         .await;
 
-        let parent_invocation = parent_invocation.or_else(|| self.parent_invocation.clone());
+        let parent_invocation = Some(command.clone());
         let mut dispatch = (*self.dispatch).clone();
         dispatch.parent_invocation = parent_invocation.clone();
         let pending = crate::sansio::PendingToolCall {
@@ -1296,8 +1232,8 @@ impl RuntimeExecutionContext<'_> {
                         execution_grant,
                         retry_policy,
                         None,
-                        ToolAttemptEffectIdentity::Scalar {
-                            parent: parent_invocation.clone(),
+                        ToolAttemptEffectIdentity::Command {
+                            command: command.clone(),
                         },
                         turn_cancel_wait.as_ref(),
                         intent_trace_hook,
@@ -1318,9 +1254,10 @@ impl RuntimeExecutionContext<'_> {
         let mut outcome = match launch {
             ToolCallLaunch::Done(outcome) => *outcome,
             ToolCallLaunch::Pending(pending) => {
-                self.await_pending_tool_dispatch_outcome(
+                self.await_pending_tool_dispatch_outcome_with_suffix(
                     &call_id,
                     parent_invocation.clone(),
+                    "await".to_string(),
                     *pending,
                     self.cancellation_token.clone(),
                 )
@@ -1351,72 +1288,6 @@ impl RuntimeExecutionContext<'_> {
         outcome.record.call_id = Some(call_id.clone());
 
         self.complete_tool_call(call_id, replay, outcome).await
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "tool execution carries explicit runtime call metadata"
-    )]
-    pub(crate) async fn execute_tool_call_by_id(
-        &self,
-        call_id: String,
-        tool_id: crate::ToolId,
-        args: serde_json::Value,
-        _index: usize,
-        replay: Option<crate::llm::types::ProviderReplayMeta>,
-        parent_invocation: Option<crate::RuntimeInvocation>,
-        child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
-    ) -> CompletedProtocolToolCall {
-        Box::pin(self.execute_tool_call(
-            call_id,
-            ToolCallAuthorization::Catalog(tool_id),
-            args,
-            replay,
-            parent_invocation,
-            child_execution_trace_hook,
-        ))
-        .await
-    }
-
-    pub async fn call_tool_with_execution_grant(
-        &self,
-        call_id: String,
-        grant: crate::ToolExecutionGrant,
-        args: serde_json::Value,
-        _index: usize,
-    ) -> ToolInvocationReply {
-        let executed = Box::pin(self.execute_tool_call(
-            call_id,
-            ToolCallAuthorization::Granted(Box::new(grant)),
-            args,
-            None,
-            None,
-            None,
-        ))
-        .await;
-        let reply = ToolInvocationReply::from_output(executed.completed.output);
-        reply.with_record(executed.record)
-    }
-
-    pub async fn call_tool_with_execution_grant_and_child_execution_trace_hook(
-        &self,
-        call_id: String,
-        grant: crate::ToolExecutionGrant,
-        args: serde_json::Value,
-        _index: usize,
-        trace_hook: crate::ToolChildExecutionTraceHook,
-    ) -> ToolInvocationReply {
-        let executed = Box::pin(self.execute_tool_call(
-            call_id,
-            ToolCallAuthorization::Granted(Box::new(grant)),
-            args,
-            None,
-            None,
-            Some(trace_hook),
-        ))
-        .await;
-        let reply = ToolInvocationReply::from_output(executed.completed.output);
-        reply.with_record(executed.record)
     }
 
     /// Delivers a named signal and JSON payload to a deferred tool handle for code-executor

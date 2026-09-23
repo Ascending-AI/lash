@@ -768,6 +768,7 @@ fn drain_rlm_contract_effects(machine: &mut lash_core::TurnMachine) -> Vec<lash_
                     tool_specs: Arc::new(Vec::new()),
                     projector_turn_inputs: None,
                 })),
+                cell_replay_grammar: None,
             });
             continue;
         }

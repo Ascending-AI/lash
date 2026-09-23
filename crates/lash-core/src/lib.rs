@@ -384,6 +384,7 @@ pub mod facade_support {
     pub use crate::runtime::ensure_durable_effect_input;
     pub use crate::runtime::process_runtime_session_ids;
     pub use crate::runtime::process_signal_event_type;
+    pub use crate::runtime::process_signal_wait_key;
     pub use crate::runtime::process_wake_delivery;
     pub use crate::runtime::process_wake_source_key;
     pub use crate::runtime::promise_semantics;
@@ -395,7 +396,6 @@ pub mod facade_support {
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{QueuedEffectSource, QueuedTurnOptions, TurnOptions};
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
-    pub use crate::runtime::{process_signal_await_key, process_signal_wait_key};
     pub use lash_core_execution::runtime::process::ProcessAdmissionDeferred;
     pub use lash_core_execution::runtime::process::ProcessAdmissionIntake;
     pub use lash_core_execution::runtime::process::ProcessAdmissionReport;
@@ -724,12 +724,13 @@ pub use runtime::{
     AdmittedScopeError, ArtifactOwner, AssistantResponseHookEvents, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
-    CompletionKeyPreparation, DeclaredProcessIdentity, DeliveryPolicy, DrainMode, DrainModePolicy,
-    DrainedChild, EffectAddress, EffectCommitState, EffectGroupDrainBudget, EffectGroupHandle,
-    EffectGroupMembership, EffectHost, EffectJournalRetirement, EffectJournaling, EffectOpener,
-    EffectOpenerError, EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt,
-    ForkSessionRequest, GroupChildBinding, GroupDrainReport, GroupExecutors,
-    GroupFinalizationReport, GroupOnlyFinalization, GroupSettlement, GroupWakePolicy, HandleId,
+    CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, DeclaredProcessIdentity,
+    DeliveryPolicy, DrainMode, DrainModePolicy, DrainedChild, EffectAddress, EffectCommitState,
+    EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
+    EffectJournalRetirement, EffectJournaling, EffectOpener, EffectOpenerError,
+    EffectRetirementGate, ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
+    GroupChildBinding, GroupDrainReport, GroupExecutors, GroupFinalizationReport,
+    GroupOnlyFinalization, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
     InMemoryProcessExecutionEnvStore, InputItem, LedgerUsageDisposition, LiveReplayEventDraft,
     LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
     LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LoserPolicy,
@@ -777,7 +778,8 @@ pub use runtime::{
     QueuedDrainSelection, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
     QueuedLaneHolder, QueuedLaneProbe, QueuedWorkAuthority, QueuedWorkBatchingConfig,
     QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkSubstrate, RankedGroupSettlement,
-    RecoveryContract, Resolution, ResolveOutcome, RuntimeAttribution, RuntimeCheckpointComponents,
+    RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecoveryContract,
+    Resolution, ResolveOutcome, RuntimeAttribution, RuntimeCheckpointComponents,
     RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
     RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,

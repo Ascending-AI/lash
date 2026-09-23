@@ -522,15 +522,6 @@ pub fn process_signal_wait_key(
     format!("process:{process_id}:signal.{signal_name}:{discriminator}")
 }
 
-/// The replay key of the effect that *awaits* a signal, as distinct from the
-/// key of the append that satisfies it.
-///
-/// Lives beside [`process_signal_wait_key`] so the shared
-/// `process:<id>:signal.<name>` prefix has exactly one definition.
-pub fn process_signal_await_key(process_id: &ProcessId, signal_name: &str, ordinal: u64) -> String {
-    process_signal_wait_key(process_id, signal_name, format_args!("await:{ordinal}"))
-}
-
 pub fn validate_process_signal_name(signal_name: &str) -> Result<(), crate::PluginError> {
     let valid = !signal_name.is_empty()
         && signal_name

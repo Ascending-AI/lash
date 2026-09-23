@@ -50,3 +50,5 @@ mod turn_cancel_receipt_consistency;
 
 #[path = "queued_run_recovery.rs"]
 mod queued_run_recovery;
+#[path = "replay_key_collation.rs"]
+mod replay_key_collation;

@@ -716,6 +716,16 @@ impl TurnInputStore for PostgresSessionStore {
                 };
             results.push(lash_core_execution::PendingTurnInputCancelReceipt { target, outcome });
         }
+        sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .delete_released_turn_park
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(results)
     }
@@ -771,6 +781,16 @@ impl TurnInputStore for PostgresSessionStore {
         for row in rows {
             outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row, now, &covered).await?);
         }
+        sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .delete_released_turn_park
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })
     }

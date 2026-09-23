@@ -34,6 +34,14 @@ pub enum ToolAttemptEffectIdentity {
         parent: RuntimeInvocation,
         replay_suffix: String,
     },
+    /// One call a replayed language program issued as a command (FIG-3586):
+    /// `command` is the [`command_invocation`](crate::runtime::command_invocation)
+    /// at the command's replay key, and every attempt, retry sleep and
+    /// deferred-completion await of the call is a child of it —
+    /// `{command}:attempt:{n}`, `{command}:attempt:{n}:sleep`,
+    /// `{command}:await`. Neither the call id nor the tool name is key
+    /// material: two calls of one tool in one run are two commands.
+    Command { command: RuntimeInvocation },
     Process {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent: Option<RuntimeInvocation>,
@@ -52,14 +60,17 @@ impl ToolAttemptEffectIdentity {
         call: &PreparedToolCall,
         attempt: u32,
     ) -> RuntimeEffectInvocation {
-        let replay_prefix = match self {
-            Self::Scalar { .. } => call.call_id.clone(),
-            Self::Batch { replay_suffix, .. } => replay_suffix.clone(),
+        let suffix = match self {
+            Self::Scalar { .. } => format!("{}:attempt:{attempt}", call.call_id),
+            Self::Batch { replay_suffix, .. } => format!("{replay_suffix}:attempt:{attempt}"),
+            Self::Command { .. } => format!("attempt:{attempt}"),
             Self::Process { process_id, .. } => {
-                format!("process:{process_id}:tool:{}", call.tool_name)
+                format!(
+                    "process:{process_id}:tool:{}:attempt:{attempt}",
+                    call.tool_name
+                )
             }
         };
-        let suffix = format!("{replay_prefix}:attempt:{attempt}");
         if let Some(parent) = self.parent() {
             let fallback = if matches!(self, Self::Batch { .. }) {
                 "tool-batch"
@@ -97,6 +108,16 @@ impl ToolAttemptEffectIdentity {
         call: &PreparedToolCall,
         attempt: u32,
     ) -> RuntimeEffectInvocation {
+        if let Self::Command { command } = self {
+            let suffix = format!("attempt:{attempt}:sleep");
+            let command_effect_id = command.effect_id().unwrap_or("command");
+            return crate::runtime::causal::child_effect_invocation(
+                context.effect_controller.scoped().execution_scope(),
+                command,
+                format!("{command_effect_id}:{suffix}"),
+                suffix,
+            );
+        }
         if let Self::Batch {
             parent,
             replay_suffix,
@@ -128,7 +149,9 @@ impl ToolAttemptEffectIdentity {
                 "lash-tool:{}:{}:{}",
                 context.session_id, call.call_id, call.tool_name
             ),
-            Self::Batch { .. } => unreachable!("batch retry sleeps return above"),
+            Self::Batch { .. } | Self::Command { .. } => {
+                unreachable!("batch and command retry sleeps return above")
+            }
         };
         let effect_id = format!("{replay_base}:attempt:{attempt}:sleep");
         RuntimeEffectInvocation::new(
@@ -157,6 +180,7 @@ impl ToolAttemptEffectIdentity {
             Self::Scalar { parent } => parent.as_ref(),
             Self::Process { parent, .. } => parent.as_ref(),
             Self::Batch { parent, .. } => Some(parent),
+            Self::Command { command } => Some(command),
         }
     }
 
@@ -168,7 +192,7 @@ impl ToolAttemptEffectIdentity {
     ) -> u64 {
         match self {
             Self::Batch { .. } => attempt_duration_ms,
-            Self::Scalar { .. } => context
+            Self::Scalar { .. } | Self::Command { .. } => context
                 .clock
                 .now()
                 .duration_since(started_at)

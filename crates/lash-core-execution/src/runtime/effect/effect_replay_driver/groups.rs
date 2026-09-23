@@ -83,9 +83,9 @@ use tokio_util::sync::CancellationToken;
 use super::*;
 pub(super) use crate::runtime::effect::group::group_shape_error;
 use crate::runtime::effect::group::{
-    EffectGroupHandle, EffectGroupRecordAccessor, GroupSettlement, GroupWakePolicy, LoserPolicy,
-    RuntimeEffectGroup, await_cancelled_error, closed_group_error, exhausted_group_error,
-    fence_reopen,
+    EffectGroupHandle, EffectGroupRecordAccessor, GroupReopen, GroupSettlement, GroupWakePolicy,
+    LoserPolicy, RuntimeEffectGroup, await_cancelled_error, closed_group_error,
+    exhausted_group_error, fence_reopen, fence_reopen_content,
 };
 use crate::runtime::effect::group_closing::GroupOnlyFinalization;
 
@@ -380,7 +380,38 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         // accepted group may never exist without discoverable complete input.
         let offered = accepted_membership(&group, self.clock.timestamp_ms())?;
         let persisted = self.row_store.open_group(&record, &offered).await?;
-        fence_reopen(&record, &persisted)?;
+        // A content-checked reopen (FIG-3586) is a replay of a recorded
+        // command: a shape it no longer matches is that command's divergence,
+        // reported under the replay-mismatch code so the run parks rather
+        // than failing.
+        fence_reopen(&record, &persisted).map_err(|error| {
+            if group.reopen() == GroupReopen::RetainedContent {
+                crate::runtime::effect::group::as_replay_mismatch(
+                    error,
+                    self.vocabulary().code(EffectReplayFailure::HashConflict),
+                )
+            } else {
+                error
+            }
+        })?;
+        // A content-checked reopen (FIG-3586) judges the offer against the
+        // journal's retained children before anything is dispatched — and
+        // before an in-process reopen short-circuits below — so a redrive
+        // whose aggregate differs is refused at the group head.
+        if group.reopen() == GroupReopen::RetainedContent {
+            let retained = reconstruct_group(
+                &group,
+                self.row_store
+                    .read_group_membership(group.group_key())
+                    .await?,
+                self.vocabulary(),
+            )?;
+            fence_reopen_content(
+                &group,
+                retained.children(),
+                self.vocabulary().code(EffectReplayFailure::HashConflict),
+            )?;
+        }
         let (offered_children, offered_executors) = match prepared {
             Some(prepared) => prepared,
             None => {

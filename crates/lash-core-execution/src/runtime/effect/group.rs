@@ -34,13 +34,10 @@ use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope};
 /// only mechanism available on engine tiers that keep no group row.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupMembership {
-    /// `{scope_id}:group:[{parent_effect_id}:]{batch_id}`.
-    ///
-    /// The occurrence ordinal is load-bearing and rides inside `batch_id`:
-    /// the batch id is a content hash of the calls *and* their
-    /// `ToolGroupOccurrence` under `TOOL_BATCH_FAMILY_VERSION` 2 (FIG-3394),
-    /// so two textually identical `race` calls in one protocol iteration mint
-    /// different batch ids and would otherwise share a group.
+    /// The group's key: a language runtime aggregate's command key, the
+    /// issue ordinal of the command that formed it (FIG-3586), or
+    /// `{scope_id}:group:[{parent_effect_id}:]{batch_id}` for a host-code
+    /// batch.
     pub group_key: String,
     /// This child's position in [`RuntimeEffectGroup::children`].
     pub position: usize,
@@ -110,6 +107,32 @@ pub struct RuntimeEffectGroup {
     children: Vec<RuntimeEffectEnvelope>,
     wake: GroupWakePolicy,
     loser_disposition: LoserPolicy,
+    reopen: GroupReopen,
+}
+
+/// How a reopen of a recorded group judges the children its opener offers
+/// (FIG-3586).
+///
+/// Either way the journal's retained children are what runs (ADR 0099 §3,
+/// W1); the question is only whether an offer that differs from them is
+/// ignored or refused.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GroupReopen {
+    /// The recorded shape — child count, wake rule, declared disposition —
+    /// must match, and the offered children are otherwise ignored: a successor
+    /// that re-presents different children cannot substitute them, and one
+    /// that never saw the opener's group still dispatches every accepted child.
+    #[default]
+    RetainedShape,
+    /// The shape must match **and** every offered child must be the retained
+    /// child at its position, compared as canonical envelopes. A language
+    /// runtime's aggregate is addressed by the issue ordinal of the command
+    /// that formed it, not by its content, so a redrive whose aggregate
+    /// carries different arguments, tools, grants or timers reaches the same
+    /// group key; this is the check that refuses it at the group head, before
+    /// any child claims, instead of serving the recorded children as the
+    /// answer to a different aggregate.
+    RetainedContent,
 }
 
 impl RuntimeEffectGroup {
@@ -236,7 +259,23 @@ impl RuntimeEffectGroup {
             children,
             wake,
             loser_disposition,
+            reopen: GroupReopen::RetainedShape,
         })
+    }
+
+    /// This group with `reopen` as the rule a reopen judges its offered
+    /// children by. Not journaled: it is the opener's demand on a reopen, and
+    /// a reopen is always made by an opener that knows which rule it needs.
+    #[must_use]
+    pub fn with_reopen(mut self, reopen: GroupReopen) -> Self {
+        self.reopen = reopen;
+        self
+    }
+
+    /// The rule a reopen of this group judges its offered children by.
+    #[must_use]
+    pub fn reopen(&self) -> GroupReopen {
+        self.reopen
     }
 
     /// The group's durable identity. Children derive their replay keys from it
@@ -246,10 +285,10 @@ impl RuntimeEffectGroup {
         &self.invocation
     }
 
-    /// `{scope_id}:group:[{parent_effect_id}:]{batch_id}` — the key the host
-    /// records the group and its settlement counter under. The occurrence
-    /// ordinal rides inside `batch_id` (FIG-3394); it is not a separate
-    /// segment.
+    /// The key the host records the group and its settlement counter under:
+    /// a language runtime aggregate's command key (FIG-3586), or
+    /// `{scope_id}:group:[{parent_effect_id}:]{batch_id}` for a host-code
+    /// batch.
     #[must_use]
     pub fn group_key(&self) -> &str {
         &self.group_key
@@ -367,6 +406,74 @@ where
         )));
     }
     Ok(())
+}
+
+/// Refuses a reopen whose offered children are not the retained ones, when
+/// the opener asked for [`GroupReopen::RetainedContent`].
+///
+/// `retained` is the group rebuilt from the journal's membership, in position
+/// order. Each position is compared through the shared replay-validation seam,
+/// so a refusal carries the same divergent-path evidence as a mismatched
+/// effect row, under the host's own replay-mismatch code.
+pub(crate) fn fence_reopen_content(
+    offered: &RuntimeEffectGroup,
+    retained: &[RuntimeEffectEnvelope],
+    mismatch_code: crate::RuntimeErrorCode,
+) -> Result<(), RuntimeEffectControllerError> {
+    if offered.reopen() != GroupReopen::RetainedContent {
+        return Ok(());
+    }
+    for (offered_child, retained_child) in offered.children().iter().zip(retained) {
+        super::validation::validate_replayed_effect_envelope(
+            &retained_child.canonical_form()?,
+            &offered_content(offered_child, retained_child).canonical_form()?,
+            mismatch_code.clone(),
+            None,
+        )
+        .map_err(|mut error| {
+            error.message = format!(
+                "durable effect group {} was reopened with a child at replay key `{}` that \
+                 is not the retained one: {}",
+                offered.group_key(),
+                offered_child.invocation.replay_key(),
+                error.message
+            );
+            error
+        })?;
+    }
+    Ok(())
+}
+
+/// The offered child as the program asked for it, for comparison with the
+/// retained one: a tool child's cancellation authority is the journal's own
+/// routing address, not program content, so the retained child's stands in
+/// for it — a reopened group runs its retained children under their retained
+/// authority either way, and a journal opened at another address keeps them.
+fn offered_content(
+    offered: &RuntimeEffectEnvelope,
+    retained: &RuntimeEffectEnvelope,
+) -> RuntimeEffectEnvelope {
+    let mut offered = offered.clone();
+    if let (
+        crate::RuntimeEffectCommand::ToolInvocation { request },
+        crate::RuntimeEffectCommand::ToolInvocation { request: retained },
+    ) = (&mut offered.command, &retained.command)
+    {
+        request
+            .cancellation_authority
+            .clone_from(&retained.cancellation_authority);
+    }
+    offered
+}
+
+/// A reopen refusal re-coded as the host's replay mismatch, for a reopen the
+/// opener asked to be checked against the recorded run (FIG-3586).
+pub(crate) fn as_replay_mismatch(
+    mut error: RuntimeEffectControllerError,
+    mismatch_code: crate::RuntimeErrorCode,
+) -> RuntimeEffectControllerError {
+    error.code = mismatch_code;
+    error
 }
 
 pub(crate) fn group_shape_error(message: impl Into<String>) -> RuntimeEffectControllerError {

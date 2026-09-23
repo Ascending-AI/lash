@@ -66,6 +66,30 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
         self.clone()
     }
 
+    /// This handle serving one replayed language command: every journal
+    /// write made through it asks `guard` first (FIG-3586).
+    #[expect(
+        clippy::expect_used,
+        reason = "the shared handle was built from a valid admitted scope"
+    )]
+    pub fn with_journal_guard(
+        &self,
+        guard: Arc<super::CommandJournalGuard>,
+    ) -> RuntimeEffectControllerHandle<'run> {
+        match self {
+            Self::Borrowed(scoped) => Self::Borrowed(scoped.clone().with_journal_guard(guard)),
+            #[cfg(any(test, feature = "testing"))]
+            Self::Shared {
+                controller,
+                admitted,
+            } => Self::Borrowed(
+                ScopedEffectController::shared(Arc::clone(controller), admitted.clone())
+                    .expect("runtime effect controller handle carries a valid scope")
+                    .with_journal_guard(guard),
+            ),
+        }
+    }
+
     pub(crate) fn to_static(&self) -> Option<RuntimeEffectControllerHandle<'static>> {
         match self {
             Self::Borrowed(scoped) => scoped

@@ -54,9 +54,170 @@ pub struct ScopedEffectController<'run> {
     /// under this controller can name its opener
     /// ([`Self::admitted_process`]).
     pub(in crate::runtime::effect::executor) admitted: AdmittedScope,
+    /// The journal guard of the replayed language command this controller
+    /// serves, when it serves one (FIG-3586). Every journal write made
+    /// through this controller asks it first.
+    pub(in crate::runtime::effect::executor) journal_guard: Option<Arc<CommandJournalGuard>>,
+}
+
+/// A replayed language command's say over the journal writes made under it
+/// (FIG-3586).
+///
+/// A re-executed lashlang run knows, from one read of its key namespace,
+/// whether the journal holds anything at a command's ordinal and anything
+/// beyond it. It cannot know before the command runs whether the command will
+/// write — a tool call can settle during preparation, an aggregate's leaves
+/// can all fail before any is admitted — so it hands the command this guard
+/// instead, on the controller the command's effects are issued through:
+///
+/// * a command the journal holds rows for is **open**: its writes pass, and
+///   the guard remembers that one was made, so a command that no longer
+///   writes what the journal recorded is caught after it returns;
+/// * a command the journal holds nothing for while it still holds entries
+///   beyond it is **refusing**: its first write is refused with the run's
+///   divergence, before anything is claimed, because the recorded run did not
+///   dispatch it there and nothing may be dispatched live inside a recorded
+///   run.
+///
+/// A command the journal holds while it still holds entries beyond it is
+/// **fenced by key**: a write to a key under the run's namespace that the
+/// journal does not hold is refused, because the recorded run wrote nothing
+/// there and something past it is recorded — a leaf whose operation moved to
+/// another kind, a handle awaited in another order. Keys outside the
+/// namespace (an incorporation record, a nested process's own journal) are
+/// the host's to judge and pass.
+#[derive(Debug)]
+pub struct CommandJournalGuard {
+    refusal: Option<RuntimeEffectControllerError>,
+    fence: Option<RecordedKeyFence>,
+    touched: std::sync::atomic::AtomicBool,
+    tripped: std::sync::Mutex<Option<RuntimeEffectControllerError>>,
+}
+
+/// The recorded keys of a run's namespace a replayed command's writes must
+/// land on while the journal holds entries beyond it (FIG-3586).
+#[derive(Clone, Debug)]
+pub struct RecordedKeyFence {
+    /// Every replay key the journal holds in `[lower, upper]`.
+    pub keys: Arc<std::collections::BTreeSet<String>>,
+    /// The namespace's closed key range, compared bytewise.
+    pub lower: String,
+    pub upper: String,
+    /// The refusal a write to an unrecorded key in the range meets.
+    pub refusal: RuntimeEffectControllerError,
+}
+
+impl RecordedKeyFence {
+    fn refuses(&self, key: &str) -> Option<RuntimeEffectControllerError> {
+        let judged = self.lower.as_str() <= key && key <= self.upper.as_str();
+        (judged && !self.keys.contains(key)).then(|| {
+            let mut refusal = self.refusal.clone();
+            refusal.message = format!(
+                "{} (it wrote `{key}`, which the journal does not hold)",
+                refusal.message
+            );
+            refusal
+        })
+    }
+}
+
+impl CommandJournalGuard {
+    fn with(
+        refusal: Option<RuntimeEffectControllerError>,
+        fence: Option<RecordedKeyFence>,
+    ) -> Self {
+        Self {
+            refusal,
+            fence,
+            touched: std::sync::atomic::AtomicBool::new(false),
+            tripped: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// A guard that admits every write and remembers whether one was made.
+    pub fn open() -> Self {
+        Self::with(None, None)
+    }
+
+    /// A guard that refuses the command's first write with `refusal`.
+    pub fn refusing(refusal: RuntimeEffectControllerError) -> Self {
+        Self::with(Some(refusal), None)
+    }
+
+    /// A guard that admits writes to the keys `fence` holds and refuses any
+    /// other key in its range.
+    pub fn fenced(fence: RecordedKeyFence) -> Self {
+        Self::with(None, Some(fence))
+    }
+
+    /// Whether the command asked to write the journal.
+    pub fn touched(&self) -> bool {
+        self.touched.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The refusal this guard handed a write, once one was refused: the
+    /// command reached a write the journal does not hold where it was
+    /// issued. However the refused write's caller shaped the error — a tool
+    /// call answers the program with a failure — the run stops on it.
+    pub fn tripped(&self) -> Option<RuntimeEffectControllerError> {
+        self.tripped
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Asks to write the journal under this command, at `key` when the
+    /// write names one.
+    pub fn admit(&self, key: Option<&str>) -> Result<(), RuntimeEffectControllerError> {
+        self.touched
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let refusal = self.refusal.clone().or_else(|| {
+            self.fence
+                .as_ref()
+                .zip(key)
+                .and_then(|(fence, key)| fence.refuses(key))
+        });
+        match refusal {
+            Some(refusal) => {
+                self.tripped
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get_or_insert_with(|| refusal.clone());
+                Err(refusal)
+            }
+            None => Ok(()),
+        }
+    }
 }
 
 impl<'run> ScopedEffectController<'run> {
+    /// This controller serving one replayed language command: every journal
+    /// write made through it asks `guard` first (FIG-3586).
+    #[must_use]
+    pub fn with_journal_guard(mut self, guard: Arc<CommandJournalGuard>) -> Self {
+        self.journal_guard = Some(guard);
+        self
+    }
+
+    /// Asks this controller's command guard, when it has one, to admit a
+    /// journal write. Every path that writes the journal under a scoped
+    /// controller without going through [`Self::execute_effect`] — a group
+    /// open, a proxied process command — asks this first.
+    pub fn admit_journal_write(&self) -> Result<(), RuntimeEffectControllerError> {
+        self.admit_journal_write_at(None)
+    }
+
+    /// [`Self::admit_journal_write`] for a write at `key`.
+    pub fn admit_journal_write_at(
+        &self,
+        key: Option<&str>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        match &self.journal_guard {
+            Some(guard) => guard.admit(key),
+            None => Ok(()),
+        }
+    }
+
     pub fn execution_scope(&self) -> &ExecutionScope {
         self.admitted.scope()
     }
@@ -82,6 +243,7 @@ impl<'run> ScopedEffectController<'run> {
         Ok(Self {
             controller: ScopedEffectControllerInner::Borrowed(controller),
             admitted,
+            journal_guard: None,
         })
     }
 
@@ -96,6 +258,7 @@ impl<'run> ScopedEffectController<'run> {
         Ok(Self {
             controller: ScopedEffectControllerInner::Shared(controller),
             admitted,
+            journal_guard: None,
         })
     }
 
@@ -111,6 +274,7 @@ impl<'run> ScopedEffectController<'run> {
         Ok(Self {
             controller: ScopedEffectControllerInner::Owned(controller),
             admitted,
+            journal_guard: None,
         })
     }
 
@@ -140,6 +304,7 @@ impl<'run> ScopedEffectController<'run> {
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         self.validate_envelope_scope(&envelope)?;
+        self.admit_journal_write_at(Some(envelope.invocation.replay_key()))?;
         self.controller()
             .execute_effect(envelope, local_executor)
             .await
@@ -176,6 +341,7 @@ impl<'run> ScopedEffectController<'run> {
         Some(ScopedEffectController {
             controller: ScopedEffectControllerInner::Shared(Arc::clone(controller)),
             admitted: self.admitted.clone(),
+            journal_guard: self.journal_guard.clone(),
         })
     }
 

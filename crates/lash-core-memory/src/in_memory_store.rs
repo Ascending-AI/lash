@@ -184,6 +184,9 @@ pub struct InMemorySessionStore {
     /// a consumption watermark: selected-batch settlement may be out of order.
     pub wake_redelivery_fences: Mutex<HashMap<(String, String), u64>>,
     pub pending_turn_inputs: Mutex<Vec<InMemoryPendingTurnInput>>,
+    /// The session's parked turn (FIG-3586): cleared by any commit, by a
+    /// cancel that releases the parked turn's claim, and by deletion.
+    pub turn_park: Mutex<Option<crate::store::TurnPark>>,
     pub pending_turn_input_next_seq: Mutex<u64>,
     pub turn_cancel_requests: Mutex<HashMap<TurnId, InMemoryTurnCancelRequest>>,
     pub attachment_manifest: SharedAttachmentManifest,
@@ -344,6 +347,7 @@ impl InMemorySessionStore {
             queued_work_next_seq: Mutex::new(0),
             wake_redelivery_fences: Mutex::new(HashMap::new()),
             pending_turn_inputs: Mutex::new(Vec::new()),
+            turn_park: Mutex::new(None),
             pending_turn_input_next_seq: Mutex::new(0),
             turn_cancel_requests: Mutex::new(HashMap::new()),
             attachment_manifest,

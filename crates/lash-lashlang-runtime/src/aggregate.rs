@@ -30,10 +30,9 @@ pub enum BridgeAggregateLeaf {
 /// every reply the answer carries, in leaf order, and never for a loser.
 pub async fn settle_bridge_aggregate(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
+    command: &lash_core::CommandReplayKey,
     consumer: lashlang::AggregateConsumer,
     settled_value_after: Option<usize>,
-    site: u64,
-    occurrence: u64,
     leaves: Vec<BridgeAggregateLeaf>,
     mut tool_value: impl FnMut(
         usize,
@@ -74,8 +73,7 @@ pub async fn settle_bridge_aggregate(
                 lashlang::AggregateConsumer::Any => lash_core::session::ToolAggregateConsumer::Any,
             },
             settled_value_after,
-            site,
-            occurrence: lash_core::session::ToolGroupOccurrence::Opener(occurrence),
+            command: command.clone(),
         })
         .await;
     let mut result_of = |leaf: usize,

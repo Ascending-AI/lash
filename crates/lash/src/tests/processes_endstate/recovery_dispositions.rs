@@ -89,6 +89,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
+                replay_grammar: None,
             },
         )
         .await?;
@@ -231,6 +232,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
+                replay_grammar: None,
             },
         )
         .await?;

@@ -193,8 +193,17 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
             assert_eq!(message, "approval was denied");
             assert_eq!(*source, lash_core::ToolFailureSource::Policy);
             assert_eq!(*retry, lash_core::ToolRetryStatus::Never);
-            assert_eq!(failed.0.as_deref(), Some(replay_key.as_str()));
-            assert!(replay_key.starts_with("lashlang:"), "{replay_key}");
+            // The node's call id and the recorded effect's key name the same
+            // issue ordinal (FIG-3586): the key under the cell's `lk2`
+            // namespace, the call id under the cell's `lashlang:v2:` scope.
+            let (_, ordinal) = replay_key
+                .split_once(":lk2:")
+                .unwrap_or_else(|| panic!("an issue-ordinal key: {replay_key}"));
+            let call_id = failed.0.as_deref().expect("a failed node names its call");
+            assert!(
+                call_id.starts_with("lashlang:v2:") && call_id.ends_with(&format!(":{ordinal}")),
+                "{call_id} names the ordinal of {replay_key}"
+            );
             assert!(
                 !replay_key.contains(":attempt:"),
                 "telemetry attempt entered effect identity"
@@ -523,9 +532,9 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
             "each leaf of each aggregate needs its own identity: {call_ids:?}"
         );
 
-        // Both leaves belong to one structural workflow node. The leaf
-        // position within the batch and that node's increasing occurrence
-        // still give each call a distinct identity.
+        // Each aggregate is one command with its own issue ordinal, and each
+        // leaf is keyed under it by its position in the aggregate: nothing
+        // about the shared call site reaches the identity (FIG-3586).
         let first_pass = call_ids
             .iter()
             .filter(|id| id.ends_with(":child:0"))
@@ -539,14 +548,14 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
             (2, 2),
             "two leaf positions, reached twice: {call_ids:?}"
         );
-        for occurrence in 1..=4 {
+        for ordinal in 0..=1 {
             assert_eq!(
                 call_ids
                     .iter()
-                    .filter(|id| id.contains(&format!(":{occurrence}:child:")))
+                    .filter(|id| id.contains(&format!(":{ordinal:010}:child:")))
                     .count(),
-                1,
-                "the shared node assigns one occurrence per leaf call: {call_ids:?}"
+                2,
+                "each aggregate is one command whose two leaves share its ordinal: {call_ids:?}"
             );
         }
     });

@@ -138,7 +138,9 @@ mod tests {
     /// A request journaled by an older build is refused, typed and before any
     /// effect. Version 6 moved a parked child's §4 commit ahead of its
     /// presentation (FIG-3609), so a child whose journal an older build wrote
-    /// would replay against a different step order.
+    /// would replay against a different step order. Version 7 keyed a
+    /// lashlang command's attempts by issue ordinal (FIG-3586), so version 6
+    /// is refused too.
     #[test]
     fn a_request_journaled_by_an_older_build_is_refused() {
         for version in 1..TOOL_CHILD_REQUEST_VERSION {

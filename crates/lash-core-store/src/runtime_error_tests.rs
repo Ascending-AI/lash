@@ -18,6 +18,8 @@ fn replay_mismatch_classification_covers_every_durable_controller_code() {
         "postgres_effect_replay_hash_conflict",
         "worker_replacement_abort",
         "tool_intent_replay_key_format_cutover",
+        "lashlang_cell_replay_divergence",
+        "lashlang_cell_replay_key_format_cutover",
     ] {
         let typed = RuntimeErrorCode::from_wire_code(code);
         assert!(typed.is_replay_mismatch(), "{code}");
@@ -84,7 +86,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        191,
+        194,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
@@ -401,4 +403,48 @@ fn an_aborted_turn_error_carries_its_acceptance_receipt() {
         serde_json::from_value(serde_json::to_value(&aborted).expect("serialize"))
             .expect("decode runtime error");
     assert_eq!(decoded.turn_input_acceptance.as_deref(), Some(&receipt));
+}
+
+/// FIG-3586: a lashlang replay refusal parks its turn. It is neither an
+/// outcome — nothing about the turn failed, and a redeploy of the build that
+/// wrote the journal serves it — nor a live fault a queued run may spend its
+/// retry budget on, since every redrive by this build refuses again.
+#[test]
+fn lashlang_replay_refusals_park_the_turn() {
+    use crate::runtime_error::TurnFailureCause;
+
+    for code in [
+        RuntimeErrorCode::LashlangCellReplayDivergence,
+        RuntimeErrorCode::LashlangCellReplayKeyFormatCutover,
+    ] {
+        assert_eq!(
+            code.turn_failure_cause(),
+            TurnFailureCause::Parked,
+            "{code}"
+        );
+        assert!(code.parks_turn(), "{code}");
+        assert!(!code.is_terminal(), "{code}: a parked turn is not failed");
+        assert!(
+            !code.is_retryable(),
+            "{code}: a parked turn is not retried live"
+        );
+        assert!(TurnFailureCause::Parked.aborts_invocation());
+        let controller = crate::runtime_error::RuntimeEffectControllerError::new(code.clone(), "x");
+        assert_eq!(controller.turn_failure_cause(), TurnFailureCause::Parked);
+        assert_eq!(
+            controller.into_runtime_error().turn_failure_cause(),
+            TurnFailureCause::Parked
+        );
+    }
+    for code in RuntimeErrorCode::ALL_FIRST_PARTY {
+        assert_eq!(
+            code.parks_turn(),
+            matches!(
+                code,
+                RuntimeErrorCode::LashlangCellReplayDivergence
+                    | RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
+            ),
+            "{code}: only the lashlang replay refusals park"
+        );
+    }
 }

@@ -96,6 +96,7 @@ impl From<lash_core::WaitKind> for RemoteProcessWaitKind {
                 key,
                 ordinal,
             },
+            lash_core::WaitKind::Parked { code, message } => Self::Parked { code, message },
         }
     }
 }
@@ -114,6 +115,7 @@ impl From<RemoteProcessWaitKind> for lash_core::WaitKind {
                 key,
                 ordinal,
             },
+            RemoteProcessWaitKind::Parked { code, message } => Self::Parked { code, message },
         }
     }
 }

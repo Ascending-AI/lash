@@ -229,6 +229,22 @@ pub enum RuntimeErrorCode {
     /// Replay found a retired tool-intent v1 key; re-execution under v2 could
     /// duplicate or diverge from the committed command, so it is refused.
     ToolIntentReplayKeyFormatCutover,
+    /// A re-executed lashlang run — a code cell or a process body — issued a
+    /// command that is not the one its journal recorded at that issue
+    /// ordinal, or issued one while the journal still held entries at or
+    /// beyond it (FIG-3586). Nothing was dispatched; the run stopped and the
+    /// turn parks until an operator redeploys the build that wrote the
+    /// journal, cancels, or forks.
+    LashlangCellReplayDivergence,
+    /// A re-executed lashlang run met a journal written under an earlier
+    /// replay-key grammar (FIG-3586). Its keys cannot be read by this build,
+    /// so it is refused before the run starts rather than re-issued live.
+    LashlangCellReplayKeyFormatCutover,
+    /// A durable effect controller that does not answer the recorded-frontier
+    /// read was asked for it: a replayed lashlang run cannot know which of its
+    /// commands the journal holds, so it refuses to run rather than dispatch
+    /// blind (FIG-3586).
+    RecordedJournalReadUnsupported,
     /// A Restate redrive diverged from its durable journal and cannot replay it
     /// safely; a fresh turn on the same session is safe.
     WorkerReplacementAbort,
@@ -570,6 +586,9 @@ impl RuntimeErrorCode {
             Self::RestateAwaitEventSessionUpdate => "restate_await_event_session_update",
             Self::RestateEffectController => "restate_effect_controller",
             Self::ToolIntentReplayKeyFormatCutover => "tool_intent_replay_key_format_cutover",
+            Self::LashlangCellReplayDivergence => "lashlang_cell_replay_divergence",
+            Self::LashlangCellReplayKeyFormatCutover => "lashlang_cell_replay_key_format_cutover",
+            Self::RecordedJournalReadUnsupported => "recorded_journal_read_unsupported",
             Self::WorkerReplacementAbort => "worker_replacement_abort",
             Self::RestateJournaledEffectPoisoned => "restate_journaled_effect_poisoned",
             Self::RestateEffectHostRequiresHandlerScope => {
@@ -717,7 +736,17 @@ impl RuntimeErrorCode {
                 | Self::RestateProcessJournalIdentityDrift
                 | Self::WorkerReplacementAbort
                 | Self::ToolIntentReplayKeyFormatCutover
+                | Self::LashlangCellReplayDivergence
+                | Self::LashlangCellReplayKeyFormatCutover
         )
+    }
+
+    /// Whether this code parks the turn it fails (FIG-3586): a re-executed
+    /// lashlang run refused a replay it cannot serve, nothing was dispatched,
+    /// and the turn neither fails nor retries live — its claims stay held and
+    /// it waits for an operator.
+    pub fn parks_turn(&self) -> bool {
+        self.turn_failure_cause() == TurnFailureCause::Parked
     }
 
     /// Whether this error aborts only the in-flight turn because its durable
@@ -836,6 +865,9 @@ impl RuntimeErrorCode {
         Self::RestateEffectController,
         Self::WorkerReplacementAbort,
         Self::ToolIntentReplayKeyFormatCutover,
+        Self::LashlangCellReplayDivergence,
+        Self::LashlangCellReplayKeyFormatCutover,
+        Self::RecordedJournalReadUnsupported,
         Self::RestateEffectHostRequiresHandlerScope,
         Self::RestateJournaledEffectPoisoned,
         Self::RestateProcessAwait,
@@ -1040,6 +1072,9 @@ impl RuntimeErrorCode {
             "restate_await_event_session_update" => Self::RestateAwaitEventSessionUpdate,
             "restate_effect_controller" => Self::RestateEffectController,
             "tool_intent_replay_key_format_cutover" => Self::ToolIntentReplayKeyFormatCutover,
+            "lashlang_cell_replay_divergence" => Self::LashlangCellReplayDivergence,
+            "lashlang_cell_replay_key_format_cutover" => Self::LashlangCellReplayKeyFormatCutover,
+            "recorded_journal_read_unsupported" => Self::RecordedJournalReadUnsupported,
             "worker_replacement_abort" | "restate_effect_hash_mismatch" => {
                 Self::WorkerReplacementAbort
             }
@@ -1338,6 +1373,8 @@ impl RuntimeError {
     pub fn turn_failure_cause(&self) -> TurnFailureCause {
         if self.is_terminal() {
             TurnFailureCause::Outcome
+        } else if self.foreign_cause.is_none() && self.code.parks_turn() {
+            TurnFailureCause::Parked
         } else {
             TurnFailureCause::LiveFault
         }

@@ -280,10 +280,11 @@ impl PluginError {
     /// deliberate refusal over the turn's inputs or durable state: an outcome
     /// spelled as `refusal`, recorded or settled once instead of retried.
     pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
-        use crate::TurnFailureCause::LiveFault;
         match self {
-            Self::Runtime(error) if error.turn_failure_cause() == LiveFault => error,
-            Self::RuntimeEffectController(error) if error.turn_failure_cause() == LiveFault => {
+            Self::Runtime(error) if error.turn_failure_cause().aborts_invocation() => error,
+            Self::RuntimeEffectController(error)
+                if error.turn_failure_cause().aborts_invocation() =>
+            {
                 error.into_runtime_error()
             }
             error @ Self::SessionExecutionLeaseLost { .. } => crate::RuntimeError::new(

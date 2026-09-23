@@ -1145,14 +1145,40 @@ pub enum WaitKind {
         key: String,
         ordinal: u64,
     },
+    /// The body refused to replay its journal (FIG-3586): the running build
+    /// cannot serve what an earlier build recorded, and nothing was
+    /// dispatched. A parked process waits for an operator verb — redeploy the
+    /// build that wrote its journal, cancel, or fork. Its sweeps re-run it
+    /// without spending its attempt budget, and each refuses again until one
+    /// does not.
+    Parked {
+        /// The refusal's runtime error code.
+        code: String,
+        /// The refusal's operator-facing message.
+        message: String,
+    },
+}
+
+impl WaitKind {
+    /// Whether this wait is a replay refusal's park.
+    pub fn is_parked(&self) -> bool {
+        matches!(self, Self::Parked { .. })
+    }
 }
 
 impl WaitState {
     /// Exposes key to store and durable-substrate implementors while persisting and coordinating
     /// durable process execution.
     pub fn key(&self) -> &str {
-        let WaitKind::Signal { key, .. } = &self.kind;
-        key
+        match &self.kind {
+            WaitKind::Signal { key, .. } => key,
+            WaitKind::Parked { .. } => "parked",
+        }
+    }
+
+    /// Whether this wait is a replay refusal's park.
+    pub fn is_parked(&self) -> bool {
+        self.kind.is_parked()
     }
 }
 

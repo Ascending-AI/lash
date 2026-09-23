@@ -116,55 +116,51 @@ impl LashlangProcessHost<'_> {
             .await;
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "callers dispatch here only for a TypeScript runtime receiver"
-    )]
+    /// Journals one checked TypeScript runtime value at `key` under the
+    /// command in flight, and incorporates its outcome into the durable
+    /// effect summary when the call site names the node it belongs to.
     pub(super) async fn typescript_runtime_value(
         &self,
-        receiver: &lashlang::Value,
+        in_flight: &crate::CommandInFlight<'_>,
         operation: &str,
-        args: &[lashlang::Value],
-        call_site: &lashlang::LashlangExecutionCallSite,
-        batch_index: Option<usize>,
+        call_site: Option<&lashlang::LashlangExecutionCallSite>,
+        key: String,
     ) -> Result<lashlang::Value, ExecutionHostError> {
         let host_operation = crate::typescript_runtime::TYPESCRIPT_RUNTIME_HOST_OPERATION;
-        let effect_id = self.resource_tool_call_id(host_operation, call_site, batch_index);
-        let mut journaled = false;
-        let result = crate::typescript_runtime::journaled_typescript_runtime_value_recording(
-            &self.ctx,
-            effect_id.clone(),
-            receiver,
-            operation,
-            args,
-            &mut journaled,
-        )
-        .await
-        .expect("TypeScript runtime receiver checked by the caller");
-        if journaled {
-            self.record_effect_outcome(
-                call_site,
-                host_operation,
-                lash_core::ProcessEffectOutcomeClass::Success,
-                None,
-                &effect_id,
-            )
-            .await;
+        match crate::journaled_typescript_runtime_value(&in_flight.ctx, key.clone(), operation)
+            .await
+        {
+            Ok(value) => {
+                if let Some(call_site) = call_site {
+                    self.record_effect_outcome(
+                        call_site,
+                        host_operation,
+                        lash_core::ProcessEffectOutcomeClass::Success,
+                        None,
+                        &key,
+                    )
+                    .await;
+                }
+                value
+            }
+            Err(error) => Err(self.commands().journal_error(in_flight, error, |error| {
+                ExecutionHostError::new(error.to_string())
+            })),
         }
-        result
     }
 
     pub(super) async fn trigger_operation(
         &self,
+        ctx: &lash_core::RuntimeExecutionContext<'_>,
         operation: lashlang::TriggerHostOperation,
         payload: serde_json::Value,
         effect_id: String,
         host_operation: &str,
-        call_site: &lashlang::LashlangExecutionCallSite,
+        call_site: Option<&lashlang::LashlangExecutionCallSite>,
     ) -> Result<lashlang::Value, ExecutionHostError> {
         let mut recorded = None;
         let result = crate::trigger_commands::execute_trigger_operation_recording(
-            &self.ctx,
+            ctx,
             self.artifact_store.as_ref(),
             operation,
             payload,
@@ -172,15 +168,16 @@ impl LashlangProcessHost<'_> {
             &mut recorded,
         )
         .await;
-        if let Some((outcome_class, code)) = recorded {
+        if let (Some((outcome_class, code)), Some(call_site)) = (recorded, call_site) {
             self.record_effect_outcome(call_site, host_operation, outcome_class, code, &effect_id)
                 .await;
         }
         result
     }
 
-    /// One aggregate of this process's pending operations: every leaf the
-    /// bridge settles itself — a TypeScript runtime value, a trigger
+    /// One aggregate of this process's pending operations: one command, its
+    /// leaves keyed under it by first-appearance index (FIG-3586). Every leaf
+    /// the bridge settles itself — a TypeScript runtime value, a trigger
     /// operation, a leaf refused before dispatch — joins the immediate prefix,
     /// every tool call and timer is admitted as a group child, and the whole
     /// is answered in the VM's reply algebra (ADR 0099 §10, §11). Each tool
@@ -194,9 +191,19 @@ impl LashlangProcessHost<'_> {
             leaves,
             consumer,
             settled_value_after,
-            site,
-            occurrence,
         } = batch;
+        let commands = self.commands();
+        let command = commands.issue()?;
+        let in_flight = commands
+            .enter(command, crate::CommandShape::Aggregate)
+            .await?;
+        let leaf_key = |leaf: usize| {
+            format!(
+                "{}:{}",
+                in_flight.command.key,
+                lash_core::CommandReplayKey::child_suffix(leaf)
+            )
+        };
         let call_sites = leaves
             .iter()
             .map(|leaf| match leaf {
@@ -208,9 +215,8 @@ impl LashlangProcessHost<'_> {
             .collect::<Vec<_>>();
         let mut bridge_leaves = Vec::with_capacity(leaves.len());
         let mut outcome_metadata: Vec<
-            Option<(String, lashlang::LashlangExecutionCallSite, String)>,
+            Option<(String, Option<lashlang::LashlangExecutionCallSite>, String)>,
         > = vec![None; leaves.len()];
-        let mut invocations = Vec::new();
         let mut dispatched = Vec::new();
         for (index, leaf) in leaves.into_iter().enumerate() {
             let operation = match leaf {
@@ -223,21 +229,22 @@ impl LashlangProcessHost<'_> {
                     continue;
                 }
             };
-            if crate::is_typescript_runtime_receiver(&operation.receiver) {
-                let result = match operation.call_site.as_ref() {
-                    Some(call_site) => {
+            if let Some(checked) = crate::typescript_runtime_operation(
+                &operation.receiver,
+                &operation.operation,
+                &operation.args,
+            ) {
+                let result = match checked {
+                    Ok(runtime_operation) => {
                         self.typescript_runtime_value(
-                            &operation.receiver,
-                            &operation.operation,
-                            &operation.args,
-                            call_site,
-                            Some(index),
+                            &in_flight,
+                            runtime_operation,
+                            operation.call_site.as_ref(),
+                            leaf_key(index),
                         )
                         .await
                     }
-                    None => Err(ExecutionHostError::new(
-                        "TypeScript runtime operation is missing its call site",
-                    )),
+                    Err(error) => Err(error),
                 };
                 bridge_leaves.push(crate::BridgeAggregateLeaf::Settled(result));
                 continue;
@@ -247,7 +254,9 @@ impl LashlangProcessHost<'_> {
                 operation.receiver,
                 operation.args,
                 operation.call_site,
-                Some(index),
+                self.identities
+                    .child_call_id(in_flight.command.ordinal, index),
+                leaf_key(index),
             ) {
                 Ok(PreparedResourceInvocation::Trigger {
                     operation,
@@ -258,11 +267,12 @@ impl LashlangProcessHost<'_> {
                 }) => {
                     let result = self
                         .trigger_operation(
+                            &in_flight.ctx,
                             operation,
                             payload,
                             effect_id,
                             &host_operation,
-                            &call_site,
+                            call_site.as_ref(),
                         )
                         .await;
                     bridge_leaves.push(crate::BridgeAggregateLeaf::Settled(result));
@@ -272,27 +282,21 @@ impl LashlangProcessHost<'_> {
                     host_operation,
                     call_site,
                 }) => {
-                    outcome_metadata[index] =
-                        Some((host_operation, call_site, invocation.id.clone()));
+                    outcome_metadata[index] = Some((host_operation, call_site, leaf_key(index)));
                     dispatched.push(index);
-                    invocations.push(invocation.clone());
                     bridge_leaves.push(crate::BridgeAggregateLeaf::Tool(invocation));
                 }
                 Err(error) => bridge_leaves.push(crate::BridgeAggregateLeaf::Settled(Err(error))),
             }
         }
 
-        let batch_id = lash_core::session::deterministic_tool_invocation_batch_id(
-            &invocations,
-            lash_core::session::ToolGroupOccurrence::Opener(occurrence),
-        );
         if dispatched.len() > 1 {
             for (position, index) in dispatched.iter().copied().enumerate() {
                 if let Some(Some(call_site)) = call_sites.get(index) {
                     self.lashlang_execution_trace.emit_waiting(
                         call_site,
                         TraceNodeAwaited::ToolBatch {
-                            batch_id: batch_id.clone(),
+                            batch_id: in_flight.command.key.as_str().to_string(),
                             position,
                         },
                     );
@@ -303,11 +307,10 @@ impl LashlangProcessHost<'_> {
         // effect summary: a loser's reply is never among them.
         let mut read = Vec::new();
         let reply = crate::settle_bridge_aggregate(
-            &self.ctx,
+            &in_flight.ctx,
+            &in_flight.command.key,
             consumer,
             settled_value_after,
-            site,
-            occurrence,
             bridge_leaves,
             |leaf, reply| {
                 let Some((_, _, replay_key)) = &outcome_metadata[leaf] else {
@@ -320,8 +323,9 @@ impl LashlangProcessHost<'_> {
             },
         )
         .await;
+        commands.finish(&in_flight)?;
         for (leaf, tool_reply) in &read {
-            if let Some((host_operation, call_site, replay_key)) = &outcome_metadata[*leaf] {
+            if let Some((host_operation, Some(call_site), replay_key)) = &outcome_metadata[*leaf] {
                 self.record_tool_reply(call_site, host_operation, replay_key, tool_reply)
                     .await;
             }
