@@ -3,7 +3,7 @@
 
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import tempfile
@@ -243,10 +243,9 @@ class ClassifyTests(unittest.TestCase):
                 )
 
     def test_tooling_selects_repo_gates(self) -> None:
-        # `scripts/` is a global invalidator, so a script diff turns on every
-        # family including tooling; the narrower check is a non-global tooling
-        # path that leaves facade and stores off.
-        self.assertEqual("true", ci_plan.classify([("M", "scripts/x.py")])["tooling"])
+        # CI machinery always selects tooling: the repository gates hold every
+        # script self-test (`CiMachineryTests` pins the rest of its map).
+        self.assertEqual("true", ci_plan.classify([("M", "scripts/ci_plan.py")])["tooling"])
         for path, expected in (
             ("tools/bazel/clippy.bzl", "true"),
             ("BUILD.bazel", "true"),
@@ -272,8 +271,6 @@ class ClassifyTests(unittest.TestCase):
             ".cargo/config.toml",
             ".config/nextest.toml",
             ".github/workflows/ci.yml",
-            "scripts/ci_plan.py",
-            ".github/actions/rust-toolchain/action.yml",
             "justfile",
             "deny.toml",
         ]
@@ -380,6 +377,265 @@ class PathClassifierTests(unittest.TestCase):
             if path and ci_plan.classify_path(path).kind is ci_plan.PathKind.UNKNOWN
         )
         self.assertEqual([], unknown)
+
+
+FIXTURE_WORKFLOW = """\
+name: CI
+jobs:
+  plan:
+    steps:
+      - &checkout
+        run: bash scripts/ci/checkout.sh
+      - run: python3 scripts/planner.py
+  lint:
+    steps:
+      - *checkout
+      - run: python3 scripts/check_style.py
+  repo-gates:
+    if: needs.plan.outputs.tooling == 'true'
+    steps:
+      - *checkout
+      - run: python3 scripts/test_check_style.py
+  postgres-store:
+    if: needs.plan.outputs.stores == 'true'
+    steps:
+      - *checkout
+      - uses: ./.github/actions/services
+      # bash scripts/commented.sh never runs from a comment
+      - run: bash scripts/store-tests.sh
+  functional-e2e:
+    if: needs.plan.outputs.functional_e2e == 'true'
+    strategy:
+      matrix:
+        include:
+          - recipe: e2e-recipe
+    steps:
+      - run: just ${{ matrix.recipe }}
+"""
+
+FIXTURE_JUSTFILE = """\
+repo := justfile_directory()
+
+e2e-recipe: helper-recipe
+  bash scripts/e2e.sh
+
+helper-recipe:
+  bash scripts/e2e-helper.sh
+
+dev-up port="3000":
+  ./scripts/dev.sh up --port "{{port}}"
+"""
+
+
+class CiMachineryTests(unittest.TestCase):
+    """A CI machinery path selects the families of the jobs that run it."""
+
+    def setUp(self) -> None:
+        self.addCleanup(ci_plan.ci_machinery_families.cache_clear)
+        ci_plan.ci_machinery_families.cache_clear()
+
+    def fixture(self, extra: dict[str, str] | None = None) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root)
+        files = {
+            ".github/workflows/ci.yml": FIXTURE_WORKFLOW,
+            ".github/workflows/nightly.yml": "jobs:\n  n:\n    steps:\n      - run: bash scripts/nightly.sh\n",
+            ".github/actions/services/action.yml": "runs:\n  steps:\n    - run: bash scripts/start-service.sh\n",
+            ".github/actions/services/LICENSE": "MIT\n",
+            "justfile": FIXTURE_JUSTFILE,
+            "scripts/ci/checkout.sh": "git checkout\n",
+            "scripts/planner.py": "print('plan')\n",
+            "scripts/check_style.py": '"""Mentions scripts/docstring-only.sh in prose."""\nprint(1)\n',
+            "scripts/docstring-only.sh": "true\n",
+            "scripts/commented.sh": "true\n",
+            "scripts/test_check_style.py": "import check_style\n",
+            "scripts/store-tests.sh": 'source "$(dirname "$0")/store-lib.sh"\n',
+            "scripts/store-lib.sh": "true\n",
+            "scripts/start-service.sh": "true\n",
+            "scripts/e2e.sh": "true\n",
+            "scripts/e2e-helper.sh": "true\n",
+            "scripts/dev.sh": "true\n",
+            "scripts/nightly.sh": "true\n",
+            "scripts/budgets.json": "{}\n",
+            "BUILD.bazel": 'filegroup(name = "b", srcs = ["scripts/budgets.json"])\n',
+            **(extra or {}),
+        }
+        for path, text in files.items():
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(text, encoding="utf-8")
+        for command in (["git", "init", "-q"], ["git", "add", "-A"]):
+            subprocess.run(command, cwd=root, check=True, capture_output=True)
+        return root
+
+    def families(self, root: Path, path: str) -> frozenset[str] | None:
+        path_class = ci_plan.classify_path(path, root)
+        if path_class.kind is ci_plan.PathKind.UNKNOWN:
+            return None
+        self.assertIs(ci_plan.PathKind.CI, path_class.kind, path)
+        return path_class.families
+
+    def test_each_path_selects_the_families_of_the_jobs_that_run_it(self) -> None:
+        root = self.fixture()
+        tooling = frozenset({"tooling"})
+        for path, expected in (
+            # Jobs that read no plan output run on every event.
+            ("scripts/planner.py", tooling),
+            ("scripts/check_style.py", tooling),
+            # An anchor carries its script into every job that aliases it.
+            ("scripts/ci/checkout.sh", {"tooling", "stores"}),
+            ("scripts/test_check_style.py", tooling),
+            ("scripts/store-tests.sh", {"stores", "tooling"}),
+            # A helper a script sources inherits that script's jobs.
+            ("scripts/store-lib.sh", {"stores", "tooling"}),
+            # A composite action, and what it runs, belong to its users' jobs.
+            (".github/actions/services/action.yml", {"stores", "tooling"}),
+            (".github/actions/services/LICENSE", {"stores", "tooling"}),
+            ("scripts/start-service.sh", {"stores", "tooling"}),
+            # A recipe a matrix leg runs, and its dependency recipe.
+            ("scripts/e2e.sh", {"functional_e2e", "tooling"}),
+            ("scripts/e2e-helper.sh", {"functional_e2e", "tooling"}),
+            # A recipe no job runs is a local entry point.
+            ("scripts/dev.sh", tooling),
+            # Another workflow has its own triggers and its own scope.
+            (".github/workflows/nightly.yml", tooling),
+            ("scripts/nightly.sh", tooling),
+            # A build input selects the Bazel partition.
+            ("scripts/budgets.json", {"rust", "tooling"}),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(frozenset(expected), self.families(root, path))
+
+    def test_the_workflow_that_defines_the_jobs_is_global(self) -> None:
+        root = self.fixture()
+        self.assertIs(
+            ci_plan.PathKind.SHARED,
+            ci_plan.classify_path(".github/workflows/ci.yml", root).kind,
+        )
+
+    def test_a_path_named_only_in_prose_has_no_consumer(self) -> None:
+        root = self.fixture()
+        for path in ("scripts/commented.sh", "scripts/docstring-only.sh"):
+            with self.subTest(path=path):
+                self.assertIsNone(self.families(root, path))
+
+    def test_a_new_or_unknown_script_fails_open(self) -> None:
+        root = self.fixture({"scripts/orphan.py": "print('nobody runs me')\n"})
+        for path in ("scripts/orphan.py", "scripts/untracked.sh", ".github/new.yml"):
+            with self.subTest(path=path):
+                self.assertIs(
+                    ci_plan.PathKind.UNKNOWN, ci_plan.classify_path(path, root).kind
+                )
+        with mock.patch.object(ci_plan, "REPO_ROOT", root):
+            plan = ci_plan.classify([("A", "scripts/orphan.py")], workbench_dirs=frozenset())
+        self.assertEqual("true", plan["fail_open"])
+        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+
+    def test_an_unreadable_tree_fails_every_ci_path_open(self) -> None:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root)
+        self.assertIs(
+            ci_plan.PathKind.UNKNOWN, ci_plan.classify_path("scripts/ci_plan.py", root).kind
+        )
+
+    def test_an_unknown_plan_output_counts_as_every_family(self) -> None:
+        self.assertEqual(
+            frozenset(ci_plan.FAMILIES),
+            ci_plan._job_families("if: needs.plan.outputs.brand_new == 'true'"),
+        )
+        self.assertEqual(frozenset(), ci_plan._job_families("run: echo hi"))
+
+
+class CiMachineryTreeTests(unittest.TestCase):
+    """The map `ci_machinery_families` reads out of this tree."""
+
+    def setUp(self) -> None:
+        self.addCleanup(ci_plan.ci_machinery_families.cache_clear)
+        ci_plan.ci_machinery_families.cache_clear()
+
+    def test_every_script_is_mapped_or_explicitly_global(self) -> None:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--", *ci_plan.CI_MACHINERY_PREFIXES],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        ).stdout.split("\0")
+        unmapped = sorted(
+            path for path in listed
+            if path and path not in ci_plan.CI_GLOBAL_PATHS
+            and ci_plan.classify_path(path).kind is not ci_plan.PathKind.CI
+        )
+        self.assertEqual(
+            [], unmapped,
+            "no CI job, workflow, justfile recipe, script or build input runs these; "
+            "wire them in, or list them in UNCONSUMED_CI_PATHS with a reason",
+        )
+
+    def test_the_unconsumed_list_holds_exactly_the_paths_nothing_runs(self) -> None:
+        for path, reason in ci_plan.UNCONSUMED_CI_PATHS.items():
+            with self.subTest(path=path):
+                self.assertTrue((ROOT / path).is_file(), f"{path} no longer exists")
+                self.assertTrue(reason.strip())
+        with mock.patch.object(ci_plan, "UNCONSUMED_CI_PATHS", {}):
+            ci_plan.ci_machinery_families.cache_clear()
+            unconsumed = {
+                path for path, families in ci_plan.ci_machinery_families(str(ROOT)).items()
+                if families is None
+            }
+        self.assertEqual(set(ci_plan.UNCONSUMED_CI_PATHS), unconsumed)
+
+    def test_the_job_split_matches_a_yaml_parse(self) -> None:
+        source = CI_WORKFLOW.read_text(encoding="utf-8")
+        jobs = yaml.safe_load(source)["jobs"]
+        split = ci_plan._workflow_jobs(source)
+        self.assertEqual(set(jobs), set(split))
+        for job, definition in jobs.items():
+            for step in definition.get("steps", []):
+                for name in re.findall(r"scripts/([\w./-]+)", step.get("run", "")):
+                    with self.subTest(job=job, script=name):
+                        self.assertIn(PurePosixPath(name).name, split[job])
+
+    def test_every_plan_output_a_job_reads_is_known(self) -> None:
+        source = CI_WORKFLOW.read_text(encoding="utf-8")
+        read = set(ci_plan._PLAN_OUTPUT.findall(source))
+        self.assertLessEqual(read, set(ci_plan.PLAN_OUTPUT_FAMILIES))
+        outputs = yaml.safe_load(source)["jobs"]["plan"]["outputs"]
+        self.assertEqual(set(outputs), set(ci_plan.PLAN_OUTPUT_FAMILIES))
+
+    def test_a_consumer_that_globs_scripts_is_a_script_check(self) -> None:
+        # Name matching cannot see a glob, so a glob over `scripts/` is only
+        # sound in a consumer every script already selects: the script gates.
+        glob = re.compile(r"scripts/[\w./-]*\*|\"scripts\"\)\.r?glob")
+        families = ci_plan.ci_machinery_families(str(ROOT))
+        for path, selected in families.items():
+            if not path.endswith((".py", ".sh")) or selected is None:
+                continue
+            text = ci_plan._strip_comments(
+                (ROOT / path).read_text(encoding="utf-8"), path.endswith(".py")
+            )
+            if glob.search(text):
+                with self.subTest(path=path):
+                    self.assertEqual(frozenset({"tooling"}), selected)
+        for job, text in ci_plan._workflow_jobs(CI_WORKFLOW.read_text()).items():
+            if glob.search(text):
+                with self.subTest(job=job):
+                    self.assertLessEqual(ci_plan._job_families(text), {"tooling"})
+
+    def test_this_tree_narrows_script_diffs(self) -> None:
+        def plan(*paths: str) -> dict[str, str]:
+            return ci_plan.classify([("M", path) for path in paths])
+
+        classifier = plan("scripts/ci_plan.py", "scripts/test_ci_plan.py")
+        self.assertEqual("ci-machinery diff", classifier["reason"])
+        self.assertEqual(
+            {"tooling"}, {family for family in ci_plan.FAMILIES if classifier[family] == "true"}
+        )
+        stores = plan("scripts/ci/store-tests.sh")
+        self.assertEqual("true", stores["stores"])
+        self.assertEqual("false", stores["rust"])
+        self.assertEqual("true", plan("scripts/ci/bazel_profile_digest.py")["rust"])
+        # A crate change beside a script keeps the build input's families.
+        mixed = plan("scripts/ci_plan.py", "crates/lash-core/src/lib.rs")
+        self.assertEqual("production-relevant diff", mixed["reason"])
+        self.assertEqual("true", mixed["rust"])
+        self.assertEqual("true", mixed["workers_e2e"])
 
 
 class RustRuntimeDocInputTests(unittest.TestCase):
@@ -490,7 +746,6 @@ class GateScopeTests(unittest.TestCase):
             (("docs/guide.md", "Cargo.lock"), "shared-inputs"),
             (("rust-toolchain.toml",), "shared-inputs"),
             ((".github/workflows/ci.yml",), "shared-inputs"),
-            (("scripts/ci_plan.py",), "shared-inputs"),
             (("mystery.data",), "unknown-paths"),
             ((), "empty-diff"),
             (("", "  "), "empty-diff"),
@@ -503,6 +758,15 @@ class GateScopeTests(unittest.TestCase):
     def test_tooling_runs_compile_and_scripts(self) -> None:
         scope = self.scope("tools/bazel/generate_build_files.py")
         self.assertEqual(frozenset({self.RUST, self.SCRIPTS}), scope.families)
+
+    def test_ci_machinery_runs_rust_only_when_a_rust_job_runs_it(self) -> None:
+        guards = frozenset({self.SCRIPTS, ci_plan.GateFamily.WORKFLOWS})
+        scope = self.scope("scripts/ci_plan.py")
+        self.assertEqual("ci-machinery", scope.classification)
+        self.assertEqual(guards, scope.families)
+        self.assertEqual(
+            guards | {self.RUST}, self.scope("scripts/ci/bazel_profile_digest.py").families
+        )
 
     def test_text_output_lists_every_family_in_ascii(self) -> None:
         lines = ci_plan.render_gate_text(self.scope("docs/guide.md")).splitlines()
@@ -654,6 +918,13 @@ class DevTestScopeTests(unittest.TestCase):
                 self.assertEqual(("scripts/test_test_xml.py",), scope.script_tests)
                 self.assertFalse(scope.broad or scope.repository)
 
+    def test_a_script_runs_the_suite_only_when_a_rust_job_runs_it(self) -> None:
+        checker = self.scope("scripts/check_version_bumps.py")
+        self.assertTrue(checker.repository)
+        self.assertFalse(checker.broad)
+        digest = self.scope("scripts/ci/bazel_profile_digest.py")
+        self.assertTrue(digest.repository and digest.broad)
+
     def test_a_script_test_edit_runs_only_its_proof(self) -> None:
         tests = frozenset({"scripts/test_ci_plan.py", "scripts/test_dev_test.py"})
         scope = self.scope("scripts/ci_plan.py", "scripts/test_dev_test.py", scripts=tests)
@@ -803,15 +1074,25 @@ class ConclusionTests(unittest.TestCase):
             {
                 "docs_only": "false",
                 "fail_open": "false",
-                "rust": "false",
-                "workbench": "false",
+                **{family: "false" for family in ci_plan.FAMILIES},
             }
         )
         needs["workspace-tests"]["result"] = "skipped"
         problems = ci_plan.evaluate_conclusion(needs)
         self.assertTrue(
-            any("rust and plan.workbench are both false" in problem for problem in problems)
+            any("selects no family for a non-docs diff" in problem for problem in problems)
         )
+
+    def test_a_ci_machinery_plan_may_leave_rust_off(self) -> None:
+        needs = successful_needs()
+        needs["plan"]["outputs"].update(
+            {family: "false" for family in ci_plan.FAMILIES} | {"tooling": "true"}
+        )
+        for job in ("bazel-tests", "bazel-tests-tail", "workspace-tests", "check",
+                    "postgres-store", "unused-deps"):
+            needs[job]["result"] = "skipped"
+        apply_event_deferrals(needs, "pull_request")
+        self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
 
     def test_skipped_ungated_job_fails(self) -> None:
         needs = successful_needs()

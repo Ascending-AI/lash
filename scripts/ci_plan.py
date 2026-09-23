@@ -10,11 +10,13 @@ Python standard library is used, so it runs before any toolchain.
 from __future__ import annotations
 
 import argparse
+import ast
 from dataclasses import dataclass
 import enum
 from functools import lru_cache
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shlex
 import subprocess
@@ -391,6 +393,10 @@ class PathKind(enum.Enum):
     DATA = "data"
     # Build and repository tooling that is not a shared input.
     TOOLING = "tooling"
+    # CI machinery under `scripts/` or `.github/` whose consumers are known:
+    # it selects exactly the families of the jobs that run or test it
+    # (`ci_machinery_families`).
+    CI = "ci"
     # A shared input: it can move the result of every job.
     SHARED = "shared"
     UNKNOWN = "unknown"
@@ -405,6 +411,8 @@ class PathClass:
     bazel_package: bool = False
     # A package's own Cargo.toml or BUILD.bazel.
     manifest: bool = False
+    # The CI families a CI machinery path selects; empty for every other kind.
+    families: frozenset[str] = frozenset()
 
 
 PACKAGE_ROOTS = ("crates", "examples", "runbooks")
@@ -427,9 +435,8 @@ RUST_RUNTIME_DOC_INPUTS = frozenset(
 # Root files that feed every job: the workspace manifest and lock, the
 # toolchain pin, and the workspace-wide dependency policy.
 SHARED_ROOT_FILES = frozenset({"Cargo.toml", "Cargo.lock", "justfile", "deny.toml"})
-# Directories that feed every job: Cargo and nextest configuration, the CI
-# workflows and actions, and the gate machinery itself -- including this file.
-SHARED_PREFIXES = (".cargo/", ".config/", ".github/", "scripts/")
+# Directories that feed every job: Cargo and nextest configuration.
+SHARED_PREFIXES = (".cargo/", ".config/")
 # Root build and repository tooling. `.bazelrc` sets flags for every Bazel
 # action and `.gitleaksignore` feeds the hygiene job, but neither is a Cargo
 # input, so they select the repository gates rather than every family.
@@ -453,6 +460,313 @@ def _is_bazel_package(root: str, package: str) -> bool:
     return (Path(root) / package / "BUILD.bazel").is_file()
 
 
+# CI machinery: the scripts and GitHub configuration CI runs. A path here is
+# not a global invalidator. It selects the families of the jobs that execute or
+# test it, derived from the tree (`ci_machinery_families`), plus `tooling`,
+# because the repository gates hold every script self-test.
+CI_MACHINERY_PREFIXES = ("scripts/", ".github/")
+CI_WORKFLOW = ".github/workflows/ci.yml"
+CLASSIFIER = "scripts/ci_plan.py"
+# The only CI machinery that re-runs everything: the file that defines the
+# jobs. Every other workflow has its own triggers and maps to its own scope.
+CI_GLOBAL_PATHS = frozenset({CI_WORKFLOW})
+# CI machinery that no CI job, workflow, `justfile` recipe, other script or
+# build input consumes. A person runs it by hand, or GitHub reads it. Its only
+# CI proof is the repository gates. An entry needs a reason, and
+# `test_ci_plan.py` fails when an entry gains a consumer or is removed.
+UNCONSUMED_CI_PATHS: Mapping[str, str] = {
+    ".github/actionlint.yaml": "actionlint finds it by name in `lint`, which runs on every event",
+    ".github/dependabot.yml": "GitHub's Dependabot reads it; no CI job does",
+    "scripts/ci_ensure_run.sh": "run by hand to recover a CI run GitHub dropped",
+    "scripts/perf_baseline.py": "run by hand to compare two lash-perf ledgers",
+    "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
+}
+
+# The plan outputs a `ci.yml` job may read that are not families. A job's
+# families are the family outputs it reads (`_job_families`); an output in
+# neither set counts as every family. `postgres_compatibility` is the schema
+# family's PG14/PG18 selection.
+PLAN_OUTPUT_FAMILIES: Mapping[str, frozenset[str]] = {
+    **{family: frozenset({family}) for family in FAMILIES},
+    "postgres_compatibility": frozenset({"schema"}),
+    "bazel_trusted": frozenset(),
+    "fail_open": frozenset(),
+    "docs_only": frozenset(),
+    "reason": frozenset(),
+    "postgres_primary": frozenset(),
+}
+_PLAN_OUTPUT = re.compile(r"needs\.plan\.outputs\.([A-Za-z0-9_]+)")
+
+
+def _job_families(text: str) -> frozenset[str]:
+    """The families a `ci.yml` job runs for: the plan outputs it reads.
+
+    A job that reads none runs on every event (`plan`, `lint`, `hygiene`, the
+    aggregator), so a script only it runs is exercised whatever the plan says.
+    """
+
+    families: set[str] = set()
+    for output in _PLAN_OUTPUT.findall(text):
+        families |= PLAN_OUTPUT_FAMILIES.get(output, frozenset(FAMILIES))
+    return frozenset(families)
+
+
+# Tracked files outside `scripts/` and `.github/` that read CI machinery at
+# build or test time: Bazel packages and rules, Cargo and nextest config, and
+# Rust sources (`include_str!`, runfiles). What they read selects `rust`.
+BUILD_READER_PATHSPECS = (
+    "crates", "examples", "runbooks", "tools", "fuzz", ".cargo", ".config",
+    "BUILD.bazel", "MODULE.bazel", ".bazelrc",
+)
+
+# Prose and data: a file of this kind names paths but never runs one. An npm
+# `package.json` is the exception, because its `scripts` run commands.
+PROSE_SUFFIXES = frozenset(DOC_SUFFIXES | {".json"})
+
+_JOB_HEADER = re.compile(r"^  ([A-Za-z0-9_-]+):\s*(?:#.*)?$")
+_ANCHOR = re.compile(r"^(\s*)(?:-\s+)?[\w-]*:?\s*&([\w-]+)\s*$")
+_ALIAS = re.compile(r"\*([\w-]+)")
+_TOKEN = re.compile(r"[\w.@-]+")
+_IMPORT = re.compile(r"^\s*(?:from|import)\s+([\w.]+)", re.MULTILINE)
+_ACTION_USE = re.compile(r"\.github/actions/([\w.-]+)")
+_RECIPE_CALL = re.compile(r"(?:\bjust\s+|\brecipe:\s*)([A-Za-z_][\w-]*)")
+_RECIPE_HEADER = re.compile(r"^@?([A-Za-z_][\w-]*)(?:\s[^:]*)?:(?!=)(.*)$")
+
+
+def _strip_comments(text: str, python: bool = False) -> str:
+    """Drop whole-line comments, and a Python file's docstrings: prose never
+    runs what it names. A file that does not parse keeps its docstrings."""
+
+    lines = text.splitlines()
+    if python:
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            tree = None
+        for node in ast.walk(tree) if tree is not None else ():
+            body = getattr(node, "body", None)
+            if not isinstance(body, list) or not body:
+                continue
+            first = body[0]
+            if not (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+                and first.end_lineno is not None
+            ):
+                continue
+            span = range(first.lineno - 1, first.end_lineno)
+            opening = lines[span[0]].lstrip()
+            closing = lines[span[-1]].rstrip()
+            # Blank only a docstring that owns its lines outright.
+            if opening[:1] in {'"', "'"} and closing[-1:] in {'"', "'"}:
+                for index in span:
+                    lines[index] = ""
+    return "\n".join(
+        line for line in lines if not line.lstrip().startswith(("#", "//"))
+    )
+
+
+def _workflow_jobs(text: str) -> dict[str, str]:
+    """Each `ci.yml` job's text, with the YAML anchors it aliases inlined.
+
+    A text split rather than a YAML parse, because this runs before any
+    toolchain; `test_ci_plan.py` checks it against a real parse.
+    """
+
+    lines = text.splitlines()
+    anchors: dict[str, str] = {}
+    for index, line in enumerate(lines):
+        match = _ANCHOR.match(line)
+        if not match:
+            continue
+        indent = len(match.group(1))
+        block = [line]
+        for follower in lines[index + 1 :]:
+            if follower.strip() and len(follower) - len(follower.lstrip()) <= indent:
+                break
+            block.append(follower)
+        anchors[match.group(2)] = "\n".join(block)
+    jobs: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    in_jobs = False
+    for line in lines:
+        if not line.startswith(" ") and line.strip():
+            in_jobs = line.startswith("jobs:")
+            current = None
+            continue
+        header = _JOB_HEADER.match(line) if in_jobs else None
+        if header:
+            current = jobs.setdefault(header.group(1), [])
+        elif current is not None:
+            current.append(line)
+    result = {}
+    for job, body in jobs.items():
+        text = "\n".join(body)
+        aliased = [anchors[name] for name in _ALIAS.findall(text) if name in anchors]
+        result[job] = _strip_comments("\n".join([text, *aliased]))
+    return result
+
+
+def _justfile_recipes(text: str) -> dict[str, str]:
+    """Each recipe's text: its header (dependencies) and its body."""
+
+    recipes: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in text.splitlines():
+        if line[:1] in {" ", "\t"}:
+            if current is not None:
+                current.append(line)
+            continue
+        current = None
+        if not line.strip() or line.startswith("#"):
+            continue
+        header = _RECIPE_HEADER.match(line)
+        if header:
+            dependencies = re.sub(r"\([^)]*\)", "", header.group(2))
+            current = recipes.setdefault(
+                header.group(1),
+                [" ".join(f"just {name}" for name in _TOKEN.findall(dependencies))],
+            )
+    return {name: _strip_comments("\n".join(body)) for name, body in recipes.items()}
+
+
+def _ci_machinery_node(path: str) -> str:
+    """The unit a CI machinery path belongs to: a composite action's directory
+    (its `action.yml` and licence) or the file itself."""
+
+    parts = PurePosixPath(path).parts
+    if len(parts) >= 3 and parts[:2] == (".github", "actions"):
+        return "/".join(parts[:3])
+    return path
+
+
+def _git_lines(root: Path, *args: str) -> list[str]:
+    output = _git(root, *args)
+    return [entry for entry in output.split("\0") if entry]
+
+
+@lru_cache(maxsize=None)
+def ci_machinery_families(root: str | None = None) -> Mapping[str, frozenset[str] | None]:
+    """The CI families each tracked CI machinery path selects.
+
+    Read from the tree, not kept by hand. A consumer names what it runs: a
+    `ci.yml` job (its steps, the anchors it aliases and the composite actions it
+    uses), another workflow, a `justfile` recipe, another script, or a build
+    input. A path selects the families of every consumer that names it, by file
+    name, `.github/actions/<name>`, Python import or `just <recipe>`, closed
+    transitively. Matching by name can only over-select, and that costs time,
+    not a missed proof. Every path also selects `tooling`, because the
+    repository gates hold the script self-tests.
+
+    A value of None marks a path with no consumer that `UNCONSUMED_CI_PATHS`
+    does not list, and `classify_path` fails that path open. `CI_GLOBAL_PATHS`
+    is not in the map. Raises OSError, RuntimeError or ValueError when the tree
+    cannot be read; `classify_path` then fails every CI machinery path open.
+    """
+
+    base = Path(root) if root is not None else REPO_ROOT
+    tracked = _git_lines(base, "ls-files", "-z", "--", *CI_MACHINERY_PREFIXES)
+    # `git grep` exits 1 when nothing matches, which is an answer, not a fault.
+    grep = subprocess.run(
+        ["git", "grep", "-l", "-z", "-I", "-E", r"scripts|\.github", "--",
+         *BUILD_READER_PATHSPECS],
+        cwd=base, capture_output=True, text=True, check=False,
+    )
+    if grep.returncode not in {0, 1}:
+        raise RuntimeError(f"git grep failed ({grep.returncode}): {grep.stderr.strip()}")
+    readers = [entry for entry in grep.stdout.split("\0") if entry]
+
+    def read(path: str) -> str:
+        return (base / path).read_text(encoding="utf-8", errors="replace")
+
+    # Each consumer: (the node it is, or None for a root; its own families; text).
+    consumers: list[tuple[str | None, frozenset[str], str]] = []
+    for text in _workflow_jobs(read(CI_WORKFLOW)).values():
+        consumers.append((None, _job_families(text), text))
+    recipes = _justfile_recipes(read("justfile"))
+    for name, text in recipes.items():
+        consumers.append((f"justfile:{name}", frozenset(), text))
+    for path in readers:
+        name = PurePosixPath(path)
+        if name.suffix in PROSE_SUFFIXES and name.name != "package.json":
+            continue
+        consumers.append(
+            (None, frozenset({"rust"}), _strip_comments(read(path), path.endswith(".py")))
+        )
+    nodes: set[str] = set()
+    for path in tracked:
+        if path in CI_GLOBAL_PATHS:
+            continue
+        node = _ci_machinery_node(path)
+        nodes.add(node)
+        # This classifier names paths as data and runs none of them; read as a
+        # consumer, its own tables would map every path they list.
+        if PurePosixPath(path).suffix not in PROSE_SUFFIXES and path != CLASSIFIER:
+            consumers.append(
+                (node, frozenset(), _strip_comments(read(path), path.endswith(".py")))
+            )
+
+    # Index each node by the names a consumer uses for it.
+    by_token: dict[str, set[str]] = {}
+    by_module: dict[str, set[str]] = {}
+    for node in nodes:
+        name = PurePosixPath(node).name
+        if node.startswith(".github/actions/"):
+            continue
+        by_token.setdefault(name, set()).add(node)
+        if name.endswith(".py"):
+            by_module.setdefault(name[: -len(".py")], set()).add(node)
+
+    edges: dict[str | None, set[str]] = {}
+    named: set[str] = set()
+    families: dict[str, set[str]] = {node: set() for node in nodes}
+    families.update({f"justfile:{name}": set() for name in recipes})
+    for owner, own, text in consumers:
+        targets: set[str] = set()
+        for token in set(_TOKEN.findall(text)):
+            targets |= by_token.get(token, set())
+        for module in _IMPORT.findall(text):
+            targets |= by_module.get(module.split(".")[0], set())
+        for action in _ACTION_USE.findall(text):
+            node = f".github/actions/{action}"
+            if node in nodes:
+                targets.add(node)
+        for recipe in _RECIPE_CALL.findall(text):
+            if recipe in recipes:
+                targets.add(f"justfile:{recipe}")
+        targets.discard(owner)
+        named |= targets
+        for target in targets:
+            families[target] |= own
+        if owner is not None:
+            edges.setdefault(owner, set()).update(targets)
+
+    # Close transitively: a consumer passes on what its own consumers run it for.
+    changed = True
+    while changed:
+        changed = False
+        for owner, targets in edges.items():
+            for target in targets:
+                if not families[owner] <= families[target]:
+                    families[target] |= families[owner]
+                    changed = True
+
+    result: dict[str, frozenset[str] | None] = {}
+    for path in tracked:
+        if path in CI_GLOBAL_PATHS:
+            continue
+        node = _ci_machinery_node(path)
+        consumed = (
+            node in named
+            or path in UNCONSUMED_CI_PATHS
+            # Every workflow is a root: GitHub runs it on its own triggers.
+            or path.startswith(".github/workflows/")
+        )
+        result[path] = frozenset(families[node] | {"tooling"}) if consumed else None
+    return result
+
+
 def classify_path(path: str, root: Path | None = None) -> PathClass:
     """The one answer to "what can this touched path affect?"."""
 
@@ -462,6 +776,16 @@ def classify_path(path: str, root: Path | None = None) -> PathClass:
     suffix = posix.suffix.lower()
     if path in RUST_RUNTIME_DOC_INPUTS:
         return PathClass(PathKind.DOC_INPUT)
+    if path in CI_GLOBAL_PATHS:
+        return PathClass(PathKind.SHARED)
+    if path.startswith(CI_MACHINERY_PREFIXES):
+        try:
+            families = ci_machinery_families(str(root or REPO_ROOT)).get(path)
+        except (OSError, RuntimeError, ValueError):
+            families = None
+        if families is None:
+            return PathClass(PathKind.UNKNOWN)
+        return PathClass(PathKind.CI, families=families)
     if (
         path in SHARED_ROOT_FILES
         or path.startswith(SHARED_PREFIXES)
@@ -594,6 +918,19 @@ _GATE_FAMILIES_BY_KIND = {
     PathKind.SHARED: ALL_GATE_FAMILIES,
     PathKind.UNKNOWN: ALL_GATE_FAMILIES,
 }
+# The CI families whose jobs compile or test Rust: all but the script gates.
+COMPILE_FAMILIES = frozenset(FAMILIES) - {"tooling"}
+
+
+def _gate_families(path_class: PathClass) -> frozenset[GateFamily]:
+    if path_class.kind is not PathKind.CI:
+        return _GATE_FAMILIES_BY_KIND[path_class.kind]
+    # The script and workflow guards read CI machinery; the Rust battery runs
+    # only when a job that compiles or tests Rust runs the path.
+    families = {GateFamily.SCRIPTS, GateFamily.WORKFLOWS}
+    if path_class.families & COMPILE_FAMILIES:
+        families.add(GateFamily.RUST_COMPILE)
+    return frozenset(families)
 
 
 @dataclass(frozen=True)
@@ -630,7 +967,7 @@ def gate_scope(paths: list[str], root: Path | None = None) -> GateScope:
     for path in ordered:
         path_class = classify_path(path, root)
         buckets.setdefault(path_class.kind, []).append(path)
-        families |= _GATE_FAMILIES_BY_KIND[path_class.kind]
+        families |= _gate_families(path_class)
         if path_class.manifest:
             families.add(GateFamily.SCRIPTS)
     kinds = set(buckets)
@@ -645,6 +982,7 @@ def gate_scope(paths: list[str], root: Path | None = None) -> GateScope:
         else "docs-only" if kinds == {PathKind.DOCS}
         else "rust-input-docs" if kinds == {PathKind.DOC_INPUT}
         else "rust-only" if kinds == {PathKind.PACKAGE}
+        else "ci-machinery" if kinds == {PathKind.CI}
         else "mixed"
     )
     reason = "; ".join(
@@ -773,6 +1111,11 @@ def dev_test_scope(
                 broad = True
         elif path_class.kind in {PathKind.DOC_INPUT, PathKind.DATA}:
             broad = True
+        elif path_class.kind is PathKind.CI:
+            # The repository gates hold every script self-test; the developer
+            # suite runs only when a Rust job runs the path.
+            repository = True
+            broad |= bool(path_class.families & COMPILE_FAMILIES)
         else:
             broad = repository = True
     return DevTestScope(
@@ -820,12 +1163,20 @@ def classify(
     )
     ambiguous = sorted(path for path, kind in kinds.items() if kind is PathKind.UNKNOWN)
     docs_only = all(kind is PathKind.DOCS for kind in kinds.values()) and not has_deletion
-    non_docs = [path for path, kind in kinds.items() if kind is not PathKind.DOCS]
+    # CI machinery selects its own families; every other non-docs path is a
+    # build input and turns on the Bazel partition plus its path families.
+    ci_families = set().union(
+        *(path_class.families for path_class in classes.values() if path_class.kind is PathKind.CI)
+    )
+    build = [
+        path for path, kind in kinds.items() if kind not in {PathKind.DOCS, PathKind.CI}
+    ]
     workbench_hit = any(
         _is_workbench_path(path) or _is_workbench_dependency_path(path, workbench_dirs)
-        for path in paths
+        for path in build
     )
-    only_workbench = bool(non_docs) and all(_is_workbench_path(path) for path in non_docs)
+    only_workbench = bool(build) and all(_is_workbench_path(path) for path in build)
+    only_ci = not build and bool(ci_families)
     run_everything = global_invalidator or bool(ambiguous) or docs_deletion
 
     outputs = {
@@ -840,8 +1191,10 @@ def classify(
             if global_invalidator
             else "docs-only diff"
             if docs_only
+            else "ci-machinery diff"
+            if only_ci
             else "workbench-only diff"
-            if only_workbench
+            if only_workbench and not ci_families
             else "production-relevant diff"
         ),
     }
@@ -856,22 +1209,23 @@ def classify(
     # case, including browser projection with a pinned Node interpreter. The
     # breadth families stay off a workbench-only diff: the workbench is an
     # example host, not a store or a worker.
-    breadth = not only_workbench
+    breadth = bool(build) and not only_workbench
+    selected = {
+        "rust": bool(build),
+        "functional_e2e": breadth,
+        "workers_e2e": breadth,
+        "workbench": workbench_hit,
+        "regress": any(_is_regress_path(path) for path in build),
+        "schema": any(_is_schema_path(path) for path in build),
+        "facade": any(_is_facade_path(path) for path in build),
+        "tooling": any(_is_tooling_class(classes[path]) for path in build),
+        # `stores` is path-derived (see _is_stores_path); `functional_e2e`
+        # and `workers_e2e` keep the breadth flag because their jobs are
+        # dispatch/label-only anyway.
+        "stores": any(_is_stores_path(path) for path in build),
+    }
     outputs.update(
-        {
-            "rust": "true",
-            "functional_e2e": str(breadth).lower(),
-            "workers_e2e": str(breadth).lower(),
-            "workbench": str(workbench_hit).lower(),
-            "regress": str(any(_is_regress_path(path) for path in paths)).lower(),
-            "schema": str(any(_is_schema_path(path) for path in paths)).lower(),
-            "facade": str(any(_is_facade_path(path) for path in paths)).lower(),
-            "tooling": str(any(_is_tooling_class(c) for c in classes.values())).lower(),
-            # `stores` is path-derived (see _is_stores_path); `functional_e2e`
-            # and `workers_e2e` keep the breadth flag because their jobs are
-            # dispatch/label-only anyway.
-            "stores": str(any(_is_stores_path(path) for path in paths)).lower(),
-        }
+        {family: str(selected[family] or family in ci_families).lower() for family in FAMILIES}
     )
     return outputs
 
@@ -919,13 +1273,10 @@ def evaluate_conclusion(
                 continue
             if expectation != "false":
                 problems.append(f"plan.{family} is true for an exact docs-only diff")
-    elif (
-        plan_outputs.get("rust") != "true"
-        and plan_outputs.get("workbench") != "true"
-    ):
-        problems.append(
-            "plan.rust and plan.workbench are both false for a non-docs diff"
-        )
+    elif not any(plan_outputs.get(family) == "true" for family in FAMILIES):
+        # A CI machinery diff may leave `rust` off, but it always selects
+        # `tooling`: a non-docs plan that selects nothing is a classifier fault.
+        problems.append("plan selects no family for a non-docs diff")
 
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
