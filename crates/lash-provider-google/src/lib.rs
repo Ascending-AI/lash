@@ -27,6 +27,7 @@ pub use config::{GoogleOAuthClient, GoogleOAuthProvider};
 #[cfg(test)]
 mod tests {
     mod epilogue;
+    mod tool_result_shape;
     use lash_sansio::sync::MutexExt;
 
     use std::num::NonZeroUsize;

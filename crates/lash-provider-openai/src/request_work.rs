@@ -68,14 +68,8 @@ pub(crate) fn needs_blocking(request: &crate::support::LlmRequest) -> bool {
     // The cache is deduplicated; materialization is not. Charge each inline
     // or stored occurrence for its final data URL, without allocating it.
     // Raw traversal above bounds this message/block walk as well.
-    for block in request
-        .messages
-        .iter()
-        .flat_map(|message| message.blocks.iter())
-    {
-        if let crate::support::LlmContentBlock::Attachment { source } = block
-            && let Some(bytes) = request.attachment_bytes(source)
-        {
+    for source in request.attachments() {
+        if let Some(bytes) = request.attachment_bytes(source) {
             let expanded = base64::encoded_len(bytes.len(), true)
                 .and_then(|len| len.checked_add(13))
                 .and_then(|len| {

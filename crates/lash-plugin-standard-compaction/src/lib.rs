@@ -18,7 +18,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 
-use lash_core::facade_support::PreparedContext;
+use lash_core::facade_support::{ModelToolReturnPart, PreparedContext};
 use lash_core::plugin::{
     CompactionContext, ContextCompaction, ContextCompactor, ContextError, PluginError,
     PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin, TurnContextTransform,
@@ -104,14 +104,30 @@ pub(crate) fn approx_token_count(text: &str) -> usize {
     text.len().div_ceil(4)
 }
 
+/// Elide the attachments a part carries, leaving `placeholder` where each
+/// sat: an attachment part keeps its slot empty with the placeholder as its
+/// text, and a tool result's attachment blocks become placeholder text in
+/// place, so the result stays one part in its original order.
 fn strip_attachment(part: &mut Part, placeholder: &str) -> bool {
+    if let Some(blocks) = part.tool_result_content_mut() {
+        let mut changed = false;
+        for block in blocks.iter_mut() {
+            if block.attachment().is_some() {
+                *block = ModelToolReturnPart::text(placeholder);
+                changed = true;
+            }
+        }
+        return changed;
+    }
     if !matches!(part.kind(), PartKind::Attachment) || part.attachment().is_none() {
         return false;
     }
     if let Some(slot) = part.attachment_mut() {
         *slot = None;
     }
-    *part.content_mut() = placeholder.to_string();
+    if let Some(content) = part.content_mut() {
+        *content = placeholder.to_string();
+    }
     true
 }
 
@@ -172,10 +188,9 @@ pub(crate) fn find_compaction_cut_point(messages: &[Message], prefix_len: usize)
     let mut accumulated = 0usize;
     for idx in (start..messages.len()).rev() {
         for part in messages[idx].parts.iter() {
-            accumulated += approx_token_count(part.content());
-            if part.attachment().is_some() {
-                accumulated += 1200; // approximate binary attachment token cost
-            }
+            accumulated += approx_token_count(&part.content());
+            // approximate binary attachment token cost
+            accumulated += 1200 * part.attachment_sources().count();
         }
         if accumulated >= COMPACTION_KEEP_RECENT_TOKENS && messages[idx].role == MessageRole::User {
             return idx;
@@ -219,9 +234,9 @@ fn extract_previous_summary(messages: &[Message]) -> Option<String> {
             return None;
         }
         m.parts.first().map(|p| {
-            p.content()
-                .strip_prefix(COMPACTION_SUMMARY_TITLE)
-                .unwrap_or_else(|| p.content())
+            let text = p.content();
+            text.strip_prefix(COMPACTION_SUMMARY_TITLE)
+                .unwrap_or(&text)
                 .trim()
                 .to_string()
         })

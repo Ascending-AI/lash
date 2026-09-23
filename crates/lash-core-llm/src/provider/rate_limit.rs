@@ -177,7 +177,14 @@ fn estimate_request_tokens(request: &LlmRequest) -> u32 {
             match block {
                 LlmContentBlock::Text { text, .. } => chars += text.len(),
                 LlmContentBlock::ToolCall { input_json, .. } => chars += input_json.len(),
-                LlmContentBlock::ToolResult { content, .. } => chars += content.len(),
+                LlmContentBlock::ToolResult { content, .. } => {
+                    for part in content {
+                        chars += match part {
+                            lash_sansio::ModelToolReturnPart::Text { text } => text.len(),
+                            lash_sansio::ModelToolReturnPart::Attachment(_) => 256,
+                        };
+                    }
+                }
                 LlmContentBlock::Reasoning { text, .. } => chars += text.len(),
                 LlmContentBlock::Attachment { .. } => chars += 256,
             }

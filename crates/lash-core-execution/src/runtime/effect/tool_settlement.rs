@@ -135,7 +135,10 @@ use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
 /// carries the aggregated attempt captures and trigger outcomes the
 /// applicator incorporates.
 /// Version 5 carries one ordered parts body without part lifecycle fields.
-pub const TOOL_SETTLEMENT_VERSION: u16 = 5;
+/// Version 6 (FIG-3515) answers a tool call with one tool-result part whose
+/// content is ordered text and attachment blocks; a v5 settlement's
+/// text-only results and call-bound attachment parts are refused.
+pub const TOOL_SETTLEMENT_VERSION: u16 = 6;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///
@@ -147,7 +150,9 @@ pub const TOOL_SETTLEMENT_VERSION: u16 = 5;
 /// a captured delta is only chargeable at incorporation when it carries the
 /// labels the session ledger keys on.
 /// Version 4 carries the same message cutover as settlement version 5.
-pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 4;
+/// Version 5 carries the same one-result-per-call cutover as settlement
+/// version 6.
+pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 5;
 
 /// One provider spend attributable to one attempt of a tool child.
 ///

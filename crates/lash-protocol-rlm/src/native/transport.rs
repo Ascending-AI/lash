@@ -172,7 +172,7 @@ pub(super) fn append_pair(messages: &mut Vec<LlmMessage>, parts: &[Part], output
                 results.push(LlmContentBlock::ToolResult {
                     call_id: call_id.to_string(),
                     tool_name: part.tool_name().map(str::to_string),
-                    content: output.to_string(),
+                    content: vec![lash_core::facade_support::ModelToolReturnPart::text(output)],
                 });
             }
             PartKind::Reasoning => assistant.push(LlmContentBlock::Reasoning {

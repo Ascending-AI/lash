@@ -1,22 +1,9 @@
 use super::*;
-use lash_core::{
-    AttachmentId, AttachmentSource, AttachmentTypeMetadata, EffectHost as _, MediaType,
-    ToolCallOutput, ToolValue, facade_support::AttachmentRef, facade_support::ModelToolReturn,
-};
+use lash_core::EffectHost as _;
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::Barrier;
 use tokio::time::{Duration, timeout};
-
-fn attachment_source(id: &str) -> AttachmentSource {
-    AttachmentSource::stored(AttachmentRef::new(
-        AttachmentId::parse(id).expect("valid attachment id"),
-        MediaType::parse("image/png").unwrap(),
-        4,
-        Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-        Some("tiny".to_string()),
-    ))
-}
 
 #[test]
 fn standard_protocol_factory_id_is_stable_plugin_contract() {
@@ -1483,56 +1470,4 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
         vec![r#"{"path": "a.txt", "content": "he said "hi"}"#.to_string()],
         "history must keep the model's raw argument text unchanged"
     );
-}
-
-#[test]
-fn tool_attachment_round_trips_to_generic_part() {
-    let attachment = attachment_source("att-1");
-    let output = ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone()));
-    let model_return =
-        ModelToolReturn::from_output("call-9".to_string(), "screenshot".to_string(), &output);
-
-    let mut parts: Vec<Part> = Vec::new();
-    append_model_return_parts(&mut parts, model_return);
-
-    assert_eq!(parts.len(), 1, "single attachment yields single part");
-    let part = &parts[0];
-    assert!(matches!(part.kind(), PartKind::Attachment));
-    assert_eq!(part.content(), "");
-    assert_eq!(part.tool_call_id(), Some("call-9"));
-    assert_eq!(part.tool_name(), Some("screenshot"));
-    let part_attachment = part.attachment().expect("attachment present");
-    assert_eq!(part_attachment.source, attachment);
-}
-
-#[test]
-fn tool_text_and_attachment_round_trip_preserves_order() {
-    let attachment = attachment_source("att-2");
-    let output = ToolCallOutput::success_tool_value(ToolValue::Array(vec![
-        ToolValue::String("before".into()),
-        ToolValue::Attachment(attachment.clone()),
-        ToolValue::String("after".into()),
-    ]));
-    let model_return =
-        ModelToolReturn::from_output("call-10".to_string(), "snap".to_string(), &output);
-
-    let mut parts: Vec<Part> = Vec::new();
-    append_model_return_parts(&mut parts, model_return);
-
-    // The array projection emits compact JSON text fragments around the
-    // attachment, preserving in-order position.
-    assert_eq!(
-        parts.len(),
-        3,
-        "text + attachment + text yields three parts"
-    );
-    assert!(matches!(parts[0].kind(), PartKind::ToolResult));
-    assert!(parts[0].content().starts_with("[\"before\""));
-    assert!(matches!(parts[1].kind(), PartKind::Attachment));
-    assert_eq!(
-        parts[1].attachment().expect("attachment").source,
-        attachment
-    );
-    assert!(matches!(parts[2].kind(), PartKind::ToolResult));
-    assert!(parts[2].content().ends_with("\"after\"]"));
 }

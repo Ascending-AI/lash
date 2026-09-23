@@ -25,7 +25,12 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
       {
         "ToolResult": {
           "call_id": "provider-id",
-          "content": "1 is not of type \"string\"",
+          "content": [
+            {
+              "type": "text",
+              "text": "1 is not of type \"string\""
+            }
+          ],
           "tool_name": "execute_code"
         }
       }

@@ -14,7 +14,7 @@ fn result(id: &str) -> LlmContentBlock {
     LlmContentBlock::ToolResult {
         call_id: id.into(),
         tool_name: Some("lookup".into()),
-        content: "found".into(),
+        content: vec![lash_sansio::ModelToolReturnPart::text("found")],
     }
 }
 

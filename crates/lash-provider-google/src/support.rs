@@ -38,7 +38,7 @@ pub(crate) use lash_llm_transport::{
 pub(crate) use lash_provider_auth::{
     CredentialCallError, CredentialError, CredentialExecuteError, Lease,
 };
-pub(crate) use lash_sansio::Redacted;
+pub(crate) use lash_sansio::{ModelToolReturnPart, Redacted, tool_result_text};
 
 pub(crate) use crate::config::*;
 

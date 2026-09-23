@@ -502,6 +502,7 @@ pub mod facade_support {
     pub use lash_sansio::render_turn_causes_prompt;
     pub use lash_sansio::resolve_schema;
     pub use lash_sansio::shared_parts;
+    pub use lash_sansio::tool_result_text;
     pub use lash_sansio::visible_response_text_from_parts;
     pub use lash_trace::JsonlTraceReadError;
     pub use lash_trace::JsonlTraceSink;
@@ -663,7 +664,7 @@ pub use lash_trace::{
     TraceLlmResponse, TracePromptComponent, TraceProviderReplayDropEvent,
     TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
     TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRuntimeStreamEvent, TraceTokenUsage,
-    TraceToolSpec,
+    TraceToolResultBlock, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};

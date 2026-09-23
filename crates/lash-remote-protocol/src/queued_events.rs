@@ -54,7 +54,12 @@ pub enum RemoteMessageOrigin {
 pub struct RemotePart {
     pub id: String,
     pub kind: RemotePartKind,
-    pub content: String,
+    /// The part's text; absent on a tool result, whose content is `blocks`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// A tool result's ordered text and attachment blocks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<Vec<crate::llm::RemoteToolResultBlock>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment: Option<RemotePartAttachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

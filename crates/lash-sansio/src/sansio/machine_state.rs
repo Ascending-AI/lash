@@ -17,7 +17,10 @@ use super::*;
 /// author: workspace-authored codes serialize as `lash:<spelling>` where
 /// earlier checkpoints wrote `adapter:`/`refusal:`, and a v6 reader would
 /// recolor a `lash:` code as provider vocabulary rather than refuse it.
-pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 7;
+/// Version 8 (FIG-3515) answers each tool call with one tool-result part
+/// carrying ordered text and attachment `blocks`; v7 checkpoints holding
+/// text-only results or call-bound attachment parts are refused.
+pub const TURN_CHECKPOINT_SCHEMA_VERSION: u32 = 8;
 
 const fn legacy_turn_checkpoint_schema_version() -> u32 {
     1

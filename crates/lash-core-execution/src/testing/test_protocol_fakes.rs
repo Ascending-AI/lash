@@ -616,32 +616,20 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     _ => None,
                 };
             }
-            for part in &outcome.model_return.parts {
-                match part {
-                    lash_sansio::ModelToolReturnPart::Text { text } => {
-                        if text.is_empty() {
-                            continue;
-                        }
-                        result_parts.push(Part::tool_result(
-                            String::new(),
-                            text.clone(),
-                            outcome.call_id.clone(),
-                            outcome.tool_name.clone(),
-                        ));
-                    }
-                    lash_sansio::ModelToolReturnPart::Attachment(source) => {
-                        result_parts.push(Part::tool_result_attachment(
-                            String::new(),
-                            String::new(),
-                            lash_sansio::PartAttachment {
-                                source: source.clone(),
-                            },
-                            outcome.call_id.clone(),
-                            outcome.tool_name.clone(),
-                        ));
-                    }
-                }
-            }
+            result_parts.push(Part::tool_result(
+                String::new(),
+                outcome
+                    .model_return
+                    .parts
+                    .iter()
+                    .filter(|block| {
+                        !matches!(block, lash_sansio::ModelToolReturnPart::Text { text } if text.is_empty())
+                    })
+                    .cloned()
+                    .collect(),
+                outcome.call_id.clone(),
+                outcome.tool_name.clone(),
+            ));
         }
         if !result_parts.is_empty() {
             let user_id = format!(

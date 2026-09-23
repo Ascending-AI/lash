@@ -26,7 +26,7 @@ pub struct OperationId {
 
 /// Encoding version of the append-request identity bytes a retried commit must
 /// reproduce exactly.
-pub const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 6;
+pub const APPEND_REQUEST_IDENTITY_ENCODING_VERSION: u32 = 7;
 
 /// Frozen durable-identity family domains minted by this module (ADR 0097).
 /// These are `FAMILY_DOMAINS`-registered names whose preimages carry no
@@ -502,7 +502,21 @@ fn push_part_kind(identity: &mut crate::stable_identity::IdentityEncoder, kind: 
 fn push_part(identity: &mut crate::stable_identity::IdentityEncoder, part: &crate::Part) {
     identity.string(part.id());
     push_part_kind(identity, part.kind());
-    identity.string(part.content());
+    // A tool result's content is its ordered blocks; every other kind's is
+    // its text.
+    match part.tool_result_content() {
+        Some(blocks) => identity.sequence(blocks, |identity, block| match block {
+            lash_sansio::ModelToolReturnPart::Text { text } => {
+                identity.tag(0);
+                identity.string(text);
+            }
+            lash_sansio::ModelToolReturnPart::Attachment(source) => {
+                identity.tag(1);
+                push_attachment_source(identity, source);
+            }
+        }),
+        None => identity.string(&part.content()),
+    }
     identity.optional(part.attachment(), |identity, attachment| {
         let lash_sansio::PartAttachment { source } = attachment;
         push_attachment_source(identity, source)
@@ -807,7 +821,7 @@ mod append_request_identity_tests {
     }
 
     #[test]
-    fn append_request_identity_v6_golden_byte_corpus() {
+    fn append_request_identity_v7_golden_byte_corpus() {
         // Versioned durability corpus. These are the exact v5 bytes, not merely
         // relational hashes. Any projection change requires an explicit
         // APPEND_REQUEST_IDENTITY_ENCODING_VERSION bump and corpus replacement.
@@ -877,7 +891,14 @@ mod append_request_identity_tests {
                             {"id": "p5", "kind": "Error", "content": "error"},
                             {"id": "p6", "kind": "Prose", "content": "prose"},
                             {
-                                "id": "p7", "kind": "ToolResult", "content": "tool-result",
+                                "id": "p7", "kind": "ToolResult",
+                                "blocks": [
+                                    {"type": "text", "text": "tool-result"},
+                                    {"type": "attachment", "source": "stored", "attachment_ref": {
+                                        "id": "result-attachment", "media_type": "image/png", "byte_len": 4
+                                    }},
+                                    {"type": "text", "text": "after"}
+                                ],
                                 "tool_call_id": "call-id", "tool_name": "tool-name"
                             },
                             {
@@ -1027,14 +1048,14 @@ mod append_request_identity_tests {
         if std::env::var_os("UPDATE_APPEND_REQUEST_IDENTITY_GOLDEN").is_some() {
             std::fs::write(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("src/store/testdata/append_request_identity_v6.hex"),
+                    .join("src/store/testdata/append_request_identity_v7.hex"),
                 &rendered,
             )
             .expect("write golden corpus");
         }
         assert_eq!(
             rendered,
-            include_str!("testdata/append_request_identity_v6.hex")
+            include_str!("testdata/append_request_identity_v7.hex")
         );
     }
 

@@ -23,7 +23,10 @@ use super::executor::RuntimeEffectControllerError;
 /// The durable format version [`ToolPresentation`] stamps and
 /// [`ToolPresentation::validate`] refuses mismatches against. Guarded by
 /// `scripts/versioned-surfaces.toml`.
-pub const TOOL_PRESENTATION_VERSION: u16 = 1;
+///
+/// Version 2 (FIG-3515) carries message parts whose tool results hold ordered
+/// text and attachment blocks, one result per call.
+pub const TOOL_PRESENTATION_VERSION: u16 = 2;
 
 /// The journaled product of one tool result's presentation chain.
 ///

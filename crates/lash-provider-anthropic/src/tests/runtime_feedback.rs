@@ -193,7 +193,7 @@ fn runtime_feedback_result_order_preserves_explicit_cache_marker() {
             vec![LlmContentBlock::ToolResult {
                 call_id: "call1".into(),
                 tool_name: Some("lookup".into()),
-                content: "RESULT".into(),
+                content: vec![lash_sansio::ModelToolReturnPart::text("RESULT")],
             }],
         ),
     ]);

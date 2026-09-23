@@ -27,7 +27,6 @@ use lash_core::sansio::{
 };
 #[cfg(test)]
 use lash_core::session_model::PartKind;
-use lash_core::session_model::message::PartAttachment;
 use lash_core::session_model::{
     ConversationRecord, Message, MessageRole, Part, SessionHistoryRecord, SessionStreamEvent,
     reassign_part_ids, shared_parts,
@@ -718,10 +717,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 actions.extend(self.handle_tool_results(ctx, completed));
                 return actions;
             }
-            let mut parts = Vec::new();
-            for outcome in completed {
-                append_model_return_parts(&mut parts, outcome.model_return);
-            }
+            let mut parts: Vec<Part> = completed
+                .into_iter()
+                .map(|outcome| tool_result_part(outcome.model_return))
+                .collect();
             let message_id =
                 standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "refused_tools");
             reassign_part_ids(&message_id, &mut parts);
@@ -754,7 +753,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 });
             }
 
-            append_model_return_parts(&mut result_parts, outcome.model_return);
+            result_parts.push(tool_result_part(outcome.model_return));
         }
 
         if !result_parts.is_empty() {
@@ -811,34 +810,27 @@ fn standard_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &st
     format!("m_standard_{turn_id}_{protocol_iteration}_{purpose}")
 }
 
-fn append_model_return_parts(
-    parts: &mut Vec<Part>,
-    model_return: lash_core::facade_support::ModelToolReturn,
-) {
-    for part in model_return.parts {
-        match part {
-            lash_core::facade_support::ModelToolReturnPart::Text { text } => {
-                if text.is_empty() {
-                    continue;
-                }
-                parts.push(Part::tool_result(
-                    String::new(),
-                    text,
-                    model_return.call_id.clone(),
-                    model_return.tool_name.clone(),
-                ));
-            }
-            lash_core::facade_support::ModelToolReturnPart::Attachment(source) => {
-                parts.push(Part::tool_result_attachment(
-                    String::new(),
-                    String::new(),
-                    PartAttachment { source },
-                    model_return.call_id.clone(),
-                    model_return.tool_name.clone(),
-                ));
-            }
-        }
-    }
+/// The one transcript part answering a tool call: the model return's text
+/// and attachment blocks in the tool value's order, under the call's id.
+/// Empty text blocks carry nothing and are dropped; a call whose return is
+/// empty is still answered, so the transcript stays resume-safe.
+fn tool_result_part(model_return: lash_core::facade_support::ModelToolReturn) -> Part {
+    let content = model_return
+        .parts
+        .into_iter()
+        .filter(|block| {
+            !matches!(
+                block,
+                lash_core::facade_support::ModelToolReturnPart::Text { text } if text.is_empty()
+            )
+        })
+        .collect();
+    Part::tool_result(
+        String::new(),
+        content,
+        model_return.call_id,
+        model_return.tool_name,
+    )
 }
 
 fn conversation_event(message: Message) -> SessionHistoryRecord {
@@ -850,6 +842,9 @@ mod tests;
 
 #[cfg(test)]
 mod discovery_tests;
+
+#[cfg(test)]
+mod tool_result_tests;
 
 #[cfg(test)]
 mod driver_contract_tests;

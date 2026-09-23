@@ -136,7 +136,12 @@ fn reload_preserves_replay_and_observation_bytes() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(output, &expected);
+    assert_eq!(
+        output,
+        &vec![lash_core::facade_support::ModelToolReturnPart::text(
+            expected
+        )]
+    );
 }
 #[test]
 fn superseded_failure_scrubs_both_sides() {

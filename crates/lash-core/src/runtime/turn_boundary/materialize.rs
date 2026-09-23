@@ -75,9 +75,9 @@ pub(super) fn committed_attachment_ids(
         .iter()
     {
         for part in message.parts.iter() {
-            if let Some(attachment_ref) = part
-                .attachment()
-                .and_then(|attachment| attachment.source.stored_ref())
+            for attachment_ref in part
+                .attachment_sources()
+                .filter_map(|source| source.stored_ref())
             {
                 attachment_ids.insert(attachment_ref.id.clone());
             }

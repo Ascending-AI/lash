@@ -143,7 +143,10 @@ pub use lashlang_graph::{
 /// skips from selection and map membership, and closes workflow site kinds.
 /// Version 32 (FIG-3535) adds `PromptViewAttachmentsPruned`, emitted when
 /// old-attachment pruning changes the prompt view without a tail-window cut.
-pub const TRACE_SCHEMA_VERSION: u32 = 32;
+/// Version 33 (FIG-3515) gives a traced tool result its ordered content:
+/// `tool_result.content` is a list of text and attachment blocks, one
+/// result per call, instead of a string beside loose attachment blocks.
+pub const TRACE_SCHEMA_VERSION: u32 = 33;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1033,7 +1036,7 @@ pub enum TraceContentBlock {
     ToolResult {
         call_id: Option<String>,
         tool_name: Option<String>,
-        content: String,
+        content: Vec<TraceToolResultBlock>,
     },
     Reasoning {
         text: String,
@@ -1042,6 +1045,15 @@ pub enum TraceContentBlock {
         has_encrypted: bool,
         redacted: bool,
     },
+}
+
+/// One ordered block of a traced tool result: text, or an attachment at the
+/// position the tool's value placed it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TraceToolResultBlock {
+    Text { text: String },
+    Attachment { source: Box<TraceAttachment> },
 }
 
 fn is_false(value: &bool) -> bool {

@@ -32,6 +32,7 @@ mod request_work_tests;
 mod responses_text_slot_tests;
 mod session_affinity_tests;
 mod strict_tool_omission_tests;
+mod tool_result_shape_tests;
 mod usage_reconciliation_tests;
 
 type ScriptedHttpResponse = (u16, Vec<(String, String)>, &'static str);

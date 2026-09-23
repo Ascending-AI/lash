@@ -524,7 +524,11 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
         .find(|message| message.role == MessageRole::User)
         .expect("user message");
     assert_eq!(
-        user_message.parts.first().map(|part| part.content()),
+        user_message
+            .parts
+            .first()
+            .map(|part| part.content())
+            .as_deref(),
         Some("/yolopush\n\n<skill>\nbody\n</skill>")
     );
     // The committed turn input carries typed provenance so a host that rendered

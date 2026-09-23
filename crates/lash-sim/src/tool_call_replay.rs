@@ -32,7 +32,9 @@ fn malformed_history_request(model: &str) -> LlmRequest {
                 vec![LlmContentBlock::ToolResult {
                     call_id: "call-1".to_string(),
                     tool_name: Some("write_file".to_string()),
-                    content: "the call was not executed".to_string(),
+                    content: vec![lash_core::facade_support::ModelToolReturnPart::text(
+                        "the call was not executed",
+                    )],
                 }],
             ),
             LlmMessage::text(LlmRole::User, "try again with valid JSON"),

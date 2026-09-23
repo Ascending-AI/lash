@@ -176,7 +176,8 @@ pub(crate) fn chat_message_from_committed(message: &lash::messages::Message) -> 
         attachments: message
             .parts
             .iter()
-            .filter_map(|part| part.attachment()?.source.stored_ref())
+            .flat_map(|part| part.attachment_sources())
+            .filter_map(|source| source.stored_ref())
             .map(|attachment| ChatAttachment::from_id(attachment.id.to_string()))
             .collect(),
         provenance: match message.origin.as_ref() {

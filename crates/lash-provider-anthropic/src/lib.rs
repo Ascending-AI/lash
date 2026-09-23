@@ -20,6 +20,7 @@ mod tests {
     mod block_identity_tests;
     mod runtime_feedback;
     mod tool_identity;
+    mod tool_result_shape;
     use runtime_feedback::request_with_instructions;
     mod epilogue;
     use lash_sansio::sync::MutexExt;

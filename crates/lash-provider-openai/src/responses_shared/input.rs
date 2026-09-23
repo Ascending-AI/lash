@@ -6,45 +6,11 @@ use super::*;
 // Request input assembly
 // ---------------------------------------------------------------------------
 
-/// The handful of genuine deltas between the direct-OpenAI and Codex flavours
-/// of the Responses `input` array. Everything else — the per-message block
-/// loop, the reasoning-replay item shape, function_call/function_call_output
-/// emission, runtime feedback projection — is identical.
-#[derive(Clone, Copy, Debug)]
-pub struct ResponsesInputOptions {
-    /// Responses assistant history is emitted as `message` items with stable
-    /// ids (`msg_lash_{message}_{part}` when the request carries none),
-    /// status/phase from [`ResponseTextMeta`], and `output_text` annotations.
-    pub assistant_message_metadata: bool,
-    /// Codex folds sibling user `input_image` parts that follow a
-    /// `function_call_output` into that output's `output` array so the image
-    /// reads as the tool's result. OpenAI keeps them as a standalone user turn.
-    pub fold_tool_result_images: bool,
-}
-
-impl ResponsesInputOptions {
-    /// Direct OpenAI Responses: synthetic assistant ids + phase/annotations,
-    /// no tool-result image folding.
-    pub const OPENAI: Self = Self {
-        assistant_message_metadata: true,
-        fold_tool_result_images: false,
-    };
-
-    /// Codex Responses: same assistant message metadata as OpenAI, with
-    /// tool-result images folded into the preceding `function_call_output`.
-    pub const CODEX: Self = Self {
-        assistant_message_metadata: true,
-        fold_tool_result_images: true,
-    };
-}
-
-#[allow(clippy::too_many_arguments)]
 fn flush_pending_content(
     pending: &mut Vec<Value>,
     input: &mut Vec<Value>,
     role: &'static str,
     is_user: bool,
-    opts: &ResponsesInputOptions,
     response_meta: Option<ResponseTextMeta>,
     message_index: usize,
     part_index: usize,
@@ -53,7 +19,7 @@ fn flush_pending_content(
         return;
     }
     let content = std::mem::take(pending);
-    if opts.assistant_message_metadata && role == "assistant" {
+    if role == "assistant" {
         let meta = response_meta.unwrap_or(ResponseTextMeta {
             id: Some(format!("msg_lash_{message_index}_{part_index}")),
             status: Some("completed".to_string()),
@@ -84,50 +50,6 @@ fn flush_pending_content(
         item["content"] = Value::Array(content);
         input.push(item);
     }
-}
-
-/// Walk backwards from the last input item: if the final entry is a user
-/// `content` message whose parts are all `input_image`, and the entry before
-/// it is a `function_call_output`, promote the image parts into the `output`
-/// of that function_call_output so the server sees the image as the tool's
-/// result rather than as a standalone user turn.
-fn fold_tool_result_images(input: &mut Vec<Value>) {
-    if input.len() < 2 {
-        return;
-    }
-    let last_idx = input.len() - 1;
-    let is_user_image_msg = input[last_idx].get("role").and_then(|v| v.as_str()) == Some("user")
-        && input[last_idx]
-            .get("content")
-            .and_then(|c| c.as_array())
-            .is_some_and(|parts| {
-                parts
-                    .iter()
-                    .all(|p| p.get("type").and_then(|t| t.as_str()) == Some("input_image"))
-            });
-    if !is_user_image_msg {
-        return;
-    }
-    let prev_is_call_output =
-        input[last_idx - 1].get("type").and_then(|v| v.as_str()) == Some("function_call_output");
-    if !prev_is_call_output {
-        return;
-    }
-    let last = input.remove(last_idx);
-    let image_parts = last
-        .get("content")
-        .and_then(|c| c.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let Some(prev) = input.last_mut() else { return };
-    // An array keeps its parts, a non-empty string becomes the text part it stood for.
-    let mut output = match prev["output"].take() {
-        Value::Array(parts) => parts,
-        Value::String(t) if !t.is_empty() => vec![json!({"type": "input_text", "text": t})],
-        _ => Vec::new(),
-    };
-    output.extend(image_parts);
-    prev["output"] = Value::Array(output);
 }
 
 fn reasoning_replay_item(text: &str, replay: Option<&ProviderReasoningReplay>) -> Option<Value> {
@@ -235,8 +157,30 @@ pub(crate) fn feedback_boundary(msg: &LlmMessage, item_count: usize, start: &mut
     }
 }
 
+/// A tool result's `function_call_output.output`: the plain string when the
+/// result is text only, otherwise the content-item array with its text and
+/// attachments interleaved in the result's order, so an image stays the
+/// tool's output rather than a separate user turn.
+fn function_call_output(req: &LlmRequest, content: &[ModelToolReturnPart]) -> Value {
+    if content.iter().all(|block| block.attachment().is_none()) {
+        return Value::String(tool_result_text(content).into_owned());
+    }
+    Value::Array(
+        content
+            .iter()
+            .filter_map(|block| match block {
+                ModelToolReturnPart::Text { text } if text.is_empty() => None,
+                ModelToolReturnPart::Text { text } => {
+                    Some(json!({"type": "input_text", "text": text}))
+                }
+                ModelToolReturnPart::Attachment(source) => Some(input_attachment_part(req, source)),
+            })
+            .collect(),
+    )
+}
+
 /// Build ordered Responses input shared by the direct provider and Codex.
-pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> Vec<Value> {
+pub fn build_responses_input(req: &LlmRequest) -> Vec<Value> {
     let mut input: Vec<Value> = Vec::new();
     let mut feedback_start = None;
     for (message_index, msg) in req.messages.iter().enumerate() {
@@ -253,21 +197,7 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
         let mut pending_meta: Option<ResponseTextMeta> = None;
         let mut pending_part_index = 0usize;
 
-        // Codex folds the image/placeholder blocks that follow a ToolResult
-        // into that tool's `output`. One scan yields both the folded image
-        // parts (keyed by ToolResult block index) and the sibling indices to
-        // skip in the main loop so they aren't double-emitted.
-        let (tool_result_image_folds, consumed_after_tool_result) = if opts.fold_tool_result_images
-        {
-            collect_tool_result_image_folds(req, msg)
-        } else {
-            Default::default()
-        };
-
         for (part_index, block) in msg.blocks.iter().enumerate() {
-            if consumed_after_tool_result.contains(&part_index) {
-                continue;
-            }
             match block {
                 LlmContentBlock::Text {
                     text,
@@ -277,8 +207,7 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                     if text.is_empty() {
                         continue;
                     }
-                    if opts.assistant_message_metadata
-                        && matches!(msg.role, LlmRole::Assistant)
+                    if matches!(msg.role, LlmRole::Assistant)
                         && (!pending_content.is_empty() || response_meta.is_some())
                     {
                         flush_pending_content(
@@ -286,7 +215,6 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                             &mut input,
                             role,
                             false,
-                            &opts,
                             pending_meta.take(),
                             message_index,
                             pending_part_index,
@@ -299,7 +227,7 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                     } else {
                         "input_text"
                     };
-                    if opts.assistant_message_metadata && part_type == "output_text" {
+                    if part_type == "output_text" {
                         pending_content.push(json!({
                             "type": part_type,
                             "text": text,
@@ -323,7 +251,6 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                         &mut input,
                         role,
                         is_user && fallback.is_none(),
-                        &opts,
                         pending_meta.take(),
                         message_index,
                         pending_part_index,
@@ -344,7 +271,6 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                         &mut input,
                         role,
                         is_user && fallback.is_none(),
-                        &opts,
                         pending_meta.take(),
                         message_index,
                         pending_part_index,
@@ -370,44 +296,19 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
                         &mut input,
                         role,
                         is_user && fallback.is_none(),
-                        &opts,
                         pending_meta.take(),
                         message_index,
                         pending_part_index,
                     );
-                    let image_parts = tool_result_image_folds
-                        .get(&part_index)
-                        .cloned()
-                        .unwrap_or_default();
-                    if image_parts.is_empty() {
-                        push_tool_output(
-                            &mut input,
-                            json!({
-                                "type": "function_call_output",
-                                "call_id": call_id,
-                                "output": content,
-                            }),
-                            &mut feedback_start,
-                        );
-                    } else {
-                        let mut parts: Vec<Value> = Vec::new();
-                        if !content.is_empty() {
-                            parts.push(json!({
-                                "type": "input_text",
-                                "text": content,
-                            }));
-                        }
-                        parts.extend(image_parts);
-                        push_tool_output(
-                            &mut input,
-                            json!({
-                                "type": "function_call_output",
-                                "call_id": call_id,
-                                "output": parts,
-                            }),
-                            &mut feedback_start,
-                        );
-                    }
+                    push_tool_output(
+                        &mut input,
+                        json!({
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": function_call_output(req, content),
+                        }),
+                        &mut feedback_start,
+                    );
                 }
             }
         }
@@ -416,54 +317,11 @@ pub fn build_responses_input(req: &LlmRequest, opts: ResponsesInputOptions) -> V
             &mut input,
             role,
             is_user && fallback.is_none(),
-            &opts,
             pending_meta.take(),
             message_index,
             pending_part_index,
         );
-
-        if opts.fold_tool_result_images && is_user && fallback.is_none() {
-            fold_tool_result_images(&mut input);
-        }
     }
 
     input
-}
-
-/// For each `ToolResult` block in `msg`, the Codex-folded image parts (its
-/// trailing sibling `Image` / `[Tool image: …]` blocks) keyed by the
-/// ToolResult's block index, plus the set of all sibling indices consumed this
-/// way so the main loop skips them. One scan replaces the former skip-set
-/// pre-pass plus a separate per-ToolResult re-scan.
-fn collect_tool_result_image_folds(
-    req: &LlmRequest,
-    msg: &lash_core::llm::types::LlmMessage,
-) -> (
-    std::collections::HashMap<usize, Vec<Value>>,
-    std::collections::HashSet<usize>,
-) {
-    let mut folds: std::collections::HashMap<usize, Vec<Value>> = std::collections::HashMap::new();
-    let mut consumed: std::collections::HashSet<usize> = std::collections::HashSet::new();
-    for (idx, block) in msg.blocks.iter().enumerate() {
-        if !matches!(block, LlmContentBlock::ToolResult { .. }) {
-            continue;
-        }
-        let mut parts: Vec<Value> = Vec::new();
-        for (j, sibling) in msg.blocks.iter().enumerate().skip(idx + 1) {
-            match sibling {
-                LlmContentBlock::Attachment { source } => {
-                    parts.push(input_attachment_part(req, source));
-                    consumed.insert(j);
-                }
-                LlmContentBlock::Text { text: t, .. } if t.starts_with("[Tool image:") => {
-                    consumed.insert(j);
-                }
-                _ => break,
-            }
-        }
-        if !parts.is_empty() {
-            folds.insert(idx, parts);
-        }
-    }
-    (folds, consumed)
 }

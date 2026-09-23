@@ -110,7 +110,7 @@ pub use tool_output::{
     ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureClass,
     ToolFailureSource, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
     ToolIntentRefusalReason, ToolRetryStatus, ToolValue, format_tool_output_content,
-    model_parts_from_tool_output,
+    model_parts_from_tool_output, tool_result_text,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{

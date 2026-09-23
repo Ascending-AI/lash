@@ -227,7 +227,7 @@ mod tests {
             role: MessageRole::User,
             parts: shared_parts(vec![Part::tool_result(
                 format!("{id}.p0"),
-                "tool result".to_string(),
+                vec![lash_sansio::ModelToolReturnPart::text("tool result")],
                 call_id.to_string(),
                 "tool".to_string(),
             )]),

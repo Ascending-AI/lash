@@ -72,8 +72,8 @@ pub(crate) enum CodexTransport {
 /// machinery is shared verbatim from [`crate::responses_shared`].
 /// This module owns only the Codex-specific surface: the
 /// `chatgpt.com/backend-api/codex/responses` endpoint, the `codex_cli_rs`
-/// originator/User-Agent headers, the explicit `instructions` request shape with
-/// tool-result image folding, and Codex error/quota classification.
+/// originator/User-Agent headers, the explicit `instructions` request shape, and
+/// Codex error/quota classification.
 #[derive(Clone, Debug)]
 pub struct CodexProvider {
     credentials: Arc<CredentialManager<CodexCredential>>,
@@ -241,7 +241,7 @@ impl CodexProvider {
         let req = safe_request.as_ref();
         shared::validate_responses_attachments(req, "OpenAI Codex")?;
         let tools = Self::build_tools(req)?;
-        let input = shared::build_responses_input(req, shared::ResponsesInputOptions::CODEX);
+        let input = shared::build_responses_input(req);
         let requested_reasoning = reasoning_intent(req);
         let policy = resolve_generation_policy(
             &req.generation,

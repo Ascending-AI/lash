@@ -18,13 +18,15 @@
 //! Each provider keeps only its genuine specifics: the OpenAI provider owns
 //! `build_responses_request_body` (surrogate sanitisation, OpenRouter/local
 //! field gating, assistant-message id flushing); Codex owns its request body
-//! (ordered runtime feedback and tool-result image folding), its
-//! endpoint/headers, and its failure classification.
+//! (ordered runtime feedback), its endpoint/headers, and its failure
+//! classification. Both send a tool result as one `function_call_output`
+//! whose `output` carries the result's images in order.
 
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
 use crate::schema::{classify_openai_error, sse_error_event_retry_verdict};
+use lash_core::facade_support::{ModelToolReturnPart, tool_result_text};
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::llm::types::{
     AttachmentSource, ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest,
@@ -44,7 +46,7 @@ use lash_llm_transport::{
 };
 
 mod input;
-pub use input::{ResponsesInputOptions, build_responses_input};
+pub use input::build_responses_input;
 pub(crate) use input::{attachment_feedback, feedback_boundary, push_tool_output};
 mod tool_argument_decoder;
 pub use tool_argument_decoder::ToolArgumentDecoder;
@@ -66,10 +68,11 @@ pub fn validate_responses_attachments(
     provider: &str,
 ) -> Result<(), LlmTransportError> {
     for (message_index, message) in req.messages.iter().enumerate() {
-        for source in message.blocks.iter().filter_map(|block| match block {
-            LlmContentBlock::Attachment { source } => Some(source.as_ref()),
-            _ => None,
-        }) {
+        for source in message
+            .blocks
+            .iter()
+            .flat_map(LlmContentBlock::attachment_sources)
+        {
             let validation = (|| {
                 if !req
                     .model_capability

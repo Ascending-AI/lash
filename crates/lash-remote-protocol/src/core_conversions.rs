@@ -22,6 +22,7 @@ mod observations;
 mod processes;
 mod prompt;
 mod queued_events;
+mod tool_result;
 mod tools;
 mod triggers;
 mod turn_control;

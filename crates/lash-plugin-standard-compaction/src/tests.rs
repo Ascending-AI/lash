@@ -1194,7 +1194,7 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
         .expect("recovery transform runs")
         .messages;
 
-    let contents: Vec<&str> = built
+    let contents: Vec<_> = built
         .iter()
         .flat_map(|message| message.parts.iter().map(|part| part.content()))
         .collect();
@@ -1301,7 +1301,9 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
         _ => None,
     };
     assert!(
-        seed_summary.is_some_and(|text| text.contains("Compaction summary:")),
+        seed_summary
+            .as_ref()
+            .is_some_and(|text| text.contains("Compaction summary:")),
         "the recovery frame is seeded with the recovered summary: {seed_summary:?}"
     );
 
@@ -1381,7 +1383,7 @@ async fn recovery_failure_is_bounded_and_explicit() {
             .await
             .expect("a failed recovery must not fail the turn");
 
-        let contents: Vec<&str> = built
+        let contents: Vec<_> = built
             .messages
             .iter()
             .flat_map(|message| message.parts.iter().map(|part| part.content()))
@@ -1487,7 +1489,7 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
             "a settled recovery must not reopen: {terminal:?}"
         );
         assert!(captured.requests().is_empty());
-        let contents: Vec<&str> = built
+        let contents: Vec<_> = built
             .messages
             .iter()
             .flat_map(|message| message.parts.iter().map(|part| part.content()))

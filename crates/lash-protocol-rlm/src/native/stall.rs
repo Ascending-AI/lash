@@ -32,7 +32,7 @@ pub(super) fn native_reply_fingerprint(parts: &[Part]) -> String {
         if matches!(part.kind(), PartKind::Reasoning) {
             continue;
         }
-        reply.push_str(part.content());
+        reply.push_str(&part.content());
         reply.push(NATIVE_PART_SEPARATOR);
     }
     reply_fingerprint(&reply)

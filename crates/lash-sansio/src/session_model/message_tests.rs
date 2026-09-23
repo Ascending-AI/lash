@@ -17,8 +17,6 @@ fn part_field_additions_trip_this_exhaustive_destructure() {
             id: _,
             content: _,
             attachment: _,
-            tool_call_id: _,
-            tool_name: _,
         } => {}
         super::Part::Code { id: _, content: _ }
         | super::Part::Output { id: _, content: _ }
@@ -312,7 +310,7 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
             role: MessageRole::User,
             parts: vec![Part::tool_result(
                 "m3.p0".to_string(),
-                "ok".to_string(),
+                vec![crate::ModelToolReturnPart::text("ok")],
                 "tc1".to_string(),
                 "read_file".to_string(),
             )]
@@ -367,7 +365,7 @@ fn render_structured_prompt_preserves_empty_tool_results() {
             role: MessageRole::User,
             parts: vec![Part::tool_result(
                 "m1.p0".to_string(),
-                String::new(),
+                Vec::new(),
                 "ask_1".to_string(),
                 "ask".to_string(),
             )]
@@ -508,7 +506,7 @@ fn prompt_resume_safety_accepts_completed_tool_history() {
             role: MessageRole::User,
             parts: vec![Part::tool_result(
                 "m1.p0".to_string(),
-                "ok".to_string(),
+                vec![crate::ModelToolReturnPart::text("ok")],
                 "tc1".to_string(),
                 "read_file".to_string(),
             )]
@@ -931,12 +929,15 @@ fn every_kind_round_trips_through_the_flat_form() {
                 source: AttachmentSource::stored(test_attachment_ref(3)),
             }),
         ),
-        Part::tool_result_attachment(
+        Part::tool_result(
             "m.p2".into(),
-            String::new(),
-            PartAttachment {
-                source: AttachmentSource::stored(test_attachment_ref(4)),
-            },
+            vec![
+                crate::ModelToolReturnPart::text("[\"before\","),
+                crate::ModelToolReturnPart::Attachment(AttachmentSource::stored(
+                    test_attachment_ref(4),
+                )),
+                crate::ModelToolReturnPart::text(",\"after\"]"),
+            ],
             "call-1".into(),
             "snap".into(),
         ),
@@ -957,7 +958,7 @@ fn every_kind_round_trips_through_the_flat_form() {
         ),
         Part::tool_result(
             "m.p8".into(),
-            "done".into(),
+            vec![crate::ModelToolReturnPart::text("done")],
             "call-2".into(),
             "lookup".into(),
         ),
@@ -991,14 +992,30 @@ fn legacy_flat_json_pairs_rejected_when_the_kind_cannot_carry_the_field() {
     );
 
     // A tool result missing its call pair is likewise unrepresentable.
-    let missing = r#"{"id":"m.p0","kind":"ToolResult","content":"x"}"#;
+    let missing = r#"{"id":"m.p0","kind":"ToolResult","blocks":[]}"#;
     let err = serde_json::from_str::<Part>(missing).expect_err("missing call pair must fail");
     assert!(
         err.to_string().contains("tool_call_id"),
         "typed error names the missing field: {err}"
     );
 
-    // A lone half of the attachment call pair is rejected too.
+    // A tool result's content is its ordered blocks: the retired text-only
+    // shape (a `content` string, no `blocks`) is refused, not coerced.
+    let text_only = r#"{"id":"m.p0","kind":"ToolResult","content":"x","tool_call_id":"call-1","tool_name":"lookup"}"#;
+    let err = serde_json::from_str::<Part>(text_only).expect_err("text-only result must fail");
+    assert!(
+        err.to_string().contains("content"),
+        "typed error names the retired field: {err}"
+    );
+    let no_blocks =
+        r#"{"id":"m.p0","kind":"ToolResult","tool_call_id":"call-1","tool_name":"lookup"}"#;
+    let err = serde_json::from_str::<Part>(no_blocks).expect_err("missing blocks must fail");
+    assert!(err.to_string().contains("blocks"), "{err}");
+    let blocks_on_text = r#"{"id":"m.p0","kind":"Text","content":"x","blocks":[]}"#;
+    serde_json::from_str::<Part>(blocks_on_text).expect_err("blocks belong to tool results");
+
+    // An attachment answers no call: the retired tool-result attachment
+    // pairing is rejected.
     let lone = r#"{"id":"m.p0","kind":"Attachment","content":"","tool_call_id":"call-1"}"#;
-    serde_json::from_str::<Part>(lone).expect_err("lone tool_call_id must fail");
+    serde_json::from_str::<Part>(lone).expect_err("attachment tool_call_id must fail");
 }

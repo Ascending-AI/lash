@@ -1104,10 +1104,7 @@ impl LlmRequestSpec {
         self.messages
             .iter()
             .flat_map(|message| message.blocks.iter())
-            .filter_map(|block| match block {
-                crate::llm::types::LlmContentBlock::Attachment { source } => Some(source.as_ref()),
-                _ => None,
-            })
+            .flat_map(crate::llm::types::LlmContentBlock::attachment_sources)
             .collect()
     }
 
@@ -1117,16 +1114,29 @@ impl LlmRequestSpec {
     ) -> Result<Self, RuntimeEffectControllerError> {
         let mut messages = request.messages.clone();
         for message in &mut messages {
-            if !message
+            if message
                 .blocks
                 .iter()
-                .any(|block| matches!(block, crate::llm::types::LlmContentBlock::Attachment { .. }))
+                .flat_map(crate::llm::types::LlmContentBlock::attachment_sources)
+                .next()
+                .is_none()
             {
                 continue;
             }
             for block in Arc::make_mut(&mut message.blocks) {
-                if let crate::llm::types::LlmContentBlock::Attachment { source } = block {
-                    **source = durable_attachment_source(source, attachment_store).await?;
+                match block {
+                    crate::llm::types::LlmContentBlock::Attachment { source } => {
+                        **source = durable_attachment_source(source, attachment_store).await?;
+                    }
+                    crate::llm::types::LlmContentBlock::ToolResult { content, .. } => {
+                        for part in content {
+                            if let crate::ModelToolReturnPart::Attachment(source) = part {
+                                *source =
+                                    durable_attachment_source(source, attachment_store).await?;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

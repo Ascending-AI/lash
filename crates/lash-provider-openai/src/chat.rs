@@ -1,5 +1,6 @@
 use crate::responses_shared as shared;
 use crate::support::*;
+use lash_core::facade_support::{ModelToolReturnPart, tool_result_text};
 use lash_core::llm::types::ExecutionEvidenceMergeError;
 use std::borrow::Cow;
 
@@ -30,10 +31,11 @@ impl OpenAiCompatibleProvider {
 
     fn validate_chat_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
         for (message_index, message) in req.messages.iter().enumerate() {
-            for source in message.blocks.iter().filter_map(|block| match block {
-                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
-                _ => None,
-            }) {
+            for source in message
+                .blocks
+                .iter()
+                .flat_map(LlmContentBlock::attachment_sources)
+            {
                 let validation = (|| {
                     let supported = req
                         .model_capability
@@ -177,10 +179,28 @@ impl OpenAiCompatibleProvider {
                         content,
                         tool_name,
                     } => {
+                        // A `tool` message carries text only: the result's
+                        // text keeps `[Attachment N]` markers where its
+                        // attachments sat, and the attachments follow, in
+                        // marker order, in the user message after the tool
+                        // messages.
+                        let mut attachments = content
+                            .iter()
+                            .filter_map(ModelToolReturnPart::attachment)
+                            .peekable();
+                        if attachments.peek().is_some() {
+                            text_parts.push(json!({
+                                "type": "text",
+                                "text": format!("Attachments from tool result {call_id}:"),
+                            }));
+                            text_parts.extend(
+                                attachments.map(|source| Self::chat_attachment_part(req, source)),
+                            );
+                        }
                         let mut tool_message = json!({
                             "role": "tool",
                             "tool_call_id": call_id,
-                            "content": content,
+                            "content": tool_result_text(content),
                         });
                         if let Some(name) = tool_name.as_deref()
                             && !name.is_empty()

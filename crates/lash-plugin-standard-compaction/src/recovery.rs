@@ -62,7 +62,7 @@ pub(crate) fn recovery_record_payload(message: &Message) -> Option<&str> {
         return None;
     }
     message.parts.iter().find_map(|part| {
-        let text = part.content();
+        let text = part.text_content()?;
         [
             OVERFLOW_RECOVERY_MARKER,
             OVERFLOW_RECOVERY_COMPLETED,
@@ -152,18 +152,27 @@ pub(crate) fn elide_oversized_parts(messages: &mut [Message]) -> usize {
     let mut elided = 0usize;
     for message in messages {
         for part in std::sync::Arc::make_mut(&mut message.parts).iter_mut() {
-            if approx_token_count(part.content()) < OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS {
+            let mut text = part.content().into_owned();
+            if approx_token_count(&text) < OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS {
                 continue;
             }
-            if let Some((index, _)) = part
-                .content()
+            if let Some((index, _)) = text
                 .char_indices()
                 .nth(OVERFLOW_RECOVERY_ELIDED_RETAINED_CHARS)
             {
-                part.content_mut().truncate(index);
+                text.truncate(index);
             }
-            part.content_mut()
-                .push_str(OVERFLOW_ELIDED_PART_PLACEHOLDER);
+            text.push_str(OVERFLOW_ELIDED_PART_PLACEHOLDER);
+            // A tool result's blocks collapse to the elided text; the
+            // summarization request carries no body of the result anyway.
+            match part.tool_result_content_mut() {
+                Some(blocks) => *blocks = vec![ModelToolReturnPart::text(text)],
+                None => {
+                    if let Some(content) = part.content_mut() {
+                        *content = text;
+                    }
+                }
+            }
             elided += 1;
         }
     }
@@ -419,12 +428,7 @@ pub(crate) async fn run_overflow_recovery(
                 .parts
                 .iter()
                 .map(|part| {
-                    approx_token_count(part.content())
-                        + if part.attachment().is_some() {
-                            1_200
-                        } else {
-                            0
-                        }
+                    approx_token_count(&part.content()) + 1_200 * part.attachment_sources().count()
                 })
                 .sum::<usize>()
         })

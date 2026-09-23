@@ -312,7 +312,10 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
                     for message in &request.messages {
                         for block in message.blocks.iter() {
                             if let LlmContentBlock::ToolResult { content, .. } = block {
-                                observed_tool_results.lock().await.push(content.clone());
+                                observed_tool_results.lock().await.push(
+                                    lash_core::facade_support::tool_result_text(content)
+                                        .into_owned(),
+                                );
                             }
                         }
                     }
