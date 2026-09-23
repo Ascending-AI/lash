@@ -216,7 +216,7 @@ impl DiagnosticCode {
             }
             Self::ForOfUnsupported => "iterate a materialized array with plain `for...of`",
             Self::AwaitUnsupported => {
-                "await tool calls, process handles, `sleep`, `waitSignal`, or `Promise.all`/`allSettled` — nothing else is awaitable"
+                "await tool calls, process handles, `sleep`, `waitSignal`, or `Promise.all`/`allSettled`/`race`/`any` — nothing else is awaitable"
             }
             Self::AwaitRequired => "add `await` — the call returns a promise",
             Self::YieldUnsupported => "collect the values into an array and return it",
@@ -284,7 +284,7 @@ impl DiagnosticCode {
     /// arguments sends it rewriting code that was already the right shape.
     ///
     /// Three codes cannot answer for themselves. `TS_METHOD_UNSUPPORTED` covers
-    /// the whole determinism-refusal set — `Promise.then`, `Promise.race`,
+    /// the whole determinism-refusal set — `Promise.then`, `Promise.resolve`,
     /// `crypto.randomUUID`, `localeCompare`, local-time `Date` readers, and the
     /// methods simply absent from the runtime surface — *and* ordinary arity
     /// mistakes like `[].map()` with no callback. `TS_EXPRESSION_UNSUPPORTED`
@@ -945,7 +945,6 @@ mod tests {
                 "finish(Promise.resolve(1).then((v) => v));",
                 "Promise chaining",
             ),
-            ("finish(Promise.race([]));", "Promise.race"),
             ("finish('a'.localeCompare('b'));", "localeCompare"),
             ("finish((1).toLocaleString());", "toLocaleString"),
             ("finish('e'.normalize());", "String.normalize"),

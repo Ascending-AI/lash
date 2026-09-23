@@ -86,9 +86,33 @@ pub struct ResourceOperation {
 
 #[derive(Clone, Debug)]
 pub struct ResourceOperationBatch {
-    pub operations: Vec<ResourceOperation>,
-    /// Whether the aggregate wakes on the first settled rejection.
-    pub first_settled_rejection: bool,
+    /// One entry per **unique** pending operation, numbered in the order each
+    /// first appears in the operand. A handle written at two positions is one
+    /// leaf (ADR 0099 §10 L4, §11 clause 1): execution deduplicates, input
+    /// positions never do, and the VM expands a leaf's outcome to every
+    /// position that names it.
+    pub leaves: Vec<ResourceOperationBatchLeaf>,
+    /// How the aggregate consumes its leaves' settlements (ADR 0099 §10 L1).
+    /// A caller-side loop decision, never journaled; the host derives the
+    /// journaled wake policy from it.
+    pub consumer: AggregateConsumer,
+    /// For `race` and `any`: how many leaves precede, in source order, the
+    /// first operand that is already a plain value. That value is part of the
+    /// immediate prefix (§10 L5): it decides the aggregate unless an earlier
+    /// leaf settled during preparation does, and every pending leaf is still
+    /// admitted before it answers (§11 clause 3). `None` when no plain value
+    /// is present, and always `None` for the all-results consumers.
+    pub settled_value_after: Option<usize>,
+    /// The instruction that formed the aggregate: stable for a given compiled
+    /// program, which `BYTECODE_FORMAT_VERSION` guarantees and a restored
+    /// continuation's own instruction pointer already depends on.
+    ///
+    /// With [`occurrence`](Self::occurrence) it names the aggregate within its
+    /// execution. A host that keys a group on the leaves' own identities needs
+    /// it only for leaves that have none: two timer aggregates at two sites,
+    /// each reached once, carry the same timers and the same occurrence, and
+    /// only the site tells them apart (ADR 0099 §11 clause 4).
+    pub site: u64,
     /// How many times this VM has reached this aggregate, counting from 1.
     ///
     /// The host needs it because a batch's content is not its identity: two
@@ -109,79 +133,151 @@ pub struct ResourceOperationBatch {
     pub occurrence: u64,
 }
 
-#[derive(Clone, Debug)]
-pub struct ResourceOperationBatchResult {
-    /// Per-leaf results in the batch's **input** order. Aggregates that are
-    /// specified to preserve input order — `Promise.allSettled` — read this
-    /// directly.
-    pub results: Vec<ResourceOperationResult>,
-    /// Input indices in the order the leaves **settled**, which is the order
-    /// `Promise.all` must select its rejection from. Hosts record it as part of
-    /// the journaled batch result so replay reproduces the same choice.
+#[cfg(any(test, feature = "testing"))]
+impl ResourceOperationBatch {
+    /// A scripted host's answer: its leaves settle in leaf order and none
+    /// during preparation, as a host that resolved them one after another
+    /// would report. `results` holds one result per leaf, in leaf order.
     ///
-    /// It is a required field rather than an optional one: a host that cannot
-    /// observe settlement order must say so explicitly with
-    /// [`ResourceOperationBatchResult::settled_in_input_order`], because a
-    /// silently defaulted order would reintroduce the input-order rejection
-    /// this field exists to fix.
-    pub settlement_order: Vec<usize>,
+    /// Testing only: the reply algebra is the host's to derive from the
+    /// settlements it actually observed. This helper synthesizes a selection
+    /// from results a test already holds, which no product host may do
+    /// (ADR 0099 §10 L2, L6).
+    ///
+    /// A plain operand is part of the immediate prefix, which answers ahead of
+    /// every dispatched settlement (ADR 0099 §10 L5), so such a host answers a
+    /// `race` or an `any` that holds one with [`ResourceOperationBatchResult::SettledValue`].
+    #[must_use]
+    pub fn answer_in_leaf_order(
+        &self,
+        results: Vec<ResourceOperationResult>,
+    ) -> ResourceOperationBatchResult {
+        let first_rejection = || {
+            results
+                .iter()
+                .position(|result| matches!(result, ResourceOperationResult::Error(_)))
+        };
+        match self.consumer {
+            AggregateConsumer::AllSettled => ResourceOperationBatchResult::AllResults(results),
+            AggregateConsumer::All => match first_rejection() {
+                Some(leaf) => ResourceOperationBatchResult::Selected {
+                    leaf,
+                    result: results[leaf].clone(),
+                },
+                None => ResourceOperationBatchResult::AllResults(results),
+            },
+            AggregateConsumer::Race | AggregateConsumer::Any
+                if self.settled_value_after.is_some() =>
+            {
+                ResourceOperationBatchResult::SettledValue
+            }
+            AggregateConsumer::Race => match results.into_iter().next() {
+                Some(result) => ResourceOperationBatchResult::Selected { leaf: 0, result },
+                None => ResourceOperationBatchResult::AllResults(Vec::new()),
+            },
+            AggregateConsumer::Any => {
+                match results
+                    .iter()
+                    .position(|result| matches!(result, ResourceOperationResult::Value(_)))
+                {
+                    Some(leaf) => ResourceOperationBatchResult::Selected {
+                        leaf,
+                        result: results[leaf].clone(),
+                    },
+                    None => ResourceOperationBatchResult::ExhaustedRejections(
+                        results
+                            .into_iter()
+                            .filter_map(|result| match result {
+                                ResourceOperationResult::Error(error) => Some(error),
+                                ResourceOperationResult::Value(_) => None,
+                            })
+                            .collect(),
+                    ),
+                }
+            }
+        }
+    }
 }
 
-impl ResourceOperationBatchResult {
-    /// A batch whose leaves settled in the order they were issued.
-    ///
-    /// This is the honest constructor for a host that runs its leaves
-    /// sequentially, and for one that resolves them without ever suspending:
-    /// in both cases input order *is* settlement order.
-    pub fn settled_in_input_order(results: Vec<ResourceOperationResult>) -> Self {
-        let settlement_order = (0..results.len()).collect();
-        Self {
-            results,
-            settlement_order,
-        }
-    }
+/// One unique pending operation of an aggregate.
+#[derive(Clone, Debug)]
+pub enum ResourceOperationBatchLeaf {
+    /// A resource (tool) operation.
+    Operation(ResourceOperation),
+    /// A timer from an unawaited `sleep(ms)`. Its start point is its
+    /// admission and its fulfilment value is `undefined` (ADR 0099 §11
+    /// clause 4); the host records the deadline once when it admits the
+    /// aggregate.
+    Timer(Sleep),
+}
 
-    /// A batch whose leaves settled in `settlement_order`, an ordering of the
-    /// input indices.
-    pub fn settled_in_order(
-        results: Vec<ResourceOperationResult>,
-        settlement_order: Vec<usize>,
-    ) -> Self {
-        Self {
-            results,
-            settlement_order,
+impl ResourceOperationBatchLeaf {
+    /// The resource operation, when this leaf is one.
+    #[must_use]
+    pub fn operation(&self) -> Option<&ResourceOperation> {
+        match self {
+            Self::Operation(operation) => Some(operation),
+            Self::Timer(_) => None,
         }
     }
+}
 
-    /// The input indices in settlement order, validated against `results`.
-    ///
-    /// The VM refuses a batch whose order is not an ordering of its results
-    /// rather than guessing, so a host that miscounts fails closed. The error
-    /// names the offending position: a length-only complaint reads as
-    /// self-consistent and leaves nothing to debug.
-    pub fn settlement_sequence(&self) -> Result<&[usize], String> {
-        if self.settlement_order.len() != self.results.len() {
-            return Err(format!(
-                "reported {} settled positions for {} results",
-                self.settlement_order.len(),
-                self.results.len()
-            ));
+/// How an aggregate consumes its leaves' settlements (ADR 0099 §10 L1).
+///
+/// Four modes over three journaled wake policies: `all` and `allSettled` ask
+/// the host for the same thing and differ only in how far the caller consumes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AggregateConsumer {
+    /// Every leaf's result, in leaf order. `Promise.allSettled`, and every
+    /// Lashlang-native aggregate: those wait for all results and report the
+    /// first *written* rejection (§10 L7).
+    AllSettled,
+    /// `Promise.all`: the first consumed rejection, or every result when
+    /// none rejects.
+    All,
+    /// `Promise.race`: the first settlement.
+    Race,
+    /// `Promise.any`: the first fulfilment, or every rejection.
+    Any,
+}
+
+impl AggregateConsumer {
+    /// The consumer a TypeScript `Promise.<method>` aggregate lowers to, by
+    /// the method's name: `all`, `allSettled`, `race` or `any`.
+    #[must_use]
+    pub fn from_typescript_method(method: &str) -> Option<Self> {
+        match method {
+            "all" => Some(Self::All),
+            "allSettled" => Some(Self::AllSettled),
+            "race" => Some(Self::Race),
+            "any" => Some(Self::Any),
+            _ => None,
         }
-        let mut seen = vec![false; self.results.len()];
-        for index in &self.settlement_order {
-            let Some(slot) = seen.get_mut(*index) else {
-                return Err(format!(
-                    "settled position {index} is out of range for {} results",
-                    self.results.len()
-                ));
-            };
-            if *slot {
-                return Err(format!("settled position {index} was reported twice"));
-            }
-            *slot = true;
-        }
-        Ok(&self.settlement_order)
     }
+}
+
+/// The host's answer to an aggregate — the total response algebra of ADR 0099
+/// §10 L2. Infrastructure failure and host cancellation are not in it: they
+/// travel as the ability's `Err` (L3) and never become a leaf rejection.
+#[derive(Clone, Debug)]
+pub enum ResourceOperationBatchResult {
+    /// One result per leaf, in leaf order: `allSettled`, a successful `all`,
+    /// and every Lashlang-native aggregate.
+    AllResults(Vec<ResourceOperationResult>),
+    /// The one settlement that decided the aggregate: the first settlement
+    /// for `race`, the first fulfilment for `any`, the first rejection for
+    /// `all`. `leaf` indexes [`ResourceOperationBatch::leaves`].
+    Selected {
+        leaf: usize,
+        result: ResourceOperationResult,
+    },
+    /// The plain value [`ResourceOperationBatch::settled_value_after`] names
+    /// decided a `race` or `any`; every pending leaf was admitted first.
+    SettledValue,
+    /// `any` with no fulfilment: each leaf's rejection, in leaf order. The VM
+    /// expands them to input positions, duplicates included (§10 L2, §11
+    /// clause 8).
+    ExhaustedRejections(Vec<ExecutionHostError>),
 }
 
 #[derive(Clone, Debug)]

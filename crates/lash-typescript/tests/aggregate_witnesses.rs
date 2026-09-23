@@ -18,7 +18,7 @@
 
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ResourceOperation, ResourceOperationBatchResult, ResourceOperationResult, State, Value,
+    ResourceOperation, ResourceOperationResult, State, Value,
 };
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -76,9 +76,13 @@ impl ExecutionHost for OrderRecordingHost {
                 self.batch_sizes
                     .lock()
                     .expect("batch sizes lock")
-                    .push(batch.operations.len());
+                    .push(batch.leaves.len());
                 let mut results = Vec::new();
-                for operation in &batch.operations {
+                for operation in batch
+                    .leaves
+                    .iter()
+                    .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                {
                     let value = self.record(operation)?;
                     results.push(if self.fail_every_call {
                         ResourceOperationResult::Error(ExecutionHostError::new(format!(
@@ -90,7 +94,7 @@ impl ExecutionHost for OrderRecordingHost {
                     });
                 }
                 Ok(AbilityResult::ResourceOperationBatch(
-                    ResourceOperationBatchResult::settled_in_input_order(results),
+                    batch.answer_in_leaf_order(results),
                 ))
             }
             AbilityOp::Print(_) => {
@@ -253,15 +257,16 @@ impl ExecutionHost for ProcessHost {
             }
             AbilityOp::ResourceOperationBatch(batch) => {
                 let results = batch
-                    .operations
+                    .leaves
                     .iter()
+                    .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                     .map(|operation| {
                         assert_eq!(operation.operation, "await");
                         ResourceOperationResult::Value(self.wait())
                     })
                     .collect();
                 Ok(AbilityResult::ResourceOperationBatch(
-                    ResourceOperationBatchResult::settled_in_input_order(results),
+                    batch.answer_in_leaf_order(results),
                 ))
             }
             AbilityOp::Finish(value) => Ok(AbilityResult::Value(value)),

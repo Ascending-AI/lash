@@ -133,11 +133,23 @@ rejection_test!(
     "new WeakMap();",
     Code::NewUnsupported
 );
-rejection_test!(rejects_unawaited_sleep, "sleep(1);", Code::AwaitRequired);
+/// An unawaited `sleep(ms)` is a pending timer, the way an unawaited tool call
+/// is a pending tool request: it links, and the aggregate that awaits it
+/// admits it (ADR 0099 §11). One that nothing awaits fails at cell end like
+/// any pending operation.
+#[test]
+fn an_unawaited_sleep_is_a_pending_timer() {
+    for source in [
+        "const timer = sleep(1); await timer;",
+        "await Promise.race([sleep(1), sleep(2)]);",
+    ] {
+        lash_typescript::validate(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+}
 
 #[test]
 fn await_permission_stops_at_nested_function_boundaries() {
-    let operations = ["sleep(1)", "waitSignal('ready')"];
+    let operations = ["waitSignal('ready')"];
     for operation in operations {
         for source in [
             format!("await (async () => {{ {operation}; }})();"),

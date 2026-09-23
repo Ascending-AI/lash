@@ -608,12 +608,13 @@ async fn execute_code_inner(
             {
                 state.cancel_code_execution();
             }
+            let message = lash_lashlang_runtime::host_lifetime_failure_message(&failure.error)
+                .unwrap_or_else(|| {
+                    lashlang::format_runtime_diagnostic(code, &failure.error, failure.span)
+                });
             return exec_response_from(
                 host.into_collected(),
-                Some(lash_core::CellFailure::new(
-                    kind,
-                    lashlang::format_runtime_diagnostic(code, &failure.error, failure.span),
-                )),
+                Some(lash_core::CellFailure::new(kind, message)),
                 None,
                 start,
                 degraded_bindings.clone(),
@@ -649,6 +650,12 @@ fn lashlang_runtime_feedback_kind(
     match error {
         _ if host_cancelled => lash_core::CellFailureKind::Host,
         lashlang::RuntimeError::HostCancelled => lash_core::CellFailureKind::Host,
+        // An await nothing can settle is the host's lifetime ending, not the
+        // program's error (ADR 0099 §11 clause 5).
+        lashlang::RuntimeError::AggregateAwaitUnsettled { .. } => lash_core::CellFailureKind::Host,
+        // An aggregate's infrastructure failure or host stop travels on the
+        // host-control channel (ADR 0099 §10 L3): the host's, not the program's.
+        lashlang::RuntimeError::AggregateHostControl { .. } => lash_core::CellFailureKind::Host,
         error if error.is_execution_bound_exhausted() => lash_core::CellFailureKind::Policy,
         _ => lash_core::CellFailureKind::Program,
     }

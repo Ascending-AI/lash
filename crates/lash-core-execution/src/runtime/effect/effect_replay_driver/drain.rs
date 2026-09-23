@@ -75,7 +75,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
     }
 
     /// One drain pass. See [`StoreEffectGroupDrain::drain_group`].
-    async fn drain_effect_group(
+    pub(super) async fn drain_effect_group(
         self: &Arc<Self>,
         group_key: &str,
         cancel: &CancellationToken,

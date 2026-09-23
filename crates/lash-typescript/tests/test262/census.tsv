@@ -132,7 +132,7 @@ feature	Promise	skip	ticket-ruling:FIG-1413:Promise	-
 feature	promise-try	skip	ticket-ruling:FIG-1413:promise-try	-
 feature	promise-with-resolvers	skip	ticket-ruling:FIG-1413:promise-with-resolvers	-
 feature	Promise.allSettled	accepted	-	-
-feature	Promise.any	rejected	TS_METHOD_UNSUPPORTED	Promise.any([1]);
+feature	Promise.any	accepted	-	-
 feature	Promise.prototype.finally	rejected	TS_METHOD_UNSUPPORTED	const p: any = 1; p.finally(() => { });
 feature	Proxy	skip	ticket-ruling:FIG-1413:Proxy — an interposed handler makes every property access an arbitrary guest computation, which the durable snapshot cannot represent and the effect model cannot bound	-
 feature	proxy-missing-checks	skip	ticket-ruling:FIG-1413:proxy-missing-checks	-
@@ -213,5 +213,6 @@ typescript	generics	accepted	-	-
 typescript	interfaces	accepted	-	-
 typescript	namespaces	rejected	TS_NAMESPACE_UNSUPPORTED	namespace N { }
 typescript	non-null-assertion	accepted	-	-
+typescript	Promise.race	accepted	-	-
 typescript	satisfies	accepted	-	-
 typescript	type-aliases	accepted	-	-

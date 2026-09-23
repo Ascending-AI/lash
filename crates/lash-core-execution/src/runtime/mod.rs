@@ -73,9 +73,9 @@ pub use effect::{
     ToolInvocationEffectOutcome, ToolSettlement, ToolUsageDelta, ToolUsageLedger,
     TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
     TurnControlAttachment, TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, concrete_turn_cancellation_authority, effect_groups_unsupported,
-    refuse_unhonored_group_membership, turn_control_binding_id_for_scope,
-    validate_replayed_effect_envelope,
+    TurnControlBindingIdError, UnsettledEffectGroup, concrete_turn_cancellation_authority,
+    effect_groups_unsupported, refuse_unhonored_group_membership,
+    turn_control_binding_id_for_scope, validate_replayed_effect_envelope,
 };
 #[cfg(feature = "testing")]
 pub use effect::{RuntimeEffectControllerHandle, TurnCancelWait};

@@ -193,6 +193,7 @@ pub(super) fn turn_effect_executor(
         observes_durable_cancel_after_llm: driver.observes_durable_cancel_after_llm,
         protocol_reply: Default::default(),
         live_opener: std::sync::Mutex::new(None),
+        opener_state: driver.opener_state.clone(),
         cooperative_cancel: CancellationToken::new(),
     };
     (

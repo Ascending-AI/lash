@@ -93,6 +93,10 @@ const typescriptNames = [
   "interfaces",
   "namespaces",
   "non-null-assertion",
+  // Not a feature tag upstream: `Promise.race` rides the base `Promise`
+  // feature, which the census skips as a whole. The dialect's ruling on it
+  // needs a row of its own (FIG-3397, ADR 0099 §11).
+  "Promise.race",
   "satisfies",
   "type-aliases",
 ];

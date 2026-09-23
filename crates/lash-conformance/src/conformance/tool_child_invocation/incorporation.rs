@@ -62,7 +62,7 @@ fn incorporation_group(
 /// The session-ledger stand-in an incorporating context charges into: every
 /// delta the applicator applies lands here, counted by `(source, model)`.
 #[derive(Default)]
-struct RecordingCharge {
+pub(super) struct RecordingCharge {
     charges: std::sync::Mutex<Vec<(String, String, crate::TokenUsage)>>,
 }
 
@@ -82,7 +82,7 @@ impl crate::session::UsageChargeSink for RecordingCharge {
 }
 
 impl RecordingCharge {
-    fn count(&self) -> usize {
+    pub(super) fn count(&self) -> usize {
         self.charges
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

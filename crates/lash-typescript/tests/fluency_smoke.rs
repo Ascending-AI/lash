@@ -1,6 +1,6 @@
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    ResourceOperationBatchResult, ResourceOperationResult, State, Value,
+    ResourceOperationResult, State, Value,
 };
 
 struct FluencyHost;
@@ -9,10 +9,11 @@ impl ExecutionHost for FluencyHost {
     async fn perform(&self, operation: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match operation {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_input_order(
+                batch.answer_in_leaf_order(
                     batch
-                        .operations
+                        .leaves
                         .iter()
+                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
                         .enumerate()
                         .map(|(index, call)| {
                             ResourceOperationResult::Value(resource_operation_value(call, index))

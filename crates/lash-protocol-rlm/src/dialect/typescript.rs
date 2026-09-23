@@ -434,14 +434,14 @@ impl TypescriptDialect {
             format!("\n\n### Processes\n\n{durable}")
         };
         let sleep = if environment.abilities.sleep {
-            "\n\n`await sleep(ms)` pauses the program."
+            "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call keeps running until the turn ends."
         } else {
             ""
         };
         let host_api = format!(
             r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object, `Map` or `Set` into a string — with `+`, `` `${{...}}` `` or `String(...)` — refuses instead of producing a placeholder; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
-`Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `Promise.race` are not supported.
+`Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes and generators are not supported.
 
 ### Host API
 

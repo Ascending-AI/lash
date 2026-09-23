@@ -91,9 +91,18 @@ impl Compiler {
             *instruction = Instruction::PendingTool { operation, argc };
             return;
         }
-        if let ("__typescript_await_array", [items, Expr::Bool(settle)]) = (name, args) {
+        if let ("__typescript_pending_timer", [duration]) = (name, args) {
+            self.compile_expr(duration, &path.child(0));
+            let instruction = self.code.len();
+            self.code.push(Instruction::PendingTimer);
+            self.mark_instruction_source_span(instruction, path);
+            return;
+        }
+        if let ("__typescript_await_array", [items, Expr::String(mode)]) = (name, args)
+            && let Some(consumer) = AggregateConsumer::from_typescript_method(mode)
+        {
             self.compile_expr(items, &path.child(0));
-            self.code.push(Instruction::AwaitArray { settle: *settle });
+            self.code.push(Instruction::AwaitArray { consumer });
             return;
         }
         if let ("__typescript_await_pending", [value]) = (name, args) {

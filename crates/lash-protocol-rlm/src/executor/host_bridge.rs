@@ -656,22 +656,43 @@ impl HostBridge<'_> {
 
     #[expect(
         clippy::expect_used,
-        reason = "runtime receivers are filtered by the same check per operation, and every results slot is filled exactly once by the enumeration of batch.operations above"
+        reason = "runtime receivers are filtered by the same check per operation"
     )]
     async fn resource_operation_batch(
         &self,
         batch: lashlang::ResourceOperationBatch,
-    ) -> lashlang::ResourceOperationBatchResult {
-        let occurrence = batch.occurrence;
-        let mut results = vec![None; batch.operations.len()];
-        let mut positions = Vec::new();
-        let mut call_sites = Vec::new();
-        let mut source_operations = Vec::new();
-        let mut execution_indices = Vec::new();
+    ) -> Result<lashlang::ResourceOperationBatchResult, ExecutionHostError> {
+        let lashlang::ResourceOperationBatch {
+            leaves,
+            consumer,
+            settled_value_after,
+            site,
+            occurrence,
+        } = batch;
+        let mut bridge_leaves = Vec::with_capacity(leaves.len());
+        // Per dispatched leaf: its call site, source operation, executed-call
+        // index and replay key, keyed by leaf index.
+        let mut dispatched: std::collections::BTreeMap<
+            usize,
+            (lashlang::LashlangExecutionCallSite, String, usize, String),
+        > = std::collections::BTreeMap::new();
         let mut invocations = Vec::new();
-        let mut replay_keys = Vec::new();
 
-        for (source_index, operation) in batch.operations.into_iter().enumerate() {
+        for (source_index, leaf) in leaves.into_iter().enumerate() {
+            let operation = match leaf {
+                lashlang::ResourceOperationBatchLeaf::Operation(operation) => operation,
+                lashlang::ResourceOperationBatchLeaf::Timer(sleep) => {
+                    bridge_leaves.push(match lash_lashlang_runtime::timer_duration_ms(&sleep) {
+                        Ok(duration_ms) => {
+                            lash_lashlang_runtime::BridgeAggregateLeaf::Timer { duration_ms }
+                        }
+                        Err(error) => {
+                            lash_lashlang_runtime::BridgeAggregateLeaf::Settled(Err(error))
+                        }
+                    });
+                    continue;
+                }
+            };
             if lash_lashlang_runtime::is_typescript_runtime_receiver(&operation.receiver) {
                 let result = match Self::require_call_site(
                     &operation.operation,
@@ -696,8 +717,7 @@ impl HostBridge<'_> {
                     },
                     Err(error) => Err(error),
                 };
-                results[source_index] =
-                    Some(lashlang::ResourceOperationResult::from_result(result));
+                bridge_leaves.push(lash_lashlang_runtime::BridgeAggregateLeaf::Settled(result));
                 continue;
             }
             let result = async {
@@ -742,7 +762,9 @@ impl HostBridge<'_> {
             let (host_operation, source_operation, payload, call_site) = match result {
                 Ok(prepared) => prepared,
                 Err(error) => {
-                    results[source_index] = Some(lashlang::ResourceOperationResult::Error(error));
+                    bridge_leaves.push(lash_lashlang_runtime::BridgeAggregateLeaf::Settled(Err(
+                        error,
+                    )));
                     continue;
                 }
             };
@@ -758,8 +780,9 @@ impl HostBridge<'_> {
                 ) {
                     Ok(call_id) => call_id,
                     Err(error) => {
-                        results[source_index] =
-                            Some(lashlang::ResourceOperationResult::Error(error));
+                        bridge_leaves.push(lash_lashlang_runtime::BridgeAggregateLeaf::Settled(
+                            Err(error),
+                        ));
                         continue;
                     }
                 };
@@ -779,8 +802,7 @@ impl HostBridge<'_> {
                 let result = self
                     .record_executed_call(execution_index, source_operation, outcome, None)
                     .and(result);
-                results[source_index] =
-                    Some(lashlang::ResourceOperationResult::from_result(result));
+                bridge_leaves.push(lash_lashlang_runtime::BridgeAggregateLeaf::Settled(result));
                 continue;
             }
 
@@ -788,8 +810,9 @@ impl HostBridge<'_> {
                 match self.resource_tool_call_id(&host_operation, &call_site, Some(source_index)) {
                     Ok(call_id) => call_id,
                     Err(error) => {
-                        results[source_index] =
-                            Some(lashlang::ResourceOperationResult::Error(error));
+                        bridge_leaves.push(lash_lashlang_runtime::BridgeAggregateLeaf::Settled(
+                            Err(error),
+                        ));
                         continue;
                     }
                 };
@@ -814,12 +837,17 @@ impl HostBridge<'_> {
             {
                 invocation = invocation.with_child_execution_trace_hook(hook);
             }
-            replay_keys.push(invocation.id.clone());
-            positions.push(source_index);
-            call_sites.push(call_site);
-            source_operations.push(source_operation);
-            execution_indices.push(execution_index);
-            invocations.push(invocation);
+            dispatched.insert(
+                source_index,
+                (
+                    call_site,
+                    source_operation,
+                    execution_index,
+                    invocation.id.clone(),
+                ),
+            );
+            invocations.push(invocation.clone());
+            bridge_leaves.push(lash_lashlang_runtime::BridgeAggregateLeaf::Tool(invocation));
         }
 
         if let Some(trace) = &self.lashlang_execution_trace {
@@ -827,8 +855,8 @@ impl HostBridge<'_> {
                 &invocations,
                 lash_core::session::ToolGroupOccurrence::Opener(occurrence),
             );
-            if call_sites.len() > 1 {
-                for (position, call_site) in call_sites.iter().enumerate() {
+            if dispatched.len() > 1 {
+                for (position, (call_site, ..)) in dispatched.values().enumerate() {
                     trace.emit_waiting(
                         call_site,
                         lash_lashlang_runtime::TraceNodeAwaited::ToolBatch {
@@ -840,69 +868,52 @@ impl HostBridge<'_> {
             }
         }
 
-        let batch = self
-            .ctx
-            .call_tool_batch(
-                invocations,
-                lash_core::session::ToolGroupOccurrence::Opener(occurrence),
-            )
-            .await;
-        for ((((source_index, source_operation), execution_index), replay_key), reply) in positions
-            .iter()
-            .copied()
-            .zip(source_operations)
-            .zip(execution_indices)
-            .zip(replay_keys)
-            .zip(batch.replies)
-        {
-            // Batch replies are terminal for the same reason as scalar replies.
-            let outcome = match &reply.output.outcome {
-                lash_core::ToolCallOutcome::Success(_) => lash_core::ExecutedCallOutcome::Ok,
-                lash_core::ToolCallOutcome::Failure(_)
-                | lash_core::ToolCallOutcome::Cancelled(_) => lash_core::ExecutedCallOutcome::Err,
-            };
-            let (result, host_record) = self.consume_reply(reply, &replay_key);
-            let result = self
-                .record_executed_call(execution_index, source_operation, outcome, host_record)
-                .and(result);
-            results[source_index] = Some(lashlang::ResourceOperationResult::from_result(result));
-        }
+        let reply = lash_lashlang_runtime::settle_bridge_aggregate(
+            &self.ctx,
+            consumer,
+            settled_value_after,
+            site,
+            occurrence,
+            bridge_leaves,
+            |leaf, reply| {
+                let Some((_, source_operation, execution_index, replay_key)) =
+                    dispatched.get(&leaf)
+                else {
+                    return Err(ExecutionHostError::new(format!(
+                        "aggregate leaf {leaf} was answered as a tool call it never dispatched"
+                    )));
+                };
+                // Batch replies are terminal for the same reason as scalar replies.
+                let outcome = match &reply.output.outcome {
+                    lash_core::ToolCallOutcome::Success(_) => lash_core::ExecutedCallOutcome::Ok,
+                    lash_core::ToolCallOutcome::Failure(_)
+                    | lash_core::ToolCallOutcome::Cancelled(_) => {
+                        lash_core::ExecutedCallOutcome::Err
+                    }
+                };
+                let (result, host_record) = self.consume_reply(reply, replay_key);
+                self.record_executed_call(
+                    *execution_index,
+                    source_operation.clone(),
+                    outcome,
+                    host_record,
+                )
+                .and(result)
+            },
+        )
+        .await;
         if !self.is_cancelled()
-            && call_sites.len() > 1
+            && dispatched.len() > 1
             && let Some(trace) = &self.lashlang_execution_trace
         {
-            for call_site in &call_sites {
+            for (call_site, ..) in dispatched.values() {
                 trace.emit_resumed(
                     call_site,
                     lash_lashlang_runtime::TraceNodeWaitResolution::Resumed,
                 );
             }
         }
-
-        // The batch reports settlement in its own invocation positions; the VM
-        // reads leaf positions. Leaves resolved before the batch ran — the
-        // journaled TypeScript runtime values above, and anything that failed
-        // during preparation — had already settled, so they lead the order.
-        let mut settlement_order = (0..results.len())
-            .filter(|index| !positions.contains(index))
-            .collect::<Vec<_>>();
-        // `call_tool_batch` refuses a malformed order at its boundary, so every
-        // reported position is a real invocation position here. Filtering again
-        // would only convert a future defect back into a silent repair.
-        settlement_order.extend(
-            batch
-                .settlement_order
-                .iter()
-                .filter_map(|position| positions.get(*position).copied()),
-        );
-
-        lashlang::ResourceOperationBatchResult::settled_in_order(
-            results
-                .into_iter()
-                .map(|result| result.expect("every batch result slot should be filled"))
-                .collect(),
-            settlement_order,
-        )
+        reply
     }
 
     async fn await_handle(&self, handle: FlowValue) -> Result<FlowValue, ExecutionHostError> {
@@ -986,9 +997,9 @@ impl HostBridge<'_> {
                     .map(AbilityResult::Value)
             }),
             AbilityOp::ResourceOperationBatch(batch) => Box::pin(async move {
-                Ok(AbilityResult::ResourceOperationBatch(
-                    self.resource_operation_batch(batch).await,
-                ))
+                self.resource_operation_batch(batch)
+                    .await
+                    .map(AbilityResult::ResourceOperationBatch)
             }),
             AbilityOp::Await(handle) => {
                 Box::pin(async move { self.await_handle(handle).await.map(AbilityResult::Value) })

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 152,
+  "cargo_target_count": 153,
   "feature_lane_units": [
     {
       "features": [],
@@ -17407,7 +17407,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 211,
+  "generated_label_count": 212,
   "packages": [
     {
       "declared_features": [
@@ -19665,6 +19665,15 @@
           "cargo_only": "the no-abort stress binary runs 43 s; too slow for the developer loop; the merge group runs it in the Bazel tail",
           "kind": "test",
           "label": "//crates/lash-typescript:integration__test",
+          "tags": [
+            "dev-deferred"
+          ]
+        },
+        {
+          "cargo": "race_any_runtime",
+          "cargo_only": "the no-abort stress binary runs 43 s; too slow for the developer loop; the merge group runs it in the Bazel tail",
+          "kind": "test",
+          "label": "//crates/lash-typescript:race_any_runtime__test",
           "tags": [
             "dev-deferred"
           ]

@@ -28,8 +28,8 @@ use crate::workflow_graph::WorkflowOwnership;
 use super::record::{Symbol, intern_symbol, lookup_symbol, record_with_capacity, symbol_name};
 use super::schema::{SchemaScalarKind, ValidationPlan, compile_schema_value};
 use super::{
-    Chunk, ClosureParameterModel, CompileStats, CompiledAggregateAwaitShape, CompiledAssignPath,
-    CompiledAssignPathStep, CompiledFormatTemplate, CompiledFunction,
+    AggregateConsumer, Chunk, ClosureParameterModel, CompileStats, CompiledAggregateAwaitShape,
+    CompiledAssignPath, CompiledAssignPathStep, CompiledFormatTemplate, CompiledFunction,
     CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf,
     CompiledResourceOperationListBatch, EMPTY_HANDLER_CHAIN_DIGEST, HandlerScopeExtent,
     Instruction, IntrinsicOp, JavaScriptUriCodec, LASH_HOST_REQUIREMENTS_REF_KEY,

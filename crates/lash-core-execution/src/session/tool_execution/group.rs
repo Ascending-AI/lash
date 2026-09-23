@@ -1,25 +1,26 @@
-//! Effect-group formation and settlement consumption for tool batches
+//! Effect-group formation and settlement consumption for tool aggregates
 //! (ADR 0099, FIG-3397).
 //!
-//! This module replaces the batch-effect consumer path: a prepared batch of
-//! tool calls is opened as a [`crate::RuntimeEffectGroup`] whose children are
-//! [`crate::RuntimeEffectCommand::ToolInvocation`] envelopes, and the opener
-//! consumes the group's durable settlement order rather than a source-ordered
-//! launch vector. What changes under ADR 0099 §5 is cross-child ordering: a
-//! child's final record commits first, its drain admits in durable
-//! `commit_seq` order, and the consumer observes settlement rank — so a held
-//! source-first leaf no longer blocks a later sibling's terminal.
+//! Every product tool batch and every Lashlang aggregate opens one durable
+//! [`crate::RuntimeEffectGroup`]: a [`crate::RuntimeEffectCommand::ToolInvocation`]
+//! child per unique tool call, and a `Sleep` child per timer whose deadline
+//! was recorded at admission (§11 clause 4). The consumer observes durable
+//! rank — the order children's final records committed (§5) — so a held
+//! source-first leaf never blocks a later sibling's terminal.
 //!
-//! A cancelled turn closes its group under `Cancel` through the FIG-3410
-//! closing driver. What does *not* live here yet: opener-side lifecycle
-//! closing at turn end and process terminal with the opener's own
-//! finalization steps (FIG-3410, ADR 0099 §7) and drain-end handling
-//! (FIG-3419).
-//! Settlement-fact incorporation is FIG-3411's `incorporate_group_prefix`:
-//! the consumer journals the consumed prefix as an `IncorporateGroupSettlements`
-//! record and applies each rank's recorded facts once, while the seam below
-//! reads the model return the child projected and recorded rather than
-//! re-projecting it (ADR 0099 §6).
+//! A consumer stops where its aggregate is decided (§10): `race` at the first
+//! settlement, `any` at the first fulfilment, `all` at the first rejection,
+//! `allSettled` and every all-results batch at exhaustion. A group decided
+//! early is handed to the opener with the consumer's cursor; its losers keep
+//! running, and the opener's end closes it (`opener_groups.rs`, §7). A
+//! cancelled await closes its group under `Cancel` through the FIG-3410
+//! closing driver.
+//!
+//! Settlement facts are incorporated through FIG-3411's
+//! `incorporate_group_prefix`: the consumer journals the consumed prefix as
+//! an `IncorporateGroupSettlements` record and applies each rank's recorded
+//! facts once, while presentation reads the model return the child projected
+//! and recorded rather than re-projecting it (§6).
 
 use super::*;
 
@@ -32,11 +33,11 @@ use crate::runtime::effect::{
 /// mint the child's retained [`ToolChildRequest`] and the consumer needs to
 /// apply its settlement.
 ///
-/// `input_index` is the leaf's position in the caller's original call vector;
-/// the position inside the group's `children` is the leaf's index in the
-/// vector passed to [`RuntimeExecutionContext::open_tool_child_group`]. The
-/// position-to-input mapping is the only translation PR C's dedup needs to
-/// change (ADR 0099 §10: duplicate operands ride one position-to-unique map).
+/// `input_index` is the leaf's position in the caller's leaf vector; the
+/// position inside the group's `children` is the leaf's index in the vector
+/// passed to [`RuntimeExecutionContext::open_tool_child_group`]. Duplicate
+/// operands never reach here: the caller deduplicates, and positions map onto
+/// unique leaves above the group (ADR 0099 §10 L4).
 pub(crate) struct PreparedToolChildLeaf {
     /// This leaf's index in the caller's input vector.
     pub input_index: usize,
@@ -53,21 +54,108 @@ pub(crate) struct PreparedToolChildLeaf {
     // group children run with no hook (the driver passes `None`).
 }
 
-/// What [`RuntimeExecutionContext::consume_all_tool_child_settlements`] hands
-/// back: every leaf's completed call, plus the settlement order the group
-/// actually produced.
+/// One child of an aggregate's group, in group-position order.
+pub(crate) enum PreparedGroupChild {
+    /// A tool call, run by the invocation driver.
+    Tool(Box<PreparedToolChildLeaf>),
+    /// A timer from an unawaited `sleep(ms)`: a `Sleep` child whose deadline
+    /// was recorded once, at admission (ADR 0099 §11 clause 4).
+    Timer { deadline_ms: u64 },
+}
+
+impl PreparedGroupChild {
+    /// The tool leaf, when this child is one.
+    pub(crate) fn tool(&self) -> Option<&PreparedToolChildLeaf> {
+        match self {
+            Self::Tool(leaf) => Some(leaf),
+            Self::Timer { .. } => None,
+        }
+    }
+}
+
+/// How a group's consumer decides its aggregate (ADR 0099 §10 L1). A
+/// caller-side loop decision, never journaled; [`Self::wake`] is the journaled
+/// wake policy it implies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolAggregateConsumer {
+    /// Every settlement: `allSettled` and every all-results batch.
+    AllSettled,
+    /// Stop at the first consumed rejection: `Promise.all`.
+    All,
+    /// Stop at the first settlement: `Promise.race`.
+    Race,
+    /// Stop at the first fulfilment: `Promise.any`.
+    Any,
+}
+
+impl ToolAggregateConsumer {
+    /// The three-way journaled wake policy this four-way consumer mode folds
+    /// into every child's envelope (ADR 0099 §10 L1, ADR 0065).
+    #[must_use]
+    pub fn wake(self) -> GroupWakePolicy {
+        match self {
+            Self::AllSettled | Self::All => GroupWakePolicy::All,
+            Self::Race => GroupWakePolicy::First,
+            Self::Any => GroupWakePolicy::FirstSuccess,
+        }
+    }
+
+    /// Whether a settlement with this fulfilment decides the aggregate.
+    #[must_use]
+    pub fn decides(self, fulfilled: bool) -> bool {
+        match self {
+            Self::AllSettled => false,
+            Self::All => !fulfilled,
+            Self::Race => true,
+            Self::Any => fulfilled,
+        }
+    }
+}
+
+/// One settled child as its consumer saw it.
+pub(crate) enum GroupChildSettled {
+    /// A tool child's completed call.
+    Tool(Box<CompletedProtocolToolCall>),
+    /// A timer child that elapsed; its fulfilment value is `undefined`.
+    Timer,
+}
+
+impl GroupChildSettled {
+    /// A timer always fulfils; a tool child fulfils when its output succeeded.
+    pub(crate) fn fulfilled(&self) -> bool {
+        match self {
+            Self::Tool(completed) => {
+                matches!(
+                    completed.completed.output.outcome,
+                    crate::ToolCallOutcome::Success(_)
+                )
+            }
+            Self::Timer => true,
+        }
+    }
+}
+
+/// What [`RuntimeExecutionContext::consume_tool_child_group`] hands back.
 ///
 /// `settled` is indexed by group position; `settlement_positions` is the
 /// rank-ordered list of positions the group settled, which the batch surface
 /// maps back to input indices for `ToolBatchReplies::settlement_order`.
 pub(crate) struct ToolChildGroupSettled {
-    /// One slot per group position; every slot is filled — unconsumed
-    /// positions carry the cancelled completion a turn-cancel await produced.
-    pub settled: Vec<Option<CompletedProtocolToolCall>>,
+    /// One slot per group position. After exhaustion every slot is filled;
+    /// after a cancelled await, unconsumed tool positions carry the cancelled
+    /// completion; after a decision, only the consumed prefix is filled — a
+    /// loser's value is never synthesized (§10 L6).
+    pub settled: Vec<Option<GroupChildSettled>>,
     /// Positions in the order the group settled them (durable commit order,
     /// ADR 0099 §5), with cancel-unconsumed positions appended in position
     /// order so `validate_batch_settlement_order` still sees a permutation.
     pub settlement_positions: Vec<usize>,
+    /// The position whose settlement decided the aggregate. When the group
+    /// was not yet exhausted at that settlement it is the opener's: its losers
+    /// keep running and the opener's end closes it.
+    pub decided: Option<usize>,
+    /// The await was cancelled with the turn.
+    pub cancelled: bool,
 }
 
 impl RuntimeExecutionContext<'_> {
@@ -131,7 +219,8 @@ impl RuntimeExecutionContext<'_> {
         &self,
         group_invocation: crate::RuntimeEffectInvocation,
         batch_id: &str,
-        leaves: &[PreparedToolChildLeaf],
+        children: &[PreparedGroupChild],
+        wake: GroupWakePolicy,
     ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
         let scoped = self.dispatch.effect_controller.scoped();
         let scope = scoped.execution_scope().clone();
@@ -193,7 +282,7 @@ impl RuntimeExecutionContext<'_> {
         // Live trace/activity is the opener's (ToolSettlement plan rule 3):
         // started events are emitted here, at formation, exactly as the batch
         // path emitted them at each child's dispatch.
-        for leaf in leaves {
+        for leaf in children.iter().filter_map(PreparedGroupChild::tool) {
             let call_id = leaf.call.call.call_id.clone();
             self.emit_tool_call_started(
                 &call_id,
@@ -205,8 +294,36 @@ impl RuntimeExecutionContext<'_> {
         }
 
         let group_key = self.tool_child_group_key(batch_id);
-        let mut children = Vec::with_capacity(leaves.len());
-        for (position, leaf) in leaves.iter().enumerate() {
+        // The group's unique children are reserved against the opener's bound
+        // before anything is journaled or dispatched (ADR 0099 §9).
+        self.reserve_group_work(&group_key, children.len()).await?;
+        let mut envelopes = Vec::with_capacity(children.len());
+        for (position, child) in children.iter().enumerate() {
+            let leaf = match child {
+                PreparedGroupChild::Tool(leaf) => leaf,
+                PreparedGroupChild::Timer { deadline_ms } => {
+                    // A timer child carries the deadline recorded at
+                    // admission, never a duration: a redrive, a reattachment
+                    // and a duplicate position all wait on the same instant
+                    // (ADR 0099 §11 clause 4).
+                    envelopes.push(crate::RuntimeEffectEnvelope::new(
+                        crate::RuntimeEffectInvocation::new(
+                            crate::EffectAddress::new(
+                                scope.clone(),
+                                format!("{group_key}:child:{position}"),
+                            )?,
+                            self.effect_attribution(),
+                            format!("tool-batch:{batch_id}:child:{position}"),
+                        ),
+                        crate::RuntimeEffectCommand::Sleep {
+                            spec: crate::SleepSpec::Until {
+                                deadline_ms: *deadline_ms,
+                            },
+                        },
+                    ));
+                    continue;
+                }
+            };
             let call_id = leaf.call.call.call_id.clone();
             let completion_routing = self
                 .tool_child_completion_routing(
@@ -240,7 +357,7 @@ impl RuntimeExecutionContext<'_> {
             if let Some(authority) = &cancellation_authority {
                 request = request.with_cancellation_authority(authority.clone());
             }
-            children.push(crate::RuntimeEffectEnvelope::new(
+            envelopes.push(crate::RuntimeEffectEnvelope::new(
                 crate::RuntimeEffectInvocation::new(
                     crate::EffectAddress::new(
                         scope.clone(),
@@ -254,14 +371,21 @@ impl RuntimeExecutionContext<'_> {
                 },
             ));
         }
+        // Declared `RunToCompletion`: selection cancels nothing, and a loser
+        // runs while its opener lives (§0 *live*). The opener's end narrows
+        // the close to `Cancel` (§7).
         let group = crate::RuntimeEffectGroup::try_new(
             group_invocation,
-            group_key,
-            children,
-            GroupWakePolicy::All,
+            group_key.clone(),
+            envelopes,
+            wake,
             LoserPolicy::RunToCompletion,
-        )?;
-        controller.open_effect_group(group).await
+        )
+        .inspect_err(|_| self.release_group_work(&group_key))?;
+        controller
+            .open_effect_group(group)
+            .await
+            .inspect_err(|_| self.release_group_work(&group_key))
     }
 
     /// Records one leaf's completion routing from the same two admission facts
@@ -318,45 +442,52 @@ impl RuntimeExecutionContext<'_> {
         }
     }
 
-    /// Consumes a tool-child group's settlement order to exhaustion
-    /// (ADR 0099 §5, §10).
+    /// Consumes a group's settlement order until its aggregate is decided or
+    /// the group is exhausted (ADR 0099 §5, §10).
     ///
     /// Settlements are served by durable rank, so `settled[position]` fills in
     /// commit order — not input order. A `GroupSettlement.outcome: Err` is
-    /// infrastructure, never a tool rejection (§10: tool rejections arrive as
-    /// ordinary `ToolCallOutput`s inside the outcome), and aborts the consume
-    /// with the controller error so the batch surface fails closed.
+    /// infrastructure, never a tool rejection (§10 L3: tool rejections arrive
+    /// as ordinary `ToolCallOutput`s inside the outcome), and aborts the
+    /// consume with the controller error; the group is handed to the opener
+    /// first, so the opener's end closes it rather than leaving it live.
     ///
-    /// A `RuntimeEffectGroupAwaitCancelled` await means the turn was
-    /// cancelled: consumption stops, every unsettled position is filled with
-    /// the batch surface's cancelled reply and appended to the settlement
+    /// **Decided** (`consumer.decides` on a settlement before exhaustion): the
+    /// consumed prefix is incorporated and the group — with its cursor — is
+    /// handed to the opener. Its losers keep running: selection cancels
+    /// nothing (§0 *live*), and the opener's end closes it (§7).
+    ///
+    /// **Cancelled** (`RuntimeEffectGroupAwaitCancelled`): the turn was
+    /// cancelled. Consumption stops, every unsettled tool position is filled
+    /// with the batch surface's cancelled reply and appended to the settlement
     /// order in position order, and the group is closed under
     /// [`LoserPolicy::Cancel`]: the close records `closing` through the
     /// FIG-3410 driver, seats a cancelled terminal for every undecided child
     /// and fires the group's token, so a child that ignores cooperative
     /// cancellation is dropped as the batch path's cancel grace dropped it.
-    /// Wiring the opener's real `OpenerFinalizationSteps` — whose
-    /// `commit_outcome_and_accounting` is FIG-3411 step 2 — and closing at
-    /// turn end / process terminal remain PR C's.
+    /// The group — with the cursor after its incorporated prefix — is then
+    /// handed to the opener, whose end incorporates the ranks that land after
+    /// the close.
     ///
-    /// On clean exhaustion the group is closed under the declared
-    /// `RunToCompletion` disposition to release consumer interest: the close
-    /// CASes the journaled `Live → Closing` fact and returns without waiting —
-    /// finalization is host-owned and cursor-resumable — and it runs against
-    /// `GroupOnlyFinalization`, so a consumer-only close owes no opener steps.
-    /// A close error is logged rather than failing the batch, because close is
-    /// idempotent and retryable by the trait contract and the settlements are
-    /// already consumed.
-    pub(crate) async fn consume_all_tool_child_settlements(
+    /// **Exhausted**: the group is closed under the declared `RunToCompletion`
+    /// disposition to release consumer interest: the close CASes the journaled
+    /// `Live → Closing` fact and returns without waiting — finalization is
+    /// host-owned and cursor-resumable. A close error is logged rather than
+    /// failing the batch, because close is idempotent and retryable by the
+    /// trait contract, the settlements are already consumed, and the opener's
+    /// end resumes whatever closing is recorded under its scope.
+    pub(crate) async fn consume_tool_child_group(
         &self,
         mut handle: crate::EffectGroupHandle,
-        leaves: &[PreparedToolChildLeaf],
+        children: &[PreparedGroupChild],
+        consumer: ToolAggregateConsumer,
     ) -> Result<ToolChildGroupSettled, crate::RuntimeEffectControllerError> {
         let controller = self.dispatch.effect_controller.controller();
         let cancel = self.cancellation_token.clone().unwrap_or_default();
-        let mut settled: Vec<Option<CompletedProtocolToolCall>> =
-            (0..leaves.len()).map(|_| None).collect();
-        let mut settlement_positions = Vec::with_capacity(leaves.len());
+        let mut settled: Vec<Option<GroupChildSettled>> =
+            (0..children.len()).map(|_| None).collect();
+        let mut settlement_positions = Vec::with_capacity(children.len());
+        let mut decided = None;
         while !handle.is_exhausted() {
             let settlement = match controller
                 .await_next_settlement(&mut handle, cancel.child_token())
@@ -366,9 +497,13 @@ impl RuntimeExecutionContext<'_> {
                 Err(error)
                     if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled =>
                 {
-                    for (position, leaf) in leaves.iter().enumerate() {
-                        if settled[position].is_none() {
-                            settled[position] = Some(cancelled_group_leaf(leaf));
+                    for (position, child) in children.iter().enumerate() {
+                        if settled[position].is_none()
+                            && let PreparedGroupChild::Tool(leaf) = child
+                        {
+                            settled[position] = Some(GroupChildSettled::Tool(Box::new(
+                                cancelled_group_leaf(leaf),
+                            )));
                             settlement_positions.push(position);
                         }
                     }
@@ -384,7 +519,12 @@ impl RuntimeExecutionContext<'_> {
                     // cancellation is dropped rather than left running under
                     // the turn's sessions — the batch path's cancel-grace
                     // observable. A committed child keeps its authority to
-                    // finish its drain (§4); finalization is host-owned.
+                    // finish its drain (§4) and ranks after this close.
+                    let cursor = crate::EffectGroupHandle::restored(
+                        handle.group_key(),
+                        handle.children(),
+                        handle.consumed(),
+                    )?;
                     if let Err(error) = controller
                         .close_effect_group(handle, LoserPolicy::Cancel)
                         .await
@@ -394,6 +534,13 @@ impl RuntimeExecutionContext<'_> {
                             "closing a cancelled tool-child group failed; the close is retryable"
                         );
                     }
+                    // The group stays the opener's: a rank that lands after
+                    // this close — a committed loser's drain, a cancelled
+                    // attempt's captured usage — is a fact the opener's end
+                    // incorporates, and the end finalizes the group before the
+                    // opener's outcome and accounting commit (§6, §7, §13).
+                    // The cursor starts after the prefix just incorporated.
+                    self.retain_outstanding_group(cursor);
                     // A child that parked this run's execution slot
                     // (`release_process_execution_permit_while`) is no longer
                     // awaited: the run continues, so it re-takes its slot here
@@ -403,40 +550,85 @@ impl RuntimeExecutionContext<'_> {
                     return Ok(ToolChildGroupSettled {
                         settled,
                         settlement_positions,
+                        decided: None,
+                        cancelled: true,
                     });
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    self.retain_outstanding_group(handle);
+                    return Err(error);
+                }
             };
             let position = settlement.position;
-            match settlement.outcome {
-                Ok(crate::RuntimeEffectOutcome::ToolInvocation {
-                    outcome,
-                    settlement,
-                }) => {
-                    let completed = self
-                        .apply_tool_child_settlement(&leaves[position], *outcome, *settlement)
-                        .await?;
-                    settled[position] = Some(completed);
-                }
-                Ok(other) => {
-                    return Err(crate::RuntimeEffectControllerError::new(
+            let child = match (children.get(position), settlement.outcome) {
+                (
+                    Some(PreparedGroupChild::Tool(leaf)),
+                    Ok(crate::RuntimeEffectOutcome::ToolInvocation {
+                        outcome,
+                        settlement,
+                    }),
+                ) => match self
+                    .apply_tool_child_settlement(leaf, *outcome, *settlement)
+                    .await
+                {
+                    Ok(completed) => GroupChildSettled::Tool(Box::new(completed)),
+                    Err(error) => {
+                        self.retain_outstanding_group(handle);
+                        return Err(error);
+                    }
+                },
+                (
+                    Some(PreparedGroupChild::Timer { .. }),
+                    Ok(crate::RuntimeEffectOutcome::Sleep),
+                ) => GroupChildSettled::Timer,
+                (_, Ok(other)) => {
+                    let error = crate::RuntimeEffectControllerError::new(
                         crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
                         format!(
                             "durable effect group {} settled position {position} with a {} \
-                             outcome; a tool-child group settles only ToolInvocation children",
+                             outcome, which is not what that child was admitted as",
                             handle.group_key(),
                             other.kind().as_str(),
                         ),
-                    ));
+                    );
+                    self.retain_outstanding_group(handle);
+                    return Err(error);
                 }
-                Err(error) => return Err(error),
-            }
+                (_, Err(error)) => {
+                    self.retain_outstanding_group(handle);
+                    return Err(error);
+                }
+            };
+            let decides = decided.is_none() && consumer.decides(child.fulfilled());
+            settled[position] = Some(child);
             settlement_positions.push(position);
+            if decides {
+                decided = Some(position);
+            }
+            if decides && !handle.is_exhausted() {
+                // Journal and apply the consumed prefix, then hand the group
+                // to the opener: the losers run on while the opener lives, and
+                // the opener's end closes them (ADR 0099 §0, §6, §7).
+                if let Err(error) = self.incorporate_group_prefix(&handle).await {
+                    self.retain_outstanding_group(handle);
+                    return Err(error);
+                }
+                self.retain_outstanding_group(handle);
+                return Ok(ToolChildGroupSettled {
+                    settled,
+                    settlement_positions,
+                    decided: Some(position),
+                    cancelled: false,
+                });
+            }
         }
         // Journal and apply the consumed prefix: every settled rank's facts
         // land once under its recorded `child_replay_key`, and a replay
         // re-incorporates exactly this prefix (FIG-3411 part 2).
         self.incorporate_group_prefix(&handle).await?;
+        // Every child ranked, was consumed and is incorporated: the opener no
+        // longer depends on the group (ADR 0099 §9's release condition).
+        self.release_group_work(handle.group_key());
         if let Err(error) = controller
             .close_effect_group(handle, LoserPolicy::RunToCompletion)
             .await
@@ -449,6 +641,8 @@ impl RuntimeExecutionContext<'_> {
         Ok(ToolChildGroupSettled {
             settled,
             settlement_positions,
+            decided,
+            cancelled: false,
         })
     }
 
@@ -477,7 +671,7 @@ impl RuntimeExecutionContext<'_> {
         let call_id = leaf.call.call.call_id.clone();
         let correlation_id = tool_activity_id(&call_id);
         // Settlement *facts* (possession, messages, triggers, usage) are not
-        // applied here: `consume_all_tool_child_settlements` incorporates the
+        // applied here: `consume_tool_child_group` incorporates the
         // consumed prefix through `incorporate_group_prefix` (FIG-3411 part
         // 2), which journals the `IncorporateGroupSettlements` record and
         // names each rank's real `child_replay_key` — a replay re-incorporates
@@ -558,32 +752,35 @@ impl RuntimeExecutionContext<'_> {
                     ),
                 )
             })?;
-            leaves.push(PreparedToolChildLeaf {
+            leaves.push(PreparedGroupChild::Tool(Box::new(PreparedToolChildLeaf {
                 input_index,
                 call,
                 admission: ToolChildAdmission::Catalog {
                     manifest: Box::new(manifest),
                 },
-            });
+            })));
         }
+        let consumer = ToolAggregateConsumer::AllSettled;
         let handle = self
-            .open_tool_child_group(group_invocation, batch_id, &leaves)
+            .open_tool_child_group(group_invocation, batch_id, &leaves, consumer.wake())
             .await?;
         let mut settled = self
-            .consume_all_tool_child_settlements(handle, &leaves)
+            .consume_tool_child_group(handle, &leaves, consumer)
             .await?;
         let mut results = Vec::with_capacity(leaves.len());
         for (position, leaf) in leaves.iter().enumerate() {
-            let completed = settled.settled[position].take().ok_or_else(|| {
-                crate::RuntimeEffectControllerError::new(
+            let (Some(leaf), Some(GroupChildSettled::Tool(completed))) =
+                (leaf.tool(), settled.settled[position].take())
+            else {
+                return Err(crate::RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectGroupShape,
                     format!(
-                        "tool-child group {} consumed position {position} without filling it",
-                        batch_id
+                        "tool-child group {batch_id} consumed position {position} without \
+                         filling it with a tool call"
                     ),
-                )
-            })?;
-            results.push((leaf.input_index, completed));
+                ));
+            };
+            results.push((leaf.input_index, *completed));
         }
         Ok(results)
     }

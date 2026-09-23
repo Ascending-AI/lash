@@ -447,16 +447,29 @@ pub enum RuntimeError {
     /// A resource-operation batch returned a result with an invalid shape.
     #[error("resource operation batch returned invalid result")]
     InvalidResourceBatchResult,
-    /// Executing a resource-operation batch through the host failed.
-    #[error("resource operation batch failed: {source}")]
-    ResourceBatchFailed { source: ExecutionHostError },
+    /// The host answered an aggregate on its host-control channel: an
+    /// infrastructure failure or a host stop, never a leaf's rejection
+    /// (ADR 0099 §10 L3). Leaf rejections arrive inside the reply algebra, so
+    /// no guest `catch` may see this one — a caught infrastructure failure
+    /// would let the cell commit a value a redrive answers differently.
+    #[error("aggregate await stopped on the host-control channel: {source}")]
+    AggregateHostControl { source: ExecutionHostError },
     /// A resource-operation batch returned the wrong number of results.
     #[error("resource operation batch returned {actual} results for {expected} operations")]
     ResourceBatchResultCount { actual: usize, expected: usize },
-    /// A resource-operation batch reported a settlement order that is not an
-    /// ordering of its own results.
-    #[error("resource operation batch settlement order is unusable: {problem}")]
-    ResourceBatchSettlementOrder { problem: String },
+    /// A resource-operation batch reply does not fit the aggregate that asked
+    /// for it — a selected leaf out of range, a reply shape the consumer mode
+    /// cannot produce. Refused rather than repaired (ADR 0099 §10 L2).
+    #[error("resource operation batch reply does not fit its aggregate: {problem}")]
+    ResourceBatchReply { problem: String },
+    /// An awaited aggregate that nothing can ever settle — `Promise.race([])`.
+    /// ECMA-262 returns a promise that never settles; the host ends the
+    /// execution with this typed terminal rather than parking it forever,
+    /// the analogue of Node exiting on an unsettled top-level await
+    /// (ADR 0099 §11 clause 5). Not catchable: the program's semantics are
+    /// ECMA's, and it is the host's lifetime that ends.
+    #[error("{aggregate} can never settle: the aggregate has no operand")]
+    AggregateAwaitUnsettled { aggregate: String },
     /// `await` was applied to a value that is not a process handle.
     #[error("`await` expects a process handle but found {found}; the value is already resolved")]
     AwaitExpectsHandle { found: String },
@@ -617,9 +630,10 @@ impl RuntimeError {
             Self::ResourceBatchReceiverOutOfRange => ErrorTaxonomy::Catchable,
             Self::ResourceBatchArgumentOutOfRange => ErrorTaxonomy::Catchable,
             Self::InvalidResourceBatchResult => ErrorTaxonomy::Catchable,
-            Self::ResourceBatchFailed { .. } => ErrorTaxonomy::EffectFailure,
+            Self::AggregateHostControl { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::ResourceBatchResultCount { .. } => ErrorTaxonomy::Catchable,
-            Self::ResourceBatchSettlementOrder { .. } => ErrorTaxonomy::Catchable,
+            Self::ResourceBatchReply { .. } => ErrorTaxonomy::Catchable,
+            Self::AggregateAwaitUnsettled { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::AwaitExpectsHandle { .. } => ErrorTaxonomy::Catchable,
             Self::ResourceListBatchMalformed => ErrorTaxonomy::Catchable,
             Self::AggregateAwaitLeafOutOfRange => ErrorTaxonomy::Catchable,
@@ -751,9 +765,10 @@ impl RuntimeError {
             Self::ResourceBatchReceiverOutOfRange => "ResourceBatchReceiverOutOfRange",
             Self::ResourceBatchArgumentOutOfRange => "ResourceBatchArgumentOutOfRange",
             Self::InvalidResourceBatchResult => "InvalidResourceBatchResult",
-            Self::ResourceBatchFailed { .. } => "ResourceBatchFailed",
+            Self::AggregateHostControl { .. } => "AggregateHostControl",
             Self::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
-            Self::ResourceBatchSettlementOrder { .. } => "ResourceBatchSettlementOrder",
+            Self::ResourceBatchReply { .. } => "ResourceBatchReply",
+            Self::AggregateAwaitUnsettled { .. } => "AggregateAwaitUnsettled",
             Self::AwaitExpectsHandle { .. } => "AwaitExpectsHandle",
             Self::ResourceListBatchMalformed => "ResourceListBatchMalformed",
             Self::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",
@@ -821,7 +836,7 @@ impl RuntimeError {
             | Self::PrintFailed { source }
             | Self::FinishFailed { source }
             | Self::FailFailed { source }
-            | Self::ResourceBatchFailed { source } => Some(source),
+            | Self::AggregateHostControl { source } => Some(source),
             _ => None,
         }
     }
@@ -1083,15 +1098,18 @@ mod tests {
             RuntimeError::ResourceBatchReceiverOutOfRange,
             RuntimeError::ResourceBatchArgumentOutOfRange,
             RuntimeError::InvalidResourceBatchResult,
-            RuntimeError::ResourceBatchFailed {
+            RuntimeError::AggregateHostControl {
                 source: host_error(),
             },
             RuntimeError::ResourceBatchResultCount {
                 actual: 2,
                 expected: 3,
             },
-            RuntimeError::ResourceBatchSettlementOrder {
-                problem: "settled position 5 is out of range for 3 results".to_string(),
+            RuntimeError::ResourceBatchReply {
+                problem: "selected leaf 5 is out of range for 3 leaves".to_string(),
+            },
+            RuntimeError::AggregateAwaitUnsettled {
+                aggregate: "Promise.race".to_string(),
             },
             RuntimeError::AwaitExpectsHandle {
                 found: "number".to_string(),
@@ -1404,14 +1422,17 @@ mod tests {
                 RuntimeError::InvalidResourceBatchResult => {
                     "resource operation batch returned invalid result"
                 }
-                RuntimeError::ResourceBatchFailed { .. } => {
-                    "resource operation batch failed: host error"
+                RuntimeError::AggregateHostControl { .. } => {
+                    "aggregate await stopped on the host-control channel: host error"
                 }
                 RuntimeError::ResourceBatchResultCount { .. } => {
                     "resource operation batch returned 2 results for 3 operations"
                 }
-                RuntimeError::ResourceBatchSettlementOrder { .. } => {
-                    "resource operation batch settlement order is unusable: settled position 5 is out of range for 3 results"
+                RuntimeError::ResourceBatchReply { .. } => {
+                    "resource operation batch reply does not fit its aggregate: selected leaf 5 is out of range for 3 leaves"
+                }
+                RuntimeError::AggregateAwaitUnsettled { .. } => {
+                    "Promise.race can never settle: the aggregate has no operand"
                 }
                 RuntimeError::AwaitExpectsHandle { .. } => {
                     "`await` expects a process handle but found number; the value is already resolved"
@@ -1577,9 +1598,10 @@ mod tests {
     RuntimeError::ResourceBatchReceiverOutOfRange => "ResourceBatchReceiverOutOfRange",
     RuntimeError::ResourceBatchArgumentOutOfRange => "ResourceBatchArgumentOutOfRange",
     RuntimeError::InvalidResourceBatchResult => "InvalidResourceBatchResult",
-    RuntimeError::ResourceBatchFailed { .. } => "ResourceBatchFailed",
+    RuntimeError::AggregateHostControl { .. } => "AggregateHostControl",
     RuntimeError::ResourceBatchResultCount { .. } => "ResourceBatchResultCount",
-    RuntimeError::ResourceBatchSettlementOrder { .. } => "ResourceBatchSettlementOrder",
+    RuntimeError::ResourceBatchReply { .. } => "ResourceBatchReply",
+    RuntimeError::AggregateAwaitUnsettled { .. } => "AggregateAwaitUnsettled",
     RuntimeError::AwaitExpectsHandle { .. } => "AwaitExpectsHandle",
     RuntimeError::ResourceListBatchMalformed => "ResourceListBatchMalformed",
     RuntimeError::AggregateAwaitLeafOutOfRange => "AggregateAwaitLeafOutOfRange",

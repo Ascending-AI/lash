@@ -212,5 +212,6 @@ typescript	generics
 typescript	interfaces
 typescript	namespaces
 typescript	non-null-assertion
+typescript	Promise.race
 typescript	satisfies
 typescript	type-aliases

@@ -248,6 +248,12 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
+        if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
+            // The opener's end precedes the turn's terminal checkpoint, so
+            // the facts its losers' settlements carry are delivered and
+            // committed with the turn (ADR 0099 §7 step 2).
+            Box::pin(self.finish_opener_groups_before_completion(event_tx)).await?;
+        }
         let result = self
             .invoke_turn_checkpoint_effect(machine, id, checkpoint, event_tx, cancel)
             .await;

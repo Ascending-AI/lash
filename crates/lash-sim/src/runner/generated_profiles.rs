@@ -274,7 +274,7 @@ async fn run_generated_evidence_profile(
     let fixed_manifest = Box::pin(run_fixed_script_profile(&provider_dir)).await?;
     write_provider_script_manifest(artifact_root, &fixed_manifest)?;
 
-    let runtime_proof = prove_runtime_facade_turn().await?;
+    let runtime_proof = Box::pin(prove_runtime_facade_turn()).await?;
     let seed_count = seed_values.len();
     let boundary_limit = max_boundaries.max(1);
     let replay_dir = artifact_root.join("replays");
@@ -601,7 +601,7 @@ async fn run_generated_search_profile(
     let fixed_manifest = Box::pin(run_fixed_script_profile(&provider_dir)).await?;
     write_provider_script_manifest(artifact_root, &fixed_manifest)?;
 
-    let runtime_proof = prove_runtime_facade_turn().await?;
+    let runtime_proof = Box::pin(prove_runtime_facade_turn()).await?;
     let boundary_limit = max_boundaries.max(1);
     let failures_dir = artifact_root.join("failures");
 

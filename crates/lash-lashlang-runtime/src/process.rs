@@ -81,9 +81,13 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// occurrences in the run's terminal omission record.
 /// v6 carries run-local child possession across execution segments. A segment
 /// parked by another version is refused rather than decoded (ADR 0055).
+/// v17 carries the effect groups the process still holds — each group's key,
+/// child count and consumed cursor — so a successor segment reattaches losers
+/// that are still running instead of declining the boundary (ADR 0099 §8, §9),
+/// and embeds VM continuation v18.
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 16;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 17;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -167,6 +171,12 @@ struct LashlangSegmentState {
     /// outcome class (FIG-3464). A successor segment keeps counting from here
     /// and the run's terminal omission record carries the total.
     effect_omissions: BTreeMap<String, lash_core::ProcessEffectOmittedCounts>,
+    /// The effect groups this process still holds after an aggregate stopped
+    /// consuming early (ADR 0099 §8, §9): each group's key, child count and
+    /// consumed cursor. A boundary is never declined because a loser is
+    /// unsettled; the successor segment reattaches these cursors and the
+    /// process terminal closes them.
+    outstanding_groups: Vec<lash_core::EffectGroupHandle>,
 }
 
 /// A segment that resumes carries the bound its first segment recorded, so a
@@ -372,7 +382,7 @@ pub async fn run_lashlang_process(
     {
         return Ok((*output).into());
     }
-    let segment_state: Option<LashlangSegmentState> = match handover {
+    let mut segment_state: Option<LashlangSegmentState> = match handover {
         Some(handover) => match decode_lashlang_segment_state(&handover.engine_state) {
             Ok(state) => Some(state),
             Err(err) => {
@@ -448,9 +458,20 @@ pub async fn run_lashlang_process(
         let state = lashlang::State::from_snapshot(lashlang::Snapshot::new(globals));
         (ctx, guard, state)
     };
-    if let Some(segment_state) = segment_state.as_ref() {
+    if let Some(segment_state) = segment_state.as_mut() {
         ctx.restore_started_process_ids(&segment_state.started_process_ids);
         ctx.restore_incorporation_ledger(segment_state.incorporation_ledger.clone());
+        ctx.restore_outstanding_groups(std::mem::take(&mut segment_state.outstanding_groups));
+    }
+    // A segment that starts after a worker died recovers the losers of groups
+    // its process accepted earlier (ADR 0099 W5): worker loss and a segment
+    // handover are not opener ends, so nothing is cancelled here.
+    if let Err(error) = ctx.recover_opener_groups().await {
+        tracing::warn!(
+            process_id = %process_id,
+            %error,
+            "recovering a resumed process's live effect groups failed; its terminal closes them",
+        );
     }
     let ordinals = ReplayOrdinals::restore(segment_state.as_ref());
     let child_max_attempts =
@@ -497,6 +518,21 @@ pub async fn run_lashlang_process(
         incorporation_fault = host.effect_summary.take_incorporation_fault();
     }
     drop(env);
+    // A process terminal is the process opener's end (ADR 0099 §7): every
+    // effect group it still holds is closed and finalized, and its losers'
+    // settled facts incorporated, before the terminal is handed back to be
+    // committed. A segment boundary is not an end — the successor reattaches
+    // the cursors the handover carried. A failed close leaves `closing`
+    // recorded and surfaces as infrastructure, so the run is retried rather
+    // than committing a terminal whose accounting was never incorporated.
+    if output.is_terminal() {
+        let _phase = host.ctx.named_phase("rlm_process.close_groups");
+        host.ctx.close_opener_groups().await.map_err(|error| {
+            lash_core::ProcessInfraError::new(lash_core::PluginError::RuntimeEffectController(
+                error,
+            ))
+        })?;
+    }
     drop(host);
     {
         let _phase =
@@ -612,6 +648,7 @@ async fn execute_lashlang(
                             child_max_attempts: host.child_max_attempts,
                             incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
                             effect_omissions: host.effect_summary.omissions(),
+                            outstanding_groups: host.ctx.outstanding_groups_snapshot(),
                         };
                         match serde_json::to_vec(&segment_state) {
                             Ok(engine_state) => {
@@ -1091,9 +1128,9 @@ impl LashlangProcessHost<'_> {
                 .map(lashlang::AbilityResult::Value)
             }),
             lashlang::AbilityOp::ResourceOperationBatch(batch) => Box::pin(async move {
-                Ok(lashlang::AbilityResult::ResourceOperationBatch(
-                    self.resource_operation_batch(batch).await,
-                ))
+                self.resource_operation_batch(batch)
+                    .await
+                    .map(lashlang::AbilityResult::ResourceOperationBatch)
             }),
             lashlang::AbilityOp::Await(handle) => Box::pin(async move {
                 self.await_handle(handle)
@@ -1249,7 +1286,7 @@ fn process_lashlang_execution_result(
                 } else {
                     LashlangProcessFailureCode::ProcessRuntimeError
                 },
-                err.to_string(),
+                crate::host_lifetime_failure_message(&err).unwrap_or_else(|| err.to_string()),
                 None,
             )
         }

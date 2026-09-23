@@ -1070,7 +1070,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .map_err(effect_sqlite_error)
     }
 
-    async fn read_closing_groups(
+    async fn read_unsettled_groups(
         &self,
         scope_id: &str,
     ) -> Result<Vec<EffectGroupRecord>, RuntimeEffectControllerError> {
@@ -1080,7 +1080,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 let mut statement = connection.prepare(
                     effect_sql(Schema::Main)
                         .group_sqlite
-                        .select_closing_by_scope
+                        .select_unsettled_by_scope
                         .sql(),
                 )?;
                 statement

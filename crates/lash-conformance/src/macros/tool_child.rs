@@ -213,9 +213,12 @@ macro_rules! __tool_child_invocation_register {
     };
 }
 
-/// Register the tool-batch group law (FIG-3397, ADR 0099 §5, §10): an `All`
-/// group of tool children answers every admission shape with its own reply,
-/// keyed by input index, and a settlement order its preparation prefix leads.
+/// Register the consumer-driven group laws (FIG-3397, ADR 0099 §5, §6, §7,
+/// §10, §13): an `All` group of tool children answers every admission shape
+/// with its own reply, keyed by input index, and a settlement order its
+/// preparation prefix leads; and the opener's end finishes and incorporates
+/// every group its aggregates formed — one a cancel handed back, one a failed
+/// end left `closing`.
 ///
 /// The fixture hands back a guard, a session prefix and a
 /// [`ToolChildLawFixture`], the same shape `tool_child_invocation_tests!`
@@ -228,5 +231,11 @@ macro_rules! tool_batch_group_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
             (an_all_group_of_tool_children_yields_the_batch_replies, "tool-batch-group-replies"));
+        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
+            (a_cancelled_aggregates_committed_loser_is_incorporated_by_its_openers_end,
+             "opener-end-cancelled-aggregate"));
+        $crate::__tool_child_invocation_register!([$(#[$attr])*] $fixture;
+            (a_retried_openers_end_finishes_the_closing_group_its_first_end_left,
+             "opener-end-retried-end"));
     };
 }

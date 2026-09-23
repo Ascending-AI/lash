@@ -3,6 +3,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+mod aggregate;
+pub use aggregate::{
+    BridgeAggregateLeaf, host_lifetime_failure_message, settle_bridge_aggregate, timer_duration_ms,
+};
 mod error;
 pub use error::{
     LashlangHostError, LashlangProcessFailureCode, LashlangRuntimeError, ToolBindingError,

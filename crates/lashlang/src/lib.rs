@@ -70,26 +70,26 @@ pub use linker::{
     ResourceTypeCatalog, TriggerSourceBinding, ValueConstructorBinding,
 };
 pub use runtime::{
-    AbilityOp, AbilityResult, BudgetedJsonProjectionConfig, BudgetedJsonProjector, CompileStats,
-    CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
-    CompiledProgramCache, CompiledProgramCacheStats, ContinuationError, ErrorTaxonomy,
-    ExecutableProgram, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
-    ExecutionHostError, ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError,
-    GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
-    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
-    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
-    LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError, ListValue,
-    ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
-    ProjectedBindingError, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
-    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
-    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchResult,
-    ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
-    SnapshotDecodeError, State, VM_CONTINUATION_FORMAT_VERSION, Value, ValueProjectionContext,
-    ValueProjector, Vm, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
-    VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome, compile_ast,
-    compile_linked, compile_linked_process, compile_module_artifact_process, compile_process,
-    execute, from_json, is_process_handle, prewarm, unwrap_type_value,
+    AbilityOp, AbilityResult, AggregateConsumer, BudgetedJsonProjectionConfig,
+    BudgetedJsonProjector, CompileStats, CompiledLinkedProgram, CompiledProcessCache,
+    CompiledProcessCacheKey, CompiledProgram, CompiledProgramCache, CompiledProgramCacheStats,
+    ContinuationError, ErrorTaxonomy, ExecutableProgram, ExecutionBound, ExecutionBounds,
+    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
+    ExecutionScratch, FormatError, GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue,
+    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
+    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
+    LASH_TYPE_KEY, LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError,
+    ListValue, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport,
+    ProfileStat, ProjectedBindingError, ProjectedBindings, ProjectedFuture,
+    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
+    ResourceHandle, ResourceOperation, ResourceOperationBatch, ResourceOperationBatchLeaf,
+    ResourceOperationBatchResult, ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep,
+    SleepKind, Snapshot, SnapshotDecodeError, State, VM_CONTINUATION_FORMAT_VERSION, Value,
+    ValueProjectionContext, ValueProjector, Vm, VmContinuation, VmFinallyCompletionContinuation,
+    VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
+    VmIteratorCursor, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
+    compile_ast, compile_linked, compile_linked_process, compile_module_artifact_process,
+    compile_process, execute, from_json, is_process_handle, prewarm, unwrap_type_value,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -107,7 +107,10 @@ pub use span::Span;
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
-pub const BYTECODE_FORMAT_VERSION: u32 = 18;
+///
+/// v19: `AwaitArray` carries the aggregate's consumer mode instead of a
+/// settled flag, and `PendingTimer` mints a pending timer (ADR 0099 §10, §11).
+pub const BYTECODE_FORMAT_VERSION: u32 = 19;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,
@@ -342,12 +345,16 @@ mod tests {
                 }
                 AbilityOp::ResourceOperationBatch(batch) => {
                     Ok(AbilityResult::ResourceOperationBatch(
-                        ResourceOperationBatchResult::settled_in_input_order(
+                        ResourceOperationBatchResult::AllResults(
                             batch
-                                .operations
+                                .leaves
                                 .into_iter()
-                                .map(|operation| {
-                                    if operation.operation == "anything" {
+                                .map(|leaf| {
+                                    if matches!(
+                                        &leaf,
+                                        ResourceOperationBatchLeaf::Operation(operation)
+                                            if operation.operation == "anything"
+                                    ) {
                                         ResourceOperationResult::Value(Value::Record(
                                             std::sync::Arc::new(Record::from_iter([(
                                                 "ok".to_string(),

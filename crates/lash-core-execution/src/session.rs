@@ -9,6 +9,7 @@ use crate::{PromptContribution, RuntimeServices, SessionStreamEvent, ToolProvide
 mod execution_context;
 #[cfg(test)]
 mod fig790_tests;
+mod opener_groups;
 mod process_handles;
 mod settlement_incorporation;
 #[cfg(test)]
@@ -22,13 +23,16 @@ pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutio
 pub(crate) use execution_context::{
     attach_process_invocation_correlation, clear_process_invocation_correlation,
 };
+pub use opener_groups::{OpenerGroupRegistry, OpenerGroupsClosed, OpenerState, OpenerWorkBound};
 pub use settlement_incorporation::{
-    Incorporated, IncorporationLedger, SettlementSource, UsageChargeSink, UsageDeltaIdentity,
+    ContextFinalizationSteps, Incorporated, IncorporationLedger, SettlementSource, UsageChargeSink,
+    UsageDeltaIdentity,
 };
 /// Runtime tool invocation requests and their collected replies.
 pub use tool_execution::{
-    ToolBatchReplies, ToolGroupOccurrence, ToolInvocation, ToolInvocationReply,
-    deterministic_tool_invocation_batch_id,
+    ToolAggregateConsumer, ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome,
+    ToolAggregateRequest, ToolBatchReplies, ToolGroupOccurrence, ToolInvocation,
+    ToolInvocationReply, deterministic_tool_invocation_batch_id,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

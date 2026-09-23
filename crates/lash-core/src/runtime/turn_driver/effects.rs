@@ -275,6 +275,7 @@ impl RuntimeTurnDriver<'_> {
                             .and_then(crate::runtime::turn_input_ingress::TurnInputDrive::as_claim)
                             .cloned()
                     }),
+                incorporation: self.opener_state.ledger_snapshot(),
             }),
         }
     }
@@ -290,7 +291,7 @@ impl RuntimeTurnDriver<'_> {
         let invocation = self
             .turn_effect_invocation(machine, id, RuntimeEffectKind::Checkpoint)
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        let (result, queued_work_claims, turn_input_claim) = self
+        let (result, claims) = self
             .execute_typed_turn_effect(
                 machine,
                 event_tx,
@@ -303,6 +304,15 @@ impl RuntimeTurnDriver<'_> {
             )
             .await
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        let crate::runtime::effect::CheckpointClaimSet {
+            queued_work_claims,
+            turn_input_claim,
+            incorporation,
+        } = claims;
+        // A replayed checkpoint carries what the opener had incorporated when
+        // it committed; the cells before it are served from the journal and
+        // re-run none of it.
+        self.opener_state.absorb_ledger(incorporation);
         let delivery = result.map_err(RuntimeEffectControllerError::into_runtime_error)?;
         // The same rule the local execution applied, applied to the journalled
         // authority: at a terminal checkpoint, a claim this turn does not

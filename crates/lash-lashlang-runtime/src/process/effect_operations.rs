@@ -179,25 +179,50 @@ impl LashlangProcessHost<'_> {
         result
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the TypeScript runtime receiver was checked above per site, and each batch result slot was filled by the same loop that reserved the Vec of slots"
-    )]
+    /// One aggregate of this process's pending operations: every leaf the
+    /// bridge settles itself — a TypeScript runtime value, a trigger
+    /// operation, a leaf refused before dispatch — joins the immediate prefix,
+    /// every tool call and timer is admitted as a group child, and the whole
+    /// is answered in the VM's reply algebra (ADR 0099 §10, §11). Each tool
+    /// reply the answer carries is incorporated into the durable effect
+    /// summary as it is read (FIG-3464); a loser's reply is never read here.
     pub(super) async fn resource_operation_batch(
         &self,
         batch: lashlang::ResourceOperationBatch,
-    ) -> lashlang::ResourceOperationBatchResult {
-        let occurrence = batch.occurrence;
-        let call_sites = batch
-            .operations
+    ) -> Result<lashlang::ResourceOperationBatchResult, ExecutionHostError> {
+        let lashlang::ResourceOperationBatch {
+            leaves,
+            consumer,
+            settled_value_after,
+            site,
+            occurrence,
+        } = batch;
+        let call_sites = leaves
             .iter()
-            .map(|operation| operation.call_site.clone())
+            .map(|leaf| match leaf {
+                lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
+                    operation.call_site.clone()
+                }
+                lashlang::ResourceOperationBatchLeaf::Timer(sleep) => sleep.call_site.clone(),
+            })
             .collect::<Vec<_>>();
-        let mut results = vec![None; batch.operations.len()];
-        let mut positions = Vec::new();
+        let mut bridge_leaves = Vec::with_capacity(leaves.len());
+        let mut outcome_metadata: Vec<
+            Option<(String, lashlang::LashlangExecutionCallSite, String)>,
+        > = vec![None; leaves.len()];
         let mut invocations = Vec::new();
-        let mut outcome_metadata = Vec::new();
-        for (index, operation) in batch.operations.into_iter().enumerate() {
+        let mut dispatched = Vec::new();
+        for (index, leaf) in leaves.into_iter().enumerate() {
+            let operation = match leaf {
+                lashlang::ResourceOperationBatchLeaf::Operation(operation) => operation,
+                lashlang::ResourceOperationBatchLeaf::Timer(sleep) => {
+                    bridge_leaves.push(match crate::timer_duration_ms(&sleep) {
+                        Ok(duration_ms) => crate::BridgeAggregateLeaf::Timer { duration_ms },
+                        Err(error) => crate::BridgeAggregateLeaf::Settled(Err(error)),
+                    });
+                    continue;
+                }
+            };
             if crate::is_typescript_runtime_receiver(&operation.receiver) {
                 let result = match operation.call_site.as_ref() {
                     Some(call_site) => {
@@ -214,7 +239,7 @@ impl LashlangProcessHost<'_> {
                         "TypeScript runtime operation is missing its call site",
                     )),
                 };
-                results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
+                bridge_leaves.push(crate::BridgeAggregateLeaf::Settled(result));
                 continue;
             }
             match self.prepare_resource_invocation(
@@ -240,20 +265,20 @@ impl LashlangProcessHost<'_> {
                             &call_site,
                         )
                         .await;
-                    results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
+                    bridge_leaves.push(crate::BridgeAggregateLeaf::Settled(result));
                 }
                 Ok(PreparedResourceInvocation::Tool {
                     invocation,
                     host_operation,
                     call_site,
                 }) => {
-                    positions.push(index);
-                    outcome_metadata.push((host_operation, call_site, invocation.id.clone()));
-                    invocations.push(invocation);
+                    outcome_metadata[index] =
+                        Some((host_operation, call_site, invocation.id.clone()));
+                    dispatched.push(index);
+                    invocations.push(invocation.clone());
+                    bridge_leaves.push(crate::BridgeAggregateLeaf::Tool(invocation));
                 }
-                Err(error) => {
-                    results[index] = Some(lashlang::ResourceOperationResult::Error(error));
-                }
+                Err(error) => bridge_leaves.push(crate::BridgeAggregateLeaf::Settled(Err(error))),
             }
         }
 
@@ -261,8 +286,8 @@ impl LashlangProcessHost<'_> {
             &invocations,
             lash_core::session::ToolGroupOccurrence::Opener(occurrence),
         );
-        if positions.len() > 1 {
-            for (position, index) in positions.iter().copied().enumerate() {
+        if dispatched.len() > 1 {
+            for (position, index) in dispatched.iter().copied().enumerate() {
                 if let Some(Some(call_site)) = call_sites.get(index) {
                     self.lashlang_execution_trace.emit_waiting(
                         call_site,
@@ -274,57 +299,41 @@ impl LashlangProcessHost<'_> {
                 }
             }
         }
-        let batch = self
-            .ctx
-            .call_tool_batch(
-                invocations,
-                lash_core::session::ToolGroupOccurrence::Opener(occurrence),
-            )
-            .await;
-        for ((index, reply), (host_operation, call_site, replay_key)) in positions
-            .iter()
-            .copied()
-            .zip(batch.replies)
-            .zip(outcome_metadata)
-        {
-            self.record_tool_reply(&call_site, &host_operation, &replay_key, &reply)
-                .await;
-            results[index] = Some(lashlang::ResourceOperationResult::from_result(
-                protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation),
-            ));
+        // The replies the answer carries, in the order it read them, for the
+        // effect summary: a loser's reply is never among them.
+        let mut read = Vec::new();
+        let reply = crate::settle_bridge_aggregate(
+            &self.ctx,
+            consumer,
+            settled_value_after,
+            site,
+            occurrence,
+            bridge_leaves,
+            |leaf, reply| {
+                let Some((_, _, replay_key)) = &outcome_metadata[leaf] else {
+                    return Err(ExecutionHostError::new(format!(
+                        "aggregate leaf {leaf} was answered with a tool reply it never dispatched"
+                    )));
+                };
+                read.push((leaf, reply.clone()));
+                protocol_tool_reply_to_lashlang_value(reply, replay_key, &self.cancellation)
+            },
+        )
+        .await;
+        for (leaf, tool_reply) in &read {
+            if let Some((host_operation, call_site, replay_key)) = &outcome_metadata[*leaf] {
+                self.record_tool_reply(call_site, host_operation, replay_key, tool_reply)
+                    .await;
+            }
         }
-
-        if !self.cancellation.is_cancelled() && positions.len() > 1 {
-            for index in positions.iter().copied() {
+        if !self.cancellation.is_cancelled() && dispatched.len() > 1 {
+            for index in dispatched.iter().copied() {
                 if let Some(Some(call_site)) = call_sites.get(index) {
                     self.lashlang_execution_trace
                         .emit_resumed(call_site, TraceNodeWaitResolution::Resumed);
                 }
             }
         }
-
-        // The batch counts settlement in its own invocation positions; the VM
-        // counts in the aggregate's leaf positions. Leaves that failed before
-        // the batch ran had already settled, so they lead.
-        let mut settlement_order = (0..results.len())
-            .filter(|index| !positions.contains(index))
-            .collect::<Vec<_>>();
-        // `call_tool_batch` refuses a malformed order at its boundary, so every
-        // reported position is a real invocation position here. Filtering again
-        // would only convert a future defect back into a silent repair.
-        settlement_order.extend(
-            batch
-                .settlement_order
-                .iter()
-                .filter_map(|position| positions.get(*position).copied()),
-        );
-
-        lashlang::ResourceOperationBatchResult::settled_in_order(
-            results
-                .into_iter()
-                .map(|result| result.expect("every batch result slot should be filled"))
-                .collect(),
-            settlement_order,
-        )
+        reply
     }
 }

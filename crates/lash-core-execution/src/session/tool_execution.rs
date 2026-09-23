@@ -561,9 +561,15 @@ impl ToolBatchReplies {
     }
 }
 
+mod aggregate;
 #[path = "tool_execution/batch.rs"]
 mod batch;
 mod group;
+
+pub use aggregate::{
+    ToolAggregateLeaf, ToolAggregateLeafReply, ToolAggregateOutcome, ToolAggregateRequest,
+};
+pub use group::ToolAggregateConsumer;
 #[cfg(test)]
 #[path = "tool_execution/turn_cancel_gate_tests.rs"]
 mod turn_cancel_gate_tests;

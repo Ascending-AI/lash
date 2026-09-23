@@ -9,14 +9,16 @@
 
 use super::*;
 
-use super::group::PreparedToolChildLeaf;
+use super::group::{
+    GroupChildSettled, PreparedGroupChild, PreparedToolChildLeaf, ToolAggregateConsumer,
+};
 
 impl RuntimeExecutionContext<'_> {
     #[expect(
         clippy::expect_used,
         reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
     )]
-    fn tool_batch_invocation(&self, batch_id: &str) -> crate::RuntimeEffectInvocation {
+    pub(super) fn tool_batch_invocation(&self, batch_id: &str) -> crate::RuntimeEffectInvocation {
         let suffix = format!("tool-batch:{batch_id}");
         if let Some(parent) = self.parent_invocation.as_ref() {
             let parent_effect_id = parent.effect_id().unwrap_or("effect");
@@ -41,6 +43,121 @@ impl RuntimeExecutionContext<'_> {
             self.effect_attribution(),
             suffix,
         )
+    }
+
+    /// Prepares one caller-order tool call for group admission: resolves its
+    /// manifest and runs the tool's preparation. A call refused or completed
+    /// during preparation has already settled — it belongs to the immediate
+    /// prefix ahead of every dispatched settlement (ADR 0099 §10 L5).
+    pub(super) async fn prepare_tool_leaf(
+        &self,
+        index: usize,
+        mut call: ToolInvocation,
+    ) -> ToolLeafPreparation {
+        let context = call
+            .issuing_language_node_id
+            .clone()
+            .map(|node_id| self.clone().with_issuing_language_node_id(node_id))
+            .unwrap_or_else(|| self.clone());
+        let authorization = ToolCallAuthorization::from_invocation(&mut call);
+        let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
+            let outcome = ToolDispatchOutcome {
+                record: ToolCallRecord {
+                    call_id: Some(call.id.clone()),
+                    tool: call.tool_id.to_string(),
+                    args: call.args,
+                    output: ToolCallOutput::failure(ToolFailure::runtime(
+                        ToolFailureClass::Unavailable,
+                        "tool_unavailable",
+                        format!("Tool id `{}` is unavailable in this session", call.tool_id),
+                    )),
+                    duration_ms: 0,
+                },
+                attempts: Vec::new(),
+                intents: crate::ToolIntents::default(),
+                intent_outcomes: Vec::new(),
+                captures: Vec::new(),
+                triggers: Vec::new(),
+            };
+            let completed = context
+                .complete_undispatched_tool_call(call.id, None, outcome)
+                .await;
+            return ToolLeafPreparation::Completed(Box::new(
+                ToolInvocationReply::from_output(completed.completed.output)
+                    .with_record(completed.record),
+            ));
+        };
+        let pending = crate::sansio::PendingToolCall {
+            call_id: call.id.clone(),
+            tool_name: manifest.name.clone(),
+            args: call.args,
+            replay: None,
+        };
+        match authorization
+            .prepare(self.dispatch.as_ref(), pending, call.id.clone())
+            .await
+        {
+            ToolPreparationOutcome::Prepared(prepared) => {
+                ToolLeafPreparation::Prepared(Box::new(PreparedToolLeafEntry {
+                    index,
+                    prepared: *prepared,
+                    authorization,
+                    manifest,
+                }))
+            }
+            ToolPreparationOutcome::Completed(outcome) => {
+                let completed = context
+                    .complete_undispatched_tool_call(call.id, None, *outcome)
+                    .await;
+                ToolLeafPreparation::Completed(Box::new(
+                    ToolInvocationReply::from_output(completed.completed.output)
+                        .with_record(completed.record),
+                ))
+            }
+        }
+    }
+
+    /// The retained group leaves for `entries`, with the byte-identical
+    /// `child:{index}:{call_id}` replay suffixes the batch path minted
+    /// (ADR 0099 §3) and each leaf's admission pinned.
+    pub(super) fn tool_child_leaves(
+        &self,
+        batch_id: &str,
+        entries: Vec<PreparedToolLeafEntry>,
+    ) -> Vec<PreparedToolChildLeaf> {
+        let batch = crate::PreparedToolBatch::new_with_grants(
+            batch_id.to_string(),
+            entries
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.prepared.clone(),
+                        entry.authorization.execution_grant().cloned(),
+                    )
+                })
+                .collect(),
+        );
+        entries
+            .into_iter()
+            .zip(batch.calls)
+            .map(|(entry, call)| {
+                let admission = match entry.authorization {
+                    ToolCallAuthorization::Granted(grant) => {
+                        crate::runtime::effect::ToolChildAdmission::Granted { grant }
+                    }
+                    ToolCallAuthorization::Catalog(_) => {
+                        crate::runtime::effect::ToolChildAdmission::Catalog {
+                            manifest: Box::new(entry.manifest),
+                        }
+                    }
+                };
+                PreparedToolChildLeaf {
+                    input_index: entry.index,
+                    call,
+                    admission,
+                }
+            })
+            .collect()
     }
 
     /// Executes a source-ordered tool batch for code-executor implementors and returns replies in
@@ -83,69 +200,11 @@ impl RuntimeExecutionContext<'_> {
         // time the concurrent batch starts, so it leads the settlement order.
         let mut settled_during_preparation = Vec::new();
 
-        for (index, mut call) in calls.into_iter().enumerate() {
-            let context = call
-                .issuing_language_node_id
-                .clone()
-                .map(|node_id| self.clone().with_issuing_language_node_id(node_id))
-                .unwrap_or_else(|| self.clone());
-            let authorization = ToolCallAuthorization::from_invocation(&mut call);
-            let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
-                let outcome = ToolDispatchOutcome {
-                    record: ToolCallRecord {
-                        call_id: Some(call.id.clone()),
-                        tool: call.tool_id.to_string(),
-                        args: call.args,
-                        output: ToolCallOutput::failure(ToolFailure::runtime(
-                            ToolFailureClass::Unavailable,
-                            "tool_unavailable",
-                            format!("Tool id `{}` is unavailable in this session", call.tool_id),
-                        )),
-                        duration_ms: 0,
-                    },
-                    attempts: Vec::new(),
-                    intents: crate::ToolIntents::default(),
-                    intent_outcomes: Vec::new(),
-                    captures: Vec::new(),
-                    triggers: Vec::new(),
-                };
-                let completed = context
-                    .complete_undispatched_tool_call(call.id, None, outcome)
-                    .await;
-                replies[index] = Some(
-                    ToolInvocationReply::from_output(completed.completed.output)
-                        .with_record(completed.record),
-                );
-                settled_during_preparation.push(index);
-                continue;
-            };
-            let pending = crate::sansio::PendingToolCall {
-                call_id: call.id.clone(),
-                tool_name: manifest.name.clone(),
-                args: call.args,
-                replay: None,
-            };
-            let preparation = authorization
-                .prepare(self.dispatch.as_ref(), pending, call.id.clone())
-                .await;
-            match preparation {
-                ToolPreparationOutcome::Prepared(prepared) => {
-                    prepared_entries.push((
-                        index,
-                        *prepared,
-                        authorization,
-                        call.child_execution_trace_hook,
-                        manifest,
-                    ));
-                }
-                ToolPreparationOutcome::Completed(outcome) => {
-                    let completed = context
-                        .complete_undispatched_tool_call(call.id, None, *outcome)
-                        .await;
-                    replies[index] = Some(
-                        ToolInvocationReply::from_output(completed.completed.output)
-                            .with_record(completed.record),
-                    );
+        for (index, call) in calls.into_iter().enumerate() {
+            match self.prepare_tool_leaf(index, call).await {
+                ToolLeafPreparation::Prepared(entry) => prepared_entries.push(*entry),
+                ToolLeafPreparation::Completed(reply) => {
+                    replies[index] = Some(*reply);
                     settled_during_preparation.push(index);
                 }
             }
@@ -158,39 +217,14 @@ impl RuntimeExecutionContext<'_> {
             // rank — durable final-commit order — rather than a source-ordered
             // launch vector (§5).
             let group_invocation = self.tool_batch_invocation(&batch_id);
-            let batch = crate::PreparedToolBatch::new_with_grants(
-                batch_id.clone(),
-                prepared_entries
-                    .iter()
-                    .map(|(_, prepared, authorization, _, _)| {
-                        (prepared.clone(), authorization.execution_grant().cloned())
-                    })
-                    .collect(),
-            );
-            let mut leaves = Vec::with_capacity(prepared_entries.len());
-            for ((index, _, authorization, _, manifest), call) in
-                prepared_entries.iter().zip(batch.calls)
-            {
-                let admission = match authorization {
-                    ToolCallAuthorization::Granted(grant) => {
-                        crate::runtime::effect::ToolChildAdmission::Granted {
-                            grant: grant.clone(),
-                        }
-                    }
-                    ToolCallAuthorization::Catalog(_) => {
-                        crate::runtime::effect::ToolChildAdmission::Catalog {
-                            manifest: Box::new(manifest.clone()),
-                        }
-                    }
-                };
-                leaves.push(PreparedToolChildLeaf {
-                    input_index: *index,
-                    call,
-                    admission,
-                });
-            }
+            let leaves = self
+                .tool_child_leaves(&batch_id, prepared_entries)
+                .into_iter()
+                .map(|leaf| PreparedGroupChild::Tool(Box::new(leaf)))
+                .collect::<Vec<_>>();
+            let consumer = ToolAggregateConsumer::AllSettled;
             let handle = match self
-                .open_tool_child_group(group_invocation, &batch_id, &leaves)
+                .open_tool_child_group(group_invocation, &batch_id, &leaves, consumer.wake())
                 .await
             {
                 Ok(handle) => handle,
@@ -210,7 +244,7 @@ impl RuntimeExecutionContext<'_> {
                 }
             };
             let mut settled = match self
-                .consume_all_tool_child_settlements(handle, &leaves)
+                .consume_tool_child_group(handle, &leaves, consumer)
                 .await
             {
                 Ok(settled) => settled,
@@ -242,10 +276,13 @@ impl RuntimeExecutionContext<'_> {
                 settled
                     .settlement_positions
                     .iter()
-                    .map(|position| leaves[*position].input_index),
+                    .filter_map(|position| leaves[*position].tool())
+                    .map(|leaf| leaf.input_index),
             );
             for (position, leaf) in leaves.iter().enumerate() {
-                let Some(completed) = settled.settled[position].take() else {
+                let (Some(leaf), Some(GroupChildSettled::Tool(completed))) =
+                    (leaf.tool(), settled.settled[position].take())
+                else {
                     return fail_batch(
                         format!("tool-child group left position {position} unfilled"),
                         &mut replies,
@@ -271,6 +308,23 @@ impl RuntimeExecutionContext<'_> {
             settlement_order,
         }
     }
+}
+
+/// One tool call ready for group admission.
+pub(super) struct PreparedToolLeafEntry {
+    /// The call's position in its caller's leaf order.
+    pub(super) index: usize,
+    pub(super) prepared: crate::PreparedToolCall,
+    pub(super) authorization: ToolCallAuthorization,
+    pub(super) manifest: crate::ToolManifest,
+}
+
+/// What preparing one tool call produced.
+pub(super) enum ToolLeafPreparation {
+    /// Ready for admission as a group child.
+    Prepared(Box<PreparedToolLeafEntry>),
+    /// Settled during preparation: part of the immediate prefix.
+    Completed(Box<ToolInvocationReply>),
 }
 
 #[cfg(test)]

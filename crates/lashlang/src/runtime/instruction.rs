@@ -182,19 +182,21 @@ pub(crate) struct CompiledResourceOperationBatch {
     pub(crate) shape: CompiledAggregateAwaitShape,
     pub(crate) stack_value_count: usize,
     pub(crate) aggregate_unwrap: bool,
-    /// Select the rejection this batch reports by the order its leaves
-    /// *settled* rather than the order they were written.
+    /// How the aggregate consumes its leaves' settlements (ADR 0099 §10 L1),
+    /// recorded per batch at lowering rather than inferred at run time.
     ///
-    /// `Promise.all` is specified to reject with the first settled rejection,
-    /// so the TypeScript lowering sets this. Lashlang's own aggregates select
-    /// in input order and leave it clear, which is why the choice is recorded
-    /// per batch at lowering instead of being inferred at run time from a
-    /// dialect flag that answers some other question.
-    pub(crate) first_settled_rejection: bool,
+    /// The TypeScript dialect's `Promise.*` aggregates carry their ECMA mode.
+    /// Lashlang's own aggregates — the literal batch and the list-comprehension
+    /// batch — are [`AggregateConsumer::AllSettled`]: they wait for every
+    /// result and report the first *written* unwrapped rejection (§10 L7).
+    pub(crate) consumer: super::AggregateConsumer,
 }
 
 #[derive(Clone)]
 pub(crate) struct CompiledResourceOperationBatchLeaf {
+    /// A timer leaf from an unawaited `sleep(ms)`: `argc` is zero, `operation`
+    /// is unused, and the value at `receiver_stack_index` is the duration.
+    pub(crate) timer: bool,
     pub(crate) operation: usize,
     pub(crate) argc: usize,
     pub(crate) receiver_stack_index: usize,
@@ -351,8 +353,11 @@ pub(crate) enum Instruction {
         operation: usize,
         argc: usize,
     },
+    /// Mint a pending timer handle from the duration on top of the stack —
+    /// an unawaited `sleep(ms)` (ADR 0099 §11).
+    PendingTimer,
     AwaitArray {
-        settle: bool,
+        consumer: super::AggregateConsumer,
     },
     AwaitPending,
     ResourceOperationBatch(usize),
@@ -559,6 +564,7 @@ impl Instruction {
                 InstructionProfileTag::ResourceCall
             }
             Instruction::PendingTool { .. }
+            | Instruction::PendingTimer
             | Instruction::AwaitArray { .. }
             | Instruction::AwaitPending
             | Instruction::ResourceOperationBatch(_)

@@ -61,24 +61,28 @@ impl ExecutionHost for ComprehensionBatchHost {
                 Self::perform_operation(*operation).map(AbilityResult::Value)
             }
             AbilityOp::ResourceOperationBatch(batch) => {
+                let operations = batch
+                    .leaves
+                    .iter()
+                    .filter_map(crate::ResourceOperationBatchLeaf::operation)
+                    .cloned()
+                    .collect::<Vec<_>>();
                 self.batches
                     .lock_recover()
-                    .push(batch.operations.iter().map(Self::describe).collect());
-                // Deliberately settle in reverse order, so a test can tell
-                // settlement order from written order.
+                    .push(operations.iter().map(Self::describe).collect());
+                // Deliberately run in reverse order, so a test can tell the
+                // order leaves ran in from the order they were written.
                 let mut results =
-                    vec![ResourceOperationResult::Value(Value::Null); batch.operations.len()];
-                let mut settlement_order = Vec::with_capacity(results.len());
-                for (index, operation) in batch.operations.into_iter().enumerate().rev() {
+                    vec![ResourceOperationResult::Value(Value::Null); batch.leaves.len()];
+                for (index, operation) in operations.into_iter().enumerate().rev() {
                     results[index] =
                         ResourceOperationResult::from_result(Self::perform_operation(operation));
-                    settlement_order.push(index);
                 }
+                // A Lashlang-native aggregate asks for every result (ADR 0099
+                // §10 L7), which this host answers in leaf order.
+                assert_eq!(batch.consumer, crate::AggregateConsumer::AllSettled);
                 Ok(AbilityResult::ResourceOperationBatch(
-                    ResourceOperationBatchResult {
-                        results,
-                        settlement_order,
-                    },
+                    ResourceOperationBatchResult::AllResults(results),
                 ))
             }
             AbilityOp::Finish(value) | AbilityOp::Fail(value) => Ok(AbilityResult::Value(value)),
@@ -99,10 +103,11 @@ impl ExecutionHost for AggregateProcessHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityResult::ResourceOperationBatch(
-                ResourceOperationBatchResult::settled_in_input_order(
+                batch.answer_in_leaf_order(
                     batch
-                        .operations
+                        .leaves
                         .iter()
+                        .filter_map(crate::ResourceOperationBatchLeaf::operation)
                         .map(|operation| {
                             if operation.operation == "err" {
                                 ResourceOperationResult::Error(ExecutionHostError::new(
@@ -539,7 +544,7 @@ async fn nested_comprehension_aggregates_match_literal_expansion() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn nested_comprehension_rejections_follow_settlement_order() {
+async fn nested_comprehension_rejections_follow_written_order() {
     let host = ComprehensionBatchHost::default();
     let compiled = comprehension_compile(comprehension_module(vec![builders::finish(
         builders::await_expr(builders::record(vec![
@@ -568,9 +573,10 @@ async fn nested_comprehension_rejections_follow_settlement_order() {
     let error = execute_compiled(&compiled, &mut State::new(), &host)
         .await
         .unwrap_err();
-    // `Promise.all` reports the rejection that settled first (ADR 0096), and
-    // this host settles in reverse: the last-written leaf wins.
-    assert!(error.to_string().contains("second"), "{error}");
+    // A Lashlang-native aggregate waits for every result and reports its
+    // first *written* rejection (ADR 0099 §10 L7). This host runs its leaves
+    // in reverse, so a settlement-ordered selection would report `second`.
+    assert!(error.to_string().contains("first"), "{error}");
     assert_eq!(
         host.batches(),
         vec![vec![

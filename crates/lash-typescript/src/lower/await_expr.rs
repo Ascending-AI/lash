@@ -30,7 +30,7 @@ impl Lowerer {
                         property: MemberProperty::Field(method),
                         ..
                     } if matches!(object.as_ref(), Expr::Ident(name, _) if name == "Promise" && !self.has_binding(name))
-                        && matches!(method.as_str(), "all" | "allSettled")
+                        && matches!(method.as_str(), "all" | "allSettled" | "race" | "any")
                 ) =>
             {
                 let Expr::Member {
@@ -53,12 +53,18 @@ impl Lowerer {
         };
         if let Some((mode, value)) = promise_kind {
             if is_async_map(value) {
-                return self.with_await(|lowerer| {
-                    if mode == "allSettled" {
-                        lowerer.lower_all_settled_async_map(value)
-                    } else {
-                        lowerer.lower_expr(value)
-                    }
+                return self.with_await(|lowerer| match mode {
+                    "allSettled" => lowerer.lower_all_settled_async_map(value),
+                    "all" => lowerer.lower_expr(value),
+                    // The v1 async-map driver runs its callbacks to completion
+                    // in order (`TS_ASYNC_MAP_SEQUENTIAL_V1`), so a `race` or
+                    // an `any` over it selects among settled values — the
+                    // registered deviation, not a new one (ADR 0099 §11
+                    // clause 10).
+                    _ => Ok(LashExpr::BuiltinCall {
+                        name: "__typescript_await_array".into(),
+                        args: vec![lowerer.lower_expr(value)?, LashExpr::String(mode.into())],
+                    }),
                 });
             }
             // The operand is lowered as top-level code whatever surrounds the
@@ -74,7 +80,7 @@ impl Lowerer {
             let array = self.at_top_level_await_depth(|lowerer| lowerer.lower_expr(value))?;
             let aggregate = LashExpr::BuiltinCall {
                 name: "__typescript_await_array".into(),
-                args: vec![array, LashExpr::Bool(mode == "allSettled")],
+                args: vec![array, LashExpr::String(mode.into())],
             };
             return Ok(if mode == "allSettled" {
                 all_settled_results(aggregate)

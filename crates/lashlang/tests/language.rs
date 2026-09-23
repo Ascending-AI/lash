@@ -69,18 +69,21 @@ impl ExecutionHost for TestHost {
                 .await
                 .map(AbilityResult::Value),
             AbilityOp::ResourceOperationBatch(batch) => {
-                let results = futures::future::join_all(
-                    batch
-                        .operations
-                        .into_iter()
-                        .map(|operation| self.perform_resource_operation(operation)),
-                )
-                .await
-                .into_iter()
-                .map(lashlang::ResourceOperationResult::from_result)
-                .collect();
+                let results = futures::future::join_all(batch.leaves.iter().map(|leaf| async {
+                    match leaf {
+                        lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
+                            lashlang::ResourceOperationResult::from_result(
+                                self.perform_resource_operation(operation.clone()).await,
+                            )
+                        }
+                        lashlang::ResourceOperationBatchLeaf::Timer(_) => {
+                            lashlang::ResourceOperationResult::Value(Value::Undefined)
+                        }
+                    }
+                }))
+                .await;
                 Ok(AbilityResult::ResourceOperationBatch(
-                    lashlang::ResourceOperationBatchResult::settled_in_input_order(results),
+                    batch.answer_in_leaf_order(results),
                 ))
             }
             AbilityOp::Await(handle) => handle

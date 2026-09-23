@@ -68,6 +68,15 @@ pub struct RuntimeExecutionContext<'run> {
     /// `to_static`, so a rebound or handed-over context incorporates against
     /// the same set.
     pub(crate) incorporation_ledger: Arc<std::sync::Mutex<crate::session::IncorporationLedger>>,
+    /// The groups this context's opener still holds after a consumer stopped
+    /// before exhaustion (ADR 0099 §7). Shared with the ledger through
+    /// [`OpenerState`](crate::session::OpenerState): the opener's owner hands
+    /// one state to every phase context it builds.
+    pub(crate) opener_groups: Arc<std::sync::Mutex<crate::session::OpenerGroupRegistry>>,
+    /// The host's durable closing seam (ADR 0099 §7), which the opener's end
+    /// finalizes through. `None` on Restate, whose engine-side group index is
+    /// the twin, and wherever no host wired one.
+    pub(crate) group_closing: Option<Arc<dyn crate::StoreEffectGroupClosing>>,
     /// The turn-control binding id of the host the runtime's tool children
     /// resolve on, recorded onto a group child's `ProcessLifetime` completion
     /// routing (ADR 0099 §14). That is the host `install_tool_child_host`
@@ -441,6 +450,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             started_process_ids: Arc::default(),
             nested_effect_error: Arc::default(),
             incorporation_ledger: Arc::default(),
+            opener_groups: Arc::default(),
+            group_closing: None,
             parent_invocation: None,
             turn_phase_probe: None,
             turn_event_tx: None,
@@ -486,6 +497,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
             incorporation_ledger: Arc::clone(&self.incorporation_ledger),
+            opener_groups: Arc::clone(&self.opener_groups),
+            group_closing: self.group_closing.clone(),
             tool_child_completion_issuer: self.tool_child_completion_issuer.clone(),
             #[cfg(any(test, feature = "testing"))]
             live_opener_guard: self.live_opener_guard.clone(),

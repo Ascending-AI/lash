@@ -2287,6 +2287,8 @@ mod plugin_stack;
 mod processes_endstate;
 mod queued_run_recovery;
 #[cfg(feature = "rlm")]
+mod race_recovery;
+#[cfg(feature = "rlm")]
 mod rebuild_conformance;
 #[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;

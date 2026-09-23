@@ -9,6 +9,7 @@ mod handlers;
 mod lease;
 mod local_effects;
 mod machine;
+mod opener_groups;
 mod streaming;
 mod tool_catalog;
 mod tools;
@@ -80,13 +81,17 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// Registered the first time the turn builds a tool-execution context and
     /// re-registered on each later one, so a tool child of a group this turn
     /// opened borrows the turn's *current* live context. Deregistered when the
-    /// guard drops with the driver, which on today's path is turn end: ADR 0099
-    /// §7's durable live-to-closing transition does not exist yet, and when
-    /// FIG-3410 lands it the deregistration moves to the end of finalization.
-    /// Until then a child whose opener's turn has ended is not runnable here,
-    /// which is the conservative direction — it stays accepted for recovery
-    /// rather than running against a context that is finishing.
+    /// guard is released at the end of `run`, after the turn's end has closed
+    /// and finalized every group the turn held (ADR 0099 §7): finalization may
+    /// have to run a child no process is running, and that child resolves its
+    /// executor through this registration.
     pub(super) live_opener: std::sync::Mutex<Option<crate::facade_support::LiveOpenerGuard>>,
+    /// The turn's opener state (ADR 0099 §6, §7): the once-only incorporation
+    /// ledger and the groups the turn still holds after an aggregate stopped
+    /// consuming early. Every phase context the turn builds shares it, so a
+    /// loser the turn's end incorporates is charged against the same ledger
+    /// the winning cell charged.
+    pub(super) opener_state: crate::session::OpenerState,
     /// The cooperative cancellation signal this turn's effect loop runs under.
     ///
     /// The lent opener context carries this token so a tool child's waits are

@@ -63,6 +63,8 @@ impl<'run> RuntimeTurnDriver<'run> {
             .map(|context| {
                 self.register_live_opener(context.dispatch(), stream_event_tx);
                 let context = context
+                    .with_opener_state(self.opener_state.clone())
+                    .with_group_closing(self.host.core.control.effect_host.effect_group_closing())
                     .with_turn_cancel_scope(self.turn_cancel_scope())
                     .with_engine_child_max_attempts(
                         self.host.core.control.engine_child_max_attempts,

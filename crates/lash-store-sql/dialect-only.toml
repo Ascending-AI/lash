@@ -3546,7 +3546,7 @@ phase list as a JSON array; PostgreSQL reads the JSONB column with
 """
 
 [[dialect_only]]
-statement = "effect_group.select_closing_by_scope"
+statement = "effect_group.select_unsettled_by_scope"
 backends = ["sqlite", "postgres"]
 kind = "JSON operator"
 reason = "Same phase-tag JSON fork as effect_group.transition_lifecycle."

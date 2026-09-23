@@ -196,13 +196,14 @@ lash_store_sql::statements! {
                AND lifecycle->>'type' = ANY(?3)
              RETURNING group_key, lifecycle";
 
-        /// Every `closing` group under scope `?1` — the resumable
-        /// finalization set (ADR 0099 §7).
-        select_closing_by_scope = "SELECT group_key, scope_id, session_id, wake, loser_disposition,
+        /// Every `live` or `closing` group under scope `?1` — the groups an
+        /// opener's end closes and resumes finalizing (ADR 0099 §7).
+        select_unsettled_by_scope = "SELECT group_key, scope_id, session_id, wake, loser_disposition,
                     expected_children, lifecycle, created_at_ms
              FROM runtime_effect_group
              WHERE scope_id = ?1
-               AND lifecycle->>'type' = 'closing'";
+               AND lifecycle->>'type' != 'settled'
+             ORDER BY created_at_ms, group_key";
 
         /// `(group_key, lifecycle)` for every non-`settled` group owned by
         /// session `?1` — the pins session deletion refuses on.

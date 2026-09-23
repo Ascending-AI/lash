@@ -29,14 +29,19 @@ pub(super) fn validate_program_continuation(
         let Value::List(call) = value else {
             unreachable!("structural validation runs first")
         };
-        let Value::Number(operation) = call[0] else {
-            unreachable!()
-        };
         let Value::Number(site) = call[1] else {
             unreachable!()
         };
-        if !matches!(chunk.code.get(site as usize), Some(Instruction::PendingTool { operation: index, argc }) if *index == operation as usize && *argc == call.len() - 3)
-        {
+        let matches_instruction = match call[0] {
+            Value::Number(operation) => {
+                matches!(chunk.code.get(site as usize), Some(Instruction::PendingTool { operation: index, argc }) if *index == operation as usize && *argc == call.len() - 3)
+            }
+            _ => matches!(
+                chunk.code.get(site as usize),
+                Some(Instruction::PendingTimer)
+            ),
+        };
+        if !matches_instruction {
             return Err(ContinuationError::UnserializableValue {
                 location: "pending tool".into(),
                 variant: "pending tool does not match its instruction",

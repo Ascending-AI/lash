@@ -484,6 +484,30 @@ impl LashCore {
             }
             .into());
         }
+        // ADR 0099 §7 / W16: an accepted or closing effect group keeps its
+        // session until it settles. Asked before anything is deleted — the
+        // journal retirement below refuses the same pins, but only after the
+        // session's processes, subscriptions, waits and store rows are gone.
+        if let Some(closing) = administration.effect_host().effect_group_closing() {
+            let group_pins = closing
+                .read_session_pins(&session_id)
+                .await
+                .map_err(|err| EmbedError::SessionDeleteProcess {
+                    session_id: session_id.clone(),
+                    message: err.to_string(),
+                })?;
+            if let Some(first) = group_pins.first() {
+                return Err(lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::EffectGroupLifecyclePinned,
+                    format!(
+                        "session `{session_id}` still owns {} effect group(s) that are live or \
+                         closing (first: `{first}`); session deletion is refused until they settle",
+                        group_pins.len()
+                    ),
+                )
+                .into());
+            }
+        }
         let process = if let Some(process) = administration.process() {
             #[expect(
                 clippy::expect_used,

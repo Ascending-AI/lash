@@ -45,14 +45,15 @@ decorators are not type-only in this contract and reject as
 TypeScript-only rulings beside the official ECMAScript inventory.
 
 Cells are scripts and may use top-level `await` for tools, process handles,
-`sleep`, `Promise.all`, and `Promise.allSettled`; `waitSignal` is
+`sleep`, `Promise.all`, `Promise.allSettled`, `Promise.race`, and `Promise.any`;
+`waitSignal` is
 process-only and rejects at the cell top level by name. Async functions and arrows
 are accepted when every awaited value is transitively grounded in this agent surface;
 `await Promise.all(xs.map(async x => ...))` and its `Promise.allSettled`
 counterpart use the durable sequential async-map driver. The all-settled form
 wraps each callback in guest `try`/`catch`, so a rejection becomes that input's
 `{status: "rejected", reason}` record and later callbacks still run. Promise
-chaining, synthetic promises, `race`, and `any` remain named rejects.
+chaining and synthetic promises remain named rejects.
 Tool calls require `await` and use explicit `typescript.tool` module paths;
 their prompt signatures return `Promise<T>`. Unknown module paths participate
 in the executor's deferred tool-resolution path.
@@ -85,28 +86,31 @@ an object-valued `inputs` each reject by name with
 `TS_TRIGGER_SOURCE_EVENT_ACCESS`, `TS_TRIGGER_EVENT_REMOVED` and
 `TS_TRIGGER_INPUTS_LITERAL_REQUIRED`.
 
-`Promise.all` and `Promise.allSettled` evaluate any array-valued expression and
-aggregate its pending tool handles and already-settled values through the shared
-batch machine. Unawaited tool calls create handles; abandoning one at cell end
-is a typed runtime error. Non-array values and awaiting a settled value also
+Every `Promise` aggregate evaluates any array-valued expression and aggregates
+its pending handles and already-settled values as one durable effect group.
+Unawaited tool calls create handles, and so does an unawaited `sleep(ms)` — a
+pending timer whose start point is the aggregate that admits it; abandoning
+either at cell end is a typed runtime error. Non-array values and awaiting a settled value also
 fail loudly. A mixed aggregate is **one** batch on **one** recorded settlement
 order: a `processes.await` leaf parks on a durable wait and takes its place in
 that order when its completion arrives, so a tool rejection has no precedence
 over a process rejection and there is no tool-then-process phase split. A raw
 process handle at an element position is refused, with a repair naming
 `processes.await(handle)`; a handle carried inside a value bound to a name is
-passed through untouched. `Promise.all` rejects with the reason of the leaf that
-settled first, and `Promise.allSettled` keeps its results in input order, both as
-ECMA specifies. The host records the order its leaves settled in as part of the
-journaled batch result, so replay selects the same reason rather than re-deriving
-one.
+passed through untouched. As ECMA specifies, `Promise.all` rejects with the
+reason of the leaf that settled first, `Promise.allSettled` keeps its results in
+input order, `Promise.race` resolves with the first settlement and `Promise.any`
+with the first fulfilment — or rejects with an `AggregateError` whose `errors`
+hold one rejection per input position, in input order. The group's settlement
+order is durable, so replay selects the same answer rather than re-deriving one.
 
-A rejected `Promise.all` still waits for every leaf to settle before it reports.
-ECMA specifies which reason surfaces, not when: it has no wall times, and a
-conforming program cannot observe the difference except through timing. v1 has
-no fail-fast cancellation of an in-flight batch leaf, so the aggregate settles
-at the pace of its slowest leaf while rejecting with its first-settled reason.
-This is a runtime-system constraint, not an alternate semantics.
+An aggregate answers as soon as its first deciding settlement is consumed; the
+leaves that lost keep running, as losing promises do, while the cell's turn or
+process lives. When that turn or process ends, an unfinished loser is cancelled
+and a loser whose result already committed still realizes its declared effects
+before the end is final (ADR 0099). `Promise.race([])` never settles, so the host
+ends the cell with the typed `aggregate_await_unsettled` error rather than
+parking it; `Promise.any([])` rejects with an empty `AggregateError`.
 
 `Date.now()`, argless `new Date()`, and `Math.random()` are host effects, so their result is recorded
 at the same journal boundary as other effects and replay never samples the VM's
