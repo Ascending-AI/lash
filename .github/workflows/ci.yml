@@ -20,7 +20,7 @@ name: CI
 # API seal `//crates/lash:ui_fixtures`), the workspace clippy, one PostgreSQL
 # major (16) and the path-gated script jobs. The merge group runs the same set on
 # the combined tree plus the test tail, the feature-lane clippy, the
-# `//:runtime_off` graph and, for a schema diff, the PG14/PG18 compatibility
+# `//:runtime_off` witness and, for a schema diff, the PG14/PG18 compatibility
 # legs. Cached Bazel results mean a merge group re-executes only what its
 # combined tree changed.
 #
@@ -435,7 +435,6 @@ jobs:
           python3 scripts/test_fast_test.py
           python3 scripts/test_bazel_test_contract.py
           python3 scripts/test_bazel_profile_digest.py
-          python3 scripts/test_runtime_off_graph.py ManifestInheritance
           python3 scripts/test_bazel_source_ownership.py
           python3 scripts/test_bazel_diagnostics.py
           python3 scripts/check_feature_coverage.py check
@@ -1219,8 +1218,9 @@ jobs:
       # Breadth rides the merge group and the dispatch only. On those events
       # `//:feature_lane_clippy` lints the slack-clone `e2e` variant and the
       # other feature-lane variants in the same invocation, and
-      # `//:runtime_off` builds the isolated OFF graph whose compiler actions
-      # are reconciled with Cargo below. Together they are about 45
+      # `//:runtime_off` compiles the facade with every optional feature off,
+      # the feature-lane variant of `cargo check -p lash-runtime --lib
+      # --no-default-features`. Together they are about 45
       # feature-variant compiles on a core-touching diff, evidence no pull
       # request needs for its first signal; the merge group proves them on the
       # combined tree before anything lands.
@@ -1229,9 +1229,7 @@ jobs:
         shell: bash
         run: |
           targets=(//:workspace_clippy //:schema_checks)
-          breadth=false
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
-            breadth=true
             targets+=(//:feature_lane_clippy //:runtime_off)
           fi
           # shellcheck disable=SC2086
@@ -1241,19 +1239,6 @@ jobs:
             --profile="${RUNNER_TEMP}/bazel-lint-profile.json.gz" \
             --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
             -- "${targets[@]}"
-          if [[ "$breadth" == false ]]; then
-            exit 0
-          fi
-          # shellcheck disable=SC2086
-          bazel --output_user_root="$RUNNER_TEMP/bazel-output" aquery \
-            ${BAZEL_SHARED_CACHE_FLAGS} \
-            'mnemonic("Rustc.*", deps(//:runtime_off))' \
-            --output=jsonproto > "$RUNNER_TEMP/runtime-off-actions.json"
-          python3 scripts/check_runtime_off_graph.py \
-            --actions "$RUNNER_TEMP/runtime-off-actions.json"
-          bazel_output_base="$(bazel --output_user_root="$RUNNER_TEMP/bazel-output" info output_base)"
-          python3 scripts/test_runtime_off_graph.py \
-            --resolver "$bazel_output_base/external/rules_rs+/rs/private/resolver.bzl"
 
       - name: Remove client credentials
         if: always()
@@ -1329,11 +1314,10 @@ jobs:
       # that every referenced path exists at that feature set (FIG-3427:
       # `lash_core::runtime::effect` is `pub(crate)` without `testing`, and a
       # downstream `crate::runtime::effect::…` path broke only under this
-      # command). Trusted merge groups and dispatches build the isolated
-      # //:runtime_off graph alongside Clippy above and reconcile its actual
-      # compiler actions with Cargo. Untrusted events retain the Cargo OFF witness here because the
-      # feature-lanes job is dispatch-only and repo-gates skips Rust-only
-      # diffs.
+      # command). Trusted merge groups and dispatches build the
+      # //:runtime_off variant alongside Clippy above. Untrusted events retain
+      # the Cargo OFF witness here because the feature-lanes job is
+      # dispatch-only and repo-gates skips Rust-only diffs.
       - name: Check feature and schema contracts
         env:
           BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}

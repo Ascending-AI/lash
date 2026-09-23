@@ -21,8 +21,6 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-exports_files(["patches/rules-rs-reachable-features.patch"])
-
 exports_files(["patches/rules-swift-no-toolchain-registration.patch"])
 
 # The `--run_under` prefix of every test action (`.bazelrc`): the test writes

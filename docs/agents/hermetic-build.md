@@ -365,22 +365,18 @@ recipes for these correctness contracts:
   requests keep the Cargo matrix exactly as it was, which is where a real
   third-party feature divergence would still surface.
 
-  The unconditional runtime OFF witness uses a separate `//:runtime_off`
-  graph. `runtime_off_workspace.py` flattens Cargo workspace inheritance into
-  generated manifests and links their source directories to the checkout.
-  Its single root depends on `lash-runtime` with default features disabled.
-  `runtime-off.Cargo.lock` records this resolution; `kiln sync` regenerates it
-  from the current workspace lock. The `runtime_off_crates` hub selects
-  `prune_unreachable` in the local rules_rs patch, so platform-inactive lock
-  packages cannot enable features on reachable dependencies. The ordinary
-  hub retains dormant dependencies needed by the feature-lane variants.
-
-  Trusted lint CI builds this target alongside Clippy and schemas, then
-  `check_runtime_off_graph.py` compares its actual Rust compiler features
-  and dependency edges with the package-only Cargo tree. The existing native
-  AWS-LC annotation replaces only `aws-lc-sys`'s Cargo build-script dependency
-  subtree. All remaining Rust units and edges must match. Untrusted CI keeps
-  `cargo check -p lash-runtime --lib --no-default-features --locked`.
+  The unconditional runtime OFF witness, `//:runtime_off`, is the
+  feature-lane variant of `cargo check -p lash-runtime --lib
+  --no-default-features`: the facade library at that request's first-party
+  resolution, in the one `@crates` universe. The generator resolves the
+  request itself, writes the label as `RUNTIME_OFF_TARGET` in
+  `tools/bazel/feature_lanes.bzl`, and fails if it stops being a lane unit.
+  Its first-party features are reconciled with Cargo like every other lane
+  unit, by `--verify-resolution` and `check_feature_coverage.py --bazel`.
+  It shares the general third-party limitation above. Trusted merge groups
+  and dispatches build it alongside Clippy; untrusted CI keeps
+  `cargo check -p lash-runtime --lib --no-default-features --locked`, which
+  is where a third-party divergence would surface.
 
   Cargo-required targets omitted from the resolved default graph are still
   recorded with `cargo-feature-gate` in `tools/bazel/target-inventory.json`.

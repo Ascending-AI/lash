@@ -2346,8 +2346,23 @@ def feature_lane_outputs(metadata: dict) -> tuple[dict[str, str], str, list[dict
             "feature-lane test floors name units no lane command compiles: "
             f"{sorted(FEATURE_LANE_TEST_FLOORS)}"
         )
+    # The runtime OFF witness, `cargo check -p lash-runtime --lib
+    # --no-default-features`: the facade library at that request's first-party
+    # resolution. The `otel-feature-chain` lane runs the same command, so the
+    # label is one of the lane units and the check below proves it stays one.
+    runtime_off_request = feature_variants.resolve_request(
+        graph.workspace, "lash-runtime", default_features=False, requested=[], with_dev=False
+    ).sorted_features()
+    runtime_off = graph.library_label("lash-runtime", runtime_off_request)
+    if runtime_off not in compile_targets:
+        raise SystemExit(
+            f"the runtime OFF witness {runtime_off} is not a feature-lane unit; "
+            "scripts/feature-coverage.toml must keep "
+            "`cargo check -p lash-runtime --lib --no-default-features`"
+        )
     bzl = [
         GENERATED_HEADER,
+        "RUNTIME_OFF_TARGET = " + quote(runtime_off) + "\n\n",
         "FEATURE_LANE_COMPILE_TARGETS = " + string_list(compile_targets, indent=4) + "\n\n",
         "FEATURE_LANE_TEST_TARGETS = " + string_list(test_targets, indent=4) + "\n\n",
         "FEATURE_LANE_CLIPPY_TARGETS = " + string_list(clippy_targets, indent=4) + "\n\n",
