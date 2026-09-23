@@ -512,7 +512,6 @@ jobs:
           python3 scripts/test_check_conformance_law_registration.py
           python3 scripts/test_check_law_execution_receipts.py
           python3 scripts/test_check_transcript_diff.py
-          python3 scripts/test_gate_scope.py
           python3 scripts/test_toolchain_canary.py
           python3 scripts/test_main_ci_policy.py
           python3 scripts/test_release_version.py

@@ -29,6 +29,7 @@ class DevTestTests(unittest.TestCase):
         })
         (self.root / "scripts").mkdir()
         shutil.copyfile(SOURCE, self.root / "scripts/dev-test.py")
+        shutil.copyfile(SOURCE.with_name("ci_plan.py"), self.root / "scripts/ci_plan.py")
         self.source = self.root / "crates/example/src/lib.rs"
         self.source.parent.mkdir(parents=True)
         self.source.write_text("pub fn example() {}\n")

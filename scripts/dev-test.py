@@ -18,6 +18,11 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# No bytecode beside the classifier: an untracked `__pycache__` is a changed
+# path to the very selection this import makes.
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT / "scripts"))
+import ci_plan  # noqa: E402
 LIVE_STORES = (
     "LASH_POSTGRES_DATABASE_URL", "LASH_REQUIRE_POSTGRES", "LASH_S3_ENDPOINT",
     "LASH_REQUIRE_S3", "LASH_MINIO_ENDPOINT", "LASH_REQUIRE_MINIO",
@@ -112,40 +117,12 @@ def batch_labels(members: set[str], batches: dict[str, list[str]]) -> list[str]:
 
 
 def select(paths: list[str], gates: dict[str, list[list[str]]]) -> tuple[list[str], bool, bool, list[list[str]]]:
-    packages: set[str] = set()
-    scripts: set[str] = set()
-    broad = facade = repository = False
-    # These implementations affect validation policy, not Rust compilation.
-    families = {
-        "scripts/dev-test.py": "scripts/test_dev_test.py",
-        "scripts/gate_scope.py": "scripts/test_gate_scope.py",
-        "tools/bazel/test_batch_runner.sh": "scripts/test_test_batch_runner.py",
-        "tools/bazel/junit_xml.py": "scripts/test_test_xml.py",
-        "tools/bazel/test_xml_runner.sh": "scripts/test_test_xml.py",
-    }
-    for name in paths:
-        path = Path(name)
-        if path.suffix == ".md" or name.startswith(("docs/", "LICENSE")) or name == ".gitignore":
-            continue
-        proof = families.get(name, name)
-        if proof in gates and Path(proof).name.startswith("test_"):
-            scripts.add(proof)
-        elif name in ("Cargo.toml", "Cargo.lock"):
-            broad = facade = True
-        elif len(path.parts) >= 3 and path.parts[0] in ("crates", "examples", "runbooks"):
-            package = "/".join(path.parts[:2])
-            if not (ROOT / package / "BUILD.bazel").is_file():
-                broad = True
-            else:
-                packages.add("//" + package)
-                facade |= package == "crates/lash"
-            if path.name in ("Cargo.toml", "BUILD.bazel"):
-                broad = True
-        else:
-            broad = repository = True
-    commands = ([["bash", "scripts/ci/repository-gates.sh"]] if repository else
-                [command for name in sorted(scripts) for command in gates[name]])
-    return sorted(packages), broad, facade, commands
+    # `scripts/ci_plan.py` is the repository's one change classifier; this is
+    # its dev-test projection plus the commands each part of it runs.
+    scope = ci_plan.dev_test_scope(paths, ROOT, frozenset(gates))
+    commands = ([["bash", "scripts/ci/repository-gates.sh"]] if scope.repository else
+                [command for name in scope.script_tests for command in gates[name]])
+    return list(scope.packages), scope.broad, scope.facade, commands
 
 
 def plan(base: str, dependents: bool) -> dict:

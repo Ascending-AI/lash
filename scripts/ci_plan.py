@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""Classify CI changes and validate the aggregate CI conclusion."""
+"""Classify changed paths and validate the aggregate CI conclusion.
+
+This is the repository's one change classifier. `classify_path` maps a path to
+what it can affect; CI's job plan (`classify`), the push gate (`gate-scope`)
+and `scripts/dev-test.py` (`dev_test_scope`) are projections of it. Only the
+Python standard library is used, so it runs before any toolchain.
+"""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+import enum
 from functools import lru_cache
 import json
 import os
 from pathlib import Path, PurePosixPath
+import shlex
+import subprocess
 import sys
 import tomllib
 from typing import Mapping
@@ -357,17 +367,139 @@ class PlanError(ValueError):
     """Raised when a path set cannot be classified exactly."""
 
 
-def _is_global_invalidator(path: str) -> bool:
-    name = PurePosixPath(path).name
-    return (
-        name in {"Cargo.lock", "Cargo.toml"}
-        or name.startswith("rust-toolchain")
-        or path.startswith(".cargo/")
-        or path == ".config/nextest.toml"
-        or path.startswith(".github/workflows/")
-        or path.startswith("scripts/")
-        or path in {"justfile", "deny.toml"}
-    )
+# The one path classifier.
+#
+# Three consumers ask the same question -- what can this touched path affect?
+# -- and used to answer it with four tables that disagreed: this CI plan, the
+# push gate's family scope, `scripts/dev-test.py`'s package selection, and the
+# PR test selector. `classify_path` is now the only table. `classify` projects
+# it onto CI job families, `gate_scope` onto the push gate's families, and
+# `dev_test_scope` onto dev-test's package selection. A consumer may widen its
+# own projection (dev-test runs its whole suite for a package manifest because
+# it does not query reverse dependencies by default); it never re-reads paths.
+class PathKind(enum.Enum):
+    # Prose outside every package: affects nothing compiled or checked.
+    DOCS = "docs"
+    # Prose a Rust test reads at run time (`RUST_RUNTIME_DOC_INPUTS`).
+    DOC_INPUT = "doc-input"
+    # A path inside a first-party package directory (`PACKAGE_ROOTS`).
+    PACKAGE = "package"
+    # Test data outside every package: fixtures, published schemas, fuzz.
+    DATA = "data"
+    # Build and repository tooling that is not a shared input.
+    TOOLING = "tooling"
+    # A shared input: it can move the result of every job.
+    SHARED = "shared"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class PathClass:
+    kind: PathKind
+    # `crates/<name>` for a PACKAGE path, else None.
+    package: str | None = None
+    # Whether the package directory carries a BUILD.bazel file.
+    bazel_package: bool = False
+    # A package's own Cargo.toml or BUILD.bazel.
+    manifest: bool = False
+
+
+PACKAGE_ROOTS = ("crates", "examples", "runbooks")
+DATA_ROOTS = ("fixtures/", "schemas/", "fuzz/")
+DOC_SUFFIXES = frozenset({".md", ".rst", ".txt"})
+
+# Prose files that a Rust test reads at run time, so a change to one of them
+# can fail the Rust suite without touching a single line of Rust.
+# `test_ci_plan.py` sweeps every tracked `*.rs` for references to `docs/**`
+# and `CONTEXT.md` and fails on any path not listed here, so a newly added
+# runtime doc read reopens no hole silently.
+RUST_RUNTIME_DOC_INPUTS = frozenset(
+    {
+        "docs/adr/0008-confidence-gate.md",
+        "docs/adr/0009-deterministic-simulation-harness.md",
+        "CONTEXT.md",
+    }
+)
+
+# Root files that feed every job: the workspace manifest and lock, the
+# toolchain pin, and the workspace-wide dependency policy.
+SHARED_ROOT_FILES = frozenset({"Cargo.toml", "Cargo.lock", "justfile", "deny.toml"})
+# Directories that feed every job: Cargo and nextest configuration, the CI
+# workflows and actions, and the gate machinery itself -- including this file.
+SHARED_PREFIXES = (".cargo/", ".config/", ".github/", "scripts/")
+# Root build and repository tooling. `.bazelrc` sets flags for every Bazel
+# action and `.gitleaksignore` feeds the hygiene job, but neither is a Cargo
+# input, so they select the repository gates rather than every family.
+TOOLING_ROOT_FILES = frozenset(
+    {
+        "BUILD.bazel",
+        ".bazelrc",
+        ".bazelversion",
+        "clippy.toml",
+        "rustfmt.toml",
+        ".pre-commit-config.yaml",
+        ".gitattributes",
+        ".gitleaksignore",
+    }
+)
+INERT_ROOT_FILES = frozenset({".gitignore"})
+
+
+@lru_cache(maxsize=None)
+def _is_bazel_package(root: str, package: str) -> bool:
+    return (Path(root) / package / "BUILD.bazel").is_file()
+
+
+def classify_path(path: str, root: Path | None = None) -> PathClass:
+    """The one answer to "what can this touched path affect?"."""
+
+    posix = PurePosixPath(path)
+    parts = posix.parts
+    name = posix.name
+    suffix = posix.suffix.lower()
+    if path in RUST_RUNTIME_DOC_INPUTS:
+        return PathClass(PathKind.DOC_INPUT)
+    if (
+        path in SHARED_ROOT_FILES
+        or path.startswith(SHARED_PREFIXES)
+        or (len(parts) == 1 and name.startswith("rust-toolchain"))
+    ):
+        return PathClass(PathKind.SHARED)
+    if (
+        path in TOOLING_ROOT_FILES
+        or path.startswith("tools/")
+        or (len(parts) == 1 and name.startswith("MODULE.bazel"))
+    ):
+        return PathClass(PathKind.TOOLING)
+    if parts and parts[0] in PACKAGE_ROOTS:
+        if len(parts) < 3:
+            # A file beside the packages, such as the judged runbook matrix.
+            return PathClass(PathKind.TOOLING)
+        package = "/".join(parts[:2])
+        bazel = _is_bazel_package(str(root or REPO_ROOT), package)
+        if suffix in DOC_SUFFIXES and not bazel:
+            # Prose in a directory no build reads, such as a runbook.
+            return PathClass(PathKind.DOCS)
+        # Anything inside a package, markdown included, is package-local:
+        # `include_str!` and test runfiles read package READMEs.
+        return PathClass(
+            PathKind.PACKAGE,
+            package=package,
+            bazel_package=bazel,
+            manifest=name in {"Cargo.toml", "BUILD.bazel"},
+        )
+    if path.startswith(DATA_ROOTS):
+        if suffix in DOC_SUFFIXES:
+            return PathClass(PathKind.DOCS)
+        return PathClass(PathKind.DATA)
+    if (
+        path.startswith("docs/")
+        or suffix in DOC_SUFFIXES
+        or name.startswith("LICENSE")
+        or path in INERT_ROOT_FILES
+    ):
+        return PathClass(PathKind.DOCS)
+    return PathClass(PathKind.UNKNOWN)
 
 
 def _is_workbench_path(path: str) -> bool:
@@ -388,7 +520,9 @@ def _is_schema_path(path: str) -> bool:
 
 # `stores` is path-derived: every production diff used to pay 7-18 min of
 # runner Cargo for the PG16 leg. The release dispatch still runs the full
-# matrix, so only the PR/merge-queue trigger narrows.
+# matrix, so only the PR/merge-queue trigger narrows. A SQL script or a SQLite
+# database anywhere -- a store crate's migrations or a durable-read fixture --
+# is store input.
 def _is_stores_path(path: str) -> bool:
     return (
         path.startswith(
@@ -402,7 +536,7 @@ def _is_stores_path(path: str) -> bool:
             )
         )
         or "migrations" in PurePosixPath(path).parts
-        or PurePosixPath(path).suffix == ".sql"
+        or PurePosixPath(path).suffix in {".sql", ".db"}
     )
 
 
@@ -412,46 +546,232 @@ def _is_facade_path(path: str) -> bool:
     return path.startswith("crates/lash/") or path in {"Cargo.toml", "Cargo.lock"}
 
 
-# `tooling` gates repo-gates: scripts, build tooling and CI config are the
-# only inputs its self-checks read.
-def _is_tooling_path(path: str) -> bool:
-    name = PurePosixPath(path).name
-    return (
-        path.startswith(("scripts/", "tools/", ".github/", ".config/"))
-        or path == "justfile"
-        or name in {"Cargo.toml", "Cargo.lock", "BUILD.bazel"}
-        or name.startswith("rust-toolchain")
-        or name.startswith("MODULE.bazel")
-        or PurePosixPath(path).suffix == ".bzl"
-    )
+# `tooling` gates repo-gates: shared inputs, build tooling and a package's own
+# manifest are the only inputs its self-checks read (the feature-lane
+# resolution and dependency-boundary checks read every package manifest).
+def _is_tooling_class(path_class: PathClass) -> bool:
+    return path_class.kind in {PathKind.SHARED, PathKind.TOOLING} or path_class.manifest
 
 
-def _is_docs_path(path: str) -> bool:
-    name = PurePosixPath(path).name.lower()
-    return (
-        (
-            path.startswith("docs/")
-            and PurePosixPath(path).suffix.lower()
-            in {
-                ".md",
-                ".rst",
-                ".txt",
-            }
+# The push gate's projection of `classify_path` (`scripts/push-gate.sh`).
+# A family is only ever skipped when every touched path provably cannot affect
+# it; a shared input, an unknown path, an empty path set or a git failure runs
+# everything. Being wrong in the skip direction hides a real failure until CI;
+# being wrong in the run direction costs wall-clock and nothing else.
+class GateFamily(enum.Enum):
+    """The push gate's families. Closed: `scoped` in push-gate.sh names one."""
+
+    # fmt, check, clippy, the Rust suites and every source guard.
+    RUST_COMPILE = "rust-compile"
+    # The repository script self-test suite: CI's `tooling` family.
+    SCRIPTS = "scripts"
+    # The `.github/` guards; only a shared input can move them.
+    WORKFLOWS = "workflows"
+
+    @property
+    def env_variable(self) -> str:
+        """The shell variable `gate_family_runs` reads for this family."""
+        return f"GATE_RUN_{self.name}"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+GATE_FAMILIES = tuple(GateFamily)
+ALL_GATE_FAMILIES = frozenset(GateFamily)
+
+_GATE_FAMILIES_BY_KIND = {
+    PathKind.DOCS: frozenset(),
+    PathKind.DOC_INPUT: frozenset({GateFamily.RUST_COMPILE}),
+    PathKind.PACKAGE: frozenset({GateFamily.RUST_COMPILE}),
+    PathKind.DATA: frozenset({GateFamily.RUST_COMPILE}),
+    PathKind.TOOLING: frozenset({GateFamily.RUST_COMPILE, GateFamily.SCRIPTS}),
+    PathKind.SHARED: ALL_GATE_FAMILIES,
+    PathKind.UNKNOWN: ALL_GATE_FAMILIES,
+}
+
+
+@dataclass(frozen=True)
+class GateScope:
+    """The push gate's verdict for one path set."""
+
+    classification: str
+    reason: str
+    families: frozenset[GateFamily]
+
+    def runs(self, family: GateFamily) -> bool:
+        return family in self.families
+
+
+def _sample(paths: list[str], limit: int = 3) -> str:
+    shown = ", ".join(paths[:limit])
+    remainder = len(paths) - limit
+    return f"{shown}, +{remainder} more" if remainder > 0 else shown
+
+
+def gate_scope(paths: list[str], root: Path | None = None) -> GateScope:
+    """Map a touched-path list onto the push-gate families it can affect."""
+
+    ordered = sorted(dict.fromkeys(path for path in paths if path.strip()))
+    if not ordered:
+        return GateScope(
+            "empty-diff",
+            "no touched paths were resolved; an empty path set is a resolution "
+            "failure, not a proof of narrowness",
+            ALL_GATE_FAMILIES,
         )
-        or (path.startswith("runbooks/") and PurePosixPath(path).suffix.lower() in {".md", ".rst", ".txt"})
-        or (name.startswith("readme") and PurePosixPath(name).suffix in {"", ".md", ".rst", ".txt"})
-        or name in {"contributing.md", "context.md", "security.md", "license", "license.md"}
+    buckets: dict[PathKind, list[str]] = {}
+    families: set[GateFamily] = set()
+    for path in ordered:
+        path_class = classify_path(path, root)
+        buckets.setdefault(path_class.kind, []).append(path)
+        families |= _GATE_FAMILIES_BY_KIND[path_class.kind]
+        if path_class.manifest:
+            families.add(GateFamily.SCRIPTS)
+    kinds = set(buckets)
+    if PathKind.UNKNOWN in kinds:
+        return GateScope(
+            "unknown-paths",
+            f"paths outside every known class: {_sample(buckets[PathKind.UNKNOWN])}",
+            ALL_GATE_FAMILIES,
+        )
+    classification = (
+        "shared-inputs" if PathKind.SHARED in kinds
+        else "docs-only" if kinds == {PathKind.DOCS}
+        else "rust-input-docs" if kinds == {PathKind.DOC_INPUT}
+        else "rust-only" if kinds == {PathKind.PACKAGE}
+        else "mixed"
     )
+    reason = "; ".join(
+        f"{kind.value} ({_sample(buckets[kind])})"
+        for kind in sorted(buckets, key=lambda kind: kind.value)
+    )
+    return GateScope(classification, reason, frozenset(families))
 
 
-def _is_known_path(path: str) -> bool:
-    suffix = PurePosixPath(path).suffix.lower()
-    return (
-        _is_global_invalidator(path)
-        or _is_docs_path(path)
-        or path.startswith(("crates/", "examples/", "runbooks/", ".github/actions/", ".config/", "fuzz/", "tools/"))
-        or path.startswith(("src/", "tests/", "benches/"))
-        or suffix in {".rs", ".toml", ".json", ".yaml", ".yml", ".lock", ".bzl", ".bazel"}
+def render_gate_text(scope: GateScope) -> str:
+    lines = [
+        f"{family}: {'run' if scope.runs(family) else 'skip'}" for family in GATE_FAMILIES
+    ]
+    lines.append(f"classification: {scope.classification} -- {scope.reason}")
+    return "\n".join(lines)
+
+
+def render_gate_env(scope: GateScope) -> str:
+    lines = [
+        f"{family.env_variable}={1 if scope.runs(family) else 0}" for family in GATE_FAMILIES
+    ]
+    # The closed family set, so the consuming shell can refuse a name that is
+    # not in it instead of reading an unset variable and running everything.
+    lines.append(
+        "GATE_SCOPE_FAMILIES=" + shlex.quote(" ".join(family.name for family in GATE_FAMILIES))
+    )
+    lines.append(f"GATE_SCOPE_CLASSIFICATION={shlex.quote(scope.classification)}")
+    lines.append(f"GATE_SCOPE_REASON={shlex.quote(scope.reason)}")
+    return "\n".join(lines)
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args], cwd=repo, capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git {' '.join(args)} failed ({result.returncode}): {result.stderr.strip()}"
+        )
+    return result.stdout
+
+
+def _worktree_paths(repo: Path) -> list[str]:
+    """Uncommitted paths, so a dirty tree cannot be classified as narrow."""
+
+    tokens = [token for token in _git(repo, "status", "--porcelain", "-z").split("\0") if token]
+    paths: list[str] = []
+    index = 0
+    while index < len(tokens):
+        entry = tokens[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        status, path = entry[:2], entry[3:]
+        paths.append(path)
+        # A rename or copy spends a second NUL-token on its source path, and
+        # that path is touched too.
+        if ("R" in status or "C" in status) and index < len(tokens):
+            paths.append(tokens[index])
+            index += 1
+    return paths
+
+
+def collect_gate_paths(repo: Path, base: str, head: str, worktree: bool) -> list[str]:
+    merge_base = _git(repo, "merge-base", base, head).strip()
+    if not merge_base:
+        raise RuntimeError(f"no merge base between {base} and {head}")
+    # `-z` so a path needing quoting arrives as itself rather than as an
+    # escaped string that would classify as unknown.
+    diff = _git(repo, "diff", "--name-only", "-z", f"{merge_base}..{head}")
+    paths = [entry for entry in diff.split("\0") if entry]
+    if worktree:
+        paths.extend(_worktree_paths(repo))
+    return paths
+
+
+# `scripts/dev-test.py`'s projection of `classify_path`: which Bazel packages
+# to test, whether to widen to the whole developer suite, whether to name the
+# manual seal target, whether to run the repository gates, and which script
+# self-tests are the direct proof of a script edit.
+#
+# Implementations whose direct proof is a named self-test rather than a
+# test file of their own name.
+SCRIPT_PROOFS = {
+    "scripts/dev-test.py": "scripts/test_dev_test.py",
+    "scripts/ci_plan.py": "scripts/test_ci_plan.py",
+    "tools/bazel/test_batch_runner.sh": "scripts/test_test_batch_runner.py",
+    "tools/bazel/junit_xml.py": "scripts/test_test_xml.py",
+    "tools/bazel/test_xml_runner.sh": "scripts/test_test_xml.py",
+}
+
+
+@dataclass(frozen=True)
+class DevTestScope:
+    packages: tuple[str, ...]
+    broad: bool
+    facade: bool
+    repository: bool
+    script_tests: tuple[str, ...]
+
+
+def dev_test_scope(
+    paths: list[str], root: Path, script_tests: frozenset[str]
+) -> DevTestScope:
+    """Select dev-test's scope. `script_tests` is CI's script self-test inventory."""
+
+    packages: set[str] = set()
+    scripts: set[str] = set()
+    broad = facade = repository = False
+    for path in paths:
+        path_class = classify_path(path, root)
+        if path_class.kind is PathKind.DOCS:
+            continue
+        proof = SCRIPT_PROOFS.get(path, path)
+        if proof in script_tests and PurePosixPath(proof).name.startswith("test_"):
+            scripts.add(proof)
+        elif path in {"Cargo.toml", "Cargo.lock"}:
+            broad = facade = True
+        elif path_class.kind is PathKind.PACKAGE:
+            facade |= _is_facade_path(path)
+            # Without `--dependents` dev-test does not query who depends on a
+            # package, so a package manifest widens to the whole suite.
+            if path_class.bazel_package and not path_class.manifest:
+                packages.add("//" + path_class.package)
+            else:
+                broad = True
+        elif path_class.kind in {PathKind.DOC_INPUT, PathKind.DATA}:
+            broad = True
+        else:
+            broad = repository = True
+    return DevTestScope(
+        tuple(sorted(packages)), broad, facade, repository, tuple(sorted(scripts))
     )
 
 
@@ -486,12 +806,16 @@ def classify(
     if any(not path or path.startswith("/") or "\x00" in path for path in paths):
         raise PlanError("the diff contained an invalid repository path")
 
-    global_invalidator = any(_is_global_invalidator(path) for path in paths)
+    classes = {path: classify_path(path) for path in paths}
+    kinds = {path: path_class.kind for path, path_class in classes.items()}
+    global_invalidator = any(kind is PathKind.SHARED for kind in kinds.values())
     has_deletion = any(status == "D" for status, _ in changes)
-    docs_deletion = any(status == "D" and _is_docs_path(path) for status, path in changes)
-    ambiguous = sorted(path for path in paths if not _is_known_path(path))
-    docs_only = all(_is_docs_path(path) for path in paths) and not has_deletion
-    non_docs = [path for path in paths if not _is_docs_path(path)]
+    docs_deletion = any(
+        status == "D" and kinds[path] is PathKind.DOCS for status, path in changes
+    )
+    ambiguous = sorted(path for path, kind in kinds.items() if kind is PathKind.UNKNOWN)
+    docs_only = all(kind is PathKind.DOCS for kind in kinds.values()) and not has_deletion
+    non_docs = [path for path, kind in kinds.items() if kind is not PathKind.DOCS]
     workbench_hit = any(
         _is_workbench_path(path) or _is_workbench_dependency_path(path, workbench_dirs)
         for path in paths
@@ -537,7 +861,7 @@ def classify(
             "regress": str(any(_is_regress_path(path) for path in paths)).lower(),
             "schema": str(any(_is_schema_path(path) for path in paths)).lower(),
             "facade": str(any(_is_facade_path(path) for path in paths)).lower(),
-            "tooling": str(any(_is_tooling_path(path) for path in paths)).lower(),
+            "tooling": str(any(_is_tooling_class(c) for c in classes.values())).lower(),
             # `stores` is path-derived (see _is_stores_path); `functional_e2e`
             # and `workers_e2e` keep the breadth flag because their jobs are
             # dispatch/label-only anyway.
@@ -738,8 +1062,44 @@ def main() -> int:
         default="false",
     )
 
+    scope_parser = subparsers.add_parser(
+        "gate-scope", help="classify a branch into the push-gate families it can affect"
+    )
+    scope_parser.add_argument("--base", default="origin/main")
+    scope_parser.add_argument("--head", default="HEAD")
+    scope_parser.add_argument(
+        "--paths-from",
+        help="read the touched paths from this file ('-' for stdin) instead of git",
+    )
+    scope_parser.add_argument("--format", choices=("text", "env"), default="text")
+    scope_parser.add_argument(
+        "--no-worktree", action="store_true", help="ignore uncommitted changes"
+    )
+    scope_parser.add_argument("--repo", type=Path, default=REPO_ROOT, help=argparse.SUPPRESS)
+
     subparsers.add_parser("conclusion")
     args = parser.parse_args()
+
+    if args.command == "gate-scope":
+        try:
+            if args.paths_from:
+                raw = (
+                    sys.stdin.read()
+                    if args.paths_from == "-"
+                    else Path(args.paths_from).read_text(encoding="utf-8")
+                )
+                paths = [line.strip() for line in raw.splitlines()]
+            else:
+                paths = collect_gate_paths(
+                    args.repo, args.base, args.head, not args.no_worktree
+                )
+        except (RuntimeError, OSError) as error:
+            print(f"gate-scope: {error}", file=sys.stderr)
+            print("gate-scope: callers must treat this as 'run everything'", file=sys.stderr)
+            return 2
+        scope = gate_scope(paths, args.repo)
+        print(render_gate_env(scope) if args.format == "env" else render_gate_text(scope))
+        return 0
 
     if args.command == "classify":
         try:
