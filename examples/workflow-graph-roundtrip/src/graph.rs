@@ -299,7 +299,7 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
         .iter()
         .filter_map(|declaration| match declaration {
             WorkflowDeclaration::Process(process)
-                if !bound.contains(&process.name) && !is_lifted_process(&process.name) =>
+                if !bound.contains(&process.name) && !process.origin.is_lifted() =>
             {
                 Some(process.name.clone())
             }
@@ -326,12 +326,6 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
         };
         graph.main.nodes.insert(offset, node);
     }
-}
-
-/// A lifted process has no module declaration of its own, so nothing about it
-/// is authored under this name.
-pub(super) fn is_lifted_process(name: &str) -> bool {
-    name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX)
 }
 
 /// The freshly declared process a body is being rebuilt for.
@@ -910,6 +904,7 @@ fn node_from_flow_data(
                     "iterable",
                     &FragmentScope::of_data(data, graph_scope),
                 )?,
+                bind: None,
                 body: Box::new(WorkflowSubgraph::default()),
             },
             Some("comprehension") => WorkflowContainer::ListComprehension {

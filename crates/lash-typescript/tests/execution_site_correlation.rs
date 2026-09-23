@@ -14,7 +14,6 @@
 //! header comment on the test says what replaced it.
 
 use lash_typescript::parse;
-use lash_typescript::workflow_graph::workflow_graph_from_program;
 use lashlang::testing::ast_builders as b;
 use lashlang::testing::harness::{
     EchoHost, compile_labeled_program, compiled_execution_sites, link_labeled,
@@ -24,6 +23,14 @@ use lashlang::{
     ExecutionOutcome, LashlangExecutionObservation, Program, State, Value, WorkflowEffectKind,
     WorkflowNodeKind,
 };
+
+/// The language-neutral IR projection, with TypeScript opaque-statement text.
+fn workflow_graph_from_program(program: &lashlang::Program) -> lashlang::WorkflowGraph {
+    lashlang::workflow_graph_from_program(
+        program,
+        &lash_typescript::workflow_graph::TypeScriptStatementText,
+    )
+}
 
 /// A `(kind, label, path)` triple for every execution site the compiler emitted,
 /// ordered by path so the compiler's and the graph's lists are comparable.

@@ -11,7 +11,7 @@
 
 use std::collections::BTreeSet;
 
-use lash_typescript::workflow_graph::{workflow_graph_from_program, workflow_graph_from_source};
+use lash_typescript::workflow_graph::{TypeScriptStatementText, workflow_graph_from_source};
 use lashlang::testing::harness::test_environment;
 use lashlang::{Declaration, Expr, LinkedModule, Program, WorkflowDeclaration, WorkflowGraph};
 
@@ -144,8 +144,8 @@ fn l3_alpha_renaming_private_binders_preserves_node_ids() {
         let program = link(source).program().clone();
         let renamed = alpha_rename(&program);
         assert_ne!(program, renamed, "the corpus source has private binders");
-        let original = workflow_graph_from_program(&program);
-        let alpha = workflow_graph_from_program(&renamed);
+        let original = lashlang::workflow_graph_from_program(&program, &TypeScriptStatementText);
+        let alpha = lashlang::workflow_graph_from_program(&renamed, &TypeScriptStatementText);
         let main_ids = |graph: &WorkflowGraph| {
             graph
                 .main
@@ -181,7 +181,8 @@ fn l4_draft_and_admitted_projections_agree() {
     for source in CORPUS {
         let draft = workflow_graph_from_source(source).expect("corpus source projects");
         let linked = link(source);
-        let admitted = workflow_graph_from_program(&linked.artifact.canonical_ir);
+        let admitted =
+            lashlang::workflow_graph_from_artifact(&linked.artifact, &TypeScriptStatementText);
         assert_eq!(
             process_owners(&draft),
             process_owners(&admitted),

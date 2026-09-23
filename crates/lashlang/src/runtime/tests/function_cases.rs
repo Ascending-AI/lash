@@ -478,6 +478,7 @@ async fn caller_and_callee_iterators_round_trip_and_corrupt_frames_fail_closed()
                     Expr::For {
                         binding: "inner".into(),
                         iterable: Box::new(variable("values")),
+                        bind: None,
                         body: Box::new(Expr::Print(Box::new(variable("inner")))),
                     },
                     variable("values"),
@@ -494,6 +495,7 @@ async fn caller_and_callee_iterators_round_trip_and_corrupt_frames_fail_closed()
                     Expr::For {
                         binding: "outer".into(),
                         iterable: Box::new(variable("values")),
+                        bind: None,
                         body: Box::new(call(variable("callee"), vec![variable("values")])),
                     },
                     variable("values"),

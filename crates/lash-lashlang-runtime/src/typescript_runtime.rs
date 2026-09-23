@@ -1,22 +1,19 @@
-/// The reserved resource type the TypeScript lowerer mints for `Date.now()`,
-/// `new Date()` and `Math.random()`. Only
-/// [`crate::lashlang_host_environment_from_tool_catalog`] ever registers it, so
-/// the type alone identifies the receiver.
+/// Whether `receiver` is the language-runtime receiver.
 ///
-/// The receiver's *alias* does not: the lowerer emits `builtin`
-/// (`lash_typescript::lower::stdlib::journaled_runtime_call`), and linking a
-/// module call rewrites the receiver to the catalog's resolved module ref,
-/// whose alias is the module-path key `__typescript_runtime`. Both forms reach
-/// a host, so neither alias may gate this dispatch (FIG-3079).
-pub use lash_typescript::TYPESCRIPT_RUNTIME_RESOURCE_TYPE;
-
+/// Only [`crate::lashlang_host_environment_from_tool_catalog`] registers
+/// [`lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE`], so the type alone identifies
+/// the receiver. Its *alias* does not: a front end emits one alias and linking
+/// a module call rewrites the receiver to the catalog's resolved module ref,
+/// whose alias is the module-path key. Both forms reach a host, so neither
+/// alias may gate this dispatch (FIG-3079).
+///
 /// This is invoked only while resolving a VM `ResourceOperation` ability. That
 /// suspension is the journal boundary: the sampled value is committed as the
 /// ability outcome and replay never samples the clock or RNG again.
 pub fn is_typescript_runtime_receiver(receiver: &lashlang::Value) -> bool {
     matches!(
         receiver,
-        lashlang::Value::Resource(handle) if handle.resource_type == TYPESCRIPT_RUNTIME_RESOURCE_TYPE
+        lashlang::Value::Resource(handle) if handle.resource_type == lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE
     )
 }
 
@@ -57,7 +54,7 @@ pub(crate) async fn journaled_typescript_runtime_value_recording(
     let lashlang::Value::Resource(handle) = receiver else {
         return None;
     };
-    if handle.resource_type != TYPESCRIPT_RUNTIME_RESOURCE_TYPE {
+    if handle.resource_type != lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE {
         return None;
     }
     if !args.is_empty() {
@@ -66,8 +63,8 @@ pub(crate) async fn journaled_typescript_runtime_value_recording(
         ))));
     }
     if ![
-        lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
-        lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION,
+        lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
+        lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION,
     ]
     .contains(&operation)
     {

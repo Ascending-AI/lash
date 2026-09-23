@@ -133,6 +133,7 @@ async fn one_function_serves_many_call_sites() {
             Expr::For {
                 binding: "name".into(),
                 iterable: Box::new(Expr::List(vec![string("a"), string("b")])),
+                bind: None,
                 body: Box::new(Expr::Block(vec![assign(
                     "parts",
                     call(
@@ -539,6 +540,7 @@ async fn a_function_may_be_called_from_a_process_body() {
                 signals: Vec::new(),
                 return_ty: None,
                 label: None,
+                origin: Default::default(),
                 body: Expr::Block(vec![finish(call("shout", vec![string("ada")]))]),
             }),
         ],
@@ -635,6 +637,7 @@ async fn a_process_name_is_rejected_in_a_function() {
         signals: Vec::new(),
         return_ty: None,
         label: None,
+        origin: Default::default(),
         body: Expr::Block(vec![finish(number(1.0))]),
     });
     let (function, construct) = forbidden_construct(vec![worker], var("worker"));
@@ -652,6 +655,7 @@ async fn an_effect_nested_deep_in_a_function_is_still_rejected() {
             Expr::For {
                 binding: "path".into(),
                 iterable: Box::new(Expr::List(vec![string("a.txt")])),
+                bind: None,
                 body: Box::new(Expr::Block(vec![if_else(
                     binary(
                         call("len", vec![var("path")]),

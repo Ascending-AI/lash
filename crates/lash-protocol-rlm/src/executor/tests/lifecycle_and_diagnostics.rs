@@ -1048,8 +1048,7 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
     );
     assert_eq!(
         trace.identity().source_identity,
-        lash_typescript::workflow_graph::workflow_graph_from_program(&artifact.canonical_ir)
-            .source_identity,
+        artifact.source_identity(),
         "the RLM trace identity must carry the projector's source identity"
     );
     assert_eq!(trace.identity().attempt(), Some(2));

@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     CallArg, Expr, FunctionBody, GENERATED_BINDING_PREFIX, MemberProperty, Pattern, Stmt,
-    reserved_identifier,
+    is_reserved_name, reserved_identifier,
 };
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -100,7 +100,7 @@ impl super::Lowerer {
                 None,
             ));
         }
-        if name.starts_with(GENERATED_BINDING_PREFIX) {
+        if is_reserved_name(name) {
             return Err(reserved_identifier(name));
         }
         // Mangling exists to stop an inner scope from overwriting an outer slot

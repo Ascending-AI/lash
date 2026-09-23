@@ -60,14 +60,12 @@ fn resource_operation_value(call: &lashlang::ResourceOperation, index: usize) ->
         _ => "",
     };
     match (alias, call.operation.as_str()) {
-        (
-            lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH,
-            lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
-        ) => Value::Number(1_700_000_000_000.0),
-        (
-            lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH,
-            lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION,
-        ) => Value::Number(0.5),
+        (lashlang::LANGUAGE_RUNTIME_MODULE_PATH, lashlang::LANGUAGE_RUNTIME_NOW_OPERATION) => {
+            Value::Number(1_700_000_000_000.0)
+        }
+        (lashlang::LANGUAGE_RUNTIME_MODULE_PATH, lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION) => {
+            Value::Number(0.5)
+        }
         ("triggers", "register") => trigger_registration_value(),
         ("processes", "start") => process_handle("fluency-run"),
         _ => Value::String(format!("page-{}", index + 1).into()),
@@ -121,18 +119,18 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
     let mut catalog = lashlang::LashlangHostCatalog::new();
     for (operation, host_operation) in [
         (
-            lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+            lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
             "typescript.runtime.now",
         ),
         (
-            lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION,
+            lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION,
             "typescript.runtime.random",
         ),
     ] {
         catalog
             .add_module_operation_contract(
-                [lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH],
-                lash_typescript::TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
+                [lashlang::LANGUAGE_RUNTIME_MODULE_PATH],
+                lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE,
                 operation,
                 host_operation,
                 &lashlang::OperationContract::new(

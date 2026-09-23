@@ -5,10 +5,10 @@
 //! comments and authored formatting are discarded. Hosts own graph mutation,
 //! drafts, layout, and versioning.
 //!
-//! Projection, validation, printing and parsing live in `lash-typescript`
-//! (`lash_typescript::workflow_graph`): TypeScript is the only cell language,
-//! so every piece of the lens that renders or parses node text belongs with
-//! that dialect. This module names no source syntax at all.
+//! Projection from IR lives here, beside the IR (ADR 0100 R8), and names no
+//! source syntax: a dialect injects the text of opaque statements. Printing a
+//! graph back to source and parsing edited node text belong to the dialect
+//! (`lash_typescript::workflow_graph` for TypeScript).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,20 +20,25 @@ use lash_sansio::WorkflowExecutionSite;
 use lash_sansio::core_support::Blake3DomainHasher;
 
 use crate::ast::{
-    AssignTarget, AstString, Expr, FunctionDecl, ProcessParam, ProcessSignalDecl, TypeDecl,
-    TypeExpr,
+    AssignTarget, AstString, Expr, FunctionDecl, ProcessOrigin, ProcessParam, ProcessSignalDecl,
+    TypeDecl, TypeExpr,
 };
 use crate::span::Span;
 
 mod execution_sites;
 mod facets;
 mod ownership;
+mod projection;
 
 pub use execution_sites::execution_sites;
 pub use facets::*;
-pub(crate) use ownership::main_workflow_projection;
 pub use ownership::{
-    WorkflowNodePath, WorkflowOwnership, WorkflowProjection, process_workflow_projection,
+    ListedStatement, WorkflowBody, WorkflowBodySlot, WorkflowNodePath, WorkflowOwnership,
+    WorkflowProjection, WorkflowStatement, statement_list,
+};
+pub use projection::{
+    NoStatementText, WorkflowGraphProjector, WorkflowStatementText, else_if_chain,
+    workflow_graph_from_artifact, workflow_graph_from_program,
 };
 
 /// Version of the serialized workflow graph contract. Version 15 closes the
@@ -551,6 +556,10 @@ pub struct WorkflowProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "deserialize_strict")]
     pub return_ty: Option<TypeExpr>,
+    /// Whether the process was declared or lifted from an inline literal.
+    #[serde(default, skip_serializing_if = "ProcessOrigin::is_declared")]
+    #[serde(deserialize_with = "deserialize_strict")]
+    pub origin: ProcessOrigin,
     pub body: WorkflowSubgraph,
 }
 
@@ -875,10 +884,16 @@ pub enum WorkflowContainer {
         then_graph: Box<WorkflowSubgraph>,
         else_graph: Box<WorkflowSubgraph>,
     },
+    /// An iteration: the IR's element binding, iterable and bind, exactly as
+    /// the loop runs them. A dialect's printer reads its authored loop header
+    /// back off these fields.
     For {
         binding: String,
         #[serde(deserialize_with = "deserialize_strict")]
         iterable: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
+        bind: Option<Expr>,
         body: Box<WorkflowSubgraph>,
     },
     While {
@@ -977,8 +992,8 @@ pub enum WorkflowEdgeKind {
 impl WorkflowNodeId {
     /// Wraps an already-minted node identifier.
     ///
-    /// The projector that mints these lives in `lash-typescript`, so the
-    /// constructor is public; the value is opaque everywhere else.
+    /// Graph documents a host builds carry ids it read off a projection, so
+    /// the constructor is public; the value is opaque everywhere else.
     pub fn new(id: String) -> Self {
         Self(id)
     }

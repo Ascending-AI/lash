@@ -377,6 +377,7 @@ mod tests {
             signals: vec![b::signal("done", crate::TypeExpr::Str)],
             return_ty: Some(crate::TypeExpr::Str),
             label: Some(b::label("Watcher", Some("Tracks button presses"))),
+            origin: crate::ProcessOrigin::Declared,
             body: b::block(vec![
                 b::assign(
                     "opened",

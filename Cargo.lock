@@ -2339,7 +2339,6 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
- "lash-internal-typescript",
  "serde",
  "serde_json",
  "tempfile",

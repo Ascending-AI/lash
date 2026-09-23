@@ -99,6 +99,17 @@ impl<'module> Linker<'module> {
             Expr::LabelAnnotated { label, expr: inner } => {
                 self.lower_label_annotated(path, label, inner, scope, expected)
             }
+            Expr::Role { role, expr: inner } => {
+                let (inner, binding) =
+                    self.lower_expr_expected(inner, &path.child(0), scope, expected)?;
+                Ok((
+                    Expr::Role {
+                        role: role.clone(),
+                        expr: Box::new(inner),
+                    },
+                    binding,
+                ))
+            }
             Expr::Variable(name) => self.lower_variable(name, scope),
             Expr::Null
             | Expr::Undefined
@@ -129,8 +140,9 @@ impl<'module> Linker<'module> {
             Expr::For {
                 binding,
                 iterable,
+                bind,
                 body,
-            } => self.lower_for(expr, path, binding, iterable, body, scope),
+            } => self.lower_for(expr, path, binding, iterable, bind.as_deref(), body, scope),
             Expr::While { condition, body } => self.lower_while(expr, path, condition, body, scope),
             Expr::ProcessRef { process } => self.lower_process_ref(process, scope),
             Expr::HostDescriptorConstructor { type_name, input } => {
@@ -611,12 +623,17 @@ impl<'module> Linker<'module> {
         ))
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each argument is one field of the `For` being lowered"
+    )]
     pub(super) fn lower_for(
         &self,
         original: &Expr,
         path: &AstPath,
         binding: &AstString,
         iterable: &Expr,
+        bind: Option<&Expr>,
         body: &Expr,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
@@ -644,7 +661,13 @@ impl<'module> Linker<'module> {
         let before_loop = iterable_scope.clone();
         let mut body_scope = iterable_scope;
         let previous = body_scope.bind(binding.as_str(), self.binding_for_type(&item_ty));
-        let body_path = path.child(1);
+        let bind = bind
+            .map(|bind| {
+                self.lower_expr(bind, &path.child(1), &mut body_scope)
+                    .map(|(bind, _)| Box::new(bind))
+            })
+            .transpose()?;
+        let body_path = path.child(Expr::for_body_index(bind.as_deref()));
         let body = self.lower_expr(body, &body_path, &mut body_scope)?.0;
         if self.collect_completion.get() {
             let mut completion = self
@@ -668,6 +691,7 @@ impl<'module> Linker<'module> {
             Expr::For {
                 binding: binding.clone(),
                 iterable: Box::new(iterable),
+                bind,
                 body: Box::new(body),
             },
             Binding::Value(TypeExpr::Null),

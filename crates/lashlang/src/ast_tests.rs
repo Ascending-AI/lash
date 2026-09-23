@@ -184,6 +184,7 @@ fn a_started_handle_may_be_the_inferred_output_of_a_process() {
             optional: false,
         }])),
         label: None,
+        origin: Default::default(),
         body: Expr::Null,
     })];
     assert!(validate_ast(&finishes_a_handle).is_ok());
@@ -195,6 +196,7 @@ fn a_started_handle_may_be_the_inferred_output_of_a_process() {
         signals: Vec::new(),
         return_ty: None,
         label: None,
+        origin: Default::default(),
         body: Expr::Null,
     })];
     assert!(matches!(

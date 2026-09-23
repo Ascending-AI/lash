@@ -33,20 +33,6 @@ pub fn parse_unguarded_for_measurement(source: &str) -> Result<lashlang::Program
 /// never something a caller should render back to a user.
 pub const GENERATED_BINDING_PREFIX: &str = lower::GENERATED_BINDING_PREFIX;
 
-/// The module-path key under which the host registers the TypeScript runtime's
-/// journaled builtins, and the alias a linked receiver rewrites to.
-pub const TYPESCRIPT_RUNTIME_MODULE_PATH: &str = "__typescript_runtime";
-
-/// The reserved resource type the lowerer mints for `Date.now()`, `new Date()`
-/// and `Math.random()` receivers.
-pub const TYPESCRIPT_RUNTIME_RESOURCE_TYPE: &str = "typescript.Runtime";
-
-/// The journaled operation `Date.now()` lowers to.
-pub const TYPESCRIPT_RUNTIME_NOW_OPERATION: &str = "now";
-
-/// The journaled operation `Math.random()` lowers to.
-pub const TYPESCRIPT_RUNTIME_RANDOM_OPERATION: &str = "random";
-
 /// Exposed so the register's documented inventory can be pinned against the
 /// allowlist instead of being maintained by hand.
 pub fn accepts_instance_method(method: &str) -> bool {

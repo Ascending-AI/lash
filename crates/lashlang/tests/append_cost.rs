@@ -186,6 +186,7 @@ fn probe_program(body: Expr, iterations: usize) -> Program {
                 "range",
                 vec![Expr::Number(0.0), Expr::Number(iterations as f64)],
             )),
+            bind: None,
             body: Box::new(Expr::Block(vec![body])),
         },
         Expr::Finish(Box::new(Expr::Binary {
@@ -286,6 +287,7 @@ fn an_append_charges_what_the_object_measures() {
                 "range",
                 vec![Expr::Number(0.0), Expr::Number(64.0)],
             )),
+            bind: None,
             body: Box::new(Expr::Block(vec![
                 index_append(Expr::Binary {
                     op: BinaryOp::Add,

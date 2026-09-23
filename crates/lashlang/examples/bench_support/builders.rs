@@ -53,6 +53,7 @@ pub fn process(name: &str, params: Vec<ProcessParam>, body: Expr) -> Declaration
         signals: Vec::new(),
         return_ty: None,
         label: None,
+        origin: Default::default(),
         body,
     })
 }
@@ -70,6 +71,7 @@ pub fn process_returning(
         signals: Vec::new(),
         return_ty: Some(return_ty),
         label: None,
+        origin: Default::default(),
         body,
     })
 }
@@ -87,6 +89,7 @@ pub fn process_with_signals(
         signals,
         return_ty: None,
         label: None,
+        origin: Default::default(),
         body,
     })
 }
@@ -104,6 +107,7 @@ pub fn labelled_process(
         signals: Vec::new(),
         return_ty: None,
         label: Some(label),
+        origin: Default::default(),
         body,
     })
 }
@@ -280,6 +284,7 @@ pub fn for_in(binding: &str, iterable: Expr, body: Expr) -> Expr {
     Expr::For {
         binding: binding.into(),
         iterable: Box::new(iterable),
+        bind: None,
         body: Box::new(body),
     }
 }

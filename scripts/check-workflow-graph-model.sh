@@ -27,9 +27,9 @@ if ! grep -qE 'lash_lashlang_runtime::trace_lashlang_main_map\(artifact\)' \
   exit 1
 fi
 
-if ! grep -q 'workflow_graph_from_program' \
+if ! grep -q 'lashlang::workflow_graph_from_artifact' \
   crates/lash-lashlang-runtime/src/process/trace_map.rs; then
-  echo "workflow graph model check failed: trace skeleton no longer projects WorkflowGraph" >&2
+  echo "workflow graph model check failed: trace skeleton no longer projects the admitted artifact's WorkflowGraph" >&2
   exit 1
 fi
 
@@ -98,5 +98,61 @@ for crate, tables in (
 if failures:
     for trail in failures:
         print(f"workflow graph model check failed: language-neutral crate reaches a front end: {trail}", file=sys.stderr)
+    sys.exit(1)
+PY
+
+# FIG-3571: structure is read from IR forms and structural roles, never from a
+# binding's spelling. The structural consumers — ownership, the compiler's
+# execution sites, the projector, the dialect printer and the runtime's trace
+# maps — may compare a builtin against the declared opcode vocabulary by exact
+# name, but they may not recognise a shape by a name prefix or suffix. The
+# front end's own binding-generation code (the lowerer) is where generated
+# names are minted and reserved, and is outside this scan.
+python3 - <<'PY'
+import re
+import sys
+from pathlib import Path
+
+STRUCTURAL = [
+    "crates/lashlang/src/workflow_graph.rs",
+    "crates/lashlang/src/workflow_graph",
+    "crates/lashlang/src/runtime/compiler.rs",
+    "crates/lashlang/src/runtime/compiler",
+    "crates/lash-typescript/src/workflow_graph",
+    "crates/lash-lashlang-runtime/src/process/trace_map.rs",
+    "examples/workflow-graph-roundtrip/src",
+]
+RECOGNITION = re.compile(
+    r"\.(starts_with|ends_with|strip_prefix|strip_suffix)\(\s*\"_"
+    r"|GENERATED_BINDING_PREFIX|LIFTED_PROCESS_NAME_PREFIX"
+)
+# The printer refuses to spell a generated binding as source; that is a
+# spelling refusal, not a structural decision.
+ALLOWED = {("crates/lash-typescript/src/workflow_graph/printer.rs", "GENERATED_BINDING_PREFIX")}
+
+
+def is_test(path):
+    parts = path.parts
+    return "tests" in parts or path.name.endswith("_tests.rs") or path.name == "tests.rs"
+
+
+failures = []
+for entry in STRUCTURAL:
+    root = Path(entry)
+    files = [root] if root.is_file() else sorted(root.rglob("*.rs"))
+    for path in files:
+        if is_test(path):
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            match = RECOGNITION.search(line)
+            if not match:
+                continue
+            token = "GENERATED_BINDING_PREFIX" if "GENERATED_BINDING_PREFIX" in line else match.group(0)
+            if (str(path), token) in ALLOWED:
+                continue
+            failures.append(f"{path}:{number}: {line.strip()}")
+if failures:
+    print("workflow graph model check failed: structure recognised by a name:", file=sys.stderr)
+    print("\n".join(failures), file=sys.stderr)
     sys.exit(1)
 PY

@@ -113,6 +113,7 @@ pub fn for_range(binding: &str, end: f64, body: Vec<Expr>) -> Expr {
     Expr::For {
         binding: binding.into(),
         iterable: Box::new(call("range", vec![number(0.0), number(end)])),
+        bind: None,
         body: Box::new(Expr::Block(body)),
     }
 }

@@ -13,8 +13,8 @@ use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
     GraphRenderError, TypeScriptSourceError, WorkflowGraphBuildError,
     parse_typescript_assign_target, parse_typescript_expression, typescript_program_source,
-    validate, workflow_graph_from_program, workflow_graph_from_source,
-    workflow_graph_from_source_with_facets, workflow_graph_to_source,
+    validate, workflow_graph_from_source, workflow_graph_from_source_with_facets,
+    workflow_graph_to_source,
 };
 use lashlang::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField,
@@ -26,6 +26,14 @@ use lashlang::{
     WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowSlotPath, WorkflowSlotPathSegment,
     WorkflowSubgraph, WorkflowTypeDiagnostic, reconcile, workflow_call_to_ir, workflow_slot_value,
 };
+
+/// The language-neutral IR projection, with TypeScript opaque-statement text.
+fn workflow_graph_from_program(program: &lashlang::Program) -> lashlang::WorkflowGraph {
+    lashlang::workflow_graph_from_program(
+        program,
+        &lash_typescript::workflow_graph::TypeScriptStatementText,
+    )
+}
 
 /// The one process a fixture lifts.
 ///
@@ -929,6 +937,7 @@ fn missing_and_null_container_children_fail_at_decode() {
             WorkflowContainer::For {
                 binding: "item".to_string(),
                 iterable: ir("[]"),
+                bind: None,
                 body: empty(),
             },
             "body",

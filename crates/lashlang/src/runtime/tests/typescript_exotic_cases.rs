@@ -714,6 +714,7 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
             Expr::For {
                 binding: "value".into(),
                 iterable: Box::new(Expr::Variable("set".into())),
+                bind: None,
                 body: Box::new(ts_assign(
                     "total",
                     Expr::JavaScriptBinary {
@@ -745,6 +746,7 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
             Expr::For {
                 binding: "entry".into(),
                 iterable: Box::new(Expr::Variable("map".into())),
+                bind: None,
                 body: Box::new(ts_assign(
                     "total",
                     Expr::JavaScriptBinary {
@@ -806,6 +808,7 @@ async fn set_normalizes_negative_zero_before_iteration() {
         Expr::For {
             binding: "value".into(),
             iterable: Box::new(Expr::Variable("set".into())),
+            bind: None,
             body: Box::new(ts_assign(
                 "reciprocal",
                 Expr::JavaScriptBinary {
@@ -1272,6 +1275,7 @@ async fn stored_per_iteration_closures_stay_inside_the_vm_across_calls_and_parks
                 "range",
                 vec![Expr::Number(0.0), Expr::Number(2.0)],
             )),
+            bind: None,
             body: Box::new(Expr::Block(vec![ts_assign(
                 "callbacks",
                 private_builtin("push", vec![Expr::Variable("callbacks".into()), callback]),

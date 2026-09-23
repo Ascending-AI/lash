@@ -1031,14 +1031,12 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
         environment: &environment,
     })
     .expect("labeled workflow compiles");
-    // The lens moved to the TypeScript crate (FIG-3033). This witness is
-    // Lashlang source — `@label` and a list comprehension have no TypeScript
-    // form — so it projects the parsed program rather than the source: the
-    // program projection is language-agnostic and does not round-trip through
-    // canonical TypeScript.
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_program(&program);
+    // The projection is language-neutral and lives beside the IR (ADR 0100
+    // R8): this witness is direct IR — `@label` and a list comprehension have
+    // no TypeScript form — and projects with no dialect in the graph.
+    let graph = lashlang::workflow_graph_from_program(&program, &lashlang::NoStatementText);
     let trace_graph =
-        lash_typescript::workflow_graph::workflow_graph_from_program(&output.artifact.canonical_ir);
+        lashlang::workflow_graph_from_artifact(&output.artifact, &lashlang::NoStatementText);
     let trace_map = trace_lashlang_main_map(&output.artifact);
     assert_eq!(
         trace_lashlang_source_identity(&output.artifact),

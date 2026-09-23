@@ -362,25 +362,28 @@ impl Lowerer {
         } else {
             Self::iterable_copy(source)
         };
-        let expressions = self.with_loop(|lowerer| {
+        let (bind, body) = self.with_loop(|lowerer| {
             lowerer.continue_epilogues.push(None);
-            let expressions = (|| {
-                let mut expressions = lowerer.lower_pattern(
+            let parts = (|| {
+                let bind = lowerer.lower_pattern(
                     pattern,
                     LashExpr::Variable(iteration.as_str().into()),
                     mode,
                 )?;
-                expressions.push(lowerer.lower_stmt_block(body)?);
-                Ok(expressions)
+                Ok((bind, lowerer.lower_stmt_block(body)?))
             })();
             lowerer.continue_epilogues.pop();
-            expressions
+            parts
         })?;
         self.scopes.pop();
+        // The element binds into the authored pattern before each iteration's
+        // body: that binding is the loop's own work, and only the body holds
+        // authored statements (the iteration role's `bind`).
         Ok(vec![LashExpr::For {
             binding: iteration.into(),
             iterable: Box::new(iterable),
-            body: Box::new(LashExpr::Block(expressions)),
+            bind: Some(Box::new(LashExpr::Block(bind))),
+            body: Box::new(body),
         }])
     }
 
@@ -517,6 +520,7 @@ impl Lowerer {
                                 "Object.entries",
                                 vec![Self::variable(&source)],
                             )),
+                            bind: None,
                             body: Box::new(LashExpr::Assign {
                                 target: AssignTarget {
                                     root: result.as_str().into(),
@@ -752,7 +756,9 @@ impl Lowerer {
             let result = LashExpr::Variable(target.root.clone());
             let value = self.lower_expr(value)?;
             self.clear_process_handle_role(name)?;
-            return Ok(LashExpr::Block(vec![
+            // The assignment statement, closed by the value an assignment
+            // expression evaluates to.
+            return Ok(super::completion_list(vec![
                 LashExpr::Assign {
                     target,
                     expr: Box::new(value),
@@ -806,6 +812,7 @@ impl Lowerer {
             TsAssignTarget::Ident(name) => Some(name.as_str()),
             _ => None,
         };
+        let member = matches!(target, TsAssignTarget::Member { .. });
         let (mut output, old, target) = self.reference(target)?;
         let result = self.temporary("assignment_result");
         match op {
@@ -816,6 +823,15 @@ impl Lowerer {
                     expr: Box::new(Self::variable(&result)),
                 });
                 output.push(Self::variable(&result));
+                if member {
+                    // `object.step = value`: the base is pinned before the
+                    // value runs, the store goes through the pinned base, and
+                    // the expression's value is the stored value.
+                    return Ok(LashExpr::Role {
+                        role: StructuralRole::AttributeAssign,
+                        expr: Box::new(LashExpr::Block(output)),
+                    });
+                }
             }
             AssignOp::Binary(op) => {
                 let rhs = self.lower_expr(value)?;
@@ -1382,7 +1398,7 @@ impl Lowerer {
                 args: vec![
                     LashExpr::String("Date".into()),
                     LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
-                        crate::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+                        lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
                     ))),
                 ],
             });
@@ -1426,11 +1442,20 @@ fn js_subtract(left: LashExpr, right: LashExpr) -> LashExpr {
     }
 }
 
+/// Whether an authored identifier falls in a namespace the front end or the
+/// linker generates names in: the lowerer's own bindings, and the declarations
+/// the linker lifts process literals to.
+pub(super) fn is_reserved_name(name: &str) -> bool {
+    name.starts_with(GENERATED_BINDING_PREFIX)
+        || name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
+}
+
 pub(super) fn reserved_identifier(name: &str) -> Diagnostic {
     Diagnostic::new(
         DiagnosticCode::ReservedIdentifier,
         format!(
-            "`{name}` is reserved: identifiers starting with `{GENERATED_BINDING_PREFIX}` name the lowerer's generated bindings"
+            "`{name}` is reserved: identifiers starting with `{GENERATED_BINDING_PREFIX}` or `{}` name generated bindings and lifted processes",
+            lashlang::LIFTED_PROCESS_NAME_PREFIX
         ),
         None,
     )

@@ -1,5 +1,12 @@
 use super::*;
 
+/// A `for` loop's per-iteration code: the bind that runs first, then the body.
+#[derive(Clone, Copy)]
+pub(super) struct LoopBody<'a> {
+    bind: Option<&'a Expr>,
+    body: &'a Expr,
+}
+
 /// What an awaited-comprehension loop appends per accepted element.
 #[derive(Clone)]
 pub(super) enum ListComprehensionElement<'a> {
@@ -45,7 +52,7 @@ impl Compiler {
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
-            node_paths: crate::workflow_graph::main_workflow_projection(program)
+            node_paths: crate::workflow_graph::WorkflowProjection::for_main(program)
                 .into_ownership_map(),
             sites: Vec::new(),
         });
@@ -69,7 +76,7 @@ impl Compiler {
         );
         compiler.lashlang_execution = Some(LashlangExecutionCompileContext {
             context: lashlang_execution_context,
-            node_paths: crate::workflow_graph::process_workflow_projection(
+            node_paths: crate::workflow_graph::WorkflowProjection::for_process(
                 &program.main,
                 AstPath::main(Vec::new()),
             )
@@ -514,6 +521,7 @@ impl Compiler {
                 }
                 self.compile_expr_discarding_value(expr, &path.child(0));
             }
+            Expr::Role { expr, .. } => self.compile_expr_discarding_value(expr, &path.child(0)),
             Expr::Block(expressions) => {
                 for (index, expression) in expressions.iter().enumerate() {
                     self.compile_expr_discarding_value(expression, &path.child(index as u32));
@@ -525,8 +533,9 @@ impl Compiler {
             Expr::For {
                 binding,
                 iterable,
+                bind,
                 body,
-            } => self.compile_for_expr(binding, iterable, body, false, path),
+            } => self.compile_for_expr(binding, iterable, bind.as_deref(), body, false, path),
             Expr::While { condition, body } => {
                 self.compile_while_expr(condition, body, false, path)
             }
@@ -793,11 +802,13 @@ impl Compiler {
         &mut self,
         binding: &str,
         iterable: &Expr,
+        bind: Option<&Expr>,
         body: &Expr,
         leave_value: bool,
         path: &AstPath,
     ) {
         let binding = self.push_slot(binding);
+        let loop_body = LoopBody { bind, body };
         if let Expr::BuiltinCall { name, args } = iterable
             && name.as_str() == "range"
         {
@@ -810,7 +821,7 @@ impl Compiler {
                 binding,
                 argc: args.len(),
             });
-            self.compile_for_loop_body(body, &path.child(1), path);
+            self.compile_for_loop_body(loop_body, path);
             self.push_null_if(leave_value);
             return;
         }
@@ -819,7 +830,7 @@ impl Compiler {
         self.clear_const_slots();
         self.set_const_slot(binding, None);
         self.code.push(Instruction::BeginIter(binding));
-        self.compile_for_loop_body(body, &path.child(1), path);
+        self.compile_for_loop_body(loop_body, path);
         self.push_null_if(leave_value);
     }
 
@@ -827,7 +838,7 @@ impl Compiler {
         clippy::expect_used,
         reason = "the loop context pushed a few lines above is popped exactly once at the end of the body"
     )]
-    fn compile_for_loop_body(&mut self, body: &Expr, body_path: &AstPath, loop_path: &AstPath) {
+    fn compile_for_loop_body(&mut self, loop_body: LoopBody<'_>, loop_path: &AstPath) {
         let loop_start = self.code.len();
         let iter_next = self.code.len();
         self.code.push(Instruction::IterNext {
@@ -839,7 +850,11 @@ impl Compiler {
             break_jumps: SmallVec::new(),
             handler_scope_depth: self.handler_scopes.len(),
         });
-        self.compile_block_discarding_values(body, body_path);
+        if let Some(bind) = loop_body.bind {
+            self.compile_expr_discarding_value(bind, &loop_path.child(1));
+        }
+        let body_index = Expr::for_body_index(loop_body.bind);
+        self.compile_block_discarding_values(loop_body.body, &loop_path.child(body_index));
         let loop_context = self
             .loop_contexts
             .pop()
@@ -1031,7 +1046,9 @@ impl Compiler {
     pub(super) fn fold_compile_time_expr(&self, expr: &Expr) -> Option<Value> {
         match expr {
             Expr::ProcessLiteral(_) => None,
-            Expr::LabelAnnotated { expr, .. } => self.fold_compile_time_expr(expr),
+            Expr::LabelAnnotated { expr, .. } | Expr::Role { expr, .. } => {
+                self.fold_compile_time_expr(expr)
+            }
             Expr::Null => Some(Value::Null),
             Expr::Undefined => Some(Value::Undefined),
             Expr::Bool(value) => Some(Value::Bool(*value)),

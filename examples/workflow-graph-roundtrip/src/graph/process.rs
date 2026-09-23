@@ -25,6 +25,7 @@ pub(super) fn process_from_data(
         params: Vec::new(),
         signals: Vec::new(),
         return_ty: None,
+        origin: Default::default(),
         body: WorkflowSubgraph::default(),
     });
     let process_id = ProcessId::from(process.id.to_string());
@@ -36,7 +37,7 @@ pub(super) fn process_from_data(
     // that echoes these fields back is echoing a projection, and the echo is
     // dropped here the way a type facet's is — accepting it would leave the
     // module with a second declaration nothing binds.
-    let derived = super::is_lifted_process(&process.name);
+    let derived = process.origin.is_lifted();
     if !derived {
         let name = data.process_name.as_deref().unwrap_or(data.name.title());
         process.name = editable_identifier(&process_id, "name", name)?;

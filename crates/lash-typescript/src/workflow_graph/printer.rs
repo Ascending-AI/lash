@@ -8,17 +8,20 @@
 //! surface, so the printer re-sugars the shapes it generates before falling
 //! back to the structural spelling:
 //!
-//! * `ProcessDecl { body: Try(Finish(Call(Function))) }` with the generated
-//!   `__typescript_process_error` catch prints back as
+//! * A process body in the process-wrapper role prints back as
 //!   `const <name> = async (..) => { .. };`.
 //! * `Print(__typescript_stdlib("__consoleObservationText", x))` prints back as
 //!   `console.log(x)`.
 //! * `__typescript_await_array([..], "all")` prints back as
 //!   `await Promise.all([..])`, and likewise for `allSettled`, `race` and
 //!   `any`; `__typescript_pending_timer(ms)` prints back as `sleep(ms)`.
-//! * The array-callback driver block — generated `__typescript_N_callback_*`
-//!   bindings around a `__typescript_stdlib("__singleCallbackResult", Map { .. })`
-//!   tail — prints back as `receiver.map(fn)` / `receiver.filter(fn)`.
+//! * A collection-transform role prints back as `receiver.<operation>(fn)`.
+//! * An attribute-assignment role prints back as `object.field = value`.
+//! * An iteration whose bind copies the element into one authored binding
+//!   prints back as `for (const x of source)` or `for (const x in source)`.
+//!
+//! Structure is read off IR forms and structural roles only; no generated
+//! name is ever inspected to decide what a shape is.
 //!
 //! A generated `__typescript_*` binding that reaches the printer without being
 //! re-sugared is a defect, not a rendering choice: it has no authored spelling,
@@ -28,7 +31,7 @@
 use lashlang::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessLiteralExpr,
-    Program, ResourceRefExpr, UnaryOp,
+    Program, ResourceRefExpr, StructuralRole, UnaryOp,
 };
 use thiserror::Error;
 
@@ -244,31 +247,31 @@ impl Printer {
         Ok(out)
     }
 
-    /// Print an already-normalised statement list as a braced block.
-    fn block_statements(
-        &self,
-        statements: &[Expr],
-        level: usize,
-        bound: &mut Vec<String>,
-    ) -> Printed {
-        if statements.is_empty() {
-            return Ok("{}".to_string());
-        }
-        let mut out = String::from("{\n");
-        for statement in statements {
-            out.push_str(&self.statement(statement, level + 1, bound)?);
-        }
-        out.push_str(&indent(level));
-        out.push('}');
-        Ok(out)
-    }
-
     fn statement(&self, expression: &Expr, level: usize, bound: &mut Vec<String>) -> Printed {
         let prefix = indent(level);
-        // The lowerer gives each statement in a block a value by wrapping it;
-        // the statement the user wrote is inside that wrapper.
-        let expression = authored_statement(expression);
         match expression {
+            // A statement the front end closed with a completion value prints
+            // as the statements it wraps.
+            Expr::Role {
+                role: StructuralRole::Completion,
+                ..
+            } => {
+                let mut out = String::new();
+                for statement in statement_block_contents(expression) {
+                    out.push_str(&self.statement(statement, level, bound)?);
+                }
+                Ok(out)
+            }
+            Expr::Role {
+                role: StructuralRole::Scope,
+                expr,
+            } => {
+                let mut inner = bound.clone();
+                Ok(format!(
+                    "{prefix}{}\n",
+                    self.block(expr, level, &mut inner)?
+                ))
+            }
             // The lowerer's unit completion value. It is not something a user
             // wrote, and `undefined;` is not a statement worth showing.
             Expr::Undefined => Ok(String::new()),
@@ -285,11 +288,9 @@ impl Printer {
                 }
                 Ok(format!("{prefix}{}\n{statement}", label_comment(label)?))
             }
-            expression if let Some((target, value)) = assignment_sugar(expression) => Ok(format!(
-                "{prefix}{} = {};\n",
-                self.assign_target(&target)?,
-                self.expression(value)?
-            )),
+            expression if let Some((target, value)) = attribute_assignment(expression)? => {
+                Ok(format!("{prefix}{target} = {};\n", self.expression(value)?))
+            }
             Expr::Block(_) => {
                 let mut inner = bound.clone();
                 Ok(format!(
@@ -321,7 +322,7 @@ impl Printer {
                 condition,
                 then_block,
                 else_block,
-            } if matches!(then_block.as_ref(), Expr::Block(_)) => {
+            } if is_statement_body(then_block) => {
                 let mut out = format!("{prefix}if ({}) ", self.expression(condition)?);
                 let mut then_bound = bound.clone();
                 out.push_str(&self.block(then_block, level, &mut then_bound)?);
@@ -340,7 +341,7 @@ impl Printer {
                         // An `else if` chain lowers to a block holding the one
                         // nested `if`, so a block of that shape prints back as
                         // the chain the author wrote rather than a nested block.
-                        match else_if_chain(other) {
+                        match lashlang::else_if_chain(other) {
                             Some(chain) => out.push_str(
                                 self.statement(chain, level, &mut else_bound)?
                                     .trim_start()
@@ -356,37 +357,19 @@ impl Printer {
             Expr::For {
                 binding,
                 iterable,
+                bind,
                 body,
             } => {
-                // `for (const x of xs)` lowers to a generated element binding
-                // over `Lash.ArrayFromIterable(xs)` whose body opens by copying
-                // the element into the authored binding. Re-sugar that shape
-                // back to the loop the user wrote.
-                if let Some((authored, iterable, body)) = for_of_sugar(binding, iterable, body) {
-                    let mut body_bound = bound.clone();
-                    body_bound.push(authored.to_string());
-                    return Ok(format!(
-                        "{prefix}for ({} {} of {}) {}\n",
-                        element_binding_kind(body, authored),
-                        self.identifier("loop binding", authored)?,
-                        self.expression(iterable)?,
-                        self.block_statements(
-                            match body {
-                                [single] => statement_block_contents(single),
-                                body => body,
-                            },
-                            level,
-                            &mut body_bound,
-                        )?
-                    ));
-                }
+                let header = loop_header(binding.as_str(), iterable, bind.as_deref())?;
                 let mut body_bound = bound.clone();
-                body_bound.push(binding.to_string());
+                body_bound.push(header.binding.to_string());
+                let statements = statement_block_contents(body);
                 Ok(format!(
-                    "{prefix}for ({} {} of {}) {}\n",
-                    element_binding_kind(statement_block_contents(body), binding.as_str()),
-                    self.identifier("loop binding", binding.as_str())?,
-                    self.expression(iterable)?,
+                    "{prefix}for ({} {} {} {}) {}\n",
+                    element_binding_kind(&statements, header.binding),
+                    self.identifier("loop binding", header.binding)?,
+                    if header.keys { "in" } else { "of" },
+                    self.expression(header.source)?,
                     self.block(body, level, &mut body_bound)?
                 ))
             }
@@ -638,6 +621,9 @@ impl Printer {
             Expr::Block(_) => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "a block in expression position",
             }),
+            Expr::Role { .. } => Err(TypeScriptSourceError::Unrepresentable {
+                kind: "a statement structure in expression position",
+            }),
             Expr::LabelAnnotated { .. } => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "a label-annotated expression",
             }),
@@ -704,66 +690,48 @@ impl Printer {
         {
             return Ok(Some(format!("sleep({})", self.expression(duration)?)));
         }
-        if let Some(sugared) = self.array_callback_sugar(expression)? {
+        if let Some(sugared) = self.collection_transform(expression)? {
             return Ok(Some(sugared));
+        }
+        if let Some((target, value)) = attribute_assignment(expression)? {
+            return Ok(Some(format!("({target} = {})", self.expression(value)?)));
         }
         Ok(None)
     }
 
-    /// Re-sugar the array-callback driver block the lowerer generates for
-    /// `receiver.map(fn)` and friends.
-    ///
-    /// The block is entirely generated: a `__typescript_N_callback_receiver`
-    /// binding, a `__typescript_N_callback_function` binding, a worker closure,
-    /// and a `__singleCallbackResult` tail that drives it. Nothing in it has an
-    /// authored spelling except the receiver, the callback, and the method name
-    /// the worker's shape identifies.
-    fn array_callback_sugar(
+    /// A collection-transform role prints back as `receiver.<operation>(fn)`
+    /// when its setup is exactly the receiver, the callback and the worker;
+    /// any other setup (an initial value, extra arguments) has no one-call
+    /// spelling here.
+    fn collection_transform(
         &self,
         expression: &Expr,
     ) -> Result<Option<String>, TypeScriptSourceError> {
-        let Expr::Block(statements) = expression else {
-            return Ok(None);
-        };
-        let Some((tail, setup)) = statements.split_last() else {
-            return Ok(None);
-        };
-        let Some(args) = stdlib_call(tail, "__singleCallbackResult") else {
-            return Ok(None);
-        };
-        let [Expr::Map { function, .. }] = args else {
-            return Ok(None);
-        };
-        let Expr::Variable(worker) = function.as_ref() else {
-            return Ok(None);
-        };
-        let mut receiver = None;
-        let mut callback = None;
-        let mut worker_body = None;
-        for statement in setup {
-            let Expr::Assign { target, expr } = statement else {
-                return Ok(None);
-            };
-            let name = target.root.as_str();
-            if name.ends_with("_callback_receiver") {
-                receiver = Some(expr.as_ref());
-            } else if name.ends_with("_callback_function") {
-                callback = Some(expr.as_ref());
-            } else if name == worker.as_str() {
-                worker_body = Some(expr.as_ref());
-            }
-        }
-        let (Some(receiver), Some(callback), Some(Expr::Function(worker))) =
-            (receiver, callback, worker_body)
+        let Expr::Role {
+            role: StructuralRole::CollectionTransform { operation },
+            expr,
+        } = expression
         else {
             return Ok(None);
         };
-        let Some(method) = array_callback_method(&worker.body) else {
+        let Expr::Block(items) = expr.as_ref() else {
             return Ok(None);
         };
+        let [
+            Expr::Assign { expr: receiver, .. },
+            Expr::Assign { expr: callback, .. },
+            _worker,
+            _tail,
+        ] = items.as_slice()
+        else {
+            return Err(TypeScriptSourceError::Unrepresentable {
+                kind: "a collection transform with extra arguments",
+            });
+        };
         Ok(Some(format!(
-            "{}.{method}({})",
+            "{}.{}({})",
             self.member_target(receiver)?,
+            self.identifier("operation", operation.as_str())?,
             self.expression(callback)?
         )))
     }
@@ -874,94 +842,68 @@ impl Printer {
     }
 }
 
-/// The authored `run` body inside the lowerer's process wrapper.
-///
-/// The wrapper is `Try { body: Finish(Call(Function)), catch: <generated> }`;
-/// only its function body was authored, so that is what prints back.
+/// The authored `run` body inside a process-wrapper body.
 pub(super) fn process_run_body(process: &ProcessDecl) -> Option<&Expr> {
-    crate::lower::process_run_body_path(process).map(|(_, body)| strip_completion_value(body))
+    crate::lower::wrapped_run_body(&process.body)
 }
 
 /// The authored `run` body inside a process *literal*'s wrapper.
-///
-/// FIG-2999 made a top-level `const`-bound `async` arrow a process literal in
-/// `main` rather than a [`ProcessDecl`], so a lens door that re-parses a
-/// fragment inside such an arrow reads the body out of the literal. The
-/// wrapper shape is the same one [`process_run_body`] unwraps.
 pub(super) fn process_literal_run_body(literal: &ProcessLiteralExpr) -> Option<&Expr> {
-    crate::lower::process_run_body_path_of(&literal.body)
-        .map(|(_, body)| strip_completion_value(body))
+    crate::lower::wrapped_run_body(&literal.body)
 }
 
-/// The statements of a block, with the lowerer's block wrapper removed.
-///
-/// The lowerer wraps every authored statement block and ends it with the
-/// block's completion value. Neither piece is authored text: the wrapper has no
-/// spelling and the completion value is unobservable in statement position, and
-/// both are re-synthesised when the printed block is lowered again.
-pub(super) fn statement_block_contents(expression: &Expr) -> &[Expr] {
-    let mut expression = expression;
-    let mut unwrapped = false;
-    while let Some(inner) = block_wrapper_inner(expression) {
-        expression = inner;
-        unwrapped = true;
-    }
-    let Expr::Block(statements) = expression else {
-        return std::slice::from_ref(expression);
-    };
-    match statements.as_slice() {
-        [rest @ .., last] if trailing_is_generated(last, unwrapped) => rest,
-        other => other,
+/// The statements of a body, in authored order, without the structure that
+/// carries them: a completion list contributes its statements and never its
+/// completion value.
+pub(super) fn statement_block_contents(expression: &Expr) -> Vec<&Expr> {
+    match expression {
+        // The unit value a missing branch is spelled as holds no statement.
+        Expr::Undefined => Vec::new(),
+        expression => lashlang::statement_list(expression)
+            .into_iter()
+            .map(|listed| listed.expr)
+            .filter(|statement| !matches!(statement, Expr::Undefined))
+            .collect(),
     }
 }
 
-/// `Undefined` is the unit completion the lowerer appends to every statement
-/// block; inside the wrapper the completion is the block's own value, which is
-/// unobservable in statement position and re-synthesised on the way back down.
-pub(super) fn trailing_is_generated(last: &Expr, unwrapped: bool) -> bool {
-    matches!(last, Expr::Undefined) || (unwrapped && lashlang::is_pure_expr(last))
+/// A body position that holds statements rather than one value expression.
+fn is_statement_body(expression: &Expr) -> bool {
+    matches!(
+        expression,
+        Expr::Block(_)
+            | Expr::Role {
+                role: StructuralRole::Completion,
+                ..
+            }
+    )
 }
 
-/// The inner block of the lowerer's statement-block wrapper.
-pub(super) fn block_wrapper_inner(expression: &Expr) -> Option<&Expr> {
-    let Expr::Block(statements) = expression else {
-        return None;
+/// The authored target spelling and value of an attribute-assignment role.
+fn attribute_assignment(
+    expression: &Expr,
+) -> Result<Option<(String, &Expr)>, TypeScriptSourceError> {
+    let Expr::Role {
+        role: StructuralRole::AttributeAssign,
+        expr,
+    } = expression
+    else {
+        return Ok(None);
     };
-    let inner = match statements.as_slice() {
-        [inner @ Expr::Block(_), Expr::Undefined] | [inner @ Expr::Block(_)] => inner,
-        _ => return None,
+    let Some(parts) = lashlang::AttributeAssignParts::of(expr) else {
+        return Ok(None);
     };
-    // A lowered member assignment is also a block of generated bindings, but
-    // it is one statement rather than a nested scope.
-    if assignment_sugar(inner).is_some() {
-        return None;
-    }
-    Some(inner)
-}
-
-/// The authored target and value of a lowered member assignment.
-///
-/// `a.b = v` lowers to a block that pins the reference base, evaluates the
-/// value, stores through the pinned base and completes with the stored value.
-/// Every binding in that block is generated, so the block prints and projects
-/// as the one assignment the user wrote.
-/// One authored statement, stripped of the completion-value wrapper.
-///
-/// The lowerer gives every statement in a block a value by wrapping it as
-/// `Block([statement, <completion value>])`. Neither the printer nor the
-/// projector wants that wrapper: it is not something anyone wrote.
-pub(super) fn authored_statement(expression: &Expr) -> &Expr {
-    let Expr::Block(statements) = expression else {
-        return expression;
-    };
-    match statements.as_slice() {
-        [single, last]
-            if lashlang::is_pure_expr(last) && assignment_sugar(expression).is_none() =>
-        {
-            authored_statement(single)
+    let printer = Printer;
+    let object = printer.member_target(parts.object)?;
+    let target = match parts.step {
+        lashlang::AttributeStep::Field(field) => {
+            format!("{object}.{}", printer.identifier("field", field.as_str())?)
         }
-        _ => expression,
-    }
+        lashlang::AttributeStep::Index(index) => {
+            format!("{object}[{}]", printer.expression(index)?)
+        }
+    };
+    Ok(Some((target, parts.value)))
 }
 
 /// `let` when the loop body reassigns its element binding, `const` otherwise.
@@ -969,7 +911,7 @@ pub(super) fn authored_statement(expression: &Expr) -> &Expr {
 /// The lowerer erases the declaration kind — it copies the element into the
 /// authored binding either way — so the kind is recovered from whether the body
 /// writes the binding back, which is the only thing `const` would have refused.
-fn element_binding_kind(body: &[Expr], authored: &str) -> &'static str {
+fn element_binding_kind(body: &[&Expr], authored: &str) -> &'static str {
     fn reassigns(expression: &Expr, authored: &str) -> bool {
         if let Expr::Assign { target, .. } = expression
             && target.root.as_str() == authored
@@ -988,131 +930,64 @@ fn element_binding_kind(body: &[Expr], authored: &str) -> &'static str {
     }
 }
 
-/// The single nested `if` an `else if` chain lowers to, if this is one.
-pub(super) fn else_if_chain(expression: &Expr) -> Option<&Expr> {
-    match statement_block_contents(expression) {
-        [nested @ Expr::If { then_block, .. }] if matches!(then_block.as_ref(), Expr::Block(_)) => {
-            Some(nested)
-        }
-        _ => None,
-    }
+/// An authored loop header read off an iteration.
+struct LoopHeader<'a> {
+    binding: &'a str,
+    source: &'a Expr,
+    /// `for .. in` rather than `for .. of`.
+    keys: bool,
 }
 
-pub(super) fn assignment_sugar(expression: &Expr) -> Option<(AssignTarget, &Expr)> {
-    let Expr::Block(statements) = expression else {
-        return None;
-    };
-    let [
-        Expr::Assign {
-            target: base_target,
-            expr: base,
-        },
-        Expr::Assign {
-            target: result_target,
-            expr: value,
-        },
-        Expr::Assign {
-            target: store,
-            expr: stored,
-        },
-        Expr::Variable(completion),
-    ] = statements.as_slice()
-    else {
-        return None;
-    };
-    if !generated_binding(base_target, "_reference_base")
-        || !generated_binding(result_target, "_assignment_result")
-        || store.root != base_target.root
-        || store.steps.is_empty()
-        || *completion != result_target.root
-    {
-        return None;
-    }
-    match stored.as_ref() {
-        Expr::Variable(name) if *name == result_target.root => {}
-        _ => return None,
-    }
-    let Expr::Variable(root) = base.as_ref() else {
-        return None;
-    };
-    Some((
-        AssignTarget {
-            root: root.clone(),
-            steps: store.steps.clone(),
-        },
-        value,
-    ))
-}
-
-fn generated_binding(target: &AssignTarget, suffix: &str) -> bool {
-    target.is_simple()
-        && target.root.starts_with(GENERATED_BINDING_PREFIX)
-        && target.root.ends_with(suffix)
-}
-
-/// The authored binding, iterable and body of a lowered `for (.. of ..)` loop.
+/// The TypeScript header an iteration prints as.
 ///
-/// `for (const x of xs)` lowers to a generated element binding over
-/// `Lash.ArrayFromIterable(xs)` whose body opens by copying the element into
-/// the authored binding.
-pub(super) fn for_of_sugar<'a>(
-    binding: &str,
+/// An iteration with no bind names its element binding; one whose bind only
+/// copies the element into one binding names that binding. Any other bind is
+/// a destructuring pattern, which has no spelling here. The source is the
+/// operand of the iteration protocol the lowerer emits (`Lash.ArrayFromIterable`
+/// for `of`, `Object.keys` for `in`), or the iterable itself when a graph
+/// supplies one directly.
+fn loop_header<'a>(
+    binding: &'a str,
     iterable: &'a Expr,
-    body: &'a Expr,
-) -> Option<(&'a str, &'a Expr, &'a [Expr])> {
-    lashlang::lowered_for_of_parts(binding, iterable, body)
-}
-
-fn strip_completion_value(body: &Expr) -> &Expr {
-    let Expr::Block(statements) = body else {
-        return body;
-    };
-    match statements.as_slice() {
-        [inner @ Expr::Block(_), Expr::Undefined] => inner,
-        _ => body,
-    }
-}
-
-/// The array method a generated callback worker implements.
-///
-/// `map` appends the callback's result on every step; `filter` appends the
-/// element under an `if` on the callback's result. The worker is generated, so
-/// this shape is the lowerer's, not a user's.
-fn array_callback_method(body: &Expr) -> Option<&'static str> {
-    let Expr::Block(statements) = body else {
-        return None;
-    };
-    let loop_body = statements.iter().find_map(|statement| match statement {
-        Expr::While { body, .. } => Some(body.as_ref()),
-        _ => None,
-    })?;
-    let Expr::Block(loop_statements) = loop_body else {
-        return None;
-    };
-    let mut method = None;
-    for statement in loop_statements {
-        match statement {
-            Expr::If { then_block, .. } => {
-                if let Expr::Assign { target, .. } = then_block.as_ref()
-                    && target.root.as_str().ends_with("_callback_output")
-                {
-                    method = Some("filter");
-                }
-            }
-            Expr::Assign { target, expr }
-                if target.root.as_str().ends_with("_callback_output")
-                    && matches!(expr.as_ref(), Expr::Call { .. }) =>
+    bind: Option<&'a Expr>,
+) -> Result<LoopHeader<'a>, TypeScriptSourceError> {
+    let binding = match bind {
+        None => binding,
+        Some(Expr::Block(items)) => match items.as_slice() {
+            [Expr::Assign { target, expr }]
+                if target.is_simple()
+                    && matches!(expr.as_ref(), Expr::Variable(name) if name.as_str() == binding) =>
             {
-                method = Some("map");
+                target.root.as_str()
             }
-            _ => {}
+            _ => {
+                return Err(TypeScriptSourceError::Unrepresentable {
+                    kind: "a destructuring loop binding",
+                });
+            }
+        },
+        Some(_) => {
+            return Err(TypeScriptSourceError::Unrepresentable {
+                kind: "a loop bind that is not a statement list",
+            });
         }
-    }
-    method
+    };
+    let (source, keys) = if let Some([source]) = stdlib_call(iterable, "Lash.ArrayFromIterable") {
+        (source, false)
+    } else if let Some([source]) = stdlib_call(iterable, "Object.keys") {
+        (source, true)
+    } else {
+        (iterable, false)
+    };
+    Ok(LoopHeader {
+        binding,
+        source,
+        keys,
+    })
 }
 
 /// The arguments of a `__typescript_stdlib` call with the given selector.
-fn stdlib_call<'a>(expression: &'a Expr, selector: &str) -> Option<&'a [Expr]> {
+pub(super) fn stdlib_call<'a>(expression: &'a Expr, selector: &str) -> Option<&'a [Expr]> {
     let Expr::BuiltinCall { name, args } = expression else {
         return None;
     };

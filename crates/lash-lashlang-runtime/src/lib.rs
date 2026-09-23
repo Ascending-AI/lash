@@ -22,10 +22,7 @@ mod trigger_commands;
 pub use trace_waits::TraceWaitBookkeeping;
 pub use trigger_commands::execute_trigger_operation;
 mod typescript_runtime;
-pub use typescript_runtime::{
-    TYPESCRIPT_RUNTIME_RESOURCE_TYPE, is_typescript_runtime_receiver,
-    journaled_typescript_runtime_value,
-};
+pub use typescript_runtime::{is_typescript_runtime_receiver, journaled_typescript_runtime_value};
 
 pub use lash_trace::{
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,
@@ -404,17 +401,17 @@ pub fn lashlang_host_environment_from_tool_catalog(
     resources.try_extend(host_resources)?;
     for (operation, host_operation) in [
         (
-            lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION,
+            lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
             "typescript.runtime.now",
         ),
         (
-            lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION,
+            lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION,
             "typescript.runtime.random",
         ),
     ] {
         resources.add_module_operation_contract(
-            [lash_typescript::TYPESCRIPT_RUNTIME_MODULE_PATH],
-            typescript_runtime::TYPESCRIPT_RUNTIME_RESOURCE_TYPE,
+            [lashlang::LANGUAGE_RUNTIME_MODULE_PATH],
+            lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE,
             operation,
             host_operation,
             &lashlang::OperationContract::new(

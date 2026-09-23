@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lashlang::{
     AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, ProcessParam,
-    ResourceRefExpr, TryExpr, TypeExpr,
+    ResourceRefExpr, StructuralRole, TryExpr, TypeExpr,
 };
 
 use crate::adapter::{
@@ -39,9 +39,7 @@ pub(crate) use entry::{lower, lower_with_ambient, lower_with_context, lower_work
 use graph::{shortest_cycle_through, strongly_connected_components};
 use json_replacer::reject_json_parse_reviver;
 use param_types::process_param_type;
-pub(crate) use process_wrapper::{
-    process_run_body_path, process_run_body_path_of, wrapped_run_body,
-};
+pub(crate) use process_wrapper::{process_run_wrapper, wrapped_run_body};
 use triggers::{
     is_trigger_registration_operation, names_the_retired_trigger_event,
     retired_trigger_event_diagnostic,
@@ -58,6 +56,15 @@ pub(crate) fn accepted_instance_methods() -> &'static [&'static str] {
 /// Every binding the lowerer generates carries this prefix, which the dialect
 /// reserves so a source identifier can never collide with one.
 pub(crate) const GENERATED_BINDING_PREFIX: &str = "__typescript_";
+
+/// A statement list closed by its completion value: `items`' last element is
+/// the value the list evaluates to, and every other element is a statement.
+pub(super) fn completion_list(items: Vec<LashExpr>) -> LashExpr {
+    LashExpr::Role {
+        role: StructuralRole::Completion,
+        expr: Box::new(LashExpr::Block(items)),
+    }
+}
 
 #[derive(Default)]
 struct FunctionContext {
@@ -358,9 +365,10 @@ impl Lowerer {
                 self.apply_label(label, lowered)
             }
             Stmt::Expr(expr) => vec![self.lower_expr(expr)?],
-            Stmt::Block(statements) => {
-                vec![LashExpr::Block(self.lower_statements(statements, false)?)]
-            }
+            Stmt::Block(statements) => vec![LashExpr::Role {
+                role: StructuralRole::Scope,
+                expr: Box::new(LashExpr::Block(self.lower_statements(statements, false)?)),
+            }],
             Stmt::Var { kind, declarations } => {
                 let mut output = Vec::with_capacity(declarations.len());
                 for declaration in declarations {
@@ -507,7 +515,7 @@ impl Lowerer {
                         .as_deref()
                         .map(|stmt| self.lower_stmt_block(stmt))
                         .transpose()?
-                        .unwrap_or(LashExpr::Undefined),
+                        .unwrap_or_else(|| completion_list(vec![LashExpr::Undefined])),
                 ),
             }],
             Stmt::While { test, body } => {
@@ -677,13 +685,26 @@ impl Lowerer {
         })
     }
 
+    /// Lowers a statement body (a branch or loop body) to one statement list
+    /// closed by its completion value. A braced body is that list itself, not
+    /// a nested scope inside it.
     fn lower_stmt_block(&mut self, stmt: &Stmt) -> Result<LashExpr, Diagnostic> {
+        let (span, stmt) = match stmt {
+            Stmt::Spanned(span, inner) if matches!(inner.as_ref(), Stmt::Block(_)) => {
+                (Some(*span), inner.as_ref())
+            }
+            stmt => (None, stmt),
+        };
         let mut expressions = match stmt {
             Stmt::Block(statements) => self.lower_statements(statements, false)?,
             _ => self.lower_stmt(stmt)?,
         };
         expressions.push(LashExpr::Undefined);
-        Ok(LashExpr::Block(expressions))
+        let body = completion_list(expressions);
+        Ok(match span {
+            Some(span) => self.span_markers.annotate(span, body),
+            None => body,
+        })
     }
 
     fn lower_function(
@@ -718,7 +739,7 @@ impl Lowerer {
         // needs a fresh one, visible only here, which the VM's self-slot fills.
         let internal_name = match (&function.name, internal_name) {
             (Some(source_name), None) => {
-                if source_name.starts_with(GENERATED_BINDING_PREFIX) {
+                if is_reserved_name(source_name) {
                     self.scopes.pop();
                     self.functions.pop();
                     return Err(reserved_identifier(source_name));
@@ -821,13 +842,18 @@ impl Lowerer {
                 }
             }
             FunctionBody::Block(statements) => {
-                let mut body = self.lower_statements(statements, true)?;
+                let mut body = std::mem::take(&mut prologue);
+                body.extend(self.lower_statements(statements, true)?);
                 body.push(LashExpr::Undefined);
-                LashExpr::Block(body)
+                completion_list(body)
             }
         };
-        prologue.push(tail);
-        let body = LashExpr::Block(prologue);
+        let body = if prologue.is_empty() && matches!(tail, LashExpr::Role { .. }) {
+            tail
+        } else {
+            prologue.push(tail);
+            LashExpr::Block(prologue)
+        };
         self.scopes.pop();
         #[expect(
             clippy::expect_used,

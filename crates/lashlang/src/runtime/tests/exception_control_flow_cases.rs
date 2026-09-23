@@ -39,6 +39,7 @@ fn control_flow_for(binding: &str, count: usize, body: Expr) -> Expr {
         iterable: Box::new(Expr::List(
             (0..count).map(|index| Expr::Number(index as f64)).collect(),
         )),
+        bind: None,
         body: Box::new(body),
     }
 }

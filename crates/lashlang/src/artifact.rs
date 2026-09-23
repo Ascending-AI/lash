@@ -17,7 +17,8 @@ mod requirements;
 mod write_helpers;
 use requirements::RequirementsCollector;
 use write_helpers::{
-    write_binary_op, write_label_metadata, write_resource_ref, write_unary_expr, write_unary_op,
+    write_binary_op, write_label_metadata, write_process_origin, write_resource_ref,
+    write_structural_role, write_unary_expr, write_unary_op,
 };
 
 use crate::ast::{
@@ -202,6 +203,16 @@ impl ModuleArtifact {
             });
         }
         Ok(())
+    }
+
+    /// The definition identity a trace and an admitted graph both name.
+    pub fn source_identity(&self) -> String {
+        #[expect(
+            clippy::expect_used,
+            reason = "`Program` derives `Serialize` over plain data, so encoding it cannot fail"
+        )]
+        let encoded = serde_json::to_string(&self.canonical_ir).expect("program serializes");
+        lash_sansio::core_support::blake3_domain_hash_hex("lash-workflow-source/v3", encoded)
     }
 
     pub fn process_ref(&self, process_name: &str) -> Option<&ProcessRef> {
@@ -1138,6 +1149,7 @@ fn write_process(writer: &mut HashWriter, process: &ProcessDecl) {
     if let Some(label) = &process.label {
         write_label_metadata(writer, label);
     }
+    write_process_origin(writer, &process.origin);
     let mut normalizer = NameNormalizer::default();
     for param in &process.params {
         normalizer.bind_abi(param.name.as_str());
@@ -1332,12 +1344,25 @@ fn write_expr<'program>(
         Expr::For {
             binding,
             iterable,
+            bind,
             body,
         } => {
             writer.atom("for");
             write_name_token(writer, normalizer.name_token(binding.as_str()));
             write_expr(writer, iterable, normalizer);
+            match bind {
+                Some(bind) => {
+                    writer.atom("bind");
+                    write_expr(writer, bind, normalizer);
+                }
+                None => writer.atom("no-bind"),
+            }
             write_expr(writer, body, normalizer);
+        }
+        Expr::Role { role, expr } => {
+            writer.atom("role");
+            write_structural_role(writer, role);
+            write_expr(writer, expr, normalizer);
         }
         Expr::While { condition, body } => {
             writer.atom("while");
@@ -1579,10 +1604,14 @@ impl<'program> NameNormalizer<'program> {
             Expr::For {
                 binding,
                 iterable,
+                bind,
                 body,
             } => {
                 self.collect_expr(iterable);
                 self.bind_local(binding.as_str());
+                if let Some(bind) = bind {
+                    self.collect_expr(bind);
+                }
                 self.collect_expr(body);
             }
             Expr::ListComprehension { element, clauses } => {

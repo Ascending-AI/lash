@@ -58,3 +58,30 @@ pub(super) fn write_binary_op(writer: &mut HashWriter, op: BinaryOp) {
         BinaryOp::Or => "or",
     });
 }
+
+pub(super) fn write_structural_role(writer: &mut HashWriter, role: &crate::ast::StructuralRole) {
+    writer.atom(role.name());
+    if let crate::ast::StructuralRole::CollectionTransform { operation } = role {
+        writer.atom(operation.as_str());
+    }
+}
+
+pub(super) fn write_process_origin(writer: &mut HashWriter, origin: &crate::ast::ProcessOrigin) {
+    match origin {
+        crate::ast::ProcessOrigin::Declared => writer.atom("origin-declared"),
+        crate::ast::ProcessOrigin::Lifted { site } => {
+            writer.atom("origin-lifted");
+            match site.root {
+                crate::ast::AstRoot::Main => writer.atom("main"),
+                crate::ast::AstRoot::Declaration(index) => {
+                    writer.atom("declaration");
+                    writer.u32(index);
+                }
+            }
+            writer.usize(site.steps.len());
+            for step in &site.steps {
+                writer.u32(*step);
+            }
+        }
+    }
+}

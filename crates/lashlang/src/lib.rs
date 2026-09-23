@@ -33,11 +33,13 @@ pub use ast::{
     Expr, ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LIFTED_PROCESS_NAME_PREFIX,
     LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl,
-    ProcessLiteralExpr, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessSignatureError,
-    ProcessType, Program, ResourceRefExpr, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
-    UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
-    lifted_process_identity, validate_ast, walk_expr,
+    ProcessLiteralExpr, ProcessOrigin, ProcessParam, ProcessSignalDecl, ProcessSignature,
+    ProcessSignatureError, ProcessType, Program, ResourceRefExpr, StructuralRole, TryExpr,
+    TypeDecl, TypeExpr, TypeField, UnaryOp, UnionMembers, check_ast_nesting_depth,
+    fold_expr_children, format_type_expr, lifted_process_identity, process_wrapper_run_path,
+    validate_ast, walk_expr,
 };
+pub use ast::{AttributeAssignParts, AttributeStep};
 
 /// Names of every source Lashlang builtin, in registry order.
 pub fn builtin_names() -> impl ExactSizeIterator<Item = &'static str> + Clone {
@@ -104,6 +106,22 @@ pub use runtime::{
 pub use runtime::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
 pub use span::Span;
 
+/// The module path under which a host registers a front end's journaled
+/// language-runtime values (the clock and the random source), and the alias a
+/// linked receiver rewrites to. The spellings are the wire values every
+/// journal and replay key already carries.
+pub const LANGUAGE_RUNTIME_MODULE_PATH: &str = "__typescript_runtime";
+
+/// The reserved resource type of the language-runtime receiver a front end
+/// mints for its clock and random-source reads.
+pub const LANGUAGE_RUNTIME_RESOURCE_TYPE: &str = "typescript.Runtime";
+
+/// The journaled language-runtime clock read.
+pub const LANGUAGE_RUNTIME_NOW_OPERATION: &str = "now";
+
+/// The journaled language-runtime random-source read.
+pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
+
 /// Version of the compiled bytecode contract used for durable continuations.
 /// Increment whenever identical source/artifact identities may compile to a
 /// continuation-incompatible instruction stream.
@@ -128,6 +146,11 @@ pub use trigger::{
 };
 pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{
+    ListedStatement, NoStatementText, WorkflowBody, WorkflowBodySlot, WorkflowGraphProjector,
+    WorkflowStatement, WorkflowStatementText, else_if_chain, statement_list,
+    workflow_graph_from_artifact, workflow_graph_from_program,
+};
+pub use workflow_graph::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
     WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClass,
     WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
@@ -138,7 +161,9 @@ pub use workflow_graph::{
     WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets,
     WorkflowOwnership, WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
     WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
-    WorkflowTypedVariable, child_path, execution_sites, process_workflow_projection,
+    WorkflowTypedVariable, child_path, execution_sites,
+};
+pub use workflow_graph::{
     projected_node_type_facets, reconcile, workflow_call_from_ir, workflow_call_to_ir,
     workflow_effect_from_ir, workflow_effect_to_ir, workflow_node_id, workflow_slot_accepts_value,
     workflow_slot_value,
@@ -152,7 +177,6 @@ pub use workflow_graph::{
 pub use linker::{WorkflowLinkAnalysis, analyze_workflow_program};
 pub use runtime::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
-    lowered_for_of_parts,
 };
 
 pub fn format_runtime_diagnostic(source: &str, error: &RuntimeError, span: Option<Span>) -> String {

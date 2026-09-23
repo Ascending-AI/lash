@@ -95,7 +95,14 @@ fn a_process_literal_is_a_lifted_declaration_and_return_stays_a_function_return(
         process.signals.is_empty(),
         "the set is inferred, not declared"
     );
-    let Expr::Try(wrapper) = &process.body else {
+    let Expr::Role {
+        role: lashlang::StructuralRole::ProcessWrapper,
+        expr: wrapper,
+    } = &process.body
+    else {
+        panic!("a lifted body is marked as a process wrapper")
+    };
+    let Expr::Try(wrapper) = wrapper.as_ref() else {
         panic!("process wrapper should translate uncaught errors into failure")
     };
     let Expr::Finish(call) = wrapper.body.as_ref() else {
@@ -1208,15 +1215,15 @@ impl ExecutionHost for RuntimeValueHost {
                 };
                 assert_eq!(
                     receiver.resource_type.as_str(),
-                    lash_typescript::TYPESCRIPT_RUNTIME_RESOURCE_TYPE
+                    lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE
                 );
                 assert_eq!(receiver.alias.as_str(), "builtin");
                 assert!(operation.args.is_empty());
                 match operation.operation.as_str() {
-                    lash_typescript::TYPESCRIPT_RUNTIME_NOW_OPERATION => {
+                    lashlang::LANGUAGE_RUNTIME_NOW_OPERATION => {
                         Ok(AbilityResult::Value(Value::Number(1_723_456.0)))
                     }
-                    lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION => {
+                    lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION => {
                         Ok(AbilityResult::Value(Value::Number(0.25)))
                     }
                     other => Err(ExecutionHostError::new(format!(
@@ -2298,7 +2305,7 @@ fn math_random_draws_replay_from_the_journal_in_order() {
                 AbilityOp::ResourceOperation(operation) => {
                     assert_eq!(
                         operation.operation.as_str(),
-                        lash_typescript::TYPESCRIPT_RUNTIME_RANDOM_OPERATION
+                        lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION
                     );
                     let mut cursor = self.served.lock().expect("journal cursor");
                     let value = *self

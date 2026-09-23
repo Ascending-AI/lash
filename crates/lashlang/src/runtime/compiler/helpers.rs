@@ -78,44 +78,6 @@ pub(super) fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<Intrinsic
     })
 }
 
-/// Recovers the authored parts of a lowered TypeScript `for..of` loop.
-///
-/// The lowerer compiles `for (const item of source)` as a generated binding
-/// over `Lash.ArrayFromIterable(source)`, followed by an assignment from that
-/// binding to `item`. The projector and compiler path table use this one
-/// recognizer so they assign the same structural paths to authored body nodes.
-#[doc(hidden)]
-pub fn lowered_for_of_parts<'a>(
-    binding: &str,
-    iterable: &'a Expr,
-    body: &'a Expr,
-) -> Option<(&'a str, &'a Expr, &'a [Expr])> {
-    if !binding.starts_with("__typescript_") {
-        return None;
-    }
-    let Expr::BuiltinCall { name, args } = iterable else {
-        return None;
-    };
-    let [Expr::String(selector), source] = args.as_slice() else {
-        return None;
-    };
-    if name.as_str() != "__typescript_stdlib" || selector.as_str() != "Lash.ArrayFromIterable" {
-        return None;
-    }
-    let Expr::Block(statements) = body else {
-        return None;
-    };
-    let [Expr::Assign { target, expr }, rest @ ..] = statements.as_slice() else {
-        return None;
-    };
-    if !target.is_simple()
-        || !matches!(expr.as_ref(), Expr::Variable(name) if name.as_str() == binding)
-    {
-        return None;
-    }
-    Some((target.root.as_str(), source, rest))
-}
-
 /// `program.spans` keyed the way the compiler looks them up. Declaration
 /// bodies are included, so a deferred function body's nodes resolve their own
 /// spans without a copy step.
@@ -161,7 +123,7 @@ fn await_wraps_direct_operation(handle: &Expr) -> bool {
 
 pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
     match expr {
-        Expr::LabelAnnotated { .. } => false,
+        Expr::LabelAnnotated { .. } | Expr::Role { .. } => false,
         Expr::Assign { expr, .. } => label_attaches_to_assignment_value(expr),
         Expr::Await(expr) | Expr::ResultUnwrap(expr) => label_attaches_to_concrete_node(expr),
         Expr::ReceiverCall { .. }
@@ -230,7 +192,7 @@ fn label_attaches_to_assignment_value(expr: &Expr) -> bool {
 
 pub fn is_pure_expr(expr: &Expr) -> bool {
     match expr {
-        Expr::LabelAnnotated { expr, .. } => is_pure_expr(expr),
+        Expr::LabelAnnotated { expr, .. } | Expr::Role { expr, .. } => is_pure_expr(expr),
         Expr::Null
         | Expr::Undefined
         | Expr::Bool(_)
@@ -391,7 +353,7 @@ pub(super) fn wrap_type_schema_value(schema: Value) -> Value {
 
 pub(super) fn is_terminal_expr(expr: &Expr) -> bool {
     match expr {
-        Expr::LabelAnnotated { expr, .. } => is_terminal_expr(expr),
+        Expr::LabelAnnotated { expr, .. } | Expr::Role { expr, .. } => is_terminal_expr(expr),
         Expr::Finish(_) | Expr::Fail(_) => true,
         Expr::Block(expressions) => expressions.last().is_some_and(is_terminal_expr),
         Expr::If {
