@@ -467,7 +467,7 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         ),
     ];
 
-    assert_eq!(relations.len(), 33);
+    assert_eq!(relations.len(), 34);
     for (format, expected) in relations {
         assert_eq!(
             format_surface(format),
