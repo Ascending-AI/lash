@@ -891,7 +891,7 @@ impl SurfaceRunner {
                         ],
                         "captures": [
                             {
-                                "version": 4
+                                "version": 5
                             }
                         ],
                         "intents": {
@@ -1046,7 +1046,7 @@ impl SurfaceRunner {
                             "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
                             "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397"
                         ],
-                        "version": 5
+                        "version": 6
                     },
                     "type": "tool_invocation"
                 });
