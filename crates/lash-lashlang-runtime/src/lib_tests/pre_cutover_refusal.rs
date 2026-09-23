@@ -150,10 +150,6 @@ struct RefusedRun {
 }
 
 /// Run one process through `run_lashlang_process` behind a crossing counter.
-#[expect(
-    clippy::expect_used,
-    reason = "test harness: each step is established by the fixture above"
-)]
 async fn run_counted(
     store: Arc<dyn lashlang::LashlangArtifactStore>,
     input: &LashlangProcessInput,
@@ -297,10 +293,6 @@ async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
 
 /// A sleep process the current build published, for the handover cases: were
 /// it resumed, its first act would be a sleep effect.
-#[expect(
-    clippy::expect_used,
-    reason = "test harness: each step is established by the fixture above"
-)]
 async fn published_sleep_process() -> (Arc<InMemoryLashlangArtifactStore>, LashlangProcessInput) {
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
     let environment = LashlangHostEnvironment::new(
