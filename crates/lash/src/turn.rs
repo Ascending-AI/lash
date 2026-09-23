@@ -13,6 +13,7 @@ use crate::support::{
 };
 use futures_util::Stream;
 use lash_core::facade_support::{
+    QueuedEffectSource, QueuedTurnOptions,
     SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError, TurnCancelMode,
     TurnContextFacadeOps,
 };
@@ -149,6 +150,15 @@ enum EffectBinding<'run> {
 }
 
 impl<'run> EffectBinding<'run> {
+    fn queued(self, identity: Option<lash_core::ExecutionScope>) -> QueuedEffectSource<'run> {
+        match self {
+            Self::Host(host) => QueuedEffectSource::Host { host, identity },
+            Self::Borrowed(controller) => QueuedEffectSource::Controller {
+                controller,
+                identity,
+            },
+        }
+    }
     fn scoped(self, admitted: lash_core::AdmittedScope) -> Result<ScopedEffectController<'run>> {
         match self {
             Self::Host(host) => Ok(host.scoped(admitted)?),
@@ -586,12 +596,9 @@ impl QueuedTurnBuilder {
         self
     }
 
-    /// Hosts must keep this id unique within the session. Reusing it addresses
-    /// the same trace, effects, and cancellation promises as the earlier turn;
-    /// Lash does not mint or check uniqueness for host-supplied ids.
-    /// Do not combine this with [`Self::drain_id`]: keep `turn_id` for a
-    /// host-minted physical turn identity, or use `drain_id` as the durable
-    /// idempotency key for retried drains.
+    /// Sets the queued-run identity and its first physical turn ID. Reusing
+    /// this identity resumes unfinished work or returns its terminal receipt.
+    /// Do not combine this with [`Self::drain_id`].
     pub fn turn_id(mut self, id: impl Into<TurnId>) -> Self {
         self.turn_id = Some(id.into());
         self
@@ -614,8 +621,9 @@ impl QueuedTurnBuilder {
 
     /// Sets the durable idempotency key for a retried queued-work drain.
     ///
-    /// Do not combine this with [`Self::turn_id`]: keep `drain_id` for retried
-    /// drains, or use `turn_id` for a host-minted physical turn identity.
+    /// Persistence selects an identity when omitted. Explicit identities return
+    /// their terminal receipt on later retries and never consume new arrivals.
+    /// Do not combine this with [`Self::turn_id`].
     pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
         self.drain_id = Some(drain_id.into());
         self
@@ -661,10 +669,6 @@ impl QueuedTurnBuilder {
         AdvancedQueuedTurn { builder: self }
     }
 
-    fn resolved_drain_id(&self) -> String {
-        self.drain_id.clone().unwrap_or_else(fresh_queue_drain_id)
-    }
-
     fn validate_scope_identity_configuration(&self) -> Result<()> {
         if self.drain_id.is_some() && self.turn_id.is_some() {
             return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
@@ -675,28 +679,19 @@ impl QueuedTurnBuilder {
         Ok(())
     }
 
-    fn resolved_turn_id(
-        &self,
-        scoped_effect_controller: Option<&ScopedEffectController<'_>>,
-    ) -> Option<TurnId> {
-        self.turn_id.clone().or_else(|| {
-            scoped_effect_controller
-                .filter(|controller| controller.execution_scope().validates_turn_trace_id())
-                .map(|controller| TurnId::from(controller.scope_id()))
-        })
-    }
-
-    fn turn_scope(&self, turn_id: &TurnId) -> lash_core::ExecutionScope {
-        let observation = self.runtime.observe();
-        observation.turn_scope(turn_id)
-    }
-
-    fn execution_scope(&self, drain_id: String) -> Result<lash_core::ExecutionScope> {
+    fn validate_queued_scope(&self, controller: &ScopedEffectController<'_>) -> Result<()> {
         self.validate_scope_identity_configuration()?;
-        Ok(self.resolved_turn_id(None).map_or_else(
-            || self.runtime.observe().queue_drain_scope(drain_id),
-            |turn_id| self.turn_scope(&turn_id),
-        ))
+        let scope = controller.execution_scope();
+        let explicit_id = self.drain_id.as_deref().or(self.turn_id.as_deref());
+        if !matches!(scope, lash_core::ExecutionScope::QueueDrain { .. })
+            || explicit_id.is_some_and(|id| id != scope.id())
+        {
+            return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
+                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                "queued execution requires its admitted queue-drain scope",
+            )));
+        }
+        Ok(())
     }
 
     pub async fn stream_to_with_effects(
@@ -713,13 +708,23 @@ impl QueuedTurnBuilder {
         events: &dyn TurnActivitySink,
         binding: EffectBinding<'_>,
     ) -> Result<QueuedTurnDrain<TurnReport>> {
-        let drain_id = self.resolved_drain_id();
-        let scope = self.execution_scope(drain_id)?;
-        let scoped_effect_controller = binding.scoped(
-            lash_core::AdmittedScope::unpinned(scope).map_err(lash_core::RuntimeError::from)?,
-        )?;
-        self.stream_to_with_scope(events, scoped_effect_controller)
-            .await
+        self.validate_scope_identity_configuration()?;
+        let identity = self
+            .drain_id
+            .clone()
+            .or_else(|| self.turn_id.as_ref().map(ToString::to_string))
+            .map(|id| self.runtime.observe().queue_drain_scope(id));
+        let _cancel_guard = self
+            .cancels
+            .register(self.cancel.clone(), self.cancel_origin_hint.clone());
+        stream_next_queued_prepared_turn(
+            &self.runtime,
+            TurnSinks::turn(events),
+            binding.queued(identity),
+            self.cancel,
+            self.cancel_origin_hint,
+        )
+        .await
     }
 
     async fn stream_to_with_scope(
@@ -727,33 +732,7 @@ impl QueuedTurnBuilder {
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<QueuedTurnDrain<TurnReport>> {
-        self.validate_scope_identity_configuration()?;
-        let turn_id = self.resolved_turn_id(Some(&scoped_effect_controller));
-        if let Some(turn_id) = turn_id.as_ref()
-            && !scoped_effect_controller
-                .execution_scope()
-                .validates_turn_trace_id()
-        {
-            let scoped_turn_controller = ScopedEffectController::borrowed(
-                scoped_effect_controller.controller(),
-                lash_core::AdmittedScope::unpinned(self.turn_scope(turn_id))
-                    .map_err(lash_core::RuntimeError::from)?,
-            )?;
-            return self
-                .stream_to_with_resolved_scope(events, scoped_turn_controller)
-                .await;
-        }
-        if let Some(turn_id) = turn_id.as_deref()
-            && turn_id != scoped_effect_controller.scope_id()
-        {
-            return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
-                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
-                format!(
-                    "input trace_turn_id `{turn_id}` does not match execution scope id `{}`",
-                    scoped_effect_controller.scope_id()
-                ),
-            )));
-        }
+        self.validate_queued_scope(&scoped_effect_controller)?;
         self.stream_to_with_resolved_scope(events, scoped_effect_controller)
             .await
     }
@@ -776,7 +755,7 @@ impl QueuedTurnBuilder {
         stream_next_queued_prepared_turn(
             &runtime,
             TurnSinks::turn(events),
-            scoped_effect_controller,
+            QueuedEffectSource::Scoped(scoped_effect_controller),
             cancel,
             cancel_origin_hint,
         )
@@ -815,7 +794,7 @@ impl SelectedQueuedTurnBuilder {
         self
     }
 
-    /// By default Lash uses the first batch ID, or a fresh identity for an empty selection.
+    /// By default persistence admits a fresh identity or resumes the matching pending run.
     ///
     /// Mutually exclusive with [`Self::turn_id`]. See
     /// [`QueuedTurnBuilder::drain_id`] for the identity contracts.
@@ -835,6 +814,7 @@ impl SelectedQueuedTurnBuilder {
                 result,
                 activities: collector.into_activities(),
             }),
+            receipt: outcome.receipt,
             satisfied: outcome.satisfied,
         })
     }
@@ -850,6 +830,7 @@ impl SelectedQueuedTurnBuilder {
                 result,
                 activities: collector.into_activities(),
             }),
+            receipt: outcome.receipt,
             satisfied: outcome.satisfied,
         })
     }
@@ -871,14 +852,6 @@ impl SelectedQueuedTurnBuilder {
         AdvancedSelectedQueuedTurn { builder: self }
     }
 
-    fn resolved_drain_id(&self) -> String {
-        self.builder
-            .drain_id
-            .clone()
-            .or_else(|| self.batch_ids.first().map(ToString::to_string))
-            .unwrap_or_else(fresh_queue_drain_id)
-    }
-
     pub async fn stream_to_with_effects(
         self,
         events: &dyn TurnActivitySink,
@@ -893,13 +866,26 @@ impl SelectedQueuedTurnBuilder {
         events: &dyn TurnActivitySink,
         binding: EffectBinding<'_>,
     ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        let drain_id = self.resolved_drain_id();
-        let scope = self.builder.execution_scope(drain_id)?;
-        let scoped_effect_controller = binding.scoped(
-            lash_core::AdmittedScope::unpinned(scope).map_err(lash_core::RuntimeError::from)?,
-        )?;
-        self.stream_to_with_scope(events, scoped_effect_controller)
-            .await
+        self.builder.validate_scope_identity_configuration()?;
+        let identity = self
+            .builder
+            .drain_id
+            .clone()
+            .or_else(|| self.builder.turn_id.as_ref().map(ToString::to_string))
+            .map(|id| self.builder.runtime.observe().queue_drain_scope(id));
+        let _cancel_guard = self.builder.cancels.register(
+            self.builder.cancel.clone(),
+            self.builder.cancel_origin_hint.clone(),
+        );
+        stream_selected_queued_prepared_turn(
+            &self.builder.runtime,
+            TurnSinks::turn(events),
+            binding.queued(identity),
+            self.builder.cancel,
+            self.builder.cancel_origin_hint,
+            &self.batch_ids,
+        )
+        .await
     }
 
     async fn stream_to_with_scope(
@@ -907,35 +893,8 @@ impl SelectedQueuedTurnBuilder {
         events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        self.builder.validate_scope_identity_configuration()?;
-        let turn_id = self
-            .builder
-            .resolved_turn_id(Some(&scoped_effect_controller));
-        if let Some(turn_id) = turn_id.as_ref()
-            && !scoped_effect_controller
-                .execution_scope()
-                .validates_turn_trace_id()
-        {
-            let scoped_turn_controller = ScopedEffectController::borrowed(
-                scoped_effect_controller.controller(),
-                lash_core::AdmittedScope::unpinned(self.builder.turn_scope(turn_id))
-                    .map_err(lash_core::RuntimeError::from)?,
-            )?;
-            return self
-                .stream_to_with_resolved_scope(events, scoped_turn_controller)
-                .await;
-        }
-        if let Some(turn_id) = turn_id.as_deref()
-            && turn_id != scoped_effect_controller.scope_id()
-        {
-            return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
-                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
-                format!(
-                    "input trace_turn_id `{turn_id}` does not match execution scope id `{}`",
-                    scoped_effect_controller.scope_id()
-                ),
-            )));
-        }
+        self.builder
+            .validate_queued_scope(&scoped_effect_controller)?;
         self.stream_to_with_resolved_scope(events, scoped_effect_controller)
             .await
     }
@@ -956,16 +915,10 @@ impl SelectedQueuedTurnBuilder {
             drain_id: _,
         } = builder;
         let _cancel_guard = cancels.register(cancel.clone(), cancel_origin_hint.clone());
-        if batch_ids.is_empty() {
-            return Ok(SelectedQueuedWorkDrainOutcome {
-                turn: None,
-                satisfied: Vec::new(),
-            });
-        }
         stream_selected_queued_prepared_turn(
             &runtime,
             TurnSinks::turn(events),
-            scoped_effect_controller,
+            QueuedEffectSource::Scoped(scoped_effect_controller),
             cancel,
             cancel_origin_hint,
             &batch_ids,
@@ -1022,21 +975,17 @@ fn fresh_turn_id() -> TurnId {
     )
 }
 
-fn fresh_queue_drain_id() -> String {
-    format!("queue-drain:{}", fresh_turn_id())
-}
-
 pub(crate) async fn stream_next_queued_prepared_turn(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,
-    scoped_effect_controller: ScopedEffectController<'_>,
+    source: QueuedEffectSource<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
 ) -> Result<QueuedTurnDrain<TurnReport>> {
     let drain = Box::pin(stream_next_queued_prepared_assembled(
         runtime,
         sinks,
-        scoped_effect_controller,
+        source,
         cancel,
         cancel_origin_hint,
     ))
@@ -1047,7 +996,7 @@ pub(crate) async fn stream_next_queued_prepared_turn(
 pub(crate) async fn stream_next_queued_prepared_assembled(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,
-    scoped_effect_controller: ScopedEffectController<'_>,
+    source: QueuedEffectSource<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
 ) -> Result<QueuedTurnDrain<AssembledTurn>> {
@@ -1057,13 +1006,12 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
         runtime: runtime.clone(),
         live: sinks.turn_events(),
     };
-    let opts = turn_options(
-        sinks.events(),
-        &observation_sink,
-        scoped_effect_controller,
-        cancel,
-    )
-    .with_local_cancel_origin_hint(cancel_origin_hint);
+    let mut opts = QueuedTurnOptions::new(cancel, source)
+        .with_turn_events(&observation_sink)
+        .with_local_cancel_origin_hint(cancel_origin_hint);
+    if let Some(events) = sinks.events() {
+        opts = opts.with_events(events);
+    }
     let drain = writer.stream_next_queued_work(opts).await?;
     runtime.publish_from(&writer);
     Ok(drain)
@@ -1072,7 +1020,7 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
 pub(crate) async fn stream_selected_queued_prepared_turn(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,
-    scoped_effect_controller: ScopedEffectController<'_>,
+    source: QueuedEffectSource<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
     batch_ids: &[lash_core::BatchId],
@@ -1080,7 +1028,7 @@ pub(crate) async fn stream_selected_queued_prepared_turn(
     let outcome = Box::pin(stream_selected_queued_prepared_assembled(
         runtime,
         sinks,
-        scoped_effect_controller,
+        source,
         cancel,
         cancel_origin_hint,
         batch_ids,
@@ -1089,13 +1037,14 @@ pub(crate) async fn stream_selected_queued_prepared_turn(
     Ok(SelectedQueuedWorkDrainOutcome {
         turn: outcome.turn.map(TurnReport::from_assembled),
         satisfied: outcome.satisfied,
+        receipt: outcome.receipt,
     })
 }
 
 pub(crate) async fn stream_selected_queued_prepared_assembled(
     runtime: &RuntimeHandle,
     sinks: TurnSinks<'_>,
-    scoped_effect_controller: ScopedEffectController<'_>,
+    source: QueuedEffectSource<'_>,
     cancel: CancellationToken,
     cancel_origin_hint: TurnCancelOriginHint,
     batch_ids: &[lash_core::BatchId],
@@ -1106,13 +1055,12 @@ pub(crate) async fn stream_selected_queued_prepared_assembled(
         runtime: runtime.clone(),
         live: sinks.turn_events(),
     };
-    let opts = turn_options(
-        sinks.events(),
-        &observation_sink,
-        scoped_effect_controller,
-        cancel,
-    )
-    .with_local_cancel_origin_hint(cancel_origin_hint);
+    let mut opts = QueuedTurnOptions::new(cancel, source)
+        .with_turn_events(&observation_sink)
+        .with_local_cancel_origin_hint(cancel_origin_hint);
+    if let Some(events) = sinks.events() {
+        opts = opts.with_events(events);
+    }
     let outcome = match writer.stream_selected_queued_work(opts, batch_ids).await {
         Ok(outcome) => outcome,
         Err(CoreSelectedQueuedWorkDrainError::Runtime(error)) => {

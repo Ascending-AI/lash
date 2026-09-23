@@ -366,3 +366,45 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
     );
     assert_eq!(replayed.assistant_output.safe_text, "paid completion 1");
 }
+
+#[tokio::test]
+async fn recording_response_hook_terminal_error_replays() {
+    for recorder in [
+        RecordingEffectController::default().with_replay_by_key(),
+        RecordingEffectController::default().with_strict_replay_by_address(),
+    ] {
+        let scope = ExecutionScope::runtime_operation("recording-terminal");
+        let envelope = RuntimeEffectEnvelope::new(
+            lash_core::RuntimeEffectInvocation::new(
+                lash_core::EffectAddress::new(scope, "response-hook").expect("effect address"),
+                lash_core::RuntimeAttribution::for_turn("session", "turn", 1, 0),
+                "response-hook",
+            ),
+            RuntimeEffectCommand::AssistantResponseHooks {
+                response: Box::default(),
+            },
+        );
+        recorder
+            .execute_effect(
+                envelope.clone(),
+                lash_core::RuntimeEffectLocalExecutor::testing(|_| async {
+                    Err(RuntimeEffectControllerError::new(
+                        lash_core::RuntimeErrorCode::RuntimeEffectAssistantResponseHook,
+                        "terminal derivation error",
+                    ))
+                }),
+            )
+            .await
+            .expect_err("first attempt fails");
+        let error = recorder
+            .execute_effect(
+                envelope,
+                lash_core::RuntimeEffectLocalExecutor::testing(|_| async {
+                    panic!("a terminal hook error must replay without executing")
+                }),
+            )
+            .await
+            .expect_err("terminal replays");
+        assert_eq!(error.message, "terminal derivation error");
+    }
+}

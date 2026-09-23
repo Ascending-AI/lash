@@ -614,6 +614,39 @@ impl lash_core::SessionExecutionLeaseStore for SnapshotStore {
 
 #[async_trait]
 impl lash_core::QueuedWorkStore for SnapshotStore {
+    async fn select_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _scope: &lash_core::ExecutionScope,
+        _owner: &lash_core::LeaseOwnerIdentity,
+        _max_inputs: usize,
+        _configuration: &lash_core::PersistedSessionConfig,
+        _policy: lash_core::QueuedWorkClaimPolicy,
+    ) -> std::result::Result<lash_core::store::SelectedQueuedRun, lash_core::StoreError> {
+        unreachable!("fixture does not serve queued runs")
+    }
+    async fn pending_queued_run(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        Ok(None)
+    }
+    async fn settle_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _settlement: lash_core::store::QueuedRunCommit,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        unreachable!("fixture does not serve queued runs")
+    }
+    async fn begin_or_resume_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _request: lash_core::store::BeginQueuedRun,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        unreachable!("SnapshotStore does not serve queued runs")
+    }
+
     async fn enqueue_queued_work_with_outcome(
         &self,
         _batch: lash_core::runtime::QueuedWorkBatchDraft,
@@ -965,6 +998,39 @@ impl lash_core::SessionExecutionLeaseStore for BoundSessionStore {
 
 #[async_trait]
 impl lash_core::QueuedWorkStore for BoundSessionStore {
+    async fn select_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _scope: &lash_core::ExecutionScope,
+        _owner: &lash_core::LeaseOwnerIdentity,
+        _max_inputs: usize,
+        _configuration: &lash_core::PersistedSessionConfig,
+        _policy: lash_core::QueuedWorkClaimPolicy,
+    ) -> std::result::Result<lash_core::store::SelectedQueuedRun, lash_core::StoreError> {
+        unreachable!("fixture does not serve queued runs")
+    }
+    async fn pending_queued_run(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        Ok(None)
+    }
+    async fn settle_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _settlement: lash_core::store::QueuedRunCommit,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        unreachable!("fixture does not serve queued runs")
+    }
+    async fn begin_or_resume_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _request: lash_core::store::BeginQueuedRun,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        unreachable!("BoundSessionStore does not serve queued runs")
+    }
+
     async fn enqueue_queued_work_with_outcome(
         &self,
         _batch: lash_core::runtime::QueuedWorkBatchDraft,
@@ -2203,6 +2269,7 @@ mod discovery_execution;
 mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;
+mod queued_run_recovery;
 #[cfg(feature = "rlm")]
 mod rebuild_conformance;
 #[cfg(feature = "rlm")]

@@ -174,6 +174,7 @@ pub async fn effect_controller_lease_fencing(backend: EffectLeaseFencingBackend)
     lease_fencing_reports_lease_lost_when_stolen(&backend, &run).await;
     lease_fencing_rejects_finalize_after_expiry(&backend, &run).await;
     lease_fencing_reclaims_explicitly_expired_lease(&backend, &run).await;
+    lease_fencing_rejects_stale_derivation_release(&backend, &run).await;
 }
 
 #[expect(
@@ -424,4 +425,75 @@ async fn lease_fencing_reclaims_explicitly_expired_lease(
     .expect("successor executes the reclaimed effect");
     assert_replay_conformance_exec_marker(reclaimed, "successor-owner");
     let _keep_notify_alive = never_release;
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture asserts its public outcomes"
+)]
+async fn lease_fencing_rejects_stale_derivation_release(
+    backend: &EffectLeaseFencingBackend,
+    run: &str,
+) {
+    let ttl = std::time::Duration::from_secs(30);
+    let key = format!("derivation-release-{run}");
+    let first = (backend.make_controller)(ttl, lease_fencing_system_clock()).await;
+    let successor = (backend.make_controller)(ttl, lease_fencing_system_clock()).await;
+    let mut envelope = lease_fencing_envelope(&key);
+    envelope.command = RuntimeEffectCommand::AssistantResponseHooks {
+        response: Box::default(),
+    };
+    let (first_entered, entered) = tokio::sync::oneshot::channel();
+    let (fail, failing) = tokio::sync::oneshot::channel();
+    let first_envelope = envelope.clone();
+    let stale = crate::task::spawn(async move {
+        first
+            .controller
+            .execute_effect(
+                first_envelope,
+                RuntimeEffectLocalExecutor::testing(move |_| async move {
+                    first_entered.send(()).expect("first entered");
+                    failing.await.expect("fail first");
+                    Err(RuntimeEffectControllerError::retryable_response_derivation(
+                        "stale derivation",
+                    ))
+                }),
+            )
+            .await
+    });
+    entered.await.expect("first claimed");
+    (backend.expire_lease)(key).await;
+    let (successor_entered, entered) = tokio::sync::oneshot::channel();
+    let (finish, finishing) = tokio::sync::oneshot::channel();
+    let successor_task = crate::task::spawn(async move {
+        successor
+            .controller
+            .execute_effect(
+                envelope,
+                RuntimeEffectLocalExecutor::testing(move |_| async move {
+                    successor_entered.send(()).expect("successor entered");
+                    finishing.await.expect("finish successor");
+                    Ok(RuntimeEffectOutcome::AssistantResponseHooks {
+                        response: Box::default(),
+                        events: Vec::new(),
+                    })
+                }),
+            )
+            .await
+    });
+    entered.await.expect("successor claimed");
+    fail.send(()).expect("fail predecessor");
+    let error = stale
+        .await
+        .expect("join predecessor")
+        .expect_err("stale release refused");
+    assert!(
+        error.code.as_str().ends_with("_effect_replay_lease_lost"),
+        "{error}"
+    );
+    finish.send(()).expect("finish successor");
+    successor_task
+        .await
+        .expect("join successor")
+        .expect("stale owner must not expire the successor's claim");
 }

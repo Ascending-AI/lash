@@ -194,7 +194,8 @@ where
     for ruling in &rulings {
         let scenario = format!("error-return-{}", ruling.placement.key());
         let identity = ReferenceIdentity::for_scenario(&scenario);
-        let scope = crate::ExecutionScope::turn(&identity.session_id, &identity.turn_id);
+        let scope =
+            crate::ExecutionScope::queue_drain(&identity.session_id, identity.turn_id.as_str());
         let invocation = make_error_invocation(&scenario, scope);
         if ruling.placement.journal_point().is_some()
             && invocation.effect_journal_faults().is_none()

@@ -982,17 +982,14 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     let error = first
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("capture-abort-owner"),
             ),
         ))
         .await
         .expect_err("dirty capture aborts before commit");
-    assert_eq!(
-        error.code,
-        lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed
-    );
+    assert_eq!(error.code, lash_core::RuntimeErrorCode::QueuedRunPending);
 
     executor.fail_capture.store(false, Ordering::SeqCst);
     executor.dirty.store(false, Ordering::SeqCst);
@@ -1018,15 +1015,15 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
     let reclaimed = peer
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
-                &TurnId::from("capture-abort-peer"),
+                &TurnId::from("capture-abort-owner"),
             ),
         ))
         .await
         .expect("peer reclaim must not wait for the lease TTL")
         .ran()
-        .expect("peer immediately receives the abandoned input");
+        .expect("peer immediately resumes the admitted input");
     assert_eq!(reclaimed.assistant_output.safe_text, "peer reclaimed");
 }
 
@@ -1109,24 +1106,29 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     let committed = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("follow-on-capture-failure"),
             ),
         ))
         .await
-        .expect("a follow-on pre-commit failure must not erase the committed frame")
-        .ran()
-        .expect("the committed frame is returned");
-    assert!(matches!(
-        committed.outcome,
-        TurnOutcome::AgentFrameSwitch { .. }
-    ));
-    assert!(committed.errors.iter().any(|issue| {
-        issue.code
-            == Some(lash_core::TurnFailureCode::from_wire("execution_state_capture_failed").into())
-            && issue.retryable == Some(false)
-    }));
+        .expect_err("failed follow-on remains a recoverable admission");
+    assert_eq!(
+        committed.code,
+        lash_core::RuntimeErrorCode::QueuedRunPending
+    );
+    let pending = lash_core::store::QueuedWorkStore::pending_queued_run(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("pending admission")
+    .expect("retained continuation");
+    assert_eq!(pending.position.physical_ordinal, 1);
+    assert_eq!(
+        pending.position.turn_id,
+        TurnId::from("follow-on-capture-failure:agent-frame:1")
+    );
     let durable = lash_core::store::SessionCommitStore::load_session(store.as_ref())
         .await
         .expect("load committed frame")
@@ -1138,9 +1140,9 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     let recovered = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
-                &TurnId::from("retry-safe-committed-handoff"),
+                &TurnId::from("follow-on-capture-failure"),
             ),
         ))
         .await

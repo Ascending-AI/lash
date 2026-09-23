@@ -179,6 +179,27 @@ pub const EXPECTED_FOREIGN_KEYS: &[ExpectedForeignKey] = &[
     expected_foreign_key(
         &[SqliteConstraintDatabase::DurableCore],
         rendered_foreign_key(
+            "queued_run_members",
+            &["session_id", "scope_id"],
+            "queued_runs",
+            &["session_id", "scope_id"],
+            "no action",
+            false,
+            false,
+        ),
+        rendered_foreign_key(
+            "lash_queued_run_members",
+            &["session_id", "scope_id"],
+            "lash_queued_runs",
+            &["session_id", "scope_id"],
+            "no action",
+            false,
+            false,
+        ),
+    ),
+    expected_foreign_key(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered_foreign_key(
             "artifact_owners",
             &["namespace", "artifact_ref"],
             "artifact_refs",

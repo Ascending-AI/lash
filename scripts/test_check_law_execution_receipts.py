@@ -505,6 +505,41 @@ recipe = "deferred-e2e"
 class RealTreeTests(unittest.TestCase):
     """The real macros.rs keeps its delegation invariants under the census."""
 
+    def test_response_derivation_catalogue_has_only_backend_claimants(self) -> None:
+        macros = MODULE.load_macros()
+        self.assertEqual(
+            MODULE.suite_expected(macros, "effect_host_tests"),
+            {("effect_host", "effect-host")},
+        )
+        laws = MODULE.suite_expected(macros, "effect_controller_response_derivation_tests")
+        self.assertEqual(
+            laws,
+            {
+                ("effect_controller_response_derivation_retry", "effect-controller-response-derivation-retry"),
+                ("effect_controller_response_derivation_terminals", "effect-controller-response-derivation-terminals"),
+            },
+        )
+        for label in (
+            "//crates/lash-sqlite-store:conformance__test",
+            "//crates/lash-postgres-store:conformance__test",
+        ):
+            invocations = [
+                invocation
+                for prefix, root in MODULE.resolve_label(label)
+                for invocation in MODULE.invocations_in_root(root, prefix)
+            ]
+            expected = MODULE.expected_from_invocations(invocations, macros)
+            self.assertEqual({pair for pair in expected["conformance"] if pair in laws}, laws)
+        invocations = [
+            invocation
+            for prefix, root in MODULE.resolve_label(
+                "//crates/lash-conformance:lash-conformance__unit_test"
+            )
+            for invocation in MODULE.invocations_in_root(root, prefix)
+        ]
+        expected = MODULE.expected_from_invocations(invocations, macros)
+        self.assertFalse(any(pair in laws for pairs in expected.values() for pair in pairs))
+
     def test_reopenable_inherits_shared_catalogue_only(self) -> None:
         macros = MODULE.macro_blocks(MODULE.MACROS.read_text(encoding="utf-8"))
         plain = MODULE.suite_expected(macros, "runtime_persistence_tests")

@@ -1,4 +1,4 @@
--- lash-postgres-store teardown, component version 115.
+-- lash-postgres-store teardown, component version 116.
 --
 -- Generated artifact. These bytes are exactly the DDL a host applies to drop
 -- everything this component owns at the reject-and-recreate boundary;
@@ -41,6 +41,10 @@ DROP TABLE IF EXISTS lash_turn_cancel_requests CASCADE;
 DROP TABLE IF EXISTS lash_turn_cancel_affected_inputs CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_cancellation_bindings CASCADE;
+
+DROP TABLE IF EXISTS lash_queued_runs CASCADE;
+
+DROP TABLE IF EXISTS lash_queued_run_members CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_cancel_closure_authorizations CASCADE;
 

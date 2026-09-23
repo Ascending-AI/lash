@@ -14,11 +14,11 @@
 //!
 //! The matrix then replays the renewal-boundary point once more with the
 //! recovered turn's lease-renewal task deterministically starved. A lease that
-//! lapses by wall clock makes the checkpoint claim advisory: the undelivered
-//! active-turn input is deferred to the next turn instead of being delivered,
-//! and the suite drains it with one further turn and holds exactly-once on the
-//! drained input. Pinning that path keeps it covered on every run rather than
-//! only when a loaded runner happens to starve the renewal.
+//! lapses by wall clock cannot commit the admitted run. The suite asserts its
+//! retryable disposition and retained identity, then resumes the same run with
+//! a healthy lease and verifies one committed terminal and settled ingress.
+//! Pinning that path keeps it covered on every run rather than only when a
+//! loaded runner happens to starve the renewal.
 //!
 //! That starvation is the *only* lease lapse this suite admits. Every turn the
 //! matrix crashes runs on a lease term wide enough that no scheduling delay can
@@ -95,6 +95,9 @@ mod cold_process;
 mod error_return;
 mod expectations;
 mod held_turn_input;
+mod recovery;
+
+use recovery::run_crash_matrix_case;
 
 use cold_process::ColdProcessTurnAction;
 pub use cold_process::{
@@ -160,6 +163,9 @@ impl TurnSeamOperation {
             self,
             Self::Store(
                 StoreOperation::ClaimSessionExecutionLease
+                    | StoreOperation::BeginQueuedRun
+                    | StoreOperation::SelectQueuedRun
+                    | StoreOperation::SettleQueuedRun
                     | StoreOperation::ClaimNextTurnInputs
                     | StoreOperation::ClaimReadyQueuedWork { .. }
                     | StoreOperation::ClaimSelectedQueuedWork { .. }
@@ -180,11 +186,16 @@ impl TurnSeamOperation {
 enum StoreOperation {
     LoadSession,
     LoadSessionHeadMeta,
+    LoadQueuedRunAdmissionHead,
     ClaimSessionExecutionLease,
     RenewSessionExecutionLease,
     ReleaseSessionExecutionLease,
     ClaimLeadingSessionCommand,
     ClaimNextTurnInputs,
+    BeginQueuedRun,
+    SelectQueuedRun,
+    PendingQueuedRun,
+    SettleQueuedRun,
     DeferOrphanedActiveTurnInputs,
     ClaimReadyQueuedWork {
         boundary: String,
@@ -745,9 +756,18 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
     }
 
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+        let operation = if self
+            .control
+            .completed_count(&TurnSeamOperation::Store(StoreOperation::BeginQueuedRun))
+            == 0
+        {
+            StoreOperation::LoadQueuedRunAdmissionHead
+        } else {
+            StoreOperation::LoadSessionHeadMeta
+        };
         self.control
             .around(
-                TurnSeamOperation::Store(StoreOperation::LoadSessionHeadMeta),
+                TurnSeamOperation::Store(operation),
                 self.inner.load_session_head_meta(),
             )
             .await
@@ -781,6 +801,68 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
                 TurnSeamOperation::Store(StoreOperation::AuthorizeTurnCancelClosure),
                 self.inner
                     .authorize_turn_cancel_closure(session_execution_lease, authorization),
+            )
+            .await
+    }
+
+    async fn begin_or_resume_queued_run(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        request: crate::BeginQueuedRun,
+    ) -> Result<crate::QueuedRunAdmission, StoreError> {
+        self.control
+            .around(
+                TurnSeamOperation::Store(StoreOperation::BeginQueuedRun),
+                self.inner.begin_or_resume_queued_run(fence, request),
+            )
+            .await
+    }
+
+    async fn select_queued_run(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        scope: &crate::ExecutionScope,
+        owner: &LeaseOwnerIdentity,
+        max_inputs: usize,
+        configuration: &crate::PersistedSessionConfig,
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<crate::SelectedQueuedRun, StoreError> {
+        self.control
+            .around(
+                TurnSeamOperation::Store(StoreOperation::SelectQueuedRun),
+                self.inner.select_queued_run(
+                    fence,
+                    scope,
+                    owner,
+                    max_inputs,
+                    configuration,
+                    policy,
+                ),
+            )
+            .await
+    }
+
+    async fn pending_queued_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::QueuedRunAdmission>, StoreError> {
+        self.control
+            .around(
+                TurnSeamOperation::Store(StoreOperation::PendingQueuedRun),
+                self.inner.pending_queued_run(session_id),
+            )
+            .await
+    }
+
+    async fn settle_queued_run(
+        &self,
+        fence: &SessionExecutionLeaseAuthority,
+        settlement: crate::QueuedRunCommit,
+    ) -> Result<crate::QueuedRunAdmission, StoreError> {
+        self.control
+            .around(
+                TurnSeamOperation::Store(StoreOperation::SettleQueuedRun),
+                self.inner.settle_queued_run(fence, settlement),
             )
             .await
     }
@@ -1870,7 +1952,7 @@ fn scoped_controller(
 ) -> crate::ScopedEffectController<'static> {
     crate::ScopedEffectController::shared(
         controller,
-        crate::AdmittedScope::turn(&identity.session_id, &identity.turn_id),
+        crate::AdmittedScope::queue_drain(&identity.session_id, identity.turn_id.as_str()),
     )
     .expect("valid reference turn scope")
 }
@@ -2105,13 +2187,12 @@ async fn drive_turn(
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
 ) -> Result<Option<crate::AssembledTurn>, crate::RuntimeError> {
-    runtime
-        .stream_next_queued_work(crate::TurnOptions::new(
-            tokio_util::sync::CancellationToken::new(),
-            scoped_controller(effect_controller, identity),
-        ))
-        .await
-        .map(crate::facade_support::QueuedTurnDrain::ran)
+    Box::pin(runtime.stream_next_queued_work(crate::TurnOptions::new(
+        tokio_util::sync::CancellationToken::new(),
+        scoped_controller(effect_controller, identity),
+    )))
+    .await
+    .map(crate::facade_support::QueuedTurnDrain::ran)
 }
 
 fn generated_points(trace: &[TurnSeamOperation]) -> Vec<TurnCrashPoint> {
@@ -2333,9 +2414,8 @@ fn pending_input_text(read: &crate::PendingTurnInputRead) -> String {
 ///
 /// Every generated crash point runs under a nominal lease-renewal task. The
 /// matrix then replays the renewal-boundary point once more with the renewal
-/// task deterministically starved, which pins the advisory checkpoint-skip
-/// path (lease lapsed by wall clock) that a loaded runner would otherwise
-/// reach only by luck.
+/// task deterministically starved, which pins the retained-admission retry
+/// after lease loss that a loaded runner would otherwise reach only by luck.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -2376,272 +2456,6 @@ where
         RenewalPressure::Starved,
     ))
     .await;
-}
-
-/// Crash one scripted turn at `entry`'s point, recover it with a successor
-/// turn under `pressure`, and assert the ruled durable end state.
-#[expect(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn run_crash_matrix_case<F, I>(
-    make: &F,
-    make_invocation: &I,
-    entry: &TurnCrashOutcome,
-    scenario: &str,
-    pressure: RenewalPressure,
-) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> super::ConformanceInvocation,
-{
-    let identity = ReferenceIdentity::for_scenario(scenario);
-    let raw = make(scenario);
-    seed_reference_ingress(&raw, &identity, scenario).await;
-    let control = SeamControl::default();
-    let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let decorated = SeamStore::wrap(raw, control.clone());
-    let invocation = make_invocation(scenario);
-    let effect_redrive = invocation.effect_redrive();
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
-        control: control.clone(),
-        executions: Arc::clone(&executions),
-        journal_faults: None,
-    });
-    let runtime = Box::pin(build_runtime(
-        decorated,
-        control.clone(),
-        Arc::clone(&effect_controller),
-        &identity,
-        TraceTool::default(),
-    ))
-    .await;
-    control.arm(entry.point.clone());
-    let task_identity = identity.clone();
-    let task = crate::task::spawn(async move {
-        Box::pin(drive_turn(runtime, effect_controller, &task_identity)).await
-    });
-    control.wait_for_hit().await;
-    control.simulate_process_crash();
-    task.abort();
-    let _ = task.await;
-    let successor_invocation = invocation.redrive();
-
-    let predecessor_claimed = !matches!(
-        (&entry.point.operation, entry.point.placement),
-        (
-            TurnSeamOperation::Store(StoreOperation::ClaimSessionExecutionLease),
-            CrashPlacement::Boundary
-        ) | (
-            TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
-                releases_lease: true,
-                ..
-            }),
-            CrashPlacement::InsideCall
-        ) | (
-            TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume),
-            CrashPlacement::InsideCall
-        )
-    );
-    wait_for_recovery_lease(make, scenario, &entry.point, predecessor_claimed).await;
-    let successor_control = SeamControl::default();
-    let successor_store = SeamStore::wrap(make(scenario), successor_control.clone());
-    let successor_timings = match pressure {
-        RenewalPressure::Nominal => nominal_recovery_timings(),
-        RenewalPressure::Starved => recovery_timings(),
-    };
-    let successor_effect_controller: Arc<dyn RuntimeEffectController> =
-        Arc::new(SeamEffectController {
-            inner: successor_invocation.controller_handle(),
-            control: successor_control.clone(),
-            executions: Arc::clone(&executions),
-            journal_faults: None,
-        });
-    let successor = Box::pin(build_runtime_with_lease_timings(
-        Arc::clone(&successor_store),
-        successor_control.clone(),
-        Arc::clone(&successor_effect_controller),
-        &identity,
-        TraceTool::default(),
-        successor_timings,
-    ))
-    .await;
-    successor_control.clear();
-    if pressure == RenewalPressure::Starved {
-        successor_control.starve_renewals();
-    }
-    let _ = Box::pin(drive_turn(
-        successor,
-        successor_effect_controller,
-        &identity,
-    ))
-    .await
-    .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
-    successor_invocation.end();
-
-    let reader = make(scenario);
-    super::bind_conformance_session(&reader, &identity.session_id).await;
-    let recovered_pending = reader
-        .list_pending_turn_inputs(&identity.session_id)
-        .await
-        .expect("list pending inputs");
-    // The recovered turn may legitimately leave one input deferred to the next
-    // turn: a lapsed lease makes the checkpoint claim advisory, so the input is
-    // carried forward rather than delivered. Drain it with one more turn and
-    // hold the exactly-once law on the drained input below.
-    if pressure == RenewalPressure::Starved {
-        assert_eq!(
-            recovered_pending
-                .iter()
-                .map(pending_input_text)
-                .collect::<Vec<_>>(),
-            vec!["active checkpoint input".to_string()],
-            "{scenario}: a starved renewal must lapse the lease and defer the undelivered \
-             active-turn input, or this case covers nothing; pending={recovered_pending:?}"
-        );
-    }
-    let deferred_texts: Vec<String> = if recovered_pending.is_empty() {
-        Vec::new()
-    } else {
-        assert!(
-            deferred_to_next_turn(&recovered_pending),
-            "{scenario} ({entry:?}): all input claims settle exactly once or defer to the next \
-             turn; pending={recovered_pending:?}"
-        );
-        let texts: Vec<String> = recovered_pending.iter().map(pending_input_text).collect();
-        // Deferral is tolerated only for the demoted active-turn input. A
-        // seeded next-turn input showing up here would mean the recovered turn
-        // failed to deliver work it was never blocked on, which the state-only
-        // check above cannot tell apart from the designed deferral.
-        assert!(
-            texts
-                .iter()
-                .all(|text| text.as_str() == "active checkpoint input"),
-            "{scenario} ({entry:?}): only the demoted active-turn input may defer to the next \
-             turn; pending={recovered_pending:?}"
-        );
-        texts
-    };
-    let drain_turns = usize::from(!deferred_texts.is_empty());
-    if drain_turns == 1 {
-        Box::pin(drive_drain_turn(
-            make,
-            make_invocation,
-            scenario,
-            &identity,
-            &executions,
-        ))
-        .await;
-    }
-
-    let state = crate::load_persisted_session_state(reader.as_ref())
-        .await
-        .expect("read recovered state")
-        .expect("recovered turn commits state");
-    let read_model = state.session_graph.read_model(None).unwrap();
-    let part_count = |content: &str| {
-        read_model
-            .messages
-            .iter()
-            .flat_map(|message| message.parts.iter())
-            .filter(|part| part.content() == content)
-            .count()
-    };
-    // FIG-3157: queued work claimed at the terminal checkpoint no longer
-    // re-prompts the finishing turn. It is withheld from that delivery and
-    // drives a follow-on turn of the same logical run, so each seeded batch
-    // that lands renders its own terminal output instead of replacing one.
-    let terminal_follow_on_turns = part_count("trace-source");
-    assert_eq!(
-        part_count("trace turn complete"),
-        1 + drain_turns + terminal_follow_on_turns,
-        "{scenario} ({entry:?}): recovery must expose one terminal assistant output per turn"
-    );
-    for text in &deferred_texts {
-        assert_eq!(
-            part_count(text),
-            1,
-            "{scenario} ({entry:?}): the deferred input is delivered exactly once by the next turn"
-        );
-    }
-    let pending_inputs = reader
-        .list_pending_turn_inputs(&identity.session_id)
-        .await
-        .expect("list pending inputs");
-    assert!(
-        pending_inputs.is_empty(),
-        "{scenario} ({entry:?}): all input claims settle exactly once; pending={pending_inputs:?}"
-    );
-    assert!(
-        reader
-            .list_queued_work(&identity.session_id)
-            .await
-            .expect("list queued work")
-            .is_empty(),
-        "{scenario} ({entry:?}): queued-work claim settles exactly once"
-    );
-
-    let effect_count = executions.load(std::sync::atomic::Ordering::SeqCst);
-    let expected_effect_count = match effect_redrive {
-        super::ConformanceEffectRedrive::ReplaysJournal => {
-            usize::from(matches!(
-                entry.point.placement,
-                CrashPlacement::AfterExternalEffectBeforeOutcome
-            )) + 1
-        }
-        super::ConformanceEffectRedrive::ReexecutesUncommitted => entry.effect_executions_l1,
-    } + drain_turns * DRAIN_TURN_EFFECT_EXECUTIONS;
-    assert_eq!(
-        effect_count, expected_effect_count,
-        "{scenario}: {}",
-        entry.outcome
-    );
-}
-
-/// Drive one further clean turn to absorb inputs the recovered turn deferred to
-/// the next turn.
-async fn drive_drain_turn<F, I>(
-    make: &F,
-    make_invocation: &I,
-    scenario: &str,
-    identity: &ReferenceIdentity,
-    executions: &Arc<std::sync::atomic::AtomicUsize>,
-) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> super::ConformanceInvocation,
-{
-    // The drain turn is a new turn, not a recovery of the crashed one, so it
-    // gets its own turn identity: reusing the recovered turn's id would collide
-    // with the history nodes that turn already committed.
-    let identity = ReferenceIdentity {
-        session_id: identity.session_id.clone(),
-        turn_id: crate::TurnId::from(format!("{}:drain", identity.turn_id)),
-    };
-    let identity = &identity;
-    let control = SeamControl::default();
-    let store = SeamStore::wrap(make(scenario), control.clone());
-    let invocation = make_invocation(&identity.turn_id);
-    let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
-        inner: invocation.controller_handle(),
-        control: control.clone(),
-        executions: Arc::clone(executions),
-        journal_faults: None,
-    });
-    let runtime = Box::pin(build_runtime_with_lease_timings(
-        store,
-        control.clone(),
-        Arc::clone(&effect_controller),
-        identity,
-        TraceTool::default(),
-        nominal_recovery_timings(),
-    ))
-    .await;
-    control.clear();
-    let _ = Box::pin(drive_turn(runtime, effect_controller, identity))
-        .await
-        .unwrap_or_else(|error| panic!("drain turn failed for {scenario}: {error}"));
-    invocation.end();
 }
 
 #[cfg(test)]

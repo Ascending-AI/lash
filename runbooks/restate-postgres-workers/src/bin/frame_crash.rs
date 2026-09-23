@@ -151,6 +151,9 @@ async fn run(mode: &str) -> Result<()> {
             let deadline = tokio::time::Instant::now() + RECOVERY_DEADLINE;
             loop {
                 match session.queued_turn().run().await? {
+                    QueuedTurnDrain::Replayed(_) => anyhow::bail!(
+                        "automatic recovery unexpectedly returned an explicit-ID receipt"
+                    ),
                     QueuedTurnDrain::Empty(_) if tokio::time::Instant::now() < deadline => {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
@@ -173,6 +176,9 @@ async fn run(mode: &str) -> Result<()> {
             let deadline = tokio::time::Instant::now() + RECOVERY_DEADLINE;
             let recovered = loop {
                 match session.queued_turn().run().await? {
+                    QueuedTurnDrain::Replayed(_) => anyhow::bail!(
+                        "automatic recovery unexpectedly returned an explicit-ID receipt"
+                    ),
                     QueuedTurnDrain::Ran(recovered) => break recovered,
                     QueuedTurnDrain::Empty(_) if tokio::time::Instant::now() < deadline => {
                         tokio::time::sleep(Duration::from_millis(100)).await;

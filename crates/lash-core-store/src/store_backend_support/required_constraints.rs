@@ -102,6 +102,67 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
     expected_constraint(
         &[SqliteConstraintDatabase::DurableCore],
         rendered(
+            "queued_runs",
+            "ck_queued_runs_status",
+            "status IN ('pending', 'settled')",
+        ),
+        rendered(
+            "lash_queued_runs",
+            "ck_queued_runs_status",
+            "status IN ('pending', 'settled')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered("queued_runs", "ck_queued_runs_revision", "revision >= 0"),
+        rendered(
+            "lash_queued_runs",
+            "ck_queued_runs_revision",
+            "revision >= 0",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "queued_run_members",
+            "ck_queued_run_members_collection_kind",
+            "collection_kind IN ('initial', 'current', 'withheld', 'assigned')",
+        ),
+        rendered(
+            "lash_queued_run_members",
+            "ck_queued_run_members_collection_kind",
+            "collection_kind IN ('initial', 'current', 'withheld', 'assigned')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "queued_run_members",
+            "ck_queued_run_members_ordinal",
+            "ordinal >= 0",
+        ),
+        rendered(
+            "lash_queued_run_members",
+            "ck_queued_run_members_ordinal",
+            "ordinal >= 0",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "queued_run_members",
+            "ck_queued_run_members_member_kind",
+            "member_kind IN ('input', 'batch')",
+        ),
+        rendered(
+            "lash_queued_run_members",
+            "ck_queued_run_members_member_kind",
+            "member_kind IN ('input', 'batch')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
             "attachment_manifest",
             "ck_attachment_manifest_owner_identity",
             "(owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)",

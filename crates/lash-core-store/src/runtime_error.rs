@@ -72,6 +72,12 @@ pub enum RuntimeErrorCode {
     /// write authority was contended. Retrying the same operation unchanged is
     /// safe; reloading or rebasing is not required.
     StoreCommitContended,
+    /// A physical queued attempt yielded with a durable continuation.
+    QueuedRunPending,
+    /// An exact queued request re-presented a failed terminal receipt.
+    QueuedRunFailed,
+    /// Restore the admitted configuration or explicitly abandon this run.
+    QueuedRunConfigurationChanged,
     /// The final runtime commit lost the session-head compare-and-swap to a
     /// newer commit. Nothing from the losing commit was published, but the
     /// identical stale commit is not safe to retry: reload the durable head and
@@ -415,6 +421,14 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
             format!("failed to snapshot dirty execution state: {message}"),
         ),
         crate::store::StoreError::TurnOutcomeMaterializationRefused { error } => *error,
+        crate::store::StoreError::QueuedRunConfigurationChanged { session_id } => {
+            RuntimeError::new(
+                RuntimeErrorCode::QueuedRunConfigurationChanged,
+                format!(
+                    "session {session_id} has a pending queued run with different execution configuration; restore that configuration or explicitly abandon the admission"
+                ),
+            )
+        }
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
 }
@@ -454,6 +468,9 @@ impl RuntimeErrorCode {
                 "turn_execution_requires_reconciled_tool_surface"
             }
             Self::StoreCommitContended => "store_commit_contended",
+            Self::QueuedRunPending => "queued_run_pending",
+            Self::QueuedRunFailed => "queued_run_failed",
+            Self::QueuedRunConfigurationChanged => "queued_run_configuration_changed",
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
             Self::SessionCatalogLookupUnsupported => "session_catalog_lookup_unsupported",
@@ -709,6 +726,7 @@ impl RuntimeErrorCode {
             | Self::RuntimeEffectGroupDrainDeferred
             | Self::SessionExecutionLaneBusy
             | Self::TurnInputSettlementSuperseded
+            | Self::QueuedRunPending
             | Self::StoreCommitContended
             | Self::CancelStartGateUnavailable
             | Self::PostgresAwaitEventStore
@@ -742,6 +760,8 @@ impl RuntimeErrorCode {
             | Self::ExecutionScopeAdmissionRefused
             | Self::TurnInputRedriveSetUnavailable
             | Self::TurnExecutionRequiresReconciledToolSurface
+            | Self::QueuedRunFailed
+            | Self::QueuedRunConfigurationChanged
             | Self::QueuedWorkRowExceedsContextWindow
             | Self::StoreCommitNodeBudgetExceeded
             | Self::StoreCommitByteBudgetExceeded
@@ -930,6 +950,9 @@ impl RuntimeErrorCode {
         Self::TurnInputRedriveSetUnavailable,
         Self::TurnExecutionRequiresReconciledToolSurface,
         Self::StoreCommitContended,
+        Self::QueuedRunPending,
+        Self::QueuedRunFailed,
+        Self::QueuedRunConfigurationChanged,
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
         Self::SessionCatalogLookupUnsupported,
@@ -1131,6 +1154,9 @@ impl RuntimeErrorCode {
                 Self::TurnExecutionRequiresReconciledToolSurface
             }
             "store_commit_contended" => Self::StoreCommitContended,
+            "queued_run_pending" => Self::QueuedRunPending,
+            "queued_run_failed" => Self::QueuedRunFailed,
+            "queued_run_configuration_changed" => Self::QueuedRunConfigurationChanged,
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
             "session_catalog_lookup_unsupported" => Self::SessionCatalogLookupUnsupported,
@@ -1507,9 +1533,25 @@ pub struct RuntimeEffectReplayMismatchReport {
     pub first_divergent_paths: Vec<String>,
 }
 
+/// Journal treatment of an executor failure before a terminal is committed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EffectErrorJournalDisposition {
+    #[default]
+    Terminal,
+    RetryUncommittedResponseDerivation,
+}
+
+impl EffectErrorJournalDisposition {
+    pub fn is_retryable_derivation(self) -> bool {
+        matches!(self, Self::RetryUncommittedResponseDerivation)
+    }
+}
+
 #[derive(Clone, Debug, thiserror::Error, Serialize, Deserialize)]
 #[error("{code}: {message}")]
 pub struct RuntimeEffectControllerError {
+    #[serde(skip)]
+    journal_disposition: EffectErrorJournalDisposition,
     pub code: RuntimeErrorCode,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1521,10 +1563,32 @@ pub struct RuntimeEffectControllerError {
 impl RuntimeEffectControllerError {
     pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {
         Self {
+            journal_disposition: EffectErrorJournalDisposition::Terminal,
             code,
             message: message.into(),
             summary: None,
             cause: None,
+        }
+    }
+
+    /// Marks a failed, uncommitted host response derivation as safe to execute again.
+    /// This authority is local to the executor; decoding a stored error cannot mint it.
+    pub fn retryable_response_derivation(message: impl Into<String>) -> Self {
+        let mut error = Self::new(
+            RuntimeErrorCode::RuntimeEffectAssistantResponseHook,
+            message,
+        );
+        error.journal_disposition =
+            EffectErrorJournalDisposition::RetryUncommittedResponseDerivation;
+        error
+    }
+
+    /// Only the assistant-response command can consume derivation retry authority.
+    pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalDisposition {
+        if kind == RuntimeEffectKind::AssistantResponseHooks {
+            self.journal_disposition
+        } else {
+            EffectErrorJournalDisposition::Terminal
         }
     }
 
@@ -1555,6 +1619,7 @@ impl RuntimeEffectControllerError {
 
     pub fn into_runtime_error(self) -> RuntimeError {
         let Self {
+            journal_disposition: _,
             code,
             message,
             summary,
@@ -1572,6 +1637,7 @@ impl RuntimeEffectControllerError {
 impl From<RuntimeError> for RuntimeEffectControllerError {
     fn from(err: RuntimeError) -> Self {
         Self {
+            journal_disposition: EffectErrorJournalDisposition::Terminal,
             code: err.code,
             message: err.message,
             summary: err.summary,
@@ -1620,6 +1686,7 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
             _ => crate::RuntimeErrorCode::RuntimeStore,
         };
         Self {
+            journal_disposition: EffectErrorJournalDisposition::Terminal,
             code,
             message: err.to_string(),
             summary: None,

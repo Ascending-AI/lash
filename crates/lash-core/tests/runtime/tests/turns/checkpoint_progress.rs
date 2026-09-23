@@ -1783,7 +1783,7 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("late-active-next-turn"),
             ),
@@ -1814,7 +1814,7 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("command-only-queue-drain"),
             ),
@@ -1928,7 +1928,7 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("next-input-before-wake-drain"),
             ),
@@ -2053,7 +2053,7 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                named_queued_scope(
                     &SessionId::from("root"),
                     &TurnId::from("selected-wake-drain"),
                 ),
@@ -2393,7 +2393,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         std::time::Duration::from_secs(5),
         runtime.stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from(SESSION_ID),
                 &TurnId::from("cancel-claimed-wake-drain"),
             ),
@@ -2436,7 +2436,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                named_queued_scope(
                     &SessionId::from(SESSION_ID),
                     &TurnId::from("after-cancel-claimed-wake-drain")
                 ),

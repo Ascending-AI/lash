@@ -193,7 +193,12 @@ pub(crate) fn nearest_frame_node_id_conn(
 
 mod claim_support;
 mod maintenance;
+mod queued_run;
+mod queued_run_assignment;
+mod queued_run_selection;
 mod queued_work;
+use queued_run::*;
+use queued_run_selection::*;
 mod session_commit;
 mod session_execution_lease;
 mod turn_input;

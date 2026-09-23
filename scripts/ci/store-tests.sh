@@ -98,7 +98,10 @@ labels() {
 # One test selection per uniform suite, rendered into both dialects below.
 # Fields are
 #
-#   bazel label|test filter|cargo package|cargo target|cargo runner|flags
+#   bazel label|comma-separated test filters|cargo package|cargo target|cargo runner|flags
+#
+# Each filter runs separately in either dialect. An empty filter runs the
+# whole target.
 #
 # `flags` is a comma list of intents -- include-ignored, single-threaded,
 # nocapture -- that each renderer spells in its own dialect, so the translation
@@ -107,12 +110,12 @@ labels() {
 # nextest-vs-libtest are execution settings, not test selection.
 #
 # Three suites are deliberately absent and stay explicit arms below:
-# `pg-catalog-compatibility` runs two invocations, and `pg-store` and
+# `pg-catalog-compatibility` runs different targets; `pg-store` and
 # `s3-store` take a generated label file rather than one label. Forcing a shape
 # variation into the table for those buys nothing.
 declare -A uniform_store_suites=(
+  [pg-agent-scenario]="//crates/lash-postgres-store:integration__test|public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres,automatic_queued_retry_reuses_recorded_completion_before_new_arrivals|lash-internal-postgres-store|--test integration|nextest-ci|"
   [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|pool_wait|lash-perf||nextest|"
-  [pg-agent-scenario]="//crates/lash-postgres-store:integration__test|public_provider_parent_end_row_is_recovered_after_a_crash_before_the_ledger_write_on_postgres|lash-internal-postgres-store|--test integration|nextest-ci|"
   [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|"
   [pg-cross-backend]="//crates/lash-sim:cross_backend_store_differential__test||lash-sim|--test cross_backend_store_differential|nextest-ci|include-ignored,single-threaded,nocapture"
   [s3-attachment-differential]="//crates/lash-sim:cross_backend_store_differential__test|attachment_blob_store_differential_agrees|lash-sim|--test cross_backend_store_differential|cargo-test|include-ignored,nocapture"
@@ -173,14 +176,22 @@ render_cargo_suite() {
 }
 
 run_uniform_store_suite() {
-  local label filter package target runner flags
-  IFS='|' read -r label filter package target runner flags \
+  local label filter_list filter package target runner flags
+  local filters=()
+  IFS='|' read -r label filter_list package target runner flags \
     <<<"${uniform_store_suites[$1]}"
-  if [ "${trusted}" = true ]; then
-    render_bazel_suite "$label" "$filter" "$flags"
+  if [ -n "$filter_list" ]; then
+    IFS=',' read -r -a filters <<<"$filter_list"
   else
-    render_cargo_suite "$filter" "$package" "$target" "$runner" "$flags"
+    filters=("")
   fi
+  for filter in "${filters[@]}"; do
+    if [ "${trusted}" = true ]; then
+      render_bazel_suite "$label" "$filter" "$flags"
+    else
+      render_cargo_suite "$filter" "$package" "$target" "$runner" "$flags"
+    fi
+  done
 }
 
 if [ -n "${uniform_store_suites[$suite]+set}" ]; then

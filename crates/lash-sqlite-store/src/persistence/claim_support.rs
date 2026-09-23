@@ -32,6 +32,22 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                     input,
                 });
             }
+            let run_owns_input: bool = conn
+                .query_row(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .queued_runs
+                        .pending_member
+                        .sql(),
+                    params![row.session_id.as_str(), "input", row.input_id.as_str()],
+                    |row| row.get(0),
+                )
+                .map_err(sqlite_error)?;
+            if run_owns_input {
+                return Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed {
+                    claim: pending_turn_input_claim_diagnostics_from_row(&row, input.state.clone()),
+                    input,
+                });
+            }
             conn.execute(
                 crate::turn_ingress::turn_ingress_sql()
                     .pending_inputs
@@ -413,19 +429,45 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
-    let observations = candidate_rows
+    let selected = candidate_rows
         .into_iter()
         .take(max_inputs)
-        .map(|row| {
-            Ok(lash_core::store::claim_plan::TurnInputClaimRow {
-                input: pending_turn_input_from_row(row.clone())?,
+        .map(|row| Ok((row.clone(), pending_turn_input_from_row(row)?)))
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    claim_turn_input_rows_sqlite_conn(
+        tx,
+        now,
+        session_id,
+        session_execution_lease,
+        owner,
+        mode,
+        selected,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn claim_turn_input_rows_sqlite_conn(
+    tx: &Connection,
+    now: u64,
+    session_id: &SessionId,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
+    owner: &LeaseOwnerIdentity,
+    mode: lash_core::TurnInputClaimMode,
+    selected: Vec<(PendingTurnInputRow, lash_core::PendingTurnInput)>,
+) -> Result<TxOutcome<Option<lash_core::TurnInputClaim>>, StoreError> {
+    let generation = session_execution_lease.fencing_token;
+    let observations = selected
+        .into_iter()
+        .map(
+            |(row, input)| lash_core::store::claim_plan::TurnInputClaimRow {
+                input,
                 enqueue_seq: row.enqueue_seq,
                 claim_fencing_token: row.claim_fencing_token,
                 claim_token: row.claim_token.clone(),
                 claim_session_lease_generation: row.claim_session_lease_generation,
-            })
-        })
-        .collect::<Result<Vec<_>, StoreError>>()?;
+            },
+        )
+        .collect();
     let plan = match lash_core::store::claim_plan::plan_turn_input_claim(
         lash_core::store::queued_work::ClaimIdDialect::TurnInput,
         session_id,
@@ -455,7 +497,7 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
                 params![
                     plan.session_id().as_str(),
                     write.input_id.as_str(),
-                    plan.state_after_claim().as_str(),
+                    write.state_after_claim.as_str(),
                     plan.claim_id(),
                     owner.owner_id.as_str(),
                     owner.incarnation_id.as_str(),
@@ -503,15 +545,27 @@ pub(super) async fn claim_pending_turn_inputs_sqlite(
     conn.write_flow(move |tx| {
         let outcome: Result<TxOutcome<Option<lash_core::TurnInputClaim>>, StoreError> = (|| {
             ensure_session_execution_lease_conn(tx, &session_id, &session_execution_lease, now)?;
-            claim_pending_turn_inputs_sqlite_conn(
+            let outcome = claim_pending_turn_inputs_sqlite_conn(
                 tx,
                 now,
                 &session_id,
                 &session_execution_lease,
                 &owner,
                 max_inputs,
-                mode,
-            )
+                mode.clone(),
+            )?;
+            if let TxOutcome::Commit(input) = &outcome
+                && let lash_core::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode
+            {
+                super::queued_run_assignment::assign_checkpoint_members_conn(
+                    tx,
+                    &session_id,
+                    turn_id,
+                    input.as_ref(),
+                    None,
+                )?;
+            }
+            Ok(outcome)
         })(
         );
         match outcome {

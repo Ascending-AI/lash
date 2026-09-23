@@ -228,6 +228,19 @@ UPDATE lash_runtime_effect_replay
 SELECT commit_state, commit_seq, group_key, drain_input FROM lash_runtime_effect_replay
              WHERE scope_id = $1 AND replay_key = $2
              FOR UPDATE
+=== postgres::ReplayPostgresStatements | effect_replay.release_uncommitted_derivation
+UPDATE lash_runtime_effect_replay
+             SET lease_expires_at_ms = 0,
+                 updated_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
+             WHERE scope_id = $1
+               AND replay_key = $2
+               AND envelope_hash = $3
+               AND lease_owner_id = $4
+               AND lease_token = $5
+               AND status = 'in_progress'
+               AND group_key IS NULL
+               AND commit_state = 'pending'
+               AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
 === postgres::ReplayPostgresStatements | effect_replay.renew_lease
 UPDATE lash_runtime_effect_replay
              SET lease_expires_at_ms = floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint + $6,

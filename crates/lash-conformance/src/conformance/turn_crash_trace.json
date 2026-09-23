@@ -1,7 +1,9 @@
 [
   {"seam": "store", "operation": {"kind": "claim_session_execution_lease"}},
+  {"seam": "store", "operation": {"kind": "load_queued_run_admission_head"}},
+  {"seam": "store", "operation": {"kind": "begin_queued_run"}},
   {"seam": "store", "operation": {"kind": "defer_orphaned_active_turn_inputs"}},
-  {"seam": "store", "operation": {"kind": "claim_next_turn_inputs"}},
+  {"seam": "store", "operation": {"kind": "select_queued_run"}},
   {"seam": "store", "operation": {"kind": "load_session_head_meta"}},
   {"seam": "provider", "operation": {"kind": "initial_request"}},
   {"seam": "provider", "operation": {"kind": "initial_mid_stream"}},
@@ -14,5 +16,7 @@
   {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "beforecompletion"}},
   {"seam": "store", "operation": {"kind": "authorize_turn_cancel_closure"}},
   {"seam": "turn_control", "operation": {"kind": "resolve_base"}},
-  {"seam": "store", "operation": {"kind": "apply_turn_cancel_effects_and_consume"}}
+  {"seam": "store", "operation": {"kind": "apply_turn_cancel_effects_and_consume"}},
+  {"seam": "store", "operation": {"kind": "pending_queued_run"}},
+  {"seam": "store", "operation": {"kind": "release_session_execution_lease"}}
 ]

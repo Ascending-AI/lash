@@ -326,6 +326,7 @@ impl LashRuntime {
         let outstanding_unreported_attempts =
             crate::runtime::outstanding_unreported_attempts(&state.token_ledger);
         Ok(Self {
+            queued_run: None,
             session: Some(session),
             host,
             services,

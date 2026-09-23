@@ -3,6 +3,243 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 
 impl InMemorySessionStore {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "matches the fenced claim operation and transaction clock"
+    )]
+    pub(super) fn claim_exact_run_batches(
+        queued: &mut [super::InMemoryQueuedBatch],
+        session_id: &SessionId,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        owner: &crate::LeaseOwnerIdentity,
+        boundary: crate::QueuedWorkClaimBoundary,
+        batch_ids: &[crate::BatchId],
+        policy: crate::QueuedWorkClaimPolicy,
+        now: u64,
+    ) -> Result<crate::SelectedQueuedWorkClaimOutcome, crate::StoreError> {
+        let generation = session_execution_lease.fencing_token;
+        queued.sort_by_key(|entry| entry.batch.enqueue_seq);
+        let requested_ids = batch_ids.iter().collect::<std::collections::BTreeSet<_>>();
+        let present_ids = queued
+            .iter()
+            .filter(|entry| {
+                entry.batch.session_id == session_id
+                    && requested_ids.contains(&entry.batch.batch_id)
+            })
+            .map(|entry| entry.batch.batch_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let already_satisfied_batch_ids = batch_ids
+            .iter()
+            .filter(|batch_id| !present_ids.contains(batch_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if present_ids.is_empty() {
+            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
+        }
+        let claim_available =
+            |entry: &super::InMemoryQueuedBatch| entry.claim.claimable_by(generation);
+        let requested_indices = queued
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                entry.batch.session_id == session_id
+                    && entry.batch.available_at_ms <= now
+                    && claim_available(entry)
+                    && requested_ids.contains(&entry.batch.batch_id)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        if requested_indices.len() != present_ids.len() {
+            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                None,
+                already_satisfied_batch_ids,
+            ));
+        }
+        let involved_claim_ids = requested_indices
+            .iter()
+            .filter_map(|index| queued[*index].claim.id())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut validation_indices = requested_indices.clone();
+        if !involved_claim_ids.is_empty() {
+            validation_indices.extend(queued.iter().enumerate().filter_map(|(index, entry)| {
+                (entry.batch.session_id == session_id
+                    && entry.batch.available_at_ms <= now
+                    && claim_available(entry)
+                    && entry
+                        .claim
+                        .id()
+                        .as_ref()
+                        .is_some_and(|claim_id| involved_claim_ids.contains(claim_id)))
+                .then_some(index)
+            }));
+            validation_indices.sort_unstable();
+            validation_indices.dedup();
+        }
+        let validation_batch_claims = validation_indices
+            .iter()
+            .map(|index| {
+                (
+                    queued[*index].batch.batch_id.clone(),
+                    queued[*index].claim.id(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let interrupted_indices =
+            crate::store::queued_work::select_interrupted_exact_claim_indices(
+                &validation_batch_claims,
+                batch_ids,
+            )
+            .map_err(|required_batch_ids| {
+                crate::StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
+                    required_batch_ids: required_batch_ids
+                        .into_iter()
+                        .map(crate::BatchId::into_inner)
+                        .collect(),
+                }
+            })?;
+        let mut indices = if let Some(interrupted_indices) = interrupted_indices {
+            interrupted_indices
+                .into_iter()
+                .map(|position| validation_indices[position])
+                .collect::<Vec<_>>()
+        } else {
+            let min_enqueue_seq = queued[requested_indices[0]].batch.enqueue_seq;
+            let Some(&last_index) = requested_indices.last() else {
+                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
+            };
+            let max_enqueue_seq = queued[last_index].batch.enqueue_seq;
+            let span_indices = queued
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| {
+                    entry.batch.session_id == session_id
+                        && entry.batch.available_at_ms <= now
+                        && claim_available(entry)
+                        && (min_enqueue_seq..=max_enqueue_seq).contains(&entry.batch.enqueue_seq)
+                })
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            for index in &requested_indices {
+                if queued[*index].batch.work_class() != crate::store::QueuedWorkClass::TurnWork {
+                    return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                        None,
+                        already_satisfied_batch_ids,
+                    ));
+                }
+            }
+            let first_requested = requested_indices[0];
+            let Some(first_position) = span_indices
+                .iter()
+                .position(|index| *index == first_requested)
+            else {
+                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
+            };
+            span_indices[first_position..]
+                .iter()
+                .copied()
+                .take_while(|index| requested_ids.contains(&queued[*index].batch.batch_id))
+                .collect::<Vec<_>>()
+        };
+        let candidates = indices
+            .iter()
+            .map(|index| {
+                let entry = &queued[*index];
+                crate::store::queued_work::ClaimCandidate::from_batch(
+                    &entry.batch,
+                    entry.claim.fencing_token,
+                    entry.claim.id(),
+                    entry.claim.token(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let selected_len = match crate::store::queued_work::select_exact_turn_work_claim_prefix(
+            &candidates,
+            boundary,
+            &policy,
+            now,
+        )? {
+            crate::store::TurnWorkClaimPrefix::Selected { len } => len,
+            crate::store::TurnWorkClaimPrefix::Refused { .. } => {
+                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
+            }
+        };
+        indices.truncate(selected_len);
+        let observations = indices
+            .iter()
+            .map(|&index| {
+                let entry = &queued[index];
+                crate::store::claim_plan::QueuedWorkClaimRow {
+                    candidate: crate::store::queued_work::ClaimCandidate::from_batch(
+                        &entry.batch,
+                        entry.claim.fencing_token,
+                        entry.claim.id(),
+                        entry.claim.token(),
+                    ),
+                    batch: entry.batch.clone(),
+                    claim_token: entry.claim.token(),
+                    claim_session_lease_generation: entry
+                        .claim
+                        .diagnostic_generation()
+                        .unwrap_or(0),
+                }
+            })
+            .collect::<Vec<_>>();
+        // The SQL backends validate fencing tokens over the full candidate
+        // span, not just the selected prefix; `candidates` is that span
+        // (FIG-1065).
+        let plan = match crate::store::claim_plan::plan_queued_work_claim(
+            crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+            session_id,
+            owner,
+            generation,
+            now,
+            observations,
+            &candidates,
+        )? {
+            // Empty and Defer both report no claim: a row held by this
+            // generation was filtered out of `indices` by `claimable_by`
+            // before selection (FIG-1065).
+            crate::store::claim_plan::ClaimPlanDecision::Empty
+            | crate::store::claim_plan::ClaimPlanDecision::Defer => {
+                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+                    None,
+                    already_satisfied_batch_ids,
+                ));
+            }
+            crate::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+        };
+        // Assemble the claim record before mutating: it is the plan's only
+        // remaining fallible step, and this path writes the live rows
+        // directly rather than a staged copy.
+        let writes = plan.writes().to_vec();
+        let claim = plan.into_claim()?;
+        for (&index, write) in indices.iter().zip(&writes) {
+            queued[index].claim.acquire(
+                claim.claim_id.clone(),
+                claim.lease_token.clone(),
+                owner.clone(),
+                generation,
+                write.next_claim_fencing_token,
+            );
+        }
+        Ok(crate::SelectedQueuedWorkClaimOutcome::new(
+            Some(claim),
+            already_satisfied_batch_ids,
+        ))
+    }
+
     pub(super) fn enqueue_queued_work_in_memory(
         &self,
         batch: crate::QueuedWorkBatchDraft,
@@ -91,6 +328,311 @@ impl InMemorySessionStore {
 
 #[async_trait::async_trait]
 impl crate::store::QueuedWorkStore for InMemorySessionStore {
+    async fn pending_queued_run(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<crate::store::QueuedRunAdmission>, crate::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(session_id)?;
+        Ok(self
+            .queued_runs
+            .lock_recover()
+            .values()
+            .find(|run| run.scope.session_id() == Some(session_id) && run.terminal.is_none())
+            .cloned())
+    }
+
+    async fn select_queued_run(
+        &self,
+        fence: &crate::SessionExecutionLeaseAuthority,
+        scope: &crate::ExecutionScope,
+        owner: &crate::LeaseOwnerIdentity,
+        max_inputs: usize,
+        configuration: &crate::PersistedSessionConfig,
+        policy: crate::QueuedWorkClaimPolicy,
+    ) -> Result<crate::store::SelectedQueuedRun, crate::StoreError> {
+        use crate::store::{QueuedRunMember, QueuedRunRequest};
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(&fence.session_id)?;
+        self.verify_session_execution_lease(&fence.session_id, fence, now)?;
+        #[cfg(any(test, feature = "testing"))]
+        self.run_claim_after_lease_validation_hook();
+        let conflict = || crate::StoreError::QueuedRunConflict {
+            session_id: fence.session_id.clone(),
+        };
+        let mut runs = self.queued_runs.lock_recover();
+        let mut admission = runs.get(scope).ok_or_else(conflict)?.clone();
+        if scope.session_id() != Some(&fence.session_id) || admission.terminal.is_some() {
+            return Err(conflict());
+        }
+        if admission.members.is_some() && &admission.configuration != configuration {
+            return Err(crate::StoreError::QueuedRunConfigurationChanged {
+                session_id: fence.session_id.clone(),
+            });
+        }
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        let mut batches = self.queued_work.lock_recover();
+        let mut staged_inputs = pending.clone();
+        let mut staged_batches = batches.clone();
+        let mut already_satisfied = admission.already_satisfied_batch_ids();
+        let mut refusal = None;
+        let (inputs, queued) = if let Some(members) = &admission.members {
+            let input_ids: Vec<_> = members
+                .iter()
+                .filter_map(|member| {
+                    if let QueuedRunMember::Input(id) = member {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let batch_ids: Vec<_> = members
+                .iter()
+                .filter_map(|member| {
+                    if let QueuedRunMember::Batch(id) = member {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            #[cfg(any(test, feature = "testing"))]
+            if !batch_ids.is_empty()
+                && self
+                    .fail_next_exact_queue_claim
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(crate::StoreError::Backend(
+                    "injected committed handoff claim failure".into(),
+                ));
+            }
+            let inputs =
+                self.reclaim_run_inputs(&mut staged_inputs, &input_ids, fence, owner, now)?;
+            let queued =
+                self.reclaim_run_batches(&mut staged_batches, &batch_ids, fence, owner, now)?;
+            (inputs, queued)
+        } else {
+            let inputs = if matches!(admission.request, QueuedRunRequest::Automatic) {
+                Self::claim_pending_turn_inputs_for_state(
+                    &mut staged_inputs,
+                    &fence.session_id,
+                    fence,
+                    owner,
+                    max_inputs,
+                    crate::TurnInputClaimMode::NextTurn,
+                    now,
+                )?
+            } else {
+                None
+            };
+            let queued = if inputs.is_none() {
+                if let QueuedRunRequest::Selected { batch_ids } = &admission.request {
+                    let result = Self::claim_exact_run_batches(
+                        &mut staged_batches,
+                        &fence.session_id,
+                        fence,
+                        owner,
+                        crate::QueuedWorkClaimBoundary::Idle,
+                        batch_ids,
+                        policy,
+                        now,
+                    )?;
+                    already_satisfied = result.already_satisfied_batch_ids;
+                    let claim = result.claim;
+                    if claim.as_ref().map_or(0, |claim| claim.batches.len())
+                        + already_satisfied.len()
+                        != batch_ids.len()
+                    {
+                        return Err(crate::StoreError::SelectedQueuedRunIncomplete {
+                            unclaimed_batch_ids: batch_ids
+                                .iter()
+                                .filter(|id| {
+                                    !already_satisfied.contains(id)
+                                        && !claim.as_ref().is_some_and(|claim| {
+                                            claim.batches.iter().any(|batch| batch.batch_id == *id)
+                                        })
+                                })
+                                .cloned()
+                                .collect(),
+                        });
+                    }
+                    claim
+                } else {
+                    let result = Self::claim_ready_queued_work_for_state(
+                        &mut staged_batches,
+                        &fence.session_id,
+                        fence,
+                        owner,
+                        InMemoryQueuedWorkClaimKind::TurnWork {
+                            boundary: crate::QueuedWorkClaimBoundary::Idle,
+                            policy,
+                        },
+                        now,
+                    )?;
+                    refusal = result.refusal();
+                    result.claim()
+                }
+            } else {
+                None
+            };
+            let members: Vec<_> = inputs
+                .iter()
+                .flat_map(|claim| {
+                    claim
+                        .inputs
+                        .iter()
+                        .map(|input| QueuedRunMember::Input(input.input_id.clone()))
+                })
+                .chain(queued.iter().flat_map(|claim| {
+                    claim
+                        .batches
+                        .iter()
+                        .map(|batch| QueuedRunMember::Batch(batch.batch_id.clone()))
+                }))
+                .collect();
+            admission.configuration = configuration.clone();
+            admission.initial_members = Some(members.clone());
+            admission.members = Some(members);
+            admission.revision = crate::StoreError::checked_monotonic_increment(
+                "queued_run_revision",
+                admission.revision,
+            )?;
+            (inputs.into_iter().collect(), queued.into_iter().collect())
+        };
+        runs.insert(scope.clone(), admission.clone());
+        *pending = staged_inputs;
+        *batches = staged_batches;
+        Ok(crate::store::SelectedQueuedRun {
+            admission: admission.clone(),
+            inputs,
+            queued,
+            already_satisfied,
+            refusal,
+        })
+    }
+
+    async fn settle_queued_run(
+        &self,
+        fence: &crate::SessionExecutionLeaseAuthority,
+        settlement: crate::store::QueuedRunCommit,
+    ) -> Result<crate::store::QueuedRunAdmission, crate::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(&fence.session_id)?;
+        self.verify_session_execution_lease(&fence.session_id, fence, self.clock.timestamp_ms())?;
+        let conflict = || crate::StoreError::QueuedRunConflict {
+            session_id: fence.session_id.clone(),
+        };
+        if settlement.scope.session_id() != Some(&fence.session_id)
+            || !matches!(
+                settlement.progress,
+                crate::store::QueuedRunProgress::Settle { .. }
+                    | crate::store::QueuedRunProgress::ForgetUnworked
+            )
+        {
+            return Err(conflict());
+        }
+        let mut runs = self.queued_runs.lock_recover();
+        let run = runs.get_mut(&settlement.scope).ok_or_else(conflict)?;
+        use crate::store::{QueuedRunMember, QueuedRunProgress, QueuedRunTerminal};
+        match &settlement.progress {
+            QueuedRunProgress::Settle {
+                terminal: QueuedRunTerminal::Failed { .. },
+            } => {}
+            QueuedRunProgress::Settle {
+                terminal: QueuedRunTerminal::Empty,
+            } if run.members.as_ref().is_some_and(Vec::is_empty)
+                && run.withheld_members.is_empty()
+                && run.assigned_members.is_empty() => {}
+            QueuedRunProgress::ForgetUnworked if run.can_forget_unworked() => {}
+            _ => return Err(conflict()),
+        }
+        let settled = run.advance(&settlement, &[])?;
+        if run.terminal.is_some() {
+            return Ok(settled);
+        }
+        let members: Vec<_> = run
+            .initial_members
+            .iter()
+            .flatten()
+            .chain(run.members.iter().flatten())
+            .chain(run.withheld_members.iter())
+            .chain(run.assigned_members.iter())
+            .collect();
+        self.queued_work.lock_recover().retain(|entry| {
+            entry.batch.session_id != fence.session_id
+                || !members.contains(&&QueuedRunMember::Batch(entry.batch.batch_id.clone()))
+        });
+        for entry in self
+            .pending_turn_inputs
+            .lock_recover()
+            .iter_mut()
+            .filter(|entry| {
+                entry.input.session_id == fence.session_id
+                    && members.contains(&&QueuedRunMember::Input(entry.input.input_id.clone()))
+            })
+        {
+            if !entry.input.state.is_terminal()
+                && !(entry.input.state == crate::TurnInputState::DeferredNextTurn
+                    && run
+                        .assigned_members
+                        .contains(&QueuedRunMember::Input(entry.input.input_id.clone())))
+            {
+                entry.input.state = crate::TurnInputState::Cancelled(entry.input.state.ingress());
+                entry.claim.release();
+            }
+        }
+        if matches!(settlement.progress, QueuedRunProgress::ForgetUnworked) {
+            runs.remove(&settlement.scope);
+        } else {
+            *run = settled.clone();
+        }
+        Ok(settled)
+    }
+
+    async fn begin_or_resume_queued_run(
+        &self,
+        fence: &crate::SessionExecutionLeaseAuthority,
+        request: crate::store::BeginQueuedRun,
+    ) -> Result<crate::store::QueuedRunAdmission, crate::StoreError> {
+        request.validate(fence)?;
+        let _transaction = self.write_transaction.lock_recover();
+        self.ensure_session_not_deleted(&request.session_id)?;
+        self.verify_session_execution_lease(&request.session_id, fence, self.clock.timestamp_ms())?;
+        let mut runs = self.queued_runs.lock_recover();
+        if let Some(admitted) = request
+            .identity
+            .as_ref()
+            .and_then(|scope| runs.get_mut(scope))
+        {
+            let resumed = request.resume(admitted)?;
+            *admitted = resumed.clone();
+            return Ok(resumed);
+        }
+        if let Some(admitted) = runs.values_mut().find(|run| {
+            run.scope.session_id() == Some(&request.session_id) && run.terminal.is_none()
+        }) {
+            let resumed = request.resume(admitted)?;
+            *admitted = resumed.clone();
+            return Ok(resumed);
+        }
+        let actual = self
+            .session_head_meta
+            .lock_recover()
+            .as_ref()
+            .map_or(0, |head| head.head_revision);
+        if actual != request.expected_head_revision {
+            return Err(crate::StoreError::HeadRevisionConflict {
+                expected: request.expected_head_revision,
+                actual,
+            });
+        }
+        let admission = request.admit(uuid::Uuid::new_v4().to_string());
+        runs.insert(admission.scope.clone(), admission.clone());
+        Ok(admission)
+    }
+
     async fn enqueue_queued_work(
         &self,
         batch: crate::QueuedWorkBatchDraft,
@@ -223,15 +765,17 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             now,
         )?
         .claim();
+        self.assign_checkpoint_members(
+            session_id,
+            turn_id,
+            turn_input_claim.as_ref(),
+            queued_work_claim.as_ref(),
+        );
         *pending = staged_pending;
         *queued = staged_queued;
         Ok((turn_input_claim, queued_work_claim))
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "this branch runs only for a non-empty selection"
-    )]
     async fn claim_ready_queued_work_by_batch_ids(
         &self,
         session_id: &SessionId,
@@ -256,224 +800,16 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         {
             return Ok(crate::SelectedQueuedWorkClaimOutcome::new(None, Vec::new()));
         }
-        let generation = session_execution_lease.fencing_token;
-        let mut queued = self.queued_work.lock_recover();
-        queued.sort_by_key(|entry| entry.batch.enqueue_seq);
-        let requested_ids = batch_ids.iter().collect::<std::collections::BTreeSet<_>>();
-        let present_ids = queued
-            .iter()
-            .filter(|entry| {
-                entry.batch.session_id == session_id
-                    && requested_ids.contains(&entry.batch.batch_id)
-            })
-            .map(|entry| entry.batch.batch_id.as_str())
-            .collect::<std::collections::BTreeSet<_>>();
-        let already_satisfied_batch_ids = batch_ids
-            .iter()
-            .filter(|batch_id| !present_ids.contains(batch_id.as_str()))
-            .cloned()
-            .collect::<Vec<_>>();
-        if present_ids.is_empty() {
-            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
-                None,
-                already_satisfied_batch_ids,
-            ));
-        }
-        let claim_available =
-            |entry: &super::InMemoryQueuedBatch| entry.claim.claimable_by(generation);
-        let requested_indices = queued
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| {
-                entry.batch.session_id == session_id
-                    && entry.batch.available_at_ms <= now
-                    && claim_available(entry)
-                    && requested_ids.contains(&entry.batch.batch_id)
-            })
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        if requested_indices.len() != present_ids.len() {
-            return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
-                None,
-                already_satisfied_batch_ids,
-            ));
-        }
-        let involved_claim_ids = requested_indices
-            .iter()
-            .filter_map(|index| queued[*index].claim.id())
-            .collect::<std::collections::BTreeSet<_>>();
-        let mut validation_indices = requested_indices.clone();
-        if !involved_claim_ids.is_empty() {
-            validation_indices.extend(queued.iter().enumerate().filter_map(|(index, entry)| {
-                (entry.batch.session_id == session_id
-                    && entry.batch.available_at_ms <= now
-                    && claim_available(entry)
-                    && entry
-                        .claim
-                        .id()
-                        .as_ref()
-                        .is_some_and(|claim_id| involved_claim_ids.contains(claim_id)))
-                .then_some(index)
-            }));
-            validation_indices.sort_unstable();
-            validation_indices.dedup();
-        }
-        let validation_batch_claims = validation_indices
-            .iter()
-            .map(|index| {
-                (
-                    queued[*index].batch.batch_id.clone(),
-                    queued[*index].claim.id(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let interrupted_indices =
-            crate::store::queued_work::select_interrupted_exact_claim_indices(
-                &validation_batch_claims,
-                batch_ids,
-            )
-            .map_err(|required_batch_ids| {
-                crate::StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
-                    required_batch_ids: required_batch_ids
-                        .into_iter()
-                        .map(crate::BatchId::into_inner)
-                        .collect(),
-                }
-            })?;
-        let mut indices = if let Some(interrupted_indices) = interrupted_indices {
-            interrupted_indices
-                .into_iter()
-                .map(|position| validation_indices[position])
-                .collect::<Vec<_>>()
-        } else {
-            let min_enqueue_seq = queued[requested_indices[0]].batch.enqueue_seq;
-            let max_enqueue_seq = queued[*requested_indices.last().expect("requested rows exist")]
-                .batch
-                .enqueue_seq;
-            let span_indices = queued
-                .iter()
-                .enumerate()
-                .filter(|(_, entry)| {
-                    entry.batch.session_id == session_id
-                        && entry.batch.available_at_ms <= now
-                        && claim_available(entry)
-                        && (min_enqueue_seq..=max_enqueue_seq).contains(&entry.batch.enqueue_seq)
-                })
-                .map(|(index, _)| index)
-                .collect::<Vec<_>>();
-            for index in &requested_indices {
-                if queued[*index].batch.work_class() != crate::store::QueuedWorkClass::TurnWork {
-                    return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
-                        None,
-                        already_satisfied_batch_ids,
-                    ));
-                }
-            }
-            let first_requested = requested_indices[0];
-            let Some(first_position) = span_indices
-                .iter()
-                .position(|index| *index == first_requested)
-            else {
-                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
-                    None,
-                    already_satisfied_batch_ids,
-                ));
-            };
-            span_indices[first_position..]
-                .iter()
-                .copied()
-                .take_while(|index| requested_ids.contains(&queued[*index].batch.batch_id))
-                .collect::<Vec<_>>()
-        };
-        let candidates = indices
-            .iter()
-            .map(|index| {
-                let entry = &queued[*index];
-                crate::store::queued_work::ClaimCandidate::from_batch(
-                    &entry.batch,
-                    entry.claim.fencing_token,
-                    entry.claim.id(),
-                    entry.claim.token(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let selected_len = match crate::store::queued_work::select_exact_turn_work_claim_prefix(
-            &candidates,
-            boundary,
-            &policy,
-            now,
-        )? {
-            crate::store::TurnWorkClaimPrefix::Selected { len } => len,
-            crate::store::TurnWorkClaimPrefix::Refused { .. } => {
-                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
-                    None,
-                    already_satisfied_batch_ids,
-                ));
-            }
-        };
-        indices.truncate(selected_len);
-        let observations = indices
-            .iter()
-            .map(|&index| {
-                let entry = &queued[index];
-                crate::store::claim_plan::QueuedWorkClaimRow {
-                    candidate: crate::store::queued_work::ClaimCandidate::from_batch(
-                        &entry.batch,
-                        entry.claim.fencing_token,
-                        entry.claim.id(),
-                        entry.claim.token(),
-                    ),
-                    batch: entry.batch.clone(),
-                    claim_token: entry.claim.token(),
-                    claim_session_lease_generation: entry
-                        .claim
-                        .diagnostic_generation()
-                        .unwrap_or(0),
-                }
-            })
-            .collect::<Vec<_>>();
-        // The SQL backends validate fencing tokens over the full candidate
-        // span, not just the selected prefix; `candidates` is that span
-        // (FIG-1065).
-        let plan = match crate::store::claim_plan::plan_queued_work_claim(
-            crate::store::queued_work::ClaimIdDialect::RecordingQueuedWork,
+        Self::claim_exact_run_batches(
+            &mut self.queued_work.lock_recover(),
             session_id,
+            session_execution_lease,
             owner,
-            generation,
+            boundary,
+            batch_ids,
+            policy,
             now,
-            observations,
-            &candidates,
-        )? {
-            // Empty and Defer both report no claim: a row held by this
-            // generation was filtered out of `indices` by `claimable_by`
-            // before selection (FIG-1065).
-            crate::store::claim_plan::ClaimPlanDecision::Empty
-            | crate::store::claim_plan::ClaimPlanDecision::Defer => {
-                return Ok(crate::SelectedQueuedWorkClaimOutcome::new(
-                    None,
-                    already_satisfied_batch_ids,
-                ));
-            }
-            crate::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
-        };
-        // Assemble the claim record before mutating: it is the plan's only
-        // remaining fallible step, and this path writes the live rows
-        // directly rather than a staged copy.
-        let writes = plan.writes().to_vec();
-        let claim = plan.into_claim()?;
-        for (&index, write) in indices.iter().zip(&writes) {
-            queued[index].claim.acquire(
-                claim.claim_id.clone(),
-                claim.lease_token.clone(),
-                owner.clone(),
-                generation,
-                write.next_claim_fencing_token,
-            );
-        }
-        Ok(crate::SelectedQueuedWorkClaimOutcome::new(
-            Some(claim),
-            already_satisfied_batch_ids,
-        ))
+        )
     }
 
     async fn abandon_queued_work_claim(
@@ -508,6 +844,7 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
         let now = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         let live_generation = self.live_session_lease_generation(session_id, now);
+        let runs = self.queued_runs.lock_recover();
         let mut queued = self.queued_work.lock_recover();
         let Some(index) = queued.iter().position(|entry| {
             entry.batch.session_id == session_id && entry.batch.batch_id == batch_id
@@ -515,6 +852,15 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             return Ok(None);
         };
         let entry = &queued[index];
+        if runs.values().any(|run| {
+            run.scope.session_id() == Some(session_id)
+                && run.terminal.is_none()
+                && run.owns_member(&crate::store::QueuedRunMember::Batch(
+                    entry.batch.batch_id.clone(),
+                ))
+        }) {
+            return Ok(None);
+        }
         if entry.claim.token().is_some() && entry.claim.live_under(live_generation) {
             return Ok(None);
         }

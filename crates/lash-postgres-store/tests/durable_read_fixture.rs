@@ -102,6 +102,9 @@ const FLEETING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const EXPIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-101-f2a4770bd/postgres-expected.json",
 ];
+const FIG_3484_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-105-fig-3484/postgres-expected.json",
+];
 const SETTLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-103-constraint-predecessor/postgres-expected.json",
 ];
@@ -252,7 +255,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 115);
+    assert_eq!(PostgresStorage::schema_version(), 116);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -555,7 +558,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .await
     .expect("refresh refusal fixture with the component-113 explicit-observer catalog");
     // The component-115 effect-replay constraints land on the catalog as a
-    // delta too: the same NOT VALID + VALIDATE pair the migration arm runs.
+    // delta too: the same NOT VALID + VALIDATE pair the historical 114→115
+    // migration ran before the queued-admission cutover.
     // The drops keep the delta idempotent — a dump refreshed by a build that
     // already carried the constraints re-adds them rather than erroring.
     sqlx::raw_sql(
@@ -631,6 +635,24 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .await
         .expect("refresh refusal fixture session-meta contract from the current schema");
     }
+    sqlx::raw_sql(
+        "DROP TABLE IF EXISTS lash_queued_run_members; DROP TABLE IF EXISTS lash_queued_runs;",
+    )
+    .execute(&pool)
+    .await
+    .expect("replace author-time queued run catalog");
+    let schema = include_str!("../schema.sql");
+    let queued_start = schema
+        .find("CREATE TABLE IF NOT EXISTS lash_queued_runs (")
+        .expect("queued run schema");
+    let queued_end = schema[queued_start..]
+        .find("CREATE TABLE IF NOT EXISTS lash_turn_cancel_closure_authorizations (")
+        .expect("queued run schema end")
+        + queued_start;
+    sqlx::raw_sql(&schema[queued_start..queued_end])
+        .execute(&pool)
+        .await
+        .expect("refresh queued run catalog");
     sqlx::query(
         "UPDATE lash_schema_versions
             SET version = $1

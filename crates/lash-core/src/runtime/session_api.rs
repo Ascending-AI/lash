@@ -1399,14 +1399,13 @@ impl LashRuntime {
                 self.host.core.durability.commit_budget,
             )
             .map_err(super::runtime_error_from_store_commit)?;
-        // Queue-claim settlement is generation-pinned per ADR 0029; presenting
-        // the live execution fence on this commit is FIG-1072 territory.
-        let Some(_session_execution_lease) = session_execution_lease else {
+        let Some(session_execution_lease) = session_execution_lease else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
                 "session command commit requires a session execution lease",
             ));
         };
+        commit.session_execution_lease_fence = Some(session_execution_lease.clone());
         if let Some(completion) = completion {
             commit = commit.completing_queue_claim(completion);
         }

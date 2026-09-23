@@ -776,6 +776,21 @@ impl ChannelBot {
 
         let output = match drain {
             QueuedTurnDrain::Ran(output) => output,
+            QueuedTurnDrain::Replayed(receipt) => {
+                if let Some(lash::persistence::QueuedRunTerminal::Failed { code, message }) =
+                    receipt.terminal
+                {
+                    anyhow::bail!("queued mention failed ({code}): {message}");
+                }
+                return self
+                    .settle_empty_drain(
+                        session,
+                        record,
+                        input_id,
+                        EmptyQueuedDrainReason::ClaimRefused(QueuedWorkClaimRefusal::Empty),
+                    )
+                    .await;
+            }
             QueuedTurnDrain::Empty(reason) => {
                 return self
                     .settle_empty_drain(session, record, input_id, reason)

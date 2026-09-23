@@ -3,47 +3,13 @@
 
 use super::*;
 
-/// The current cutover rides the chain's only executable arm. Components
-/// 101 through 113 are reject-and-recreate boundaries wearing the current
-/// target: their empty `statements` never run, but matching `from` and `to`
-/// lets the divergence probe enumerate the artifacts a rewound ledger would
-/// be claiming to own before the refusal is rendered. Their `source_missing_*`
-/// lists stay keyed to this build's catalog — a pre-cutover store lacks the
-/// component-107 membership table, the component-109 and -110 additions, and
-/// the component-115 effect-replay constraints — so the older-store fixture
-/// drops those columns and constraints by name like every other post-floor
-/// artifact.
-///
-/// The history behind those boundaries: component 102 installed the
-/// cancellation affected-input child table (FIG-3263); 103 changed no shape
-/// (the store-version window's floor move, FIG-2082); 104 added only CHECK
-/// constraints to `lash_runtime_effect_group` (FIG-2811); 105 added the
-/// `lash_trigger_mutation_receipts` owner columns (FIG-1956); 106 was the
-/// creation-request cutover (FIG-3376); 107 added
-/// `lash_runtime_effect_group_child` (ADR 0099 §3, FIG-3408); 108 typed the
-/// journaled `exec_code` outcome failure (FIG-2362); 109 typed the parent-end
-/// plan payload (FIG-3418); 110 carried ADR 0099 §§4–5 (FIG-3409) — the
-/// arbitration columns, the sealed `drain_input`, the group counters and
-/// `lifecycle`, the two renames, and the uniqueness guards; 111 added
-/// settlement-fact carriage and 112 cut over message parts, both encoded
-/// payloads only; 113 removed implicit fork observer selection and
-/// attribution (FIG-1281); 114 put ADR 0099 §7's group lifecycle in service
-/// (FIG-3410) — the reserved `lifecycle` column carrying `closing` and
-/// `settled` beside `live`, a values-only cutover with no relational DDL.
-/// None is reconstructable by a DDL arm, so each is refused rather than
-/// migrated.
-///
-/// Component 114 is the last reject-and-recreate generation. The
-/// component-115 arm (FIG-1947) is the catalog's only executable migration
-/// and it is constraint-only: the two payload-pairing `CHECK`s, the
-/// settlement-rank `CHECK`, and the two deferred group foreign keys the
-/// effect-replay protocol (ADR 0099 §§4–5) already writes are installed with
-/// `ADD CONSTRAINT ... NOT VALID` and a separate `VALIDATE CONSTRAINT` for
-/// each, so the arm takes no table scan at add time and proves existing rows
-/// conform explicitly. A component-114 catalog differs from the endpoint by
-/// exactly those five `pg_constraint` rows — no table, column, or guard
-/// moved — which is why this boundary is the one the chain can ride forward
-/// in place.
+/// These declarations retain the component-115 endpoint, including the five
+/// effect-replay constraints its 114 -> 115 migration installed. Component
+/// 116 adds durable queued-run admission and normalized membership. No old
+/// catalog carries their replay ownership, so the current build offers no
+/// migration and refuses every predecessor, including 115. Source-shape
+/// declarations remain keyed to this build's catalog for precise older-store
+/// fixture construction.
 const ARBITRATION_GUARDS: &[DeclaredGuard] = &[
     DeclaredGuard {
         table: "lash_runtime_effect_replay",
@@ -92,26 +58,6 @@ const GROUP_CHILD_GROUP_FOREIGN_KEY: DeclaredForeignKey = DeclaredForeignKey {
 const EFFECT_REPLAY_FOREIGN_KEYS: &[DeclaredForeignKey] =
     &[REPLAY_GROUP_FOREIGN_KEY, GROUP_CHILD_GROUP_FOREIGN_KEY];
 
-/// The constraint DDL the component-114 -> 115 arm executes, in order. Every
-/// `ADD` lands `NOT VALID` so it takes only `SHARE ROW EXCLUSIVE` and never
-/// scans; the matching `VALIDATE` then proves the existing rows conform under
-/// a lock the advisory open already holds. A catalog whose rows violate a
-/// constraint fails the `VALIDATE` and rolls the whole arm back — the operator
-/// sees the conflict rather than a half-migrated schema, the same contract
-/// `source_missing_guards` documents.
-const EFFECT_REPLAY_CONSTRAINT_DDL: &[&str] = &[
-    "ALTER TABLE lash_runtime_effect_replay ADD CONSTRAINT ck_runtime_effect_replay_outcome_json CHECK ((status = 'completed' AND outcome_json IS NOT NULL) OR (status <> 'completed' AND outcome_json IS NULL)) NOT VALID",
-    "ALTER TABLE lash_runtime_effect_replay VALIDATE CONSTRAINT ck_runtime_effect_replay_outcome_json",
-    "ALTER TABLE lash_runtime_effect_replay ADD CONSTRAINT ck_runtime_effect_replay_error_json CHECK ((status = 'failed' AND error_json IS NOT NULL) OR (status <> 'failed' AND error_json IS NULL)) NOT VALID",
-    "ALTER TABLE lash_runtime_effect_replay VALIDATE CONSTRAINT ck_runtime_effect_replay_error_json",
-    "ALTER TABLE lash_runtime_effect_replay ADD CONSTRAINT ck_runtime_effect_replay_settlement_seq CHECK ((settlement_seq IS NULL AND NOT (commit_state IN ('drained', 'cancel_decided'))) OR (settlement_seq IS NOT NULL AND commit_state IN ('drained', 'cancel_decided'))) NOT VALID",
-    "ALTER TABLE lash_runtime_effect_replay VALIDATE CONSTRAINT ck_runtime_effect_replay_settlement_seq",
-    "ALTER TABLE lash_runtime_effect_replay ADD CONSTRAINT fk_runtime_effect_replay_group FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED NOT VALID",
-    "ALTER TABLE lash_runtime_effect_replay VALIDATE CONSTRAINT fk_runtime_effect_replay_group",
-    "ALTER TABLE lash_runtime_effect_group_child ADD CONSTRAINT fk_runtime_effect_group_child_group FOREIGN KEY (group_key) REFERENCES lash_runtime_effect_group(group_key) DEFERRABLE INITIALLY DEFERRED NOT VALID",
-    "ALTER TABLE lash_runtime_effect_group_child VALIDATE CONSTRAINT fk_runtime_effect_group_child_group",
-];
-
 pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // Keep the outer list expanded for the source-derived fixture checker.
     SchemaMigration {
@@ -121,6 +67,8 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         // fixture rebuilds the published component-101 catalog by removing them.
         to: 115,
         source_missing_tables: &[
+            "lash_queued_run_members",
+            "lash_queued_runs",
             "lash_turn_cancel_affected_inputs",
             "lash_runtime_effect_group_child",
         ],
@@ -155,7 +103,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 102,
         to: 115,
-        source_missing_tables: &["lash_runtime_effect_group_child"],
+        source_missing_tables: &[
+            "lash_queued_run_members",
+            "lash_queued_runs",
+            "lash_runtime_effect_group_child",
+        ],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -179,7 +131,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 103,
         to: 115,
-        source_missing_tables: &["lash_runtime_effect_group_child"],
+        source_missing_tables: &[
+            "lash_queued_run_members",
+            "lash_queued_runs",
+            "lash_runtime_effect_group_child",
+        ],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -202,7 +158,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 104,
         to: 115,
-        source_missing_tables: &["lash_runtime_effect_group_child"],
+        source_missing_tables: &[
+            "lash_queued_run_members",
+            "lash_queued_runs",
+            "lash_runtime_effect_group_child",
+        ],
         source_missing_columns: &[
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -226,7 +186,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 105,
         to: 115,
-        source_missing_tables: &["lash_runtime_effect_group_child"],
+        source_missing_tables: &[
+            "lash_queued_run_members",
+            "lash_queued_runs",
+            "lash_runtime_effect_group_child",
+        ],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -250,7 +214,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 106,
         to: 115,
-        source_missing_tables: &["lash_runtime_effect_group_child"],
+        source_missing_tables: &[
+            "lash_queued_run_members",
+            "lash_queued_runs",
+            "lash_runtime_effect_group_child",
+        ],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -276,7 +244,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 107,
         to: 115,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -299,7 +267,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 108,
         to: 115,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -332,7 +300,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 109,
         to: 115,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_runtime_effect_group", "next_commit_seq"),
             ("lash_runtime_effect_group", "lifecycle"),
@@ -354,17 +322,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         statements: &[],
     },
     // Components 110 through 113 share the endpoint's relational shape minus
-    // the component-115 constraints: 111 added settlement-fact carriage and
-    // 112 cut over message parts, both encoded payloads only, 113 removed
-    // observer-selection metadata, and 114 put the reserved `lifecycle` column
-    // in service — a values-only cutover with no relational DDL of its own.
-    // Each is refused — the chain's convention keeps one executable arm per
-    // generation, and the arm out of the immediate predecessor is the only
-    // one this build can prove a source shape for.
+    // the component-115 constraints and component-116 queued-run tables.
+    // All are refused at the queued-run cutover.
     SchemaMigration {
         from: 110,
         to: 115,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -375,7 +338,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 111,
         to: 115,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -386,7 +349,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 112,
         to: 115,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -397,7 +360,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration {
         from: 113,
         to: 115,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
@@ -405,19 +368,18 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
         statements: &[],
     },
-    // The constraint-only generation (FIG-1947): the only executable arm in
-    // the catalog. A component-114 catalog is the endpoint minus the five
-    // constraint rows, and the statements install them `NOT VALID` then
-    // `VALIDATE` each in turn.
+    // Component 114 lacked the five effect-replay constraints installed at
+    // 115. The retained declaration records their historical shape while the
+    // current component-116 cutover offers no executable migration.
     SchemaMigration {
         from: 114,
         to: 115,
-        source_missing_tables: &[],
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
         introduced_relations: &[],
         introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
-        statements: EFFECT_REPLAY_CONSTRAINT_DDL,
+        statements: &[],
     },
 ];

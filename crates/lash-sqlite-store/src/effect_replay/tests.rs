@@ -1037,8 +1037,9 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
     enum Write {
         Renew,
         Finalize,
+        ReleaseDerivation,
     }
-    for operation in [Write::Finalize, Write::Renew] {
+    for operation in [Write::Finalize, Write::Renew, Write::ReleaseDerivation] {
         let dir = tempfile::tempdir().expect("effect journal directory");
         let injector = SqliteFaultInjector::default();
         let conn = SqliteConnection::open_with_fault_injector(
@@ -1072,6 +1073,10 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
         let writing = tokio::spawn(async move {
             match operation {
                 Write::Renew => !store.renew(&fence(&request), 300).await.expect("renew"),
+                Write::ReleaseDerivation => !store
+                    .release_uncommitted_derivation(&fence(&request))
+                    .await
+                    .expect("release derivation"),
                 Write::Finalize => matches!(
                     store
                         .finalize(&fence(&request), &terminal("queued-write"))

@@ -234,7 +234,7 @@ pub fn cold_process_durable_recovery_expectation(scenario: &str) -> String {
 
 pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
     let identity = ReferenceIdentity::for_scenario(scenario);
-    crate::ExecutionScope::turn(identity.session_id, identity.turn_id)
+    crate::ExecutionScope::queue_drain(identity.session_id, identity.turn_id.to_string())
 }
 
 #[expect(
@@ -695,7 +695,7 @@ pub async fn cold_process_real_turn_driver(
             effect_controller
         };
     let task_identity = identity.clone();
-    let task = crate::task::spawn(async move {
+    let mut task = crate::task::spawn(async move {
         Box::pin(drive_turn(runtime, effect_controller, &task_identity)).await
     });
     if action == ColdProcessTurnAction::CheckpointAfterExecuteBeforeOutcome {
@@ -705,7 +705,10 @@ pub async fn cold_process_real_turn_driver(
         );
     }
     if action != ColdProcessTurnAction::Recover {
-        control.wait_for_hit().await;
+        tokio::select! {
+            () = control.wait_for_hit() => {}
+            result = &mut task => panic!("cold-process turn ended before its armed crash point: {result:?}"),
+        }
         println!("crash_ready");
         std::io::Write::flush(&mut std::io::stdout()).expect("flush level-2 crash signal");
         std::future::pending::<()>().await;

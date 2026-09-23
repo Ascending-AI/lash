@@ -148,6 +148,8 @@ statement = "session_core.delete_process_session_rows"
 owner = "crates/lash-postgres-store/src/postgres/session_sql.rs"
 touches = [
     "pending_turn_inputs",
+    "queued_run_members",
+    "queued_runs",
     "queued_work_batches",
     "queued_work_items",
     "session_execution_leases",
@@ -159,12 +161,12 @@ touches = [
 ]
 reason = """
 The process prune deletes a batch of sessions' rows from every table a session
-owns, in one statement, because the parts would race: twelve deletes keyed by
+owns, in one statement, because the parts would race: fourteen deletes keyed by
 the same session array, and a writer landing between two of them would leave a
-session whose queue is gone and whose metadata is not. Two of the twelve
+session whose queue is gone and whose metadata is not. Two of the fourteen
 tables belong to the process family — a session's wake redelivery fences and
-the allocation floors targeting it — and seven to the turn-ingress family: its
-queue, its inputs, its lane lease and its cancellation facts. They all go with
+the allocation floors targeting it. The turn-ingress family owns the queue,
+inputs, lane lease and cancellation facts. They all go with
 the session that owns them, so the session-core family owns the whole cascade
 and deletes from the other two families' tables inside it. SQLite's session
 delete is per session and issues the named per-table deletes in sequence under
@@ -588,6 +590,8 @@ tables = [
     "pending_turn_inputs",
     "queued_work_batches",
     "queued_work_items",
+    "queued_runs",
+    "queued_run_members",
     "session_execution_leases",
     "tool_intent_submissions",
     "turn_cancel_affected_inputs",
@@ -602,6 +606,7 @@ statement_prefixes = [
     "pending_turn_input",
     "queued_work_batch",
     "queued_work_item",
+    "queued_run",
     "session_execution_lease",
     "tool_intent_submission",
     "turn_cancel_affected_input",
@@ -621,6 +626,8 @@ shared = [
     "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs",
     "crates/lash-store-sql/src/turn_ingress/queued_batches.rs",
     "crates/lash-store-sql/src/turn_ingress/queued_items.rs",
+    "crates/lash-store-sql/src/turn_ingress/queued_runs.rs",
+    "crates/lash-store-sql/src/turn_ingress/queued_run_members.rs",
     "crates/lash-store-sql/src/turn_ingress/retired_scopes.rs",
     "crates/lash-store-sql/src/turn_ingress/session_execution_leases.rs",
     "crates/lash-store-sql/src/turn_ingress/tool_intent_submissions.rs",
@@ -674,6 +681,8 @@ usage_deltas = "crates/lash-store-sql/src/session/usage_deltas.rs"
 release_stamp = "crates/lash-store-sql/src/session/release_stamp.rs"
 checkpoint_blob_refs = "crates/lash-store-sql/src/session/checkpoint_blob_refs.rs"
 [families.turn_ingress.table_modules]
+queued_runs = "crates/lash-store-sql/src/turn_ingress/queued_runs.rs"
+queued_run_members = "crates/lash-store-sql/src/turn_ingress/queued_run_members.rs"
 pending_turn_inputs = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
 queued_work_batches = "crates/lash-store-sql/src/turn_ingress/queued_batches.rs"
 queued_work_items = "crates/lash-store-sql/src/turn_ingress/queued_items.rs"
@@ -3518,6 +3527,12 @@ statement = "turn_ingress.select_claimed_batch_source_key"
 backends = ["postgres"]
 kind = "operation exists on one backend only"
 reason = "The read half of the same fork as turn_ingress.record_wake_fence_from_claim."
+
+[[dialect_only]]
+statement = "effect_replay.release_uncommitted_derivation"
+kind = "server clock"
+backends = ["sqlite", "postgres"]
+reason = "SQLite samples its host clock after writer admission and binds the timestamp; PostgreSQL samples transaction_timestamp in the fenced update."
 
 [[dialect_only]]
 statement = "effect_group.transition_lifecycle"

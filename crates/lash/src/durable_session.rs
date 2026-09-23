@@ -322,6 +322,50 @@ impl DurableSession {
             .await?)
     }
 
+    /// Returns unfinished queued execution, including a continuation whose
+    /// initial inputs have already settled.
+    pub async fn pending_queued_run(&self) -> Result<Option<lash_core::store::QueuedRunAdmission>> {
+        Ok(self
+            .store()
+            .await?
+            .pending_queued_run(&self.session_id)
+            .await?)
+    }
+
+    /// Terminalizes an unfinished submission under the host's current session
+    /// lane. Assigned work is cancelled; the receipt retains the reason.
+    pub async fn abandon_queued_run(
+        &self,
+        fence: &lash_core::SessionExecutionLeaseAuthority,
+        scope: lash_core::ExecutionScope,
+        expected_revision: u64,
+        reason: String,
+    ) -> Result<lash_core::store::QueuedRunAdmission> {
+        if fence.session_id != self.session_id {
+            return Err(lash_core::StoreError::QueuedRunConflict {
+                session_id: self.session_id.clone(),
+            }
+            .into());
+        }
+        Ok(self
+            .store()
+            .await?
+            .settle_queued_run(
+                fence,
+                lash_core::store::QueuedRunCommit {
+                    scope,
+                    expected_revision,
+                    progress: lash_core::store::QueuedRunProgress::Settle {
+                        terminal: lash_core::store::QueuedRunTerminal::Failed {
+                            code: lash_core::RuntimeErrorCode::QueuedWork,
+                            message: reason,
+                        },
+                    },
+                },
+            )
+            .await?)
+    }
+
     /// Cancels queued work batch.
     pub async fn cancel_queued_work_batch(
         &self,

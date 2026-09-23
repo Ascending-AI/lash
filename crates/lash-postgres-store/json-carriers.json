@@ -1,4 +1,8 @@
 {
+  "lash_queued_runs.admission_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "QueuedRunAdmission is fenced by the store component version and decoded through its shared protocol type. Ordered member references live in queued_run_members; the JSON stores selection markers, configuration, terminal evidence and the last commit receipt."
+  },
   "lash_sessions.head_json": {
     "verdict": "deliberately-excluded",
     "reason": "SessionHeadPayload carries schema_version and is rejected by decode_versioned_json_record before typed decode."

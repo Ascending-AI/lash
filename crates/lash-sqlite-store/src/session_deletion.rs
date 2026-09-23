@@ -167,6 +167,7 @@ pub(super) async fn delete_session_from_catalog(
             )
             .map_err(sqlite_error)?;
             let turn_ingress = crate::turn_ingress::turn_ingress_sql();
+            let queued_runs = &turn_ingress.queued_runs;
             tx.execute(
                 turn_ingress.queued_batches.delete_by_session.sql(),
                 params![session_id.as_str()],
@@ -184,6 +185,8 @@ pub(super) async fn delete_session_from_catalog(
             // entering store deletion. Only then may the pinned closure
             // obligation and its selected-owner identity be retired.
             for statement in [
+                queued_runs.delete_members.sql(),
+                queued_runs.delete_runs.sql(),
                 turn_ingress.pending_inputs.delete_by_session.sql(),
                 turn_ingress.cancel_requests.delete_by_session.sql(),
                 turn_ingress.closures.delete_by_session.sql(),

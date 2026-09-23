@@ -35,6 +35,15 @@ impl std::fmt::Display for SessionExecutionLeaseRenewalInstallMismatch {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
+    #[error("selected queued run cannot claim the complete request: {unclaimed_batch_ids:?}")]
+    SelectedQueuedRunIncomplete {
+        unclaimed_batch_ids: Vec<crate::BatchId>,
+    },
+    #[error("session {session_id} already owns a different unfinished queued run")]
+    QueuedRunConflict { session_id: crate::SessionId },
+    #[error("session {session_id} queued run execution configuration changed")]
+    QueuedRunConfigurationChanged { session_id: crate::SessionId },
+
     /// Capturing dirty executor state failed before any store commit was
     /// attempted. The current execution must abort, but no publication is
     /// ambiguous and all live lease/claim ownership can be handed back.
@@ -687,6 +696,9 @@ impl StoreError {
                 "RequiredConstraintInspectionInconclusive"
             }
             Self::QueuedWorkPredecessorClaimCorrupt { .. } => "QueuedWorkPredecessorClaimCorrupt",
+            Self::SelectedQueuedRunIncomplete { .. } => "SelectedQueuedRunIncomplete",
+            Self::QueuedRunConflict { .. } => "QueuedRunConflict",
+            Self::QueuedRunConfigurationChanged { .. } => "QueuedRunConfigurationChanged",
             Self::HeadRevisionConflict { .. } => "HeadRevisionConflict",
             Self::TurnCancelIntentChanged { .. } => "TurnCancelIntentChanged",
             Self::TurnCancelBindingMismatch { .. } => "TurnCancelBindingMismatch",

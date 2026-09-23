@@ -323,6 +323,17 @@ impl RuntimeTurnDriver<'_> {
         if let Some(mut claim) = turn_input_claim {
             if withholds_claimed_work
                 && !claim_shares_turn_input_rows(&self.pending_turn_input_claims, &claim)
+                && !self
+                    .pending_checkpoint_turn_input_claim
+                    .as_ref()
+                    .is_some_and(|pending| {
+                        pending.inputs.iter().any(|input| {
+                            claim
+                                .inputs
+                                .iter()
+                                .any(|incoming| incoming.input_id == input.input_id)
+                        })
+                    })
             {
                 merge_pending_turn_input_claim_authority(
                     &mut self.withheld_terminal_work.turn_inputs,

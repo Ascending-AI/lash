@@ -61,7 +61,9 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 const MIGRATION_FLOOR_VERSION: i32 = 101;
 /// The table component 101 lacks: the cancellation affected-input child table
 /// component 102 installed (FIG-3263).
-const POST_FLOOR_TABLES: [&str; 2] = [
+const POST_FLOOR_TABLES: [&str; 4] = [
+    "lash_queued_run_members",
+    "lash_queued_runs",
     "lash_turn_cancel_affected_inputs",
     "lash_runtime_effect_group_child",
 ];
@@ -124,9 +126,8 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// the *current* catalog, so these are exactly the artifacts its refusal must
 /// enumerate.
 ///
-/// Component 115 is a constraint-only generation (FIG-1947), and its 114 → 115
-/// arm introduces no relation at all: the divergence a rewound component-114
-/// stamp presents is exactly the five `pg_constraint` rows the arm adds.
+/// The retained 114 -> 115 generation introduced these constraints. The
+/// component-116 queued-run cutover has no migration path from 115.
 const DIVERGENT_ARTIFACTS: [&str; 5] = [
     "ck_runtime_effect_replay_outcome_json",
     "ck_runtime_effect_replay_error_json",
@@ -134,13 +135,8 @@ const DIVERGENT_ARTIFACTS: [&str; 5] = [
     "fk_runtime_effect_replay_group",
     "fk_runtime_effect_group_child_group",
 ];
-/// A creation-only generation expects the predecessor stamp over its current
-/// catalog to be classified as migration divergence. A destructive generation
-/// has no migration arm, so that same pre-cutover stamp is the ordinary
-/// reject-and-recreate boundary. Component 115 is migratable: the 114 → 115 arm
-/// exists, so the component-114 stamp over the current catalog is refused as
-/// divergent on the constraint artifacts it claims not to own.
-const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::DivergentArtifacts;
+/// Queued-run admission has no migration from a predecessor stamp.
+const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
 /// though their rows do not.

@@ -169,10 +169,9 @@ impl RuntimeTurnDriver<'_> {
             .transform_assistant_response(&self.session_id, response)
             .await
             .map_err(|err| {
-                RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectAssistantResponseHook,
-                    format!("assistant response hook failed: {err}"),
-                )
+                RuntimeEffectControllerError::retryable_response_derivation(format!(
+                    "assistant response hook failed: {err}"
+                ))
             })?;
         let mut current: Option<LlmResponse> = None;
         let mut events = Vec::new();

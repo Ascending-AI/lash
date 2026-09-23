@@ -186,6 +186,15 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.ensure_session_not_deleted(&session_id)?;
         turn_cancel_closure::verify_pre_replay_fence(self, commit, transaction_now)?;
+        if commit.queued_run.is_some() {
+            let fence = commit
+                .session_execution_lease_fence
+                .as_ref()
+                .ok_or_else(|| crate::StoreError::QueuedRunConflict {
+                    session_id: session_id.clone(),
+                })?;
+            self.verify_session_execution_lease(&session_id, fence, transaction_now)?;
+        }
         #[cfg(any(test, feature = "testing"))]
         if let Some(error) = self.fail_next_runtime_commit.lock_recover().take() {
             return Err(error);
@@ -243,6 +252,69 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             }
             turn_cancel_closure::consume(self, commit);
             return Ok(replay.into_result());
+        }
+        let pending_run = self
+            .queued_runs
+            .lock_recover()
+            .values()
+            .find(|run| run.scope.session_id() == Some(&session_id) && run.terminal.is_none())
+            .cloned();
+        if let Some(pending) = &pending_run {
+            if commit
+                .queued_run
+                .as_ref()
+                .is_none_or(|run| run.scope != pending.scope)
+                && !(pending.members.is_none()
+                    && commit.session_execution_lease_fence.is_some()
+                    && commit.turn_commit.operation.key == "session-command")
+            {
+                return Err(crate::StoreError::QueuedRunConflict {
+                    session_id: session_id.clone(),
+                });
+            }
+        } else if commit.queued_run.is_some() {
+            return Err(crate::StoreError::QueuedRunConflict {
+                session_id: session_id.clone(),
+            });
+        }
+        if let Some(run) = &commit.queued_run {
+            let fence = commit
+                .session_execution_lease_fence
+                .as_ref()
+                .ok_or_else(|| crate::StoreError::QueuedRunConflict {
+                    session_id: session_id.clone(),
+                })?;
+            self.verify_session_execution_lease(&session_id, fence, transaction_now)?;
+            if pending_run
+                .as_ref()
+                .is_none_or(|pending| pending.revision != run.expected_revision)
+            {
+                return Err(crate::StoreError::QueuedRunConflict {
+                    session_id: session_id.clone(),
+                });
+            }
+        }
+        if let (Some(pending), Some(progress)) = (&pending_run, &commit.queued_run)
+            && let crate::store::QueuedRunProgress::Advance {
+                members,
+                withheld_members,
+                ..
+            } = &progress.progress
+        {
+            for member in members.iter().chain(withheld_members) {
+                if !pending
+                    .members
+                    .iter()
+                    .flatten()
+                    .chain(&pending.withheld_members)
+                    .chain(&pending.assigned_members)
+                    .any(|existing| existing == member)
+                {
+                    return Err(crate::StoreError::QueuedRunConflict {
+                        session_id: session_id.clone(),
+                    });
+                }
+            }
         }
         turn_cancel_closure::validate_after_receipt_miss(self, commit)?;
         if let (Some(turn_id), Some(observed)) = (
@@ -485,7 +557,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         })?;
         let checkpoint_ref = crate::BlobRef::for_content(&checkpoint_bytes);
         let (
-            staged_queued_work,
+            mut staged_queued_work,
             staged_wake_redelivery_fences,
             staged_queued_work_next_seq,
             staged_enqueued_queue_batches,
@@ -565,7 +637,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                 .collect::<Result<Vec<_>, _>>()?;
             (queued, fences, next_seq, enqueued)
         };
-        let (staged_pending_turn_inputs, staged_turn_cancel_requests, turn_cancel_input_outcome) = {
+        let (
+            mut staged_pending_turn_inputs,
+            staged_turn_cancel_requests,
+            turn_cancel_input_outcome,
+        ) = {
             let mut pending = self.pending_turn_inputs.lock_recover().clone();
             let mut requests = self.turn_cancel_requests.lock_recover().clone();
             let mut outcome = crate::TurnCancelInputOutcome::default();
@@ -655,6 +731,44 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             (pending, requests, outcome)
         };
 
+        let staged_run = match (pending_run, commit.queued_run.as_ref()) {
+            (Some(run), Some(progress)) => {
+                Some(run.advance(progress, &staged_enqueued_queue_batches)?)
+            }
+            _ => None,
+        };
+        if let Some(run) = &staged_run
+            && run.terminal.is_some()
+        {
+            use crate::store::QueuedRunMember;
+            let members: Vec<_> = run
+                .initial_members
+                .iter()
+                .flatten()
+                .chain(run.members.iter().flatten())
+                .chain(run.withheld_members.iter())
+                .chain(run.assigned_members.iter())
+                .collect();
+            staged_queued_work.retain(|entry| {
+                entry.batch.session_id != session_id
+                    || !members.contains(&&QueuedRunMember::Batch(entry.batch.batch_id.clone()))
+            });
+            for entry in staged_pending_turn_inputs.iter_mut().filter(|entry| {
+                entry.input.session_id == session_id
+                    && members.contains(&&QueuedRunMember::Input(entry.input.input_id.clone()))
+            }) {
+                if !entry.input.state.is_terminal()
+                    && !(entry.input.state == crate::TurnInputState::DeferredNextTurn
+                        && run
+                            .assigned_members
+                            .contains(&QueuedRunMember::Input(entry.input.input_id.clone())))
+                {
+                    entry.input.state =
+                        crate::TurnInputState::Cancelled(entry.input.state.ingress());
+                    entry.claim.release();
+                }
+            }
+        }
         // Refuse an armed attachment delete before publishing staged boundary
         // state. The same factory transaction excludes attachment GC.
         self.commit_attachment_refs_in_memory(
@@ -662,6 +776,11 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
             &commit.committed_attachment_ids,
             transaction_now,
         )?;
+        if let Some(run) = staged_run {
+            self.queued_runs
+                .lock_recover()
+                .insert(run.scope.clone(), run);
+        }
         *self.queued_work.lock_recover() = staged_queued_work;
         *self.wake_redelivery_fences.lock_recover() = staged_wake_redelivery_fences;
         *self.queued_work_next_seq.lock_recover() = staged_queued_work_next_seq;

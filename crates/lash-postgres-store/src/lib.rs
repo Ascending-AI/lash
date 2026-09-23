@@ -443,7 +443,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `ADD CONSTRAINT ... NOT VALID` plus an explicit `VALIDATE CONSTRAINT` for
 // each of the five constraints, and every older catalog is still rejected
 // and recreated.
-const SCHEMA_VERSION: i32 = 115;
+// Version 116 adds durable queued-run admissions and normalized membership.
+// Component-115 catalogs require recreation.
+const SCHEMA_VERSION: i32 = 116;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -78,7 +78,7 @@ impl LashRuntime {
             return Ok(None);
         };
         match SessionExecutionLeaseGuard::try_acquire_for_executor(
-            store,
+            Arc::clone(&store),
             &self.state.session_id,
             &self.runtime_lease_owner,
             &self.runtime_lease_executor_id,
@@ -88,7 +88,24 @@ impl LashRuntime {
         .await
         .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?
         {
-            Some(guard) => Ok(Some(guard)),
+            Some(guard) => {
+                if store
+                    .pending_queued_run(&self.state.session_id)
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?
+                    .is_some()
+                {
+                    guard
+                        .release_if_live()
+                        .await
+                        .map_err(super::runtime_error_from_store_commit)?;
+                    return Err(RuntimeError::new(
+                        RuntimeErrorCode::QueuedRunPending,
+                        "unfinished queued run owns this session",
+                    ));
+                }
+                Ok(Some(guard))
+            }
             None => Err(RuntimeError::new(
                 RuntimeErrorCode::SessionExecutionLaneBusy,
                 format!(
@@ -118,7 +135,7 @@ impl LashRuntime {
     /// the provided aliveness-aware wait.
     pub(super) async fn claim_session_execution_lease_for_queued_work(
         &mut self,
-        opts: &TurnOptions<'_>,
+        opts: &QueuedTurnOptions<'_>,
     ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
         let Some(store) = self
             .session
@@ -135,12 +152,7 @@ impl LashRuntime {
             timings: self.host.core.control.lease_timings,
             clock: Arc::clone(&self.host.core.clock),
         });
-        match opts
-            .scoped_effect_controller()
-            .controller()
-            .acquire_queued_lane(lane, opts.cancel.clone())
-            .await?
-        {
+        match opts.source.acquire_lane(lane, opts.cancel.clone()).await? {
             crate::QueuedLaneAcquisition::Acquired(guard) => Ok(Some(guard.into_inner())),
             crate::QueuedLaneAcquisition::NotAcquired => Ok(None),
         }
@@ -186,6 +198,9 @@ impl LashRuntime {
         err: &RuntimeError,
         claims: &[crate::QueuedWorkClaim],
     ) {
+        if self.queued_run.is_some() {
+            return;
+        }
         if !matches!(
             err.code,
             RuntimeErrorCode::SessionExecutionLeaseLost
@@ -222,6 +237,9 @@ impl LashRuntime {
         err: &RuntimeError,
         drives: &[super::turn_input_ingress::TurnInputDrive],
     ) {
+        if self.queued_run.is_some() {
+            return;
+        }
         let claims = drives
             .iter()
             .filter_map(super::turn_input_ingress::TurnInputDrive::as_claim)

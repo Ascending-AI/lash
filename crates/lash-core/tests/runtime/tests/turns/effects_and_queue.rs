@@ -133,7 +133,7 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                named_queued_scope(
                     &SessionId::from("root"),
                     &TurnId::from("after-long-turn-queued-work-claim")
                 ),
@@ -238,7 +238,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
     let first_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("queued-frame-chain"),
             ),
@@ -290,7 +290,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
     let second_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("second-queued-after-frame-chain"),
             ),
@@ -377,27 +377,26 @@ pub(super) async fn fig1123_committed_frame_handoff_survives_before_inline_claim
     let first = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("handoff-crash-window"),
             ),
         ))
         .await
-        .expect("the committed frame switch remains a successful public call")
-        .ran()
-        .expect("the committed frame switch is returned");
-    assert!(matches!(
-        first.outcome,
-        TurnOutcome::AgentFrameSwitch { .. }
-    ));
-    assert!(first.errors.iter().any(|issue| {
-        issue.code == Some(lash_core::TurnFailureCode::from_wire("store_commit_failed").into())
-            && issue.retryable == Some(false)
-    }));
-    assert!(matches!(
-        runtime.resident_session.validity(),
-        ResidentSessionState::Invalidated { .. }
-    ));
+        .expect_err("the committed handoff remains pending after selection fails");
+    assert_eq!(first.code, lash_core::RuntimeErrorCode::QueuedRunPending);
+    let pending = lash_core::store::QueuedWorkStore::pending_queued_run(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("pending admission")
+    .expect("retained handoff");
+    assert_eq!(pending.position.physical_ordinal, 1);
+    assert_eq!(
+        pending.position.turn_id,
+        TurnId::from("handoff-crash-window:agent-frame:1")
+    );
 
     let inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(
         store.as_ref(),
@@ -432,9 +431,9 @@ pub(super) async fn fig1123_committed_frame_handoff_survives_before_inline_claim
     let recovered = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
-                &TurnId::from("handoff-pump-recovery"),
+                &TurnId::from("handoff-crash-window"),
             ),
         ))
         .await
@@ -507,7 +506,7 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from(SESSION_ID),
                 &TurnId::from("mid-chain-cancel"),
             ),
@@ -571,7 +570,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("invalid-claimed-input"),
             ),
@@ -637,7 +636,7 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("claimed-plugin-abort"),
             ),
@@ -1075,16 +1074,11 @@ pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_la
     let output = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(&SessionId::from("root"), &TurnId::from("retained-service")),
+            named_queued_scope(&SessionId::from("root"), &TurnId::from("retained-service")),
         ))
         .await
-        .expect("queued switch succeeds")
-        .ran()
-        .expect("queued switch returns a turn");
-    assert!(matches!(
-        output.outcome,
-        TurnOutcome::AgentFrameSwitch { .. }
-    ));
+        .expect_err("post-commit delivery failure leaves the handoff pending");
+    assert_eq!(output.code, lash_core::RuntimeErrorCode::QueuedRunPending);
 
     let graph = retained
         .lock_recover()
@@ -1207,42 +1201,28 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
     )
     .await;
 
-    let output = runtime
+    let error = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("queued-lapsed-handoff"),
             ),
         ))
         .await
-        .expect("the committed switch is returned with a loud follow-on failure")
-        .ran()
-        .expect("queued turn should run");
-
-    assert!(matches!(
-        output.outcome,
-        TurnOutcome::AgentFrameSwitch { .. }
-    ));
-    let issue = output
-        .errors
-        .iter()
-        .find(|issue| {
-            issue.code
-                == Some(
-                    lash_core::TurnFailureCode::from_wire(
-                        lash_core::RuntimeErrorCode::SessionExecutionLeaseLost.as_str(),
-                    )
-                    .into(),
-                )
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "the durable handoff reports the lapsed session lane: {:?}",
-                output.errors
-            )
-        });
-    assert_eq!(issue.retryable, Some(false));
+        .expect_err("committed continuation remains recoverable after lane loss");
+    assert_eq!(error.code, lash_core::RuntimeErrorCode::QueuedRunPending);
+    let admitted = store
+        .pending_queued_run(&SessionId::from("root"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(admitted.position.physical_ordinal, 1);
+    assert_eq!(admitted.position.turn_index, 2);
+    assert_eq!(
+        admitted.position.turn_id.as_str(),
+        "queued-lapsed-handoff:agent-frame:1"
+    );
     assert_eq!(
         *borrowed_append_error.lock_recover(),
         Some(std::mem::discriminant(
@@ -1286,6 +1266,26 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
     assert!(
         final_lease.is_none(),
         "settling the loud durable failure must clear the expired owner row"
+    );
+    let resumed = runtime
+        .stream_next_queued_work(TurnOptions::new(
+            CancellationToken::new(),
+            named_queued_scope(
+                &SessionId::from("root"),
+                &TurnId::from("queued-lapsed-handoff"),
+            ),
+        ))
+        .await
+        .expect("host resumes committed continuation")
+        .expect("continuation runs");
+    assert_eq!(resumed.state.turn_index, 2);
+    assert_eq!(call_index.load(Ordering::SeqCst), 2);
+    assert!(
+        store
+            .pending_queued_run(&SessionId::from("root"))
+            .await
+            .unwrap()
+            .is_none()
     );
 }
 
@@ -1747,7 +1747,7 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("bounded-frame-chain"),
             ),
@@ -1864,35 +1864,31 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
     let committed = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("bounded-frame-capture-abort"),
             ),
         ))
         .await
-        .expect("a failed terminal capture preserves the last committed frame")
-        .ran()
-        .expect("the last committed frame is returned");
-
-    assert!(matches!(
-        committed.outcome,
-        TurnOutcome::AgentFrameSwitch { .. }
-    ));
-    assert!(committed.errors.iter().any(|issue| {
-        issue.code
-            == Some(lash_core::TurnFailureCode::from_wire("execution_state_capture_failed").into())
-            && issue.retryable == Some(false)
-    }));
+        .expect_err("failed terminal capture retains the pending run");
     assert_eq!(
-        store.abandoned_claim_counts(),
-        (1, 0),
-        "the claimed handoff must pass through ordinary local-abort cleanup"
+        committed.code,
+        lash_core::RuntimeErrorCode::QueuedRunPending
     );
+    assert_eq!(store.abandoned_claim_counts(), (0, 0));
+    let pending = lash_core::store::QueuedWorkStore::pending_queued_run(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("pending admission")
+    .expect("terminalization remains pending");
+    assert_eq!(pending.position.physical_ordinal, switch_count as u64);
     let queued = store.raw_queued_work_for_testing();
     assert_eq!(queued.len(), 1, "only the uncommitted handoff remains");
     assert!(
-        queued[0].1.is_none() && !queued[0].3,
-        "the remaining handoff must have no claim identity or token: {queued:?}"
+        queued[0].1.is_some() && queued[0].3,
+        "recorded claim remains assigned: {queued:?}"
     );
 }
 
@@ -1927,7 +1923,7 @@ pub(super) async fn leading_session_command_drains_before_queued_turn() {
         .stream_next_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                named_queued_scope(
                     &SessionId::from("root"),
                     &TurnId::from("command-before-turn-drain"),
                 ),
@@ -1991,7 +1987,7 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
         let drained = runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                named_queued_scope(
                     &SessionId::from("root"),
                     &TurnId::from(format!("depth-invariance-{backlog_depth}")),
                 ),
@@ -2043,7 +2039,7 @@ pub(super) async fn later_session_command_does_not_jump_earlier_queued_turn() {
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("turn-before-command-drain"),
             ),
@@ -2072,7 +2068,7 @@ pub(super) async fn later_session_command_does_not_jump_earlier_queued_turn() {
     let command_only = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            named_queued_scope(
                 &SessionId::from("root"),
                 &TurnId::from("later-command-drain"),
             ),
@@ -2170,7 +2166,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         .stream_next_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                named_queued_scope(
                     &SessionId::from("root"),
                     &TurnId::from("queued-work-started-turn"),
                 ),

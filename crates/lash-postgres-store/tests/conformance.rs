@@ -1969,6 +1969,19 @@ lash_conformance::effect_controller_replay_tests!({
     })
 });
 
+lash_conformance::effect_controller_response_derivation_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres effect replay conformance: database URL is not set");
+        return;
+    };
+    reset(storage.pool()).await;
+    let scope = ExecutionScope::runtime_operation("postgres-effect-controller-conformance");
+    let controller = storage.runtime_effect_controller(scope.clone());
+    (database_lock, move || {
+        postgres_conformance_invocation(controller.clone(), scope.clone())
+    })
+});
+
 lash_conformance::effect_controller_replay_mismatch_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres effect mismatch conformance: database URL is not set");
@@ -2292,3 +2305,28 @@ lash_conformance::retention_tests!({
     };
     (database_lock, Arc::new(storage.session_store_factory()))
 });
+
+#[tokio::test]
+async fn postgres_queued_run_satisfies_cold_process_persistence_boundaries_when_configured() {
+    let Some((_database_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let url = database_url().expect("configured PostgreSQL database URL");
+    let dir = tempfile::tempdir().expect("PostgreSQL queued-run cold process tempdir");
+    lash_conformance::assert_queued_run_cold_process_recovery(
+        dir.path(),
+        |action, nonce, marker| {
+            let mut command = tokio::process::Command::new(lash_conformance::helper_executable(
+                "postgres-await-event-helper",
+            ));
+            command
+                .env("LASH_POSTGRES_DATABASE_URL", &url)
+                .arg(action)
+                .arg(nonce)
+                .arg(marker);
+            command
+        },
+    )
+    .await;
+}

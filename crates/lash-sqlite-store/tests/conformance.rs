@@ -2261,6 +2261,14 @@ lash_conformance::effect_controller_replay_tests!({
     })
 });
 
+lash_conformance::effect_controller_response_derivation_tests!({
+    let scope = durable_turn_scope("effect-conformance-session", "effect-conformance-turn");
+    let (controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
+    (controller_dir, move || {
+        sqlite_conformance_invocation(controller.clone(), scope.clone())
+    })
+});
+
 #[tokio::test]
 async fn sqlite_effect_controller_replays_without_local_executor() {
     let scope = durable_turn_scope("session", "turn");
@@ -2483,3 +2491,20 @@ lash_conformance::retention_tests!({
         Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
     (dir, factory)
 });
+
+#[tokio::test]
+async fn sqlite_queued_run_satisfies_cold_process_persistence_boundaries() {
+    let dir = tempfile::tempdir().expect("SQLite queued-run cold process tempdir");
+    let database = dir.path().join("queued-run-cold.db");
+    lash_conformance::assert_queued_run_cold_process_recovery(
+        dir.path(),
+        |action, nonce, marker| {
+            let mut command = tokio::process::Command::new(lash_conformance::helper_executable(
+                "sqlite-await-event-helper",
+            ));
+            command.arg(&database).arg(action).arg(nonce).arg(marker);
+            command
+        },
+    )
+    .await;
+}

@@ -1771,10 +1771,9 @@ jobs:
           bash scripts/ci/with-service.sh "pg${{ matrix.postgres }}" -- \
             bash scripts/ci/store-tests.sh pg-pool-wait
 
-      # crates/lash currently has one Agent Scenario gated by the shared
-      # LASH_POSTGRES_DATABASE_URL/LASH_REQUIRE_POSTGRES helper. It is also the
-      # test that caught a real identity-version mutation, so keep it stable and
-      # focused instead of scheduling tests by parsing changed source literals.
+      # Primary PostgreSQL runs cover parent-end recovery and automatic queued
+      # retry through the real journal on PRs, merge groups, and releases.
+      # The shared service wrapper requires a live database for both scenarios.
       - name: Test runtime Postgres agent scenarios
         if: matrix.role == 'primary'
         run: |

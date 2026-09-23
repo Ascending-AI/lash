@@ -7,6 +7,10 @@ use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
 
 mod lease_fencing;
+mod response_derivation;
+pub use response_derivation::{
+    effect_controller_response_derivation_retry, effect_controller_response_derivation_terminals,
+};
 mod outstanding_waits;
 pub use lease_fencing::{
     EffectLeaseControllerFactory, EffectLeaseFencingBackend, EffectLeaseMutator,

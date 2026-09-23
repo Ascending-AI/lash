@@ -1575,6 +1575,11 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("SELECT EXISTS( SELECT 1 FROM lash_deleted_sessions") => {
             "deleted-session-check"
         }
+        q if q.starts_with("SELECT admission_json, status, revision FROM lash_queued_runs")
+            && q.contains("AND status =") =>
+        {
+            "queued-run-pending-load"
+        }
         q if q.starts_with("SELECT head_json, head_revision") => "head-load",
         q if q.starts_with("SELECT head_revision") => "head-lock",
         q if q.starts_with("SELECT node_id FROM lash_graph_nodes") => "graph-nodes-exist",
@@ -1699,11 +1704,9 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         .await
         .expect("measured statement-pin commit");
     let commit_statements = postgres_statement_calls_by_name(storage.pool()).await;
-    // FIG-3412: production head commit is 16 round trips — the ticket's pinned
-    // 15 was measured for FIG-3381 before FIG-3386 (#1807) added the
-    // unconditional attachment-adoption `commit_owned` UPDATE to every turn
-    // commit (ADR 0058). This fixture's commit path does not pass through the
-    // lease-epoch probe, so the testing build adds nothing here.
+    // The pending queued-run guard adds one read to the previous 16-round-trip
+    // head commit. It excludes unowned commits while a queued run is pending.
+    // This fixture does not pass through the testing lease-epoch probe.
     let expected_commit: std::collections::BTreeMap<&'static str, i64> =
         std::collections::BTreeMap::from([
             ("begin", 1),
@@ -1712,6 +1715,7 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
             ("deleted-session-check", 1),
             ("head-lock", 1),
             ("head-load", 1),
+            ("queued-run-pending-load", 1),
             ("turn-commit-load", 1),
             ("graph-nodes-exist", 1),
             ("blob-lock", 1),

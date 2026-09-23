@@ -5,18 +5,15 @@
 use crate::runtime_support::*;
 
 type StrictReplayEntry = (String, CanonicalRuntimeEffectEnvelope);
+type StrictReplayTerminal = (
+    CanonicalRuntimeEffectEnvelope,
+    Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+);
 
 #[derive(Clone, Default)]
 pub struct StrictReplayJournal {
     pub enabled: bool,
-    pub outcomes: Arc<
-        Mutex<
-            std::collections::BTreeMap<
-                String,
-                (CanonicalRuntimeEffectEnvelope, RuntimeEffectOutcome),
-            >,
-        >,
-    >,
+    pub outcomes: Arc<Mutex<std::collections::BTreeMap<String, StrictReplayTerminal>>>,
 }
 
 impl StrictReplayJournal {
@@ -54,15 +51,22 @@ impl StrictReplayJournal {
             lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict,
             None,
         )?;
-        Ok(Some(outcome))
+        outcome.map(Some)
     }
 
     pub fn record(
         &self,
         prepared: Option<StrictReplayEntry>,
+        kind: lash_core::RuntimeEffectKind,
         outcome: &Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
     ) {
-        if let (Some((key, canonical)), Ok(outcome)) = (prepared, outcome) {
+        if outcome
+            .as_ref()
+            .is_err_and(|error| error.journal_disposition(kind).is_retryable_derivation())
+        {
+            return;
+        }
+        if let Some((key, canonical)) = prepared {
             self.outcomes
                 .lock_recover()
                 .insert(key, (canonical, outcome.clone()));
@@ -565,6 +569,7 @@ pub struct RecordingEffectController {
     pub response_hook_crash_fired: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) replay_outcomes:
         Arc<Mutex<std::collections::BTreeMap<String, RuntimeEffectOutcome>>>,
+    replay_errors: Arc<Mutex<std::collections::BTreeMap<String, RuntimeEffectControllerError>>>,
     pub direct_gate: Option<
         Arc<(
             tokio::sync::Notify,
@@ -870,6 +875,7 @@ impl RuntimeEffectController for RecordingEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let command_kind = envelope.command.kind();
         let strict_replay = self.strict_replay.prepare(&envelope)?;
         if let Some(outcome) = self.strict_replay.replay(&strict_replay)? {
             return Ok(outcome);
@@ -883,6 +889,11 @@ impl RuntimeEffectController for RecordingEffectController {
                 .cloned()
         {
             return Ok(outcome);
+        }
+        if self.replay_by_key
+            && let Some(error) = self.replay_errors.lock_recover().get(&replay_key).cloned()
+        {
+            return Err(error);
         }
         self.envelopes
             .lock_recover()
@@ -1207,9 +1218,20 @@ impl RuntimeEffectController for RecordingEffectController {
         {
             self.replay_outcomes
                 .lock_recover()
-                .insert(replay_key, outcome.clone());
+                .insert(replay_key.clone(), outcome.clone());
         }
-        self.strict_replay.record(strict_replay, &outcome);
+        if self.replay_by_key
+            && let Err(error) = &outcome
+            && !error
+                .journal_disposition(command_kind)
+                .is_retryable_derivation()
+        {
+            self.replay_errors
+                .lock_recover()
+                .insert(replay_key, error.clone());
+        }
+        self.strict_replay
+            .record(strict_replay, command_kind, &outcome);
         outcome
     }
 

@@ -108,19 +108,38 @@ turn latency bound follows from the cancel grace.
 or `Process(ProcessRef { process_id, incarnation })`.** Its identity is stable
 across worker attempts and segments, and it changes on process re-registration.
 
-**A queued-work drain is an opener, not a turn's container.** `drain_id` and
-`turn_id` are two ways for a host to identify one physical unit — "keep
-`drain_id(...)` as the durable idempotency key for retried drains, or keep
-`turn_id(...)` as the host-minted physical turn identity"
-(`crates/lash/src/turn.rs`) — and `execution_scope` there resolves to
-`queue_drain_scope(session, drain_id)` when no turn id exists, so a queued
-turn runs its whole effect tree, cells included, under
-`ExecutionScope::QueueDrain`. A drain is durable and retry-stable for the same
-reason a turn is. One drain may run several queued turns, and the drain's
-opener lives until the drain ends rather than until its first turn does, so
-group identity, retained authority, cancellation and retirement bind the drain
-and not the turn inside it. Found by FIG-3394 when a cell of a queued turn was
-refused for naming no opener.
+**A queued-work drain is a durable logical opener.** Session persistence
+admits its `ExecutionScope::QueueDrain` before provider or tool effects.
+Automatic retries reuse the pending admission; explicit `drain_id` or
+`turn_id` names that admission and its first physical turn. A settled explicit
+identity returns its receipt without consuming later arrivals.
+
+One admission can run several physical turns. Its recorded physical ordinal,
+turn ID and turn index advance atomically with each physical `RuntimeCommit`.
+Frame handoffs and work withheld at terminal checkpoints retain the same
+opener across worker replacement. Group identity, retained authority,
+cancellation and retirement bind that exact opener throughout the run.
+
+Admission membership records ordered references to existing queue rows.
+Selection is frozen before execution, so new arrivals and changed batching
+limits cannot change a replayed physical turn. A retryable failure retains
+ownership. A terminal disposition records its result and settles assigned
+work; hosts can explicitly abandon an unfinished submission under the current
+session lane. Ordinary direct execution refuses while queued ownership is
+unfinished. Admission receipts remain until session deletion, whose permanent
+deleted-session tombstone prevents identity reuse.
+
+### Queued-run recovery
+
+An automatic drain resumes the session's pending admission before considering a new submission. The admission retains the selected order, execution configuration, physical turn ID and turn index. Changed batching limits affect new admissions. Changed execution configuration returns the non-retryable `QueuedRunConfigurationChanged` error while preserving the admission. The host restores the recorded configuration or explicitly abandons the run before direct execution can proceed.
+
+Exact selection uses the same admission owner. Its default identity is generated at admission, independently of the first requested batch ID. An explicit ID must repeat its original exact request. An incomplete exact selection fails before assigning a partial selection; it does not consume the unmatched rows. A retry with the same explicit identity returns the recorded failure receipt. A corrected request needs a new identity.
+
+`QueuedTurnDrain::Replayed` carries terminal evidence and does not produce a new turn. An explicit retry never consumes later arrivals. Callers that need to reconstruct a rendered answer read the committed transcript. `SelectedQueuedWorkDrainOutcome::receipt` carries the equivalent terminal evidence for an exact drain.
+
+Physical retry exhaustion leaves the durable admission pending. Hosts can inspect `session.durable().pending_queued_run()` and wake or drain the session again without enqueueing input. If recovery is no longer wanted, the host acquires the current session execution lane and calls `abandon_queued_run` with its fence, scope, revision and reason. That operation retains failed-terminal evidence and cancels only the run's assigned work. Checkpoint assignments commit with their claims and remain part of the admission after physical claim generations rotate; unrelated raw claims remain untouched. Abandonment cannot use a stale fence. Direct execution resumes after terminal disposition.
+
+Receipts share the session's existing retention lifetime. There is no queued-run TTL or implicit supersede. A permanently deleted session identity cannot admit new work.
 
 **`SessionDelete` and `RuntimeOperation` scopes are not openers and run no
 cells.** A scope that is none of the three is refused with a typed error rather

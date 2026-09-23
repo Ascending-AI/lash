@@ -340,6 +340,7 @@ impl TurnBoundary {
         claim_settlement: TurnClaimSettlement,
         current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
+        queued_run: Option<Box<crate::store::QueuedRunCommit>>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
@@ -385,6 +386,7 @@ impl TurnBoundary {
                 claim_settlement,
                 current_session_lease_fence,
                 enqueued_queue_batches,
+                queued_run,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
                 interrupted_turn_cancel_intent,
@@ -527,6 +529,7 @@ impl TurnBoundary {
             claim_settlement,
             current_session_lease_fence,
             enqueued_queue_batches,
+            queued_run,
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
             interrupted_turn_cancel_intent,
@@ -619,6 +622,7 @@ impl TurnBoundary {
                 claim_settlement,
                 current_session_lease_fence,
                 enqueued_queue_batches,
+                queued_run,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
                 interrupted_turn_cancel_intent,
@@ -660,6 +664,7 @@ impl TurnBoundary {
         mut claim_settlement: TurnClaimSettlement,
         current_session_lease_fence: Option<crate::SessionExecutionLeaseAuthority>,
         enqueued_queue_batches: Vec<crate::QueuedWorkBatchDraft>,
+        queued_run: Option<Box<crate::store::QueuedRunCommit>>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
@@ -705,12 +710,18 @@ impl TurnBoundary {
         // ADR 0029: final settlement is authorized by head CAS and durable
         // cancellation facts, even after expiry or takeover. A retained lease
         // is not a borrowed append-lane fence. Its release remains ancillary.
-        if let Some(completion) = session_execution_lease_completion {
+        if queued_run.is_none()
+            && let Some(completion) = session_execution_lease_completion
+        {
             commit = commit.releasing_session_execution_lease(completion);
         }
         commit.completed_queue_claims = claim_settlement.queued.completions.clone();
         commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();
         commit.enqueued_queue_batches = enqueued_queue_batches;
+        if queued_run.is_some() {
+            commit.session_execution_lease_fence = current_session_lease_fence.clone();
+        }
+        commit.queued_run = queued_run;
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
         commit.interrupted_turn_input_cancellation = interrupted_turn_input_cancellation;
         commit.interrupted_turn_cancel_intent = interrupted_turn_cancel_intent;

@@ -600,6 +600,31 @@ pub(super) async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Res
 }
 
 #[tokio::test]
+pub(super) async fn anonymous_selected_noops_leave_no_unreachable_receipt() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("anonymous-selected-noops").open().await?;
+    let store = store_factory
+        .raw_store_for_testing(&session.session_id())
+        .expect("opened session retains its store");
+
+    for ids in [Vec::new(), vec![crate::BatchId::new("already-absent")]] {
+        let outcome = session.queued_turn().batch_ids(ids).run().await?;
+        assert!(outcome.turn.is_none());
+        assert!(
+            store.queued_runs.lock().unwrap().is_empty(),
+            "an unnamed empty selection has no reachable receipt to retain"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream() -> Result<()> {
     let provider = crate::testing::TestProvider::builder()
         .kind("turn-started-cancel-target")
@@ -729,6 +754,297 @@ pub(super) async fn an_exhausted_queue_reports_an_empty_claim_refusal() -> Resul
         ),
         "an exhausted queue must report an empty claim refusal, got {drain:?}"
     );
+    let explicit = session
+        .queued_turn()
+        .drain_id("explicit-empty")
+        .run()
+        .await?;
+    assert!(matches!(
+        explicit,
+        crate::QueuedTurnDrain::Empty(crate::EmptyQueuedDrainReason::ClaimRefused(
+            crate::QueuedWorkClaimRefusal::Empty
+        ))
+    ));
+    let replay = session
+        .queued_turn()
+        .drain_id("explicit-empty")
+        .run()
+        .await?;
+    assert!(matches!(
+        replay,
+        crate::QueuedTurnDrain::Replayed(receipt)
+            if matches!(receipt.terminal, Some(lash_core::store::QueuedRunTerminal::Empty))
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+pub(super) async fn refused_automatic_drain_does_not_block_a_direct_turn() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(
+            crate::testing::TestProvider::builder()
+                .kind("refused-drain-direct-turn")
+                .complete(|_| async { Ok(text_response("direct turn completed")) })
+                .build()
+                .into_handle(),
+        )
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("refused-drain-direct-turn").open().await?;
+    let session_id = session.session_id();
+    let store = store_factory
+        .raw_store_for_testing(&session_id)
+        .expect("opened session retains its store");
+    let delayed = store
+        .enqueue_queued_work(
+            crate::persistence::QueuedWorkBatchDraft::new(
+                &session_id,
+                crate::persistence::DeliveryPolicy::EarliestSafeBoundary,
+                crate::persistence::TurnWorkPayload::agent_frame_task(
+                    lash_core::facade_support::frame_node_id(&session_id, "delayed"),
+                    "delayed work",
+                    None,
+                ),
+            )
+            .with_available_at_ms(u64::MAX / 2),
+        )
+        .await?;
+
+    let drain = session.queued_turn().run().await?;
+    assert!(matches!(
+        drain,
+        crate::QueuedTurnDrain::Empty(crate::EmptyQueuedDrainReason::ClaimRefused(
+            crate::QueuedWorkClaimRefusal::NotYetAvailable
+        ))
+    ));
+    assert!(
+        session.durable().pending_queued_run().await?.is_none(),
+        "a refused drain must settle its admission"
+    );
+    session
+        .turn(TurnInput::text("direct input after refusal"))
+        .run()
+        .await?;
+    assert!(
+        store
+            .list_queued_work(&session_id)
+            .await?
+            .iter()
+            .any(|batch| batch.batch_id == delayed.batch_id)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+pub(super) async fn automatic_pickup_keeps_an_explicit_empty_run_receipt() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("explicit-empty-pickup").open().await?;
+    session.turn(TurnInput::text("seed head")).run().await?;
+    let session_id = session.session_id();
+    let store = store_factory
+        .raw_store_for_testing(&session_id)
+        .expect("opened session retains its store");
+    let state = lash_core::store::load_persisted_session_state(store.as_ref())
+        .await?
+        .expect("opened session has a persisted head");
+    let owner =
+        lash_core::LeaseOwnerIdentity::opaque("explicit-pickup", "explicit-pickup:incarnation");
+    let lease = store
+        .try_claim_session_execution_lease(&session_id, &owner, "manual-admission", 60_000)
+        .await?
+        .acquired()
+        .expect("manual admission obtains the lane");
+    let scope = lash_core::ExecutionScope::queue_drain(&session_id, "explicit-run");
+    store
+        .begin_or_resume_queued_run(
+            &lease.authority(),
+            lash_core::store::BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: Some(scope.clone()),
+                request: lash_core::store::QueuedRunRequest::Automatic,
+                configuration: lash_core::store::persisted_session_config_from_state(&state),
+                expected_head_revision: state.head_revision,
+                initial_turn_index: state.turn_index as u64 + 1,
+            },
+        )
+        .await?;
+    store
+        .release_session_execution_lease(&lease.authority())
+        .await?;
+
+    assert!(matches!(
+        session.queued_turn().run().await?,
+        crate::QueuedTurnDrain::Empty(_)
+    ));
+    let replay = session.queued_turn().drain_id("explicit-run").run().await?;
+    assert!(matches!(
+        replay,
+        crate::QueuedTurnDrain::Replayed(receipt)
+            if receipt.scope == scope
+                && matches!(receipt.terminal, Some(lash_core::store::QueuedRunTerminal::Empty))
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+pub(super) async fn explicit_reentry_keeps_an_anonymous_empty_run_receipt() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("anonymous-empty-reentry").open().await?;
+    session.turn(TurnInput::text("seed head")).run().await?;
+    let session_id = session.session_id();
+    let store = store_factory
+        .raw_store_for_testing(&session_id)
+        .expect("opened session retains its store");
+    let state = lash_core::store::load_persisted_session_state(store.as_ref())
+        .await?
+        .expect("opened session has a persisted head");
+    let owner =
+        lash_core::LeaseOwnerIdentity::opaque("anonymous-reentry", "anonymous-reentry:incarnation");
+    let lease = store
+        .try_claim_session_execution_lease(&session_id, &owner, "manual-admission", 60_000)
+        .await?
+        .acquired()
+        .expect("manual admission obtains the lane");
+    let admission = store
+        .begin_or_resume_queued_run(
+            &lease.authority(),
+            lash_core::store::BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: None,
+                request: lash_core::store::QueuedRunRequest::Automatic,
+                configuration: lash_core::store::persisted_session_config_from_state(&state),
+                expected_head_revision: state.head_revision,
+                initial_turn_index: state.turn_index as u64 + 1,
+            },
+        )
+        .await?;
+    assert_eq!(
+        admission.origin,
+        lash_core::store::QueuedRunOrigin::Anonymous
+    );
+    store
+        .release_session_execution_lease(&lease.authority())
+        .await?;
+
+    let reentry_lease = store
+        .try_claim_session_execution_lease(&session_id, &owner, "explicit-reentry", 60_000)
+        .await?
+        .acquired()
+        .expect("explicit reentry obtains the lane");
+    store
+        .begin_or_resume_queued_run(
+            &reentry_lease.authority(),
+            lash_core::store::BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: Some(admission.scope.clone()),
+                request: lash_core::store::QueuedRunRequest::Automatic,
+                configuration: admission.configuration.clone(),
+                expected_head_revision: state.head_revision,
+                initial_turn_index: state.turn_index as u64 + 1,
+            },
+        )
+        .await?;
+    store
+        .release_session_execution_lease(&reentry_lease.authority())
+        .await?;
+
+    assert!(matches!(
+        session.queued_turn().run().await?,
+        crate::QueuedTurnDrain::Empty(_)
+    ));
+    let replay = session
+        .queued_turn()
+        .drain_id(admission.scope.id())
+        .run()
+        .await?;
+    assert!(matches!(
+        replay,
+        crate::QueuedTurnDrain::Replayed(receipt)
+            if receipt.scope == admission.scope
+                && matches!(receipt.terminal, Some(lash_core::store::QueuedRunTerminal::Empty))
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+pub(super) async fn automatic_pickup_settles_a_frozen_selected_empty_run() -> Result<()> {
+    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(store_factory.clone())
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("selected-empty-pickup").open().await?;
+    session.turn(TurnInput::text("seed head")).run().await?;
+    let session_id = session.session_id();
+    let store = store_factory
+        .raw_store_for_testing(&session_id)
+        .expect("opened session retains its store");
+    let state = lash_core::store::load_persisted_session_state(store.as_ref())
+        .await?
+        .expect("opened session has a persisted head");
+    let owner =
+        lash_core::LeaseOwnerIdentity::opaque("selected-pickup", "selected-pickup:incarnation");
+    let lease = store
+        .try_claim_session_execution_lease(&session_id, &owner, "manual-admission", 60_000)
+        .await?
+        .acquired()
+        .expect("manual admission obtains the lane");
+    let admission = store
+        .begin_or_resume_queued_run(
+            &lease.authority(),
+            lash_core::store::BeginQueuedRun {
+                session_id: session_id.clone(),
+                identity: None,
+                request: lash_core::store::QueuedRunRequest::Selected {
+                    batch_ids: vec![crate::BatchId::new("already-absent")],
+                },
+                configuration: lash_core::store::persisted_session_config_from_state(&state),
+                expected_head_revision: state.head_revision,
+                initial_turn_index: state.turn_index as u64 + 1,
+            },
+        )
+        .await?;
+    let frozen = store
+        .select_queued_run(
+            &lease.authority(),
+            &admission.scope,
+            &owner,
+            64,
+            &admission.configuration,
+            lash_core::testing::queued_work_claim_policy(64),
+        )
+        .await?;
+    assert_eq!(frozen.admission.members, Some(Vec::new()));
+    store
+        .release_session_execution_lease(&lease.authority())
+        .await?;
+
+    assert!(matches!(
+        session.queued_turn().run().await?,
+        crate::QueuedTurnDrain::Empty(_)
+    ));
+    assert!(session.durable().pending_queued_run().await?.is_none());
+    session
+        .turn(TurnInput::text("after selected empty"))
+        .run()
+        .await?;
     Ok(())
 }
 
@@ -908,6 +1224,7 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
 
     let error = session
         .queued_turn()
+        .drain_id("explicit-refused-selection")
         .batch_ids([a1.batch_id.clone(), a2.batch_id.clone()])
         .run()
         .await
@@ -918,10 +1235,34 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
                 SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
                     unclaimed_batch_ids,
                 },
-        } => assert_eq!(unclaimed_batch_ids, vec![a2.batch_id]),
+        } => assert_eq!(unclaimed_batch_ids, vec![a2.batch_id.clone()]),
         other => panic!("expected typed selected-drain refusal, got {other:?}"),
     }
+    let retry = session
+        .queued_turn()
+        .drain_id("explicit-refused-selection")
+        .batch_ids([a1.batch_id.clone(), a2.batch_id.clone()])
+        .run()
+        .await
+        .expect_err("a failed explicit receipt cannot label unexecuted batches satisfied");
+    assert!(matches!(retry, EmbedError::Runtime(_)));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    let retained_explicit = store.queued_runs.lock().unwrap().len();
+    for _ in 0..2 {
+        assert!(matches!(
+            session
+                .queued_turn()
+                .batch_ids([a1.batch_id.clone(), a2.batch_id.clone()])
+                .run()
+                .await,
+            Err(EmbedError::SelectedQueuedWorkDrainRefused { .. })
+        ));
+        assert_eq!(
+            store.queued_runs.lock().unwrap().len(),
+            retained_explicit,
+            "an unnamed refused selection has no reachable receipt to retain"
+        );
+    }
     assert_eq!(
         session
             .durable()
@@ -1160,8 +1501,7 @@ pub(super) async fn selected_queued_turn_reports_claimed_now_and_already_satisfi
 }
 
 #[tokio::test]
-pub(super) async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_busy_lane()
--> Result<()> {
+pub(super) async fn selected_queued_turn_deduplicates_absent_ids_and_requires_lane() -> Result<()> {
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let observed_provider_calls = Arc::clone(&provider_calls);
     let provider = crate::testing::TestProvider::builder()
@@ -1220,9 +1560,14 @@ pub(super) async fn selected_queued_turn_deduplicates_absent_ids_with_free_or_bu
         .queued_turn()
         .batch_ids(["absent-batch", "absent-batch"])
         .run()
-        .await?;
-    assert!(lane_busy.turn.is_none());
-    assert_eq!(lane_busy.satisfied, expected);
+        .await
+        .expect_err("even empty admission requires current lane authority");
+    assert!(matches!(
+        lane_busy,
+        EmbedError::SelectedQueuedWorkDrainRefused {
+            cause: SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
+        }
+    ));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     store
         .release_session_execution_lease(&held_lease.completion())
@@ -2004,7 +2349,7 @@ pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_sc
     let events = crate::turn::RunActivityCollector::default();
     let retry = session
         .queued_turn()
-        .batch_ids([receipt.batch_id])
+        .batch_ids([receipt.batch_id.as_str(), "absent-batch"])
         .drain_id("selected-handler-drain")
         .stream_to_with_effects(&events, &recorder)
         .await?;

@@ -10,18 +10,33 @@
     "effect_executions_l1": 1
   },
   {
+    "point": {"operation": {"seam": "store", "operation": {"kind": "load_queued_run_admission_head"}}, "placement": "boundary"},
+    "outcome": "The lease is held but no run is admitted. The successor reclaims the lane and admits the unchanged durable ingress.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": {"operation": {"seam": "store", "operation": {"kind": "begin_queued_run"}}, "placement": "boundary"},
+    "outcome": "No admission has committed. The successor admits the run before selecting any input or executing an effect.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": {"operation": {"seam": "store", "operation": {"kind": "begin_queued_run"}}, "placement": "inside_call"},
+    "outcome": "The admission committed but its response was lost. The successor resumes its durable identity and position before freezing the initial selection.",
+    "effect_executions_l1": 1
+  },
+  {
     "point": {"operation": {"seam": "store", "operation": {"kind": "defer_orphaned_active_turn_inputs"}}, "placement": "boundary"},
     "outcome": "No orphaned input exists in the reference prefix; the successor reclaims the lease and executes its durable ingress once.",
     "effect_executions_l1": 1
   },
   {
-    "point": {"operation": {"seam": "store", "operation": {"kind": "claim_next_turn_inputs"}}, "placement": "boundary"},
-    "outcome": "Next-turn input remains unclaimed and is adopted by the successor.",
+    "point": {"operation": {"seam": "store", "operation": {"kind": "select_queued_run"}}, "placement": "boundary"},
+    "outcome": "The admitted run has no frozen selection. The successor atomically selects its initial input and queued work.",
     "effect_executions_l1": 1
   },
   {
-    "point": {"operation": {"seam": "store", "operation": {"kind": "claim_next_turn_inputs"}}, "placement": "inside_call"},
-    "outcome": "The input claim is pinned to the expired lease generation and is reclaimable by the successor.",
+    "point": {"operation": {"seam": "store", "operation": {"kind": "select_queued_run"}}, "placement": "inside_call"},
+    "outcome": "The ordered selection and claims committed before the response was lost. The successor resumes those exact members with rotated physical claims.",
     "effect_executions_l1": 1
   },
   {
@@ -140,6 +155,21 @@
     "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 1}}}
   },
   {
+    "point": {"operation": {"seam": "store", "operation": {"kind": "pending_queued_run"}}, "placement": "boundary"},
+    "outcome": "The final commit settled the admission and ingress. The successor returns its receipt without repeating the committed turn.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": {"operation": {"seam": "store", "operation": {"kind": "release_session_execution_lease"}}, "placement": "boundary"},
+    "outcome": "The terminal receipt is durable but the owner still holds the lane. After reclaiming it, the successor returns the same receipt without executing another effect.",
+    "effect_executions_l1": 1
+  },
+  {
+    "point": {"operation": {"seam": "store", "operation": {"kind": "release_session_execution_lease"}}, "placement": "inside_call"},
+    "outcome": "The lane release committed but its response was lost. The successor acquires the free lane and returns the durable terminal receipt.",
+    "effect_executions_l1": 1
+  },
+  {
     "scenario": "checkpoint_execute_finalize",
     "outcome": "A checkpoint executed before its outcome was finalized is reclaimed by the successor, which reaches the exact durable terminal state without stranding ingress.",
     "exact": {"terminal": 1, "pending_inputs": 0, "queued_work": 0}
@@ -156,8 +186,8 @@
   },
   {
     "scenario": "peer_reclaim",
-    "outcome": "A recovered commit reaches terminal state while leaving the queued-work row owned by the successor lease generation untouched for at-least-once redelivery.",
-    "exact": {"terminal": 1, "pending_inputs": 0, "queued_work": 1}
+    "outcome": "After the peer releases its lease, durable admission reclaims its exact queued-work member under the recovery lease and settles it with the recovered terminal commit.",
+    "exact": {"terminal": 1, "pending_inputs": 0, "queued_work": 0}
   },
   {
     "error_return": {

@@ -751,20 +751,49 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
         query = query.bind(turn_id.to_string());
     }
     let rows = query.fetch_all(&mut **tx).await.map_err(store_sqlx_error)?;
-    let observations = rows
+    let selected = rows
         .into_iter()
         .take(max_inputs)
         .map(|row| {
             let row = pending_turn_input_row(row)?;
-            Ok(lash_core::store::claim_plan::TurnInputClaimRow {
-                input: pending_turn_input_from_row(row.clone())?,
+            Ok((row.clone(), pending_turn_input_from_row(row)?))
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    claim_turn_input_rows_postgres_tx(
+        tx,
+        now,
+        session_id,
+        session_execution_lease,
+        owner,
+        mode,
+        selected,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn claim_turn_input_rows_postgres_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    now: u64,
+    session_id: &SessionId,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
+    owner: &LeaseOwnerIdentity,
+    mode: lash_core::TurnInputClaimMode,
+    selected: Vec<(PendingTurnInputRow, lash_core::PendingTurnInput)>,
+) -> Result<ClaimTransactionOutcome<Option<lash_core::TurnInputClaim>>, StoreError> {
+    let generation = session_execution_lease.fencing_token;
+    let observations = selected
+        .into_iter()
+        .map(
+            |(row, input)| lash_core::store::claim_plan::TurnInputClaimRow {
+                input,
                 enqueue_seq: row.enqueue_seq,
                 claim_fencing_token: row.claim_fencing_token,
                 claim_token: row.claim_facts().claim_token.map(str::to_string),
                 claim_session_lease_generation: row.claim_session_lease_generation(),
-            })
-        })
-        .collect::<Result<Vec<_>, StoreError>>()?;
+            },
+        )
+        .collect();
     let plan = match lash_core::store::claim_plan::plan_turn_input_claim(
         lash_core::store::queued_work::ClaimIdDialect::TurnInput,
         session_id,
@@ -793,7 +822,7 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
         )
         .bind(plan.session_id().as_str())
         .bind(write.input_id.as_str())
-        .bind(plan.state_after_claim().as_str())
+        .bind(write.state_after_claim.as_str())
         .bind(plan.claim_id())
         .bind(&owner.owner_id)
         .bind(&owner.incarnation_id)
@@ -849,11 +878,21 @@ pub(super) async fn claim_pending_turn_inputs_postgres(
         session_execution_lease,
         owner,
         max_inputs,
-        mode,
+        mode.clone(),
     )
     .await?
     {
         ClaimTransactionOutcome::Commit(value) => {
+            if let lash_core::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode {
+                super::queued_run_assignment::assign_checkpoint_members_tx(
+                    &mut tx,
+                    session_id,
+                    turn_id,
+                    value.as_ref(),
+                    None,
+                )
+                .await?;
+            }
             tx.commit().await.map_err(store_sqlx_error)?;
             Ok(value)
         }

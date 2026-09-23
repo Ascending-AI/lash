@@ -78,6 +78,16 @@ pub fn named_turn_scope(
     native_scope(crate::AdmittedScope::turn(session_id, turn_id))
 }
 
+pub fn named_queued_scope(
+    session_id: &SessionId,
+    drain_id: &TurnId,
+) -> crate::ScopedEffectController<'static> {
+    native_scope(crate::AdmittedScope::queue_drain(
+        session_id,
+        drain_id.as_str(),
+    ))
+}
+
 pub trait ReadModelState {
     fn read_model(&self) -> crate::session_graph::SessionReadModel;
 }

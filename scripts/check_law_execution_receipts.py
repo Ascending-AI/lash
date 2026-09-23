@@ -76,6 +76,10 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MACROS = ROOT / "crates/lash-conformance/src/macros.rs"
+ADDITIONAL_MACRO_FILES = (
+    ROOT / "crates/lash-conformance/src/effect_host_macros.rs",
+    ROOT / "crates/lash-conformance/src/response_derivation_macros.rs",
+)
 WORKSPACE_TARGETS = ROOT / "tools/bazel/workspace_targets.bzl"
 DEFERRED_MANIFEST = ROOT / "scripts/deferred-law-invocations.toml"
 RECEIPT_NAME = "law-receipts.txt"
@@ -190,6 +194,12 @@ def macro_blocks(text: str) -> dict[str, Macro]:
             macro.arms.append((arm[:head_end].strip(), arm[head_end + 2 :]))
         macros[name] = macro
     return macros
+
+
+def load_macros() -> dict[str, Macro]:
+    """Read every source file that exports a conformance law catalogue."""
+    paths = (MACROS, *ADDITIONAL_MACRO_FILES)
+    return macro_blocks("\n".join(path.read_text(encoding="utf-8") for path in paths))
 
 
 def arm_rows(arm_body: str) -> set[tuple[str, str]]:
@@ -825,7 +835,7 @@ def main() -> int:
     parser.add_argument("--bazel-testlogs", action="append", default=[], metavar="DIR")
     args = parser.parse_args()
 
-    macros = macro_blocks(MACROS.read_text(encoding="utf-8"))
+    macros = load_macros()
 
     errors: list[str] = []
     manifest_set = manifest_check(errors)

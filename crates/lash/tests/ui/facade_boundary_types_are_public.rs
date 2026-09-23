@@ -279,6 +279,39 @@ impl TurnInputStore for FacadeStore {
 
 #[async_trait]
 impl QueuedWorkStore for FacadeStore {
+    async fn select_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _scope: &lash_core::ExecutionScope,
+        _owner: &lash_core::LeaseOwnerIdentity,
+        _max_inputs: usize,
+        _configuration: &lash_core::PersistedSessionConfig,
+        _policy: lash_core::QueuedWorkClaimPolicy,
+    ) -> std::result::Result<lash_core::store::SelectedQueuedRun, lash_core::StoreError> {
+        unreachable!("fixture does not serve queued runs")
+    }
+    async fn pending_queued_run(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::store::QueuedRunAdmission>, lash_core::StoreError>
+    {
+        unreachable!("fixture does not serve queued runs")
+    }
+    async fn settle_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _settlement: lash_core::store::QueuedRunCommit,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        unreachable!("fixture does not serve queued runs")
+    }
+    async fn begin_or_resume_queued_run(
+        &self,
+        _fence: &lash_core::SessionExecutionLeaseAuthority,
+        _request: lash_core::store::BeginQueuedRun,
+    ) -> std::result::Result<lash_core::store::QueuedRunAdmission, lash_core::StoreError> {
+        unreachable!("FacadeStore does not serve queued runs")
+    }
+
     async fn enqueue_queued_work_with_outcome(
         &self,
         _batch: QueuedWorkBatchDraft,
@@ -401,6 +434,7 @@ fn persistence_types_are_nameable(
     let operation = OperationId::turn("facade", "turn", "final");
     let operation_storage_key = operation.storage_key().expect("operation storage key");
     RuntimeCommit {
+        queued_run: None,
         session_id: SessionId::from("facade"),
         expected_head_revision: 0,
         session_execution_lease_fence: None,

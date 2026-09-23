@@ -87,6 +87,7 @@ struct TurnCommitRequest<'commit> {
     session: Option<&'commit mut Session>,
     staged_usage: session_manager::StagedTokenLedger,
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
+    queued_run: Option<Box<crate::store::QueuedRunCommit>>,
     session_execution_lease: Option<&'commit SessionExecutionLeaseGuard>,
     release_session_execution_lease: bool,
     trace_turn_id: &'commit TurnId,
@@ -166,6 +167,7 @@ impl PreparedTurn {
             session,
             staged_usage,
             commit_effects,
+            queued_run,
             session_execution_lease,
             release_session_execution_lease,
             trace_turn_id,
@@ -183,6 +185,7 @@ impl PreparedTurn {
                 commit_effects.claim_settlement,
                 session_execution_lease.map(SessionExecutionLeaseGuard::fence),
                 commit_effects.enqueued_queue_batches,
+                queued_run,
                 // Any active-turn input that missed the turn's final
                 // checkpoint must become the next ordinary user turn.
                 Some(trace_turn_id.clone()),
@@ -607,6 +610,67 @@ impl LashRuntime {
             &trace_turn_id,
             Some(self.state.effective_protocol_turn_options().clone()),
         );
+        let queued_run = self
+            .queued_run
+            .as_ref()
+            .map(|run| {
+                use crate::store::{
+                    QueuedRunCommit, QueuedRunMember, QueuedRunProgress, QueuedRunTerminal,
+                };
+                let mut withheld = run.withheld_members.clone();
+                if let Some(work) = &claims.withheld_terminal_work {
+                    withheld.extend(work.queued.iter().flat_map(|claim| {
+                        claim
+                            .batches
+                            .iter()
+                            .map(|batch| QueuedRunMember::Batch(batch.batch_id.clone()))
+                    }));
+                    withheld.extend(work.turn_inputs.iter().flat_map(|drive| {
+                        drive
+                            .completion()
+                            .input_ids
+                            .clone()
+                            .into_iter()
+                            .map(QueuedRunMember::Input)
+                    }));
+                }
+                let mut seen = std::collections::HashSet::new();
+                withheld.retain(|member| seen.insert(member.clone()));
+                let switched = matches!(prepared.outcome(), TurnOutcome::AgentFrameSwitch { .. });
+                let cancelled = matches!(
+                    prepared.outcome(),
+                    TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })
+                );
+                let progress = if switched || (!cancelled && !withheld.is_empty()) {
+                    QueuedRunProgress::Advance {
+                        position: run.position.next(&run.scope)?,
+                        members: if switched {
+                            Vec::new()
+                        } else {
+                            withheld.clone()
+                        },
+                        withheld_members: if switched { withheld } else { Vec::new() },
+                        include_outbox: switched,
+                    }
+                } else {
+                    QueuedRunProgress::Settle {
+                        terminal: QueuedRunTerminal::Completed {
+                            turn_id: trace_turn_id.clone(),
+                            outcome: prepared.outcome().clone(),
+                        },
+                    }
+                };
+                Ok::<_, crate::StoreError>(QueuedRunCommit {
+                    scope: run.scope.clone(),
+                    expected_revision: run.revision,
+                    progress,
+                })
+            })
+            .transpose()
+            .map_err(runtime_error_from_store_commit)?
+            .map(Box::new);
+        let release_session_execution_lease =
+            release_session_execution_lease && queued_run.is_none();
         let queued_work_completion_trace =
             commit_effects.claim_settlement.queued.completions.clone();
         let turn_input_completion_trace = commit_effects
@@ -630,6 +694,7 @@ impl LashRuntime {
                     session: self.session.as_mut(),
                     staged_usage,
                     commit_effects,
+                    queued_run,
                     session_execution_lease,
                     release_session_execution_lease,
                     trace_turn_id: &trace_turn_id,
@@ -983,7 +1048,10 @@ impl LashRuntime {
         let mut turn_pipeline = TurnBoundary::from_state_with_clock(
             self.state.clone(),
             Arc::clone(&self.host.core.clock),
-            self.state.turn_scope(&trace_turn_id),
+            self.queued_run
+                .as_ref()
+                .map(|run| run.scope.clone())
+                .unwrap_or_else(|| self.state.turn_scope(&trace_turn_id)),
             self.host.core.durability.commit_budget,
         );
         turn_pipeline.apply_prepared_messages(&messages);
@@ -1008,7 +1076,9 @@ impl LashRuntime {
             turn_control: &turn_control,
         }))
         .await;
-        if let Err(err) = &finish_result {
+        if let Err(err) = &finish_result
+            && self.queued_run.is_none()
+        {
             self.abandon_queued_work_claims_after_local_abort(err, &claims.queued)
                 .await;
             self.abandon_turn_input_claims_after_local_abort(err, &claims.turn_inputs)
