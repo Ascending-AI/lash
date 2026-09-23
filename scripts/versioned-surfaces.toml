@@ -1683,6 +1683,7 @@ kind = "rust_items"
 paths = [
   "crates/lashlang/src/workflow_graph/execution_sites.rs",
   "crates/lashlang/src/workflow_graph/ownership.rs",
+  "crates/lashlang/src/ast_roles.rs",
   "crates/lashlang/src/tracking.rs",
 ]
 symbols = [
@@ -1690,22 +1691,19 @@ symbols = [
   "indices",
   "path_for_ast",
   "for_main",
-  "visible_expression",
-  "ast_root",
+  "for_process",
   "ownership_map",
   "into_ownership_map",
-  "main_workflow_projection",
-  "process_workflow_projection",
   "workflow_projection",
-  "process_execution_body_path",
-  "push_child_index",
-  "collect_workflow_block_paths",
-  "collect_workflow_statement_paths",
-  "collect_workflow_node_paths",
-  "map_workflow_node_subtree",
-  "workflow_block_wrapper_inner",
-  "authored_workflow_statement",
-  "is_lowered_member_assignment",
+  "statement_list",
+  "push_statement_list",
+  "is_statement_list",
+  "collect_body",
+  "collect_statement",
+  "statement_value",
+  "map_node_subtree",
+  "check_shape",
+  "process_wrapper_run_path",
   "execution_sites",
   "collect_execution_sites",
   "push_execution_site_descriptor",
@@ -1828,22 +1826,26 @@ kind = "rust_items"
 paths = ["crates/lashlang/src/ast_string.rs"]
 symbols = ["AstString"]
 
-# The document's value types and shared node mint stay in lashlang. Its source
-# identity preimages and node-mint call site live in the TypeScript projector
-# and rendering helper, so guard the functions that build those bytes.
+# The document's value types, shared node mint and projector live in lashlang
+# (FIG-3571); the source identity is the admitted artifact's digest. The
+# TypeScript crate only admits source for facets and runnable views, so guard
+# the functions that build those bytes on both sides.
 [[surface.guard]]
 kind = "rust_items"
 paths = [
+  "crates/lashlang/src/workflow_graph/projection.rs",
+  "crates/lashlang/src/artifact.rs",
   "crates/lash-typescript/src/workflow_graph/mod.rs",
-  "crates/lash-typescript/src/workflow_graph/render_helpers.rs",
 ]
 symbols = [
   "workflow_graph_from_source_with_facets",
   "workflow_graph_from_program",
+  "workflow_graph_from_artifact",
+  "project_process",
+  "project_literal_process",
+  "project_node",
   "source_identity",
-  "node_id",
   "edge",
-  "hex_digest",
 ]
 
 [[surface.guard]]
@@ -1856,6 +1858,7 @@ kind = "rust_items"
 paths = [
   "crates/lashlang/src/workflow_graph/execution_sites.rs",
   "crates/lashlang/src/workflow_graph/ownership.rs",
+  "crates/lashlang/src/ast_roles.rs",
   "crates/lashlang/src/tracking.rs",
 ]
 symbols = [
@@ -1863,22 +1866,19 @@ symbols = [
   "indices",
   "path_for_ast",
   "for_main",
-  "visible_expression",
-  "ast_root",
+  "for_process",
   "ownership_map",
   "into_ownership_map",
-  "main_workflow_projection",
-  "process_workflow_projection",
   "workflow_projection",
-  "process_execution_body_path",
-  "push_child_index",
-  "collect_workflow_block_paths",
-  "collect_workflow_statement_paths",
-  "collect_workflow_node_paths",
-  "map_workflow_node_subtree",
-  "workflow_block_wrapper_inner",
-  "authored_workflow_statement",
-  "is_lowered_member_assignment",
+  "statement_list",
+  "push_statement_list",
+  "is_statement_list",
+  "collect_body",
+  "collect_statement",
+  "statement_value",
+  "map_node_subtree",
+  "check_shape",
+  "process_wrapper_run_path",
   "execution_sites",
   "collect_execution_sites",
   "push_execution_site_descriptor",
