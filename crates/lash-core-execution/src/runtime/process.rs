@@ -1,6 +1,7 @@
 mod admission;
 mod awaiter;
 mod definition_ref;
+mod effect_summary;
 mod engine;
 mod events;
 pub(crate) mod identity_projection;
@@ -37,6 +38,13 @@ pub use awaiter::{
 pub use definition_ref::{
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
     ProcessDefinitionValue, ProcessEngineKind, ProcessSignature,
+};
+pub use effect_summary::{
+    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectNodeSummary,
+    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
+    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence,
+    tool_failure_code,
 };
 pub use engine::{
     AdmittedProcessIdentity, PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission,

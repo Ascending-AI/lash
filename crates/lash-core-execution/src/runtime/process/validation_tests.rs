@@ -5,6 +5,11 @@ use super::{
 use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
+use crate::runtime::process::{
+    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectOmissions,
+    ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectSummaryOccurrence,
+    validate_generic_process_event_append,
+};
 use crate::{
     AbandonRequest, ProcessEventAppendRequest, ProcessExternalRef, ProcessIncarnation,
     ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessStarted,
@@ -389,6 +394,205 @@ fn producer_cannot_override_runtime_lifecycle_event_types() {
         error
             .to_string()
             .contains("reserved runtime lifecycle event type `process.waiting`")
+    );
+}
+
+#[test]
+fn process_event_vocabulary_version_is_pinned() {
+    assert_eq!(PROCESS_EVENT_VOCABULARY_VERSION, 1);
+}
+
+fn effect_summary_request() -> crate::ProcessEventAppendRequest {
+    ProcessEffectSummaryOccurrence::new(
+        "resource_operation:node",
+        1,
+        "fixture.operation",
+        ProcessEffectOutcomeClass::Failure,
+        Some(crate::FailureCode::from_foreign_wire("fixture:failed")),
+        "lashlang:scope:resource:17:fixture.operation:23:resource_operation:node:1",
+    )
+    .append_request()
+}
+
+#[test]
+fn effect_summary_refuses_predecessor_vocabulary() {
+    let record = ProcessRecord::from_registration(
+        fixture_registration("effect-summary-predecessor"),
+        ProcessIncarnation::from_registration_sequence(1),
+    );
+    let mut request = effect_summary_request();
+    request.payload["vocabulary_version"] = serde_json::json!(0);
+    request.payload["unknown_predecessor_field"] = serde_json::json!(true);
+
+    let error = prepare_process_event_append(&record, request, 1, None, None, 42, None)
+        .expect_err("a predecessor effect-summary payload must be refused");
+    assert!(
+        error
+            .to_string()
+            .contains("effect summary vocabulary version 0 is unsupported; expected 1"),
+        "{error}"
+    );
+}
+
+#[test]
+fn effect_summary_refuses_unknown_field() {
+    let record = ProcessRecord::from_registration(
+        fixture_registration("effect-summary-unknown-field"),
+        ProcessIncarnation::from_registration_sequence(1),
+    );
+    let mut request = effect_summary_request();
+    request.payload["unknown"] = serde_json::json!(true);
+
+    let error = prepare_process_event_append(&record, request, 1, None, None, 42, None)
+        .expect_err("an unknown effect-summary payload field must be refused");
+    assert!(
+        error.to_string().contains("unknown field `unknown`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn effect_summary_refuses_unknown_runtime_kind() {
+    let registration =
+        fixture_registration("effect-summary-unknown-kind").with_extra_event_types([
+            crate::ProcessEventType {
+                name: "process.effect_future".to_string(),
+                payload_schema: crate::LashSchema::any(),
+                semantics: crate::ProcessEventSemanticsSpec::default(),
+            },
+        ]);
+    let record = ProcessRecord::from_registration(
+        registration,
+        ProcessIncarnation::from_registration_sequence(1),
+    );
+    let request =
+        crate::ProcessEventAppendRequest::new("process.effect_future", serde_json::json!({}))
+            .with_replay_key("future-effect");
+
+    let error = prepare_process_event_append(&record, request, 1, None, None, 42, None)
+        .expect_err("an unknown runtime-owned effect kind must be refused");
+    assert!(matches!(
+        error,
+        crate::PluginError::ReservedProcessEvent { .. }
+    ));
+}
+
+#[test]
+fn effect_summary_refuses_payload_and_append_identity_drift() {
+    let record = ProcessRecord::from_registration(
+        fixture_registration("effect-summary-identity"),
+        ProcessIncarnation::from_registration_sequence(1),
+    );
+    let mut request = effect_summary_request();
+    request
+        .replay
+        .as_mut()
+        .expect("effect event has a replay key")
+        .key = "different-effect".to_string();
+
+    let error = prepare_process_event_append(&record, request, 1, None, None, 42, None)
+        .expect_err("the payload may not claim a different effect");
+    assert!(
+        error
+            .to_string()
+            .contains("payload replay_key must equal the append replay key"),
+        "{error}"
+    );
+}
+
+#[test]
+fn effect_summary_replay_is_a_noop_and_changed_payload_conflicts() {
+    let record = ProcessRecord::from_registration(
+        fixture_registration("effect-summary-replay"),
+        ProcessIncarnation::from_registration_sequence(1),
+    );
+    let request = effect_summary_request();
+    let insert = prepare_process_event_append(&record, request.clone(), 1, None, None, 42, None)
+        .expect("the first effect outcome inserts");
+    let ProcessEventAppendPlan::Insert { event, .. } = insert else {
+        panic!("the first effect outcome must insert")
+    };
+    let replay = prepare_process_event_append(
+        &record,
+        request.clone(),
+        2,
+        Some(1),
+        Some(event.clone()),
+        43,
+        None,
+    )
+    .expect("an identical effect outcome replays");
+    assert!(matches!(replay, ProcessEventAppendPlan::Replay { .. }));
+
+    let mut changed = request;
+    changed.payload["outcome_class"] = serde_json::json!("success");
+    changed
+        .payload
+        .as_object_mut()
+        .expect("object")
+        .remove("code");
+    let error = prepare_process_event_append(&record, changed, 2, Some(1), Some(event), 43, None)
+        .expect_err("a changed outcome under one replay key must conflict");
+    assert!(
+        error
+            .to_string()
+            .contains("conflicts with an existing event")
+    );
+}
+
+#[test]
+fn the_generic_append_refuses_runtime_owned_effect_summary_kinds() {
+    let mut counts = ProcessEffectOmittedCounts::default();
+    counts.record(ProcessEffectOutcomeClass::Success);
+    for request in [
+        effect_summary_request(),
+        ProcessEffectOmissions::new(std::collections::BTreeMap::from([(
+            "node".to_string(),
+            counts,
+        )]))
+        .append_request("omissions"),
+    ] {
+        let event_type = request.event_type.clone();
+        assert!(
+            matches!(
+                validate_generic_process_event_append(&request),
+                Err(crate::PluginError::ReservedProcessEvent { event_type: refused })
+                    if refused == event_type
+            ),
+            "a host append of `{event_type}` must be refused"
+        );
+    }
+}
+
+#[test]
+fn effect_summary_refuses_occurrences_beyond_the_cap_and_malformed_omissions() {
+    let record = ProcessRecord::from_registration(
+        fixture_registration("effect-summary-cap"),
+        ProcessIncarnation::from_registration_sequence(1),
+    );
+    let beyond = ProcessEffectSummaryOccurrence::new(
+        "node",
+        PROCESS_EFFECT_OCCURRENCE_CAP + 1,
+        "fixture.operation",
+        ProcessEffectOutcomeClass::Success,
+        None,
+        "effect:beyond",
+    )
+    .append_request();
+    let error = prepare_process_event_append(&record, beyond, 1, None, None, 42, None)
+        .expect_err("the writer never records an occurrence past the cap");
+    assert!(
+        error.to_string().contains("outside the recorded cap"),
+        "{error}"
+    );
+
+    let empty =
+        ProcessEffectOmissions::new(std::collections::BTreeMap::new()).append_request("omissions");
+    let error = prepare_process_event_append(&record, empty, 1, None, None, 42, None)
+        .expect_err("an omission record must name an omission");
+    assert!(
+        error.to_string().contains("no omitted occurrence"),
+        "{error}"
     );
 }
 

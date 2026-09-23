@@ -71,6 +71,11 @@ DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 # Entries stay after the surface lands; they are dead-but-honest history, and
 # re-adding a removed entry over a live constant is not a registration.
 REGISTRATION_BASELINES = {
+    # FIG-3464: the durable process-effect outcome is a new runtime-owned event
+    # vocabulary, not a rename of an earlier versioned payload.
+    "crates/lash-core-execution/src/runtime/process/effect_summary.rs:PROCESS_EVENT_VOCABULARY_VERSION": (
+        "sha256:e099c586c0ce0a2d9f284875f03f518c917553448f98c417b6e64734479056c3"
+    ),
     # FIG-2266: ADR 0099 sections 6 and 13 mint the semantic settlement a tool
     # child of a durable effect group carries on its outcome. A new durable
     # format, not a rename: the settlement had no constant before this change,

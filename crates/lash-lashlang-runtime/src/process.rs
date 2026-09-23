@@ -76,11 +76,14 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// identity and reserves the process root for the process declaration.
 /// v15 carries sleep/signal call-site continuations and the closed workflow
 /// execution-site kind. A parked v14 segment is refused before VM restore.
+/// v16 carries the durable effect summary's per-node omission counts
+/// (FIG-3464): a successor counting from zero would under-report omitted
+/// occurrences in the run's terminal omission record.
 /// v6 carries run-local child possession across execution segments. A segment
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 15;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 16;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -160,6 +163,10 @@ struct LashlangSegmentState {
     /// segment incorporates against the same set so a redrive cannot
     /// re-apply a settlement or re-charge a usage delta.
     incorporation_ledger: lash_core::session::IncorporationLedger,
+    /// Effect occurrences past the durable summary's per-node cap, counted by
+    /// outcome class (FIG-3464). A successor segment keeps counting from here
+    /// and the run's terminal omission record carries the total.
+    effect_omissions: BTreeMap<String, lash_core::ProcessEffectOmittedCounts>,
 }
 
 /// A segment that resumes carries the bound its first segment recorded, so a
@@ -459,6 +466,12 @@ pub async fn run_lashlang_process(
         ordinals,
         child_max_attempts,
         cancellation: cancellation.clone(),
+        effect_summary: EffectSummaryWriter::restore(
+            segment_state
+                .as_ref()
+                .map(|state| state.effect_omissions.clone())
+                .unwrap_or_default(),
+        ),
     };
     let env = lashlang::ExecutionEnvironment::new(&host)
         .process()
@@ -476,6 +489,13 @@ pub async fn run_lashlang_process(
         )
         .await
     };
+    // The omission record precedes the terminal event the runner appends
+    // next; a run that failed an incorporation writes nothing more.
+    let mut incorporation_fault = host.effect_summary.take_incorporation_fault();
+    if incorporation_fault.is_none() && output.is_terminal() {
+        host.record_effect_omissions().await;
+        incorporation_fault = host.effect_summary.take_incorporation_fault();
+    }
     drop(env);
     drop(host);
     {
@@ -485,6 +505,9 @@ pub async fn run_lashlang_process(
             .shutdown(false)
             .await
             .map_err(lash_core::ProcessInfraError::new)?;
+    }
+    if let Some(fault) = incorporation_fault {
+        return Err(lash_core::ProcessInfraError::new(fault));
     }
     if output.is_terminal()
         && let Some(output) = output.terminal_output()
@@ -588,6 +611,7 @@ async fn execute_lashlang(
                             started_process_ids: host.ctx.started_process_ids(),
                             child_max_attempts: host.child_max_attempts,
                             incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
+                            effect_omissions: host.effect_summary.omissions(),
                         };
                         match serde_json::to_vec(&segment_state) {
                             Ok(engine_state) => {
@@ -644,6 +668,8 @@ struct LashlangProcessHost<'run> {
     /// engine's cancellation and the cancellations this run observes for itself,
     /// which is where a cancelled tool call lands.
     cancellation: crate::ExecutionCancellation,
+    /// The durable effect summary this run writes at result incorporation.
+    effect_summary: EffectSummaryWriter,
 }
 
 #[async_trait::async_trait]
@@ -833,10 +859,6 @@ impl LashlangProcessHost<'_> {
         call_id
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the TypeScript runtime receiver was checked in the match above, which the message states, and the journaled call is awaited in place"
-    )]
     async fn resource_operation(
         &self,
         operation: String,
@@ -848,12 +870,9 @@ impl LashlangProcessHost<'_> {
             let call_site = call_site.as_ref().ok_or_else(|| {
                 ExecutionHostError::new("TypeScript runtime operation is missing its call site")
             })?;
-            let effect_id = self.resource_tool_call_id("typescript.runtime", call_site, None);
-            return crate::journaled_typescript_runtime_value(
-                &self.ctx, effect_id, &receiver, &operation, &args,
-            )
-            .await
-            .expect("TypeScript runtime receiver checked above");
+            return self
+                .typescript_runtime_value(&receiver, &operation, &args, call_site, None)
+                .await;
         }
         let invocation =
             self.prepare_resource_invocation(operation, receiver, args, call_site, None)?;
@@ -862,18 +881,20 @@ impl LashlangProcessHost<'_> {
                 operation,
                 payload,
                 effect_id,
+                host_operation,
+                call_site,
             } => {
-                return crate::execute_trigger_operation(
-                    &self.ctx,
-                    self.artifact_store.as_ref(),
-                    operation,
-                    payload,
-                    effect_id,
-                )
-                .await;
+                return self
+                    .trigger_operation(operation, payload, effect_id, &host_operation, &call_site)
+                    .await;
             }
-            PreparedResourceInvocation::Tool(invocation) => invocation,
+            PreparedResourceInvocation::Tool {
+                invocation,
+                host_operation,
+                call_site,
+            } => (invocation, host_operation, call_site),
         };
+        let (invocation, host_operation, call_site) = invocation;
         let lash_core::facade_support::ToolInvocation {
             id,
             tool_id,
@@ -893,154 +914,9 @@ impl LashlangProcessHost<'_> {
         } else {
             Box::pin(tool_ctx.call_tool_by_id(id, tool_id, args, 0)).await
         };
-        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "the TypeScript runtime receiver was checked above per site, and each batch result slot was filled by the same loop that reserved the Vec of slots"
-    )]
-    async fn resource_operation_batch(
-        &self,
-        batch: lashlang::ResourceOperationBatch,
-    ) -> lashlang::ResourceOperationBatchResult {
-        let occurrence = batch.occurrence;
-        let call_sites = batch
-            .operations
-            .iter()
-            .map(|operation| operation.call_site.clone())
-            .collect::<Vec<_>>();
-        let mut results = vec![None; batch.operations.len()];
-        let mut positions = Vec::new();
-        let mut invocations = Vec::new();
-        for (index, operation) in batch.operations.into_iter().enumerate() {
-            if crate::is_typescript_runtime_receiver(&operation.receiver) {
-                let result = match operation.call_site.as_ref() {
-                    Some(call_site) => {
-                        let effect_id = self.resource_tool_call_id(
-                            "typescript.runtime",
-                            call_site,
-                            Some(index),
-                        );
-                        crate::journaled_typescript_runtime_value(
-                            &self.ctx,
-                            effect_id,
-                            &operation.receiver,
-                            &operation.operation,
-                            &operation.args,
-                        )
-                        .await
-                        .expect("TypeScript runtime receiver checked above")
-                    }
-                    None => Err(ExecutionHostError::new(
-                        "TypeScript runtime operation is missing its call site",
-                    )),
-                };
-                results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
-                continue;
-            }
-            match self.prepare_resource_invocation(
-                operation.operation,
-                operation.receiver,
-                operation.args,
-                operation.call_site,
-                Some(index),
-            ) {
-                Ok(PreparedResourceInvocation::Trigger {
-                    operation,
-                    payload,
-                    effect_id,
-                }) => {
-                    let result = crate::execute_trigger_operation(
-                        &self.ctx,
-                        self.artifact_store.as_ref(),
-                        operation,
-                        payload,
-                        effect_id,
-                    )
-                    .await;
-                    results[index] = Some(lashlang::ResourceOperationResult::from_result(result));
-                }
-                Ok(PreparedResourceInvocation::Tool(invocation)) => {
-                    positions.push(index);
-                    invocations.push(invocation);
-                }
-                Err(error) => {
-                    results[index] = Some(lashlang::ResourceOperationResult::Error(error));
-                }
-            }
-        }
-
-        let replay_keys = invocations
-            .iter()
-            .map(|invocation| invocation.id.clone())
-            .collect::<Vec<_>>();
-        let batch_id = lash_core::session::deterministic_tool_invocation_batch_id(
-            &invocations,
-            lash_core::session::ToolGroupOccurrence::Opener(occurrence),
-        );
-        if positions.len() > 1 {
-            for (position, index) in positions.iter().copied().enumerate() {
-                if let Some(Some(call_site)) = call_sites.get(index) {
-                    self.lashlang_execution_trace.emit_waiting(
-                        call_site,
-                        TraceNodeAwaited::ToolBatch {
-                            batch_id: batch_id.clone(),
-                            position,
-                        },
-                    );
-                }
-            }
-        }
-        let batch = self
-            .ctx
-            .call_tool_batch(
-                invocations,
-                lash_core::session::ToolGroupOccurrence::Opener(occurrence),
-            )
+        self.record_tool_reply(&call_site, &host_operation, &replay_key, &reply)
             .await;
-        for ((index, replay_key), reply) in positions
-            .iter()
-            .copied()
-            .zip(replay_keys)
-            .zip(batch.replies)
-        {
-            results[index] = Some(lashlang::ResourceOperationResult::from_result(
-                protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation),
-            ));
-        }
-        if !self.cancellation.is_cancelled() && positions.len() > 1 {
-            for index in positions.iter().copied() {
-                if let Some(Some(call_site)) = call_sites.get(index) {
-                    self.lashlang_execution_trace
-                        .emit_resumed(call_site, TraceNodeWaitResolution::Resumed);
-                }
-            }
-        }
-
-        // The batch counts settlement in its own invocation positions; the VM
-        // counts in the aggregate's leaf positions. Leaves that failed before
-        // the batch ran had already settled, so they lead.
-        let mut settlement_order = (0..results.len())
-            .filter(|index| !positions.contains(index))
-            .collect::<Vec<_>>();
-        // `call_tool_batch` refuses a malformed order at its boundary, so every
-        // reported position is a real invocation position here. Filtering again
-        // would only convert a future defect back into a silent repair.
-        settlement_order.extend(
-            batch
-                .settlement_order
-                .iter()
-                .filter_map(|position| positions.get(*position).copied()),
-        );
-
-        lashlang::ResourceOperationBatchResult::settled_in_order(
-            results
-                .into_iter()
-                .map(|result| result.expect("every batch result slot should be filled"))
-                .collect(),
-            settlement_order,
-        )
+        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
     }
 
     async fn await_handle(
@@ -1094,12 +970,32 @@ impl LashlangProcessHost<'_> {
         }
         let sequence = self.ordinals.sleep_sequence.fetch_add(1, Ordering::Relaxed);
         let scope = format!("process:{}", self.process_id);
-        self.ctx
-            .sleep_process(&scope, sequence, sleep)
-            .await
-            .map_err(|error| LashlangHostError::SleepProcess {
-                message: error.to_string(),
-            })?;
+        let slept = self.ctx.sleep_process(&scope, sequence, sleep).await;
+        // The effect host journals the wake verdict, so a success or a
+        // recorded cancellation is replay-stable; any other error has no
+        // recorded outcome to summarise.
+        let outcome_class = match &slept {
+            Ok(()) => Some(lash_core::ProcessEffectOutcomeClass::Success),
+            Err(error)
+                if error.code == lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled =>
+            {
+                Some(lash_core::ProcessEffectOutcomeClass::Cancelled)
+            }
+            Err(_) => None,
+        };
+        if let (Some(call_site), Some(outcome_class)) = (&call_site, outcome_class) {
+            self.record_effect_outcome(
+                call_site,
+                lash_core::runtime::causal::PROCESS_SLEEP_OPERATION,
+                outcome_class,
+                None,
+                &self.ctx.process_sleep_replay_key(&scope, sequence),
+            )
+            .await;
+        }
+        slept.map_err(|error| LashlangHostError::SleepProcess {
+            message: error.to_string(),
+        })?;
         if let Some(call_site) = &call_site
             && !self.cancellation.is_cancelled()
         {
@@ -1384,6 +1280,9 @@ fn process_lashlang_cancelled(message: impl Into<String>) -> lash_core::ProcessA
 mod event_types;
 pub use event_types::{lashlang_process_event_types, lashlang_process_signal_event_types};
 
+#[path = "process/effect_operations.rs"]
+mod effect_operations;
+use effect_operations::EffectSummaryWriter;
 #[path = "process/schema.rs"]
 mod schema;
 pub use schema::lashlang_type_expr_schema;

@@ -17,21 +17,54 @@ pub async fn execute_trigger_operation(
     payload: Value,
     effect_id: String,
 ) -> Result<lashlang::Value, ExecutionHostError> {
+    let mut recorded = None;
+    execute_trigger_operation_recording(
+        ctx,
+        artifact_store,
+        operation,
+        payload,
+        effect_id,
+        &mut recorded,
+    )
+    .await
+}
+
+/// The outcome class and code of a trigger command whose effect result was
+/// recorded — what a process incorporates into its durable effect summary.
+pub(crate) type RecordedTriggerOutcome = Option<(
+    lash_core::ProcessEffectOutcomeClass,
+    Option<lash_core::FailureCode>,
+)>;
+
+/// As [`execute_trigger_operation`], also reporting through `recorded` the
+/// outcome of the trigger effect, when the effect ran and recorded one.
+pub(crate) async fn execute_trigger_operation_recording(
+    ctx: &lash_core::RuntimeExecutionContext<'_>,
+    artifact_store: &dyn lashlang::LashlangArtifactStore,
+    operation: TriggerHostOperation,
+    payload: Value,
+    effect_id: String,
+    recorded: &mut RecordedTriggerOutcome,
+) -> Result<lashlang::Value, ExecutionHostError> {
     match operation {
         TriggerHostOperation::Register => {
-            register_trigger(ctx, artifact_store, payload, effect_id).await
+            register_trigger(ctx, artifact_store, payload, effect_id, recorded).await
         }
-        TriggerHostOperation::List => list_triggers(ctx, payload, effect_id).await,
+        TriggerHostOperation::List => list_triggers(ctx, payload, effect_id, recorded).await,
         TriggerHostOperation::Update => {
-            update_trigger(ctx, artifact_store, payload, effect_id, false).await
+            update_trigger(ctx, artifact_store, payload, effect_id, false, recorded).await
         }
-        TriggerHostOperation::Enable => set_trigger_enabled(ctx, payload, effect_id, true).await,
-        TriggerHostOperation::Disable => set_trigger_enabled(ctx, payload, effect_id, false).await,
-        TriggerHostOperation::Delete => delete_trigger(ctx, payload, effect_id).await,
+        TriggerHostOperation::Enable => {
+            set_trigger_enabled(ctx, payload, effect_id, true, recorded).await
+        }
+        TriggerHostOperation::Disable => {
+            set_trigger_enabled(ctx, payload, effect_id, false, recorded).await
+        }
+        TriggerHostOperation::Delete => delete_trigger(ctx, payload, effect_id, recorded).await,
         TriggerHostOperation::Revive => {
-            update_trigger(ctx, artifact_store, payload, effect_id, true).await
+            update_trigger(ctx, artifact_store, payload, effect_id, true, recorded).await
         }
-        TriggerHostOperation::Prune => prune_triggers(ctx, payload, effect_id).await,
+        TriggerHostOperation::Prune => prune_triggers(ctx, payload, effect_id, recorded).await,
     }
 }
 
@@ -40,6 +73,7 @@ async fn register_trigger(
     artifact_store: &dyn lashlang::LashlangArtifactStore,
     payload: Value,
     effect_id: String,
+    recorded: &mut RecordedTriggerOutcome,
 ) -> Result<lashlang::Value, ExecutionHostError> {
     let request = lashlang::TriggerRegistrationRequest::decode(&payload)
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
@@ -49,7 +83,7 @@ async fn register_trigger(
         actor: ctx.trigger_actor(),
         draft,
     };
-    execute_trigger_command(ctx, effect_id, command).await
+    execute_trigger_command(ctx, effect_id, command, recorded).await
 }
 
 async fn prepare_trigger_draft(
@@ -172,6 +206,7 @@ async fn list_triggers(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     payload: Value,
     effect_id: String,
+    recorded: &mut RecordedTriggerOutcome,
 ) -> Result<lashlang::Value, ExecutionHostError> {
     let request = lashlang::TriggerListRequest::decode(&payload)
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
@@ -192,6 +227,7 @@ async fn list_triggers(
             owner_scope,
             filter,
         },
+        recorded,
     )
     .await
 }
@@ -202,6 +238,7 @@ async fn update_trigger(
     payload: Value,
     effect_id: String,
     revive: bool,
+    recorded: &mut RecordedTriggerOutcome,
 ) -> Result<lashlang::Value, ExecutionHostError> {
     let request = lashlang::TriggerRegistrationRequest::decode(&payload)
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
@@ -230,7 +267,7 @@ async fn update_trigger(
             expected_revision,
         }
     };
-    execute_trigger_command(ctx, effect_id, command).await
+    execute_trigger_command(ctx, effect_id, command, recorded).await
 }
 
 async fn set_trigger_enabled(
@@ -238,6 +275,7 @@ async fn set_trigger_enabled(
     payload: Value,
     effect_id: String,
     enabled: bool,
+    recorded: &mut RecordedTriggerOutcome,
 ) -> Result<lashlang::Value, ExecutionHostError> {
     let (subscription_key, expected_revision) = trigger_key_and_revision(&payload)?;
     let owner_scope = trigger_owner_scope(ctx)?;
@@ -257,13 +295,14 @@ async fn set_trigger_enabled(
             expected_revision,
         }
     };
-    execute_trigger_command(ctx, effect_id, command).await
+    execute_trigger_command(ctx, effect_id, command, recorded).await
 }
 
 async fn delete_trigger(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     payload: Value,
     effect_id: String,
+    recorded: &mut RecordedTriggerOutcome,
 ) -> Result<lashlang::Value, ExecutionHostError> {
     let (subscription_key, expected_revision) = trigger_key_and_revision(&payload)?;
     let command = lash_core::TriggerCommand::Delete {
@@ -272,13 +311,14 @@ async fn delete_trigger(
         subscription_key,
         expected_revision,
     };
-    execute_trigger_command(ctx, effect_id, command).await
+    execute_trigger_command(ctx, effect_id, command, recorded).await
 }
 
 async fn prune_triggers(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     payload: Value,
     effect_id: String,
+    recorded: &mut RecordedTriggerOutcome,
 ) -> Result<lashlang::Value, ExecutionHostError> {
     let request = lashlang::TriggerPruneRequest::decode(&payload)
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
@@ -287,7 +327,7 @@ async fn prune_triggers(
         actor: ctx.trigger_actor(),
         subscription_keys: request.subscription_keys,
     };
-    execute_trigger_command(ctx, effect_id, command).await
+    execute_trigger_command(ctx, effect_id, command, recorded).await
 }
 
 fn trigger_owner_scope(
@@ -301,12 +341,20 @@ async fn execute_trigger_command(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     effect_id: String,
     command: lash_core::TriggerCommand,
+    recorded: &mut RecordedTriggerOutcome,
 ) -> Result<lashlang::Value, ExecutionHostError> {
     let outcome = ctx
         .execute_trigger_effect(effect_id, command)
         .await
-        .map_err(|err| ExecutionHostError::new(err.to_string()))?
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
+    *recorded = Some(match &outcome {
+        Ok(_) => (lash_core::ProcessEffectOutcomeClass::Success, None),
+        Err(error) => (
+            lash_core::ProcessEffectOutcomeClass::Failure,
+            Some(error.failure_code()),
+        ),
+    });
+    let outcome = outcome.map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let value = match outcome {
         lash_core::TriggerCommandOutcome::Mutation { receipt } => {
             let mut value = serde_json::to_value(&receipt).map_err(|err| {

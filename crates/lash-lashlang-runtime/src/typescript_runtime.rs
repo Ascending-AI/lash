@@ -20,12 +20,39 @@ pub fn is_typescript_runtime_receiver(receiver: &lashlang::Value) -> bool {
     )
 }
 
+/// The host operation a TypeScript runtime call's replay key names, and the
+/// one its durable effect-summary record carries.
+pub(crate) const TYPESCRIPT_RUNTIME_HOST_OPERATION: &str = "typescript.runtime";
+
 pub async fn journaled_typescript_runtime_value(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     effect_id: String,
     receiver: &lashlang::Value,
     operation: &str,
     args: &[lashlang::Value],
+) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
+    let mut journaled = false;
+    journaled_typescript_runtime_value_recording(
+        ctx,
+        effect_id,
+        receiver,
+        operation,
+        args,
+        &mut journaled,
+    )
+    .await
+}
+
+/// As [`journaled_typescript_runtime_value`], also reporting through
+/// `journaled` whether the effect produced a journaled value — the outcome a
+/// process incorporates into its effect summary.
+pub(crate) async fn journaled_typescript_runtime_value_recording(
+    ctx: &lash_core::RuntimeExecutionContext<'_>,
+    effect_id: String,
+    receiver: &lashlang::Value,
+    operation: &str,
+    args: &[lashlang::Value],
+    journaled: &mut bool,
 ) -> Option<Result<lashlang::Value, lashlang::ExecutionHostError>> {
     let lashlang::Value::Resource(handle) = receiver else {
         return None;
@@ -48,9 +75,12 @@ pub async fn journaled_typescript_runtime_value(
             "unknown TypeScript runtime operation `{operation}`"
         ))));
     }
+    let value = ctx
+        .journaled_language_runtime_value(effect_id, operation.to_string())
+        .await;
+    *journaled = value.is_ok();
     Some(
-        ctx.journaled_language_runtime_value(effect_id, operation.to_string())
-            .await
+        value
             .map_err(|error| lashlang::ExecutionHostError::new(error.to_string()))
             .and_then(|value| {
                 value.as_f64().map(lashlang::Value::Number).ok_or_else(|| {

@@ -6,8 +6,14 @@ pub(super) enum PreparedResourceInvocation {
         operation: lashlang::TriggerHostOperation,
         payload: serde_json::Value,
         effect_id: String,
+        host_operation: String,
+        call_site: lashlang::LashlangExecutionCallSite,
     },
-    Tool(lash_core::facade_support::ToolInvocation),
+    Tool {
+        invocation: lash_core::facade_support::ToolInvocation,
+        host_operation: String,
+        call_site: lashlang::LashlangExecutionCallSite,
+    },
 }
 
 impl LashlangProcessHost<'_> {
@@ -42,6 +48,8 @@ impl LashlangProcessHost<'_> {
                 operation,
                 payload,
                 effect_id: call_id,
+                host_operation,
+                call_site,
             });
         }
         let tool_id = lash_core::ToolId::from(host_operation.as_str());
@@ -51,7 +59,7 @@ impl LashlangProcessHost<'_> {
             .ok_or_else(|| {
                 ExecutionHostError::from(LashlangHostError::ResolvedOperationUnavailable {
                     operation,
-                    host_operation,
+                    host_operation: host_operation.clone(),
                 })
             })?;
         let mut invocation =
@@ -59,10 +67,14 @@ impl LashlangProcessHost<'_> {
                 .with_issuing_language_node_id(call_site.site.node_id.clone());
         if let Some(hook) = self
             .lashlang_execution_trace
-            .tool_child_execution_trace_hook(call_site)
+            .tool_child_execution_trace_hook(call_site.clone())
         {
             invocation = invocation.with_child_execution_trace_hook(hook);
         }
-        Ok(PreparedResourceInvocation::Tool(invocation))
+        Ok(PreparedResourceInvocation::Tool {
+            invocation,
+            host_operation,
+            call_site,
+        })
     }
 }

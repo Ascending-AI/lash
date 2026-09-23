@@ -202,6 +202,8 @@ pub async fn process_event_append_arms_are_ordered(
         leased_footprint,
         "a repeated leased completion writes no event row and does not move the floor"
     );
+
+    durable_effect_outcome_event_crash_windows(registry).await;
 }
 
 /// The durable footprint of a process's appends: how many event rows exist, and
@@ -242,4 +244,180 @@ async fn terminal_sequence(
         .last()
         .expect("a completed process has a terminal event")
         .sequence
+}
+
+/// The runtime's effect-summary appends go through execution authority only.
+/// A host append of the kind is refused; a lost acknowledgement recovers the
+/// original event; a changed payload under the same effect key is refused;
+/// and a redrive that reaches the append after the run terminalised the
+/// process recovers it too.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn durable_effect_outcome_event_crash_windows(
+    registry: Arc<dyn crate::ConformanceProcessRegistry>,
+) {
+    let process_id = ProcessId::from("durable-effect-outcome-crash-windows");
+    registry
+        .register_process(registration(process_id.as_str()))
+        .await
+        .expect("register effect-summary process");
+    let lease = registry
+        .claim_process_lease(
+            &process_id,
+            &crate::LeaseOwnerIdentity::opaque("effect-worker", "effect-worker:1"),
+            60_000,
+        )
+        .await
+        .expect("claim execution lease")
+        .acquired()
+        .expect("execution lease available");
+    let authority = crate::ProcessExecutionWriteAuthority::lease(lease);
+    let recorded = lash_core::ProcessEffectSummaryOccurrence::new(
+        "node:tool",
+        1,
+        "tool:fixture",
+        lash_core::ProcessEffectOutcomeClass::Failure,
+        Some(lash_sansio::FailureCode::from_foreign_wire(
+            "fixture:refused",
+        )),
+        "lashlang:recorded-effect:1",
+    );
+
+    assert!(
+        matches!(
+            registry
+                .append_event(&process_id, recorded.append_request())
+                .await,
+            Err(crate::PluginError::ReservedProcessEvent { .. })
+        ),
+        "a host append of the runtime-owned kind is refused"
+    );
+
+    let inserted = registry
+        .append_event_with_authority(&process_id, recorded.append_request(), &authority)
+        .await
+        .expect("incorporate the recorded failure");
+    assert_eq!(inserted.event.sequence, 1);
+    assert_eq!(
+        inserted.event.event_type,
+        lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
+    );
+
+    // The acknowledgement is lost; the redrive recovers the original append.
+    let replayed = registry
+        .append_event_with_authority(&process_id, recorded.append_request(), &authority)
+        .await
+        .expect("recover the append after a lost acknowledgement");
+    assert_eq!(replayed.event.sequence, inserted.event.sequence);
+    assert_eq!(replayed.event.payload, inserted.event.payload);
+
+    let mut changed = recorded.clone();
+    changed.code = Some(lash_sansio::FailureCode::from_foreign_wire(
+        "fixture:changed",
+    ));
+    let error = registry
+        .append_event_with_authority(&process_id, changed.append_request(), &authority)
+        .await
+        .expect_err("a changed outcome under the same effect key is refused");
+    assert!(
+        error
+            .to_string()
+            .contains("conflicts with an existing event"),
+        "{error}"
+    );
+    assert_eq!(
+        registry
+            .full_event_window(&process_id, 0)
+            .await
+            .expect("read events")
+            .len(),
+        1
+    );
+
+    // A durable substrate may replay the invocation that already completed
+    // the process, reaching the append again after terminalisation.
+    let invoked_id = ProcessId::from("durable-effect-outcome-terminal-redrive");
+    registry
+        .register_process(
+            ProcessRegistration::new(
+                invoked_id.clone(),
+                ProcessInput::Engine {
+                    kind: "conformance-effect-engine".to_string(),
+                    payload: serde_json::Value::Null,
+                },
+                RecoveryContract::Rerunnable,
+                ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            )
+            .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
+                "conformance-effect-env",
+            )))
+            .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::for_definition(
+                    crate::ProcessDefinitionRef::unclaimed(
+                        "conformance-effect-engine",
+                        serde_json::Value::Null,
+                    ),
+                    Some(invoked_id.as_str()),
+                ),
+            )),
+        )
+        .await
+        .expect("register invocation-owned effect-summary process");
+    let invocation = crate::ProcessExecutionWriteAuthority::invocation(
+        invoked_id.clone(),
+        "effect-summary-invocation",
+    )
+    .bind_attempt(1);
+    registry
+        .record_first_started_with_authority(
+            &invoked_id,
+            invocation
+                .invocation_started()
+                .expect("a bound invocation names its execution"),
+            &invocation,
+        )
+        .await
+        .expect("record the invocation's execution start");
+    let invoked = registry
+        .append_event_with_authority(&invoked_id, recorded.append_request(), &invocation)
+        .await
+        .expect("incorporate under invocation authority");
+    registry
+        .complete_process(
+            &invoked_id,
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            ProcessCompletionAuthority::workflow_key(invoked_id.as_str()),
+        )
+        .await
+        .expect("terminalise the process");
+    let terminal_replay = registry
+        .append_event_with_authority(&invoked_id, recorded.append_request(), &invocation)
+        .await
+        .expect("a redrive after terminalisation recovers the append");
+    assert_eq!(terminal_replay.event.sequence, invoked.event.sequence);
+    assert_eq!(terminal_replay.event.payload, invoked.event.payload);
+    registry
+        .append_event_with_authority(&invoked_id, changed.append_request(), &invocation)
+        .await
+        .expect_err("a changed outcome after terminalisation is refused");
+    let events = registry
+        .full_event_window(&invoked_id, 0)
+        .await
+        .expect("read events");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
+            .count(),
+        1,
+        "exactly one effect outcome survives every redrive: {events:?}"
+    );
 }

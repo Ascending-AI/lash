@@ -1,0 +1,69 @@
+{
+  "scenario": "lashlang-effect-summary",
+  "recorded_at_git_sha": "5f33a14cbcc5c6ce441c7d8c76f2112155213d0f",
+  "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
+  "records": {
+    "lash:lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1:present": {
+      "envelope": {
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"replay-corpus-effect-summary\"},\"replay_key\":\"lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1:present\"},\"effect_id\":\"lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}},\"duration_ms\":1}}",
+        "hash": "79ac4896a347ce6c70d2cd83e0e9d78a70a3ace688be16390da6b1c339f5bc2d"
+      },
+      "outcome": {
+        "Ok": {
+          "type": "present_tool_result",
+          "presentation": {
+            "version": 1,
+            "model_return": {
+              "call_id": "lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1",
+              "tool_name": "recovery_count",
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "{\"executed\":1,\"line\":\"summary\"}"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "lash:tool:lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1:attempt:1": {
+      "envelope": {
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"replay-corpus-effect-summary\"},\"replay_key\":\"tool:lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1:attempt:1\"},\"effect_id\":\"tool:lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1:attempt:1\"},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1\",\"tool_id\":\"tool:recovery_count\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"}},\"attempt\":1,\"max_attempts\":1}}",
+        "hash": "b080f82d8286cabc5330caa2fbfa055a086ff9c93f8f47b8333dfa99acb4d749"
+      },
+      "outcome": {
+        "Ok": {
+          "type": "tool_attempt",
+          "launch": {
+            "status": "done",
+            "record": {
+              "call_id": "lashlang:process:28:replay-corpus-effect-summary:incarnation:1:resource:19:tool:recovery_count:29:node:7499a6b2f4aebadde790d4bd:1",
+              "tool": "recovery_count",
+              "args": {
+                "line": "summary"
+              },
+              "output": {
+                "outcome": {
+                  "status": "success",
+                  "payload": {
+                    "$lash_tool_value": "untrusted_json",
+                    "value": {
+                      "executed": 1,
+                      "line": "summary"
+                    }
+                  }
+                }
+              },
+              "duration_ms": 0
+            },
+            "intents": {
+              "protocol_version": 3,
+              "intents": []
+            }
+          }
+        }
+      }
+    }
+  }
+}

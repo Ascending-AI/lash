@@ -1251,6 +1251,31 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
+    fn process_sleep_invocation(
+        &self,
+        scope: &str,
+        sequence: u64,
+    ) -> crate::RuntimeEffectInvocation {
+        crate::runtime::causal::process_sleep_invocation(
+            self.dispatch.effect_controller.scoped().execution_scope(),
+            self.parent_invocation
+                .as_ref()
+                .map(|parent| parent.attribution.clone())
+                .unwrap_or_else(crate::RuntimeAttribution::none),
+            self.parent_invocation.as_ref(),
+            scope,
+            sequence,
+        )
+    }
+
+    /// The stable replay key [`Self::sleep_process`] journals the sleep under
+    /// for the same `scope` and `sequence`.
+    pub fn process_sleep_replay_key(&self, scope: &str, sequence: u64) -> String {
+        self.process_sleep_invocation(scope, sequence)
+            .replay_key()
+            .to_owned()
+    }
+
     /// Sleeps process execution through the effect-host seam for code-executor implementors so
     /// cancellation and replay semantics remain durable.
     pub async fn sleep_process(
@@ -1260,16 +1285,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         spec: crate::SleepSpec,
     ) -> Result<(), crate::RuntimeEffectControllerError> {
         let cancellation = self.cancellation_token.clone().unwrap_or_default();
-        let invocation = crate::runtime::causal::process_sleep_invocation(
-            self.dispatch.effect_controller.scoped().execution_scope(),
-            self.parent_invocation
-                .as_ref()
-                .map(|parent| parent.attribution.clone())
-                .unwrap_or_else(crate::RuntimeAttribution::none),
-            self.parent_invocation.as_ref(),
-            scope,
-            sequence,
-        );
+        let invocation = self.process_sleep_invocation(scope, sequence);
         let command = crate::RuntimeEffectCommand::Sleep { spec };
         let outcome = self
             .dispatch

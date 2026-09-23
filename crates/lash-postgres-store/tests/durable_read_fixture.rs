@@ -32,6 +32,9 @@ const SETTLEMENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-96-f9e0aa07d/postgres-expected.json",
 ];
 const REGENERATE_ENV: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES";
+const EFFECT_OUTCOME_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-106-effect-outcome-predecessor/postgres-expected.json",
+];
 const OBSERVER_SELECTION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-98-observer-predecessor/postgres-expected.json",
 ];

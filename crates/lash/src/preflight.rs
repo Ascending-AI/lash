@@ -233,6 +233,10 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: carried on process rows, refused when a lease is read rather \
              than at rest",
         ),
+        DurableFormat::ProcessEffectSummary => SurfaceRelation::Unwalkable(
+            "no bounded surface: carried on process-event rows, refused when a summary event is \
+             appended or folded rather than at rest",
+        ),
         DurableFormat::AppendRequestIdentity
         | DurableFormat::RecordConfigRequestIdentity
         | DurableFormat::CreateSessionRequestIdentity

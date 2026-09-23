@@ -172,39 +172,13 @@ impl LinkedTestProcess {
         program: lashlang::Program,
         process_name: &str,
     ) -> Self {
-        let linked = lashlang::LinkedModule::link(
+        Self::new_with_catalog(
+            artifact_store,
             program,
-            lashlang::LashlangHostEnvironment::new(
-                programs::process_control_catalog(),
-                lashlang::LashlangAbilities::default().with_sleep(),
-            ),
+            process_name,
+            programs::process_control_catalog(),
         )
-        .expect("link lashlang process");
-        artifact_store
-            .publish_module_artifact(
-                &lash_core::ArtifactOwner::host(format!("process-test:{process_name}")),
-                &linked.artifact,
-            )
-            .await
-            .expect("store lashlang process artifact");
-        let process_ref = linked
-            .artifact
-            .process_ref(process_name)
-            .unwrap_or_else(|| panic!("missing process ref `{process_name}`"))
-            .clone();
-        let signal_event_types = linked
-            .artifact
-            .canonical_ir
-            .process(process_name)
-            .map(lash_lashlang_runtime::lashlang_process_signal_event_types)
-            .unwrap_or_default();
-        Self {
-            module_ref: linked.module_ref,
-            host_requirements_ref: linked.host_requirements_ref,
-            process_ref,
-            process_name: process_name.to_string(),
-            signal_event_types,
-        }
+        .await
     }
 
     fn process_input(&self) -> lash_core::ProcessInput {
@@ -2104,6 +2078,9 @@ async fn durable_admission_core(
     .process_env_store(artifact_store.inner.clone())
     .process_registry(registry)
     .trigger_store(trigger_store)
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+    ))
     .effect_host(effect_host)
     .process_event_sink(Arc::new(sink))
     .without_queued_work()
@@ -2490,6 +2467,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
 }
 
 mod artifact_cleanup_round4;
+mod effect_summary;
 mod event_pages;
 mod lifecycle_observation;
 mod native_process_await;

@@ -59,10 +59,10 @@ pub use lash_core::store::{
     SESSION_HEAD_META_SCHEMA_VERSION, USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
 };
 pub use lash_core::{
-    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-    PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, SESSION_NODE_BODY_SCHEMA_VERSION,
-    TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_CHILD_REQUEST_VERSION, TOOL_PRESENTATION_VERSION,
-    TOOL_SETTLEMENT_VERSION,
+    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_EVENT_VOCABULARY_VERSION,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
+    SESSION_NODE_BODY_SCHEMA_VERSION, TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_CHILD_REQUEST_VERSION,
+    TOOL_PRESENTATION_VERSION, TOOL_SETTLEMENT_VERSION,
 };
 #[cfg(feature = "rlm")]
 pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
@@ -112,6 +112,9 @@ pub enum DurableFormat {
     ParentScopeStoragePayload,
     /// The persisted process lease record.
     ProcessLease,
+    /// The runtime-owned durable effect-summary events a process's log
+    /// carries (`process.effect_outcome`, `process.effect_omissions`).
+    ProcessEffectSummary,
     /// The identity bytes a retried append request must reproduce. Identity,
     /// not a stored stamp — see [`FormatProbe::IdentityOnly`].
     AppendRequestIdentity,
@@ -181,6 +184,7 @@ impl DurableFormat {
             DurableFormat::ProtocolTurnOptions => "protocol turn options",
             DurableFormat::ParentScopeStoragePayload => "parent scope storage payload",
             DurableFormat::ProcessLease => "process lease",
+            DurableFormat::ProcessEffectSummary => "process effect summary",
             DurableFormat::AppendRequestIdentity => "append request identity",
             DurableFormat::RecordConfigRequestIdentity => "record-config request identity",
             DurableFormat::CreateSessionRequestIdentity => "create-session request identity",
@@ -338,6 +342,13 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
             version: FormatVersion::Counter(PROCESS_LEASE_SCHEMA_VERSION),
             owning_crate: "lash-core",
             constant: "PROCESS_LEASE_SCHEMA_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        DurableFormatEntry {
+            format: DurableFormat::ProcessEffectSummary,
+            version: FormatVersion::Counter(PROCESS_EVENT_VOCABULARY_VERSION),
+            owning_crate: "lash-core",
+            constant: "PROCESS_EVENT_VOCABULARY_VERSION",
             probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {

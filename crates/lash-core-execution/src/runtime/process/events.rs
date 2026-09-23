@@ -5,6 +5,9 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::effect_summary::{
+    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+};
 use super::model::{ProcessId, ProcessObserverBy, RecoveryContract};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1149,6 +1152,8 @@ pub use lash_core_store::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProcessEventKind {
+    EffectOutcome,
+    EffectOmissions,
     FirstStarted,
     Waiting,
     Resumed,
@@ -1159,12 +1164,15 @@ pub(super) enum ProcessEventKind {
     ObserverAdded,
     ObserverRemoved,
     SubscriptionRetargeted,
+    UnknownRuntime,
     Custom,
 }
 
 impl ProcessEventKind {
     pub(super) fn from_event_type(name: &str) -> Self {
         match name {
+            PROCESS_EFFECT_OUTCOME_EVENT_TYPE => Self::EffectOutcome,
+            PROCESS_EFFECT_OMISSIONS_EVENT_TYPE => Self::EffectOmissions,
             "process.first_started" => Self::FirstStarted,
             "process.waiting" => Self::Waiting,
             "process.resumed" => Self::Resumed,
@@ -1175,6 +1183,7 @@ impl ProcessEventKind {
             "process.observer_added" => Self::ObserverAdded,
             "process.observer_removed" => Self::ObserverRemoved,
             "process.subscription_retargeted" => Self::SubscriptionRetargeted,
+            _ if name.starts_with("process.effect_") => Self::UnknownRuntime,
             _ => Self::Custom,
         }
     }
@@ -1182,7 +1191,17 @@ impl ProcessEventKind {
 
 pub(super) fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
     match ProcessEventKind::from_event_type(name) {
-        ProcessEventKind::Custom => None,
+        ProcessEventKind::Custom | ProcessEventKind::UnknownRuntime => None,
+        ProcessEventKind::EffectOutcome => Some(ProcessEventType {
+            name: name.to_string(),
+            payload_schema: super::effect_summary::effect_outcome_payload_schema(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        }),
+        ProcessEventKind::EffectOmissions => Some(ProcessEventType {
+            name: name.to_string(),
+            payload_schema: super::effect_summary::effect_omissions_payload_schema(),
+            semantics: ProcessEventSemanticsSpec::default(),
+        }),
         ProcessEventKind::FirstStarted
         | ProcessEventKind::Waiting
         | ProcessEventKind::Resumed
@@ -1206,6 +1225,8 @@ pub(super) fn is_runtime_lifecycle_event_type(name: &str) -> bool {
 
 pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
     let mut event_types: Vec<_> = [
+        PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+        PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
         "process.cancel_requested",
         "process.first_started",
         "process.waiting",

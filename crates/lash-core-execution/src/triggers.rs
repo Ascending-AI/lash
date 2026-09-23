@@ -1377,6 +1377,21 @@ pub enum TriggerOperationError {
     Store { message: String },
 }
 
+impl TriggerOperationError {
+    /// The Lash-vocabulary code a recorded trigger failure carries in the
+    /// durable effect summary. Guarded by `PROCESS_EVENT_VOCABULARY_VERSION`:
+    /// a spelling change rewrites what a redrive re-derives.
+    pub fn failure_code(&self) -> lash_sansio::FailureCode {
+        let spelling = match self {
+            Self::Conflict { .. } => "trigger_conflict",
+            Self::Invalid { .. } => "trigger_invalid",
+            Self::RevisionOverflow { .. } => "trigger_revision_overflow",
+            Self::Store { .. } => "trigger_store",
+        };
+        lash_sansio::FailureCode::lash(lash_sansio::TurnFailureCode::from_wire(spelling))
+    }
+}
+
 impl From<PluginError> for TriggerOperationError {
     fn from(value: PluginError) -> Self {
         Self::Store {

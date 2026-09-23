@@ -1401,3 +1401,64 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
         .expect("rank two is discharged");
     assert_eq!(second.replay_key, "k1");
 }
+
+/// FIG-3464: the store-backed replay driver hands every claimed command to
+/// the local executor's `execute`, which now runs a trigger command on its
+/// trigger target — before, it refused it as a mismatch, so a process-scoped
+/// trigger effect on a durable host failed — and a replay answers from the
+/// recorded row without touching the trigger store again.
+#[tokio::test]
+async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row() {
+    let scope = ExecutionScope::process("trigger-driver-process");
+    let controller = SqliteRuntimeEffectController::memory(scope.clone())
+        .await
+        .expect("open the in-memory effect journal");
+    let triggers: Arc<dyn lash_core::TriggerStore> = Arc::new(
+        crate::SqliteTriggerStore::memory()
+            .await
+            .expect("open the in-memory trigger store"),
+    );
+    let owner_scope =
+        lash_core::TriggerOwnerScope::host("trigger-driver").expect("trigger owner scope");
+    let envelope = || {
+        RuntimeEffectEnvelope::new(
+            lash_core::RuntimeEffectInvocation::new(
+                lash_core::EffectAddress::new(scope.clone(), "trigger-driver:list")
+                    .expect("valid trigger address"),
+                lash_core::RuntimeAttribution::none(),
+                "trigger-driver:list",
+            ),
+            lash_core::RuntimeEffectCommand::Trigger {
+                command: Box::new(lash_core::TriggerCommand::List {
+                    owner_scope: owner_scope.clone(),
+                    filter: lash_core::TriggerSubscriptionFilter::default(),
+                }),
+            },
+        )
+    };
+
+    let recorded = controller
+        .execute_effect(envelope(), RuntimeEffectLocalExecutor::triggers(triggers))
+        .await
+        .expect("the trigger target executes the command");
+    assert!(matches!(
+        &recorded,
+        RuntimeEffectOutcome::Trigger { result }
+            if matches!(result.as_ref(), Ok(lash_core::TriggerCommandOutcome::List { records }) if records.is_empty())
+    ));
+
+    controller.start_replay();
+    let replayed = controller
+        .execute_effect(
+            envelope(),
+            RuntimeEffectLocalExecutor::testing(|_| async {
+                panic!("a recorded trigger row must bypass the local executor")
+            }),
+        )
+        .await
+        .expect("replay the recorded trigger row");
+    assert_eq!(
+        serde_json::to_value(replayed).expect("encode the replayed outcome"),
+        serde_json::to_value(recorded).expect("encode the recorded outcome")
+    );
+}

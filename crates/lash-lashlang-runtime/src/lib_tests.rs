@@ -45,6 +45,40 @@ fn effect_group_wait_identity_uses_the_durable_group_contract() {
     );
 }
 
+/// A process engine runs inside a durable process execution. The harness
+/// registers the process under the invocation's authority and wires its event
+/// log, which the runtime writes the durable effect summary to (FIG-3464).
+async fn durable_process_events(
+    registry: &Arc<dyn lash_core::ProcessRegistry>,
+    registration: &lash_core::ProcessRegistration,
+    authority: &lash_core::ProcessExecutionWriteAuthority,
+) -> lash_core_execution::session::RuntimeExecutionProcessEventContext {
+    let (_, env_ref) = lash_core::testing::process_execution_env_fixture();
+    registry
+        .register_process(registration.clone().with_execution_env_ref(Some(env_ref)))
+        .await
+        .expect("register the harness process");
+    registry
+        .record_first_started_with_authority(
+            &registration.id,
+            authority
+                .invocation_started()
+                .expect("the harness invocation names its execution"),
+            authority,
+        )
+        .await
+        .expect("record the harness execution start");
+    lash_core_execution::session::RuntimeExecutionProcessEventContext {
+        execution_write_authority: authority.clone(),
+        process_work: lash_core::testing::process_work_wiring_for_registry(Arc::clone(registry)),
+        store: None,
+        session_store_factory: None,
+        queued_work: Arc::new(lash_core::NoQueuedWork::new()),
+        process_wake_delivery_policy: lash_core::DeliveryPolicy::EarliestSafeBoundary,
+        clock: Arc::new(lash_core::facade_support::SystemClock),
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn real_process_sleep_until_emits_deadline_and_completion() {
     let store = Arc::new(InMemoryLashlangArtifactStore::new());
@@ -124,13 +158,14 @@ async fn real_process_sleep_until_emits_deadline_and_completion() {
     let expected_catalog = Arc::clone(&catalog);
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "sleep-run")
+        .bind_attempt(1);
+    let process_events = durable_process_events(&registry, &registration, &authority).await;
+    let execution_registration = registration.clone();
     let context = lash_core::ProcessEngineRunContext::new(
         registration,
         incarnation,
-        lash_core::ProcessExecutionContext::default().with_execution_write_authority(
-            lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "sleep-run")
-                .bind_attempt(1),
-        ),
+        lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
         lash_core::testing::process_work_wiring_for_registry(registry),
         lash_core::SessionId::from("sleep-session"),
         plugins,
@@ -149,7 +184,9 @@ async fn real_process_sleep_until_emits_deadline_and_completion() {
             assert!(Arc::ptr_eq(&catalog, &expected_catalog));
             Ok(
                 lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
-                    built.into_runtime(),
+                    built
+                        .into_runtime()
+                        .with_process_execution(&execution_registration, process_events),
                     lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
                         Box::pin(async { Ok(()) })
                     }),
@@ -520,13 +557,14 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     let expected_catalog = Arc::clone(&catalog);
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "batch-run")
+        .bind_attempt(1);
+    let process_events = durable_process_events(&registry, &registration, &authority).await;
+    let execution_registration = registration.clone();
     let context = lash_core::ProcessEngineRunContext::new(
         registration,
         incarnation,
-        lash_core::ProcessExecutionContext::default().with_execution_write_authority(
-            lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "batch-run")
-                .bind_attempt(1),
-        ),
+        lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
         lash_core::testing::process_work_wiring_for_registry(registry),
         lash_core::SessionId::from("batch-session"),
         plugins,
@@ -545,7 +583,9 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
             assert!(Arc::ptr_eq(&catalog, &expected_catalog));
             Ok(
                 lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
-                    built.into_runtime(),
+                    built
+                        .into_runtime()
+                        .with_process_execution(&execution_registration, process_events),
                     lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
                         Box::pin(async { Ok(()) })
                     }),

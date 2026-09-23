@@ -1266,6 +1266,17 @@ fn normalize_contract_process_event_payload(event_type: &str, payload: Value) ->
     let mut payload = payload;
     if let Some(object) = payload.as_object_mut() {
         object.remove("await_key_id");
+        if event_type == "process.effect_outcome"
+            && object
+                .get("replay_key")
+                .and_then(Value::as_str)
+                .is_some_and(|key| !key.is_empty())
+        {
+            // Fresh contract executions have distinct intent identities. The
+            // real event log retains the key; only the simulator's fixed-source
+            // comparison masks it, as it does for other per-run identities.
+            object.insert("replay_key".to_owned(), json!("<opaque>"));
+        }
         if event_type == "process.first_started"
             && let Some(started) = object.get_mut("started").and_then(Value::as_object_mut)
         {

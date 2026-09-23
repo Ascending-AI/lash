@@ -27,6 +27,9 @@ struct Scenario {
 
 const SCENARIOS: &[Scenario] = &[
     Scenario {
+        name: "lashlang-effect-summary",
+    },
+    Scenario {
         name: "scalar-lashlang-tool-attempt",
     },
     Scenario {
@@ -99,6 +102,7 @@ async fn drive_scenario(
         "scalar-lashlang-tool-attempt" => {
             drive_scalar_lashlang_tool_attempt(context, replaying).await;
         }
+        "lashlang-effect-summary" => drive_lashlang_effect_summary(context, replaying).await,
         other => panic!("unimplemented replay corpus scenario `{other}`"),
     }
 }
@@ -183,6 +187,60 @@ async fn drive_scalar_lashlang_tool_attempt(
         "replay must return the journaled scalar ToolAttempt without re-executing it"
     );
     assert_eq!(context.runs(), vec![effect_name]);
+}
+
+/// FIG-3464: a Lashlang process whose tool call is journaled in the Restate
+/// invocation. Replaying the committed journal answers the call without
+/// running the tool, and the durable effect summary is written from the
+/// journaled outcome — the record a redrive after an interruption rebuilds.
+async fn drive_lashlang_effect_summary(context: Arc<ReplayableRecordingContext>, replaying: bool) {
+    let process_id = ProcessId::from("replay-corpus-effect-summary");
+    let registry = process_registry();
+    let registration =
+        super::process_effect_summary::counting_lashlang_registration(&process_id).await;
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register the effect-summary process");
+    let executions = Arc::new(AtomicUsize::new(0));
+    let outcome = super::process_effect_summary::run_invocation(
+        Arc::clone(&registry),
+        &executions,
+        &context,
+        &registration,
+    )
+    .await
+    .expect("the effect-summary invocation must match the committed recording");
+    let lash_core::ProcessRunOutcome::Terminal { output } = outcome else {
+        panic!("the effect-summary invocation terminates");
+    };
+    assert!(matches!(
+        output.as_ref(),
+        ProcessAwaitOutput::Settled { output } if output.value_for_projection() == serde_json::json!(1)
+    ));
+    assert_eq!(
+        executions.load(Ordering::SeqCst),
+        usize::from(!replaying),
+        "replay answers the tool call from the journal"
+    );
+    let outcomes = super::process_effect_summary::effect_outcomes(&registry, &process_id).await;
+    assert_eq!(outcomes.len(), 1, "one summary record per journaled effect");
+    let summary = lash_core::ProcessEffectSummaryOccurrence::decode(outcomes[0].payload.clone())
+        .expect("decode the summary record");
+    assert_eq!(summary.operation, "tool:recovery_count");
+    assert_eq!(summary.occurrence, 1);
+    assert_eq!(
+        summary.outcome_class,
+        lash_core::ProcessEffectOutcomeClass::Success
+    );
+    assert!(
+        context
+            .recorded_runtime_effects()
+            .keys()
+            .any(|name| name.contains(&summary.replay_key)),
+        "the summary names the journaled effect: {}",
+        summary.replay_key
+    );
 }
 
 fn read_fixture(scenario: Scenario) -> ReplayCorpusFixture {
