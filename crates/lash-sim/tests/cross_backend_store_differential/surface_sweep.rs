@@ -67,6 +67,9 @@ pub(super) enum SurfaceMethod {
     ClaimActiveTurnInputs,
     AbandonTurnInputClaim,
     AbandonTurnInputClaims,
+    BindTurnInputClaim,
+    BindTurnInputClaimOfReceipt,
+    ReclaimTurnBoundInputs,
     CancelUnknownPendingTurnInput,
     CancelPendingTurnInputs,
     CancelPendingTurnInputSuffix,
@@ -115,6 +118,9 @@ impl SurfaceMethod {
             Self::ClaimActiveTurnInputs => "surface:claim_active_turn_inputs",
             Self::AbandonTurnInputClaim => "surface:abandon_turn_input_claim",
             Self::AbandonTurnInputClaims => "surface:abandon_turn_input_claims",
+            Self::BindTurnInputClaim => "surface:bind_turn_input_claim",
+            Self::BindTurnInputClaimOfReceipt => "surface:bind_turn_input_claim_of_receipt",
+            Self::ReclaimTurnBoundInputs => "surface:reclaim_turn_bound_inputs",
             Self::CancelUnknownPendingTurnInput => "surface:cancel_pending_turn_input_unknown",
             Self::CancelPendingTurnInputs => "surface:cancel_pending_turn_inputs",
             Self::CancelPendingTurnInputSuffix => "surface:cancel_pending_turn_input_suffix",
@@ -154,6 +160,32 @@ fn unknown_attachment_intent(session_id: &SessionId) -> lash_core::AttachmentInt
     }
 }
 
+/// The read status of every pending turn input, in queue order, with the ids
+/// the backends mint left out: what a bind or reclaim changed durably.
+async fn turn_input_statuses(
+    store: &Arc<dyn ConformancePersistence>,
+    session_id: &SessionId,
+) -> Result<String, StoreError> {
+    let statuses = store
+        .list_pending_turn_inputs(session_id)
+        .await?
+        .into_iter()
+        .map(|read| match read.status {
+            lash_core::PendingTurnInputReadStatus::Pending => "pending".to_string(),
+            lash_core::PendingTurnInputReadStatus::Held { .. } => "held".to_string(),
+            lash_core::PendingTurnInputReadStatus::TurnBound {
+                turn_id,
+                receipt_input_id,
+            } => format!(
+                "turn_bound(turn={turn_id:?},receipt_is_row={})",
+                receipt_input_id == read.input.input_id
+            ),
+            other => format!("{other:?}"),
+        })
+        .collect::<Vec<_>>();
+    Ok(format!("statuses={statuses:?}"))
+}
+
 fn surface(method: SurfaceMethod) -> StoreOperation {
     StoreOperation::DriveSurface { method }
 }
@@ -171,6 +203,8 @@ const SURFACE_COMMITTED_TURN_ID: &str = "fig-2841-surface-committed-turn";
 /// and whatever a backend answers, the no-residue law still applies.
 const UNKNOWN_ATTACHMENT_ID: &str = "fig-2841-unknown-attachment";
 const UNKNOWN_INPUT_ID: &str = "fig-2841-unknown-input";
+/// The aborted direct turn the sweep binds its drive claim to (FIG-3589).
+const SURFACE_ABORTED_TURN_ID: &str = "fig-3589-surface-aborted-turn";
 /// The queue drain the sweep admits, selects, settles and ends. Its scope is
 /// the run's caller-supplied identity, so every backend admits the same
 /// `QueueDrain` scope and the reads before admission ask about a drain that
@@ -297,6 +331,54 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::ForgetUnknownAttachment),
             surface(SurfaceMethod::Vacuum),
         ],
+    }
+}
+
+/// An aborted direct turn's drive claim, bound and re-taken (FIG-3589).
+///
+/// The sweep drives with the first lease slot, so each lane turnover
+/// re-acquires that slot under a new owner: a reclaim under the generation
+/// that bound the claim defers, and one under a successor generation re-takes
+/// the rows. Both binds are driven: with the claim the turn knows, and by the
+/// receipt's row under the generation a lost drive ran under. The closing
+/// abandon returns the row to the queue.
+pub(super) fn turn_bound_claim_case() -> GeneratedCase {
+    fn turnover(owner: &'static str) -> [StoreOperation; 2] {
+        [
+            StoreOperation::ReleaseSessionLease {
+                lease: LeaseSlot::First,
+            },
+            StoreOperation::AcquireSessionLease {
+                slot: LeaseSlot::First,
+                owner,
+            },
+        ]
+    }
+    let mut operations = vec![
+        StoreOperation::EnqueueNextTurnInput,
+        StoreOperation::AcquireSessionLease {
+            slot: LeaseSlot::First,
+            owner: "turn-bound-drive-owner",
+        },
+        surface(SurfaceMethod::ClaimNextTurnInputs),
+        surface(SurfaceMethod::BindTurnInputClaim),
+        surface(SurfaceMethod::ReclaimTurnBoundInputs),
+    ];
+    operations.extend(turnover("turn-bound-redrive-owner"));
+    operations.extend([
+        surface(SurfaceMethod::ReclaimTurnBoundInputs),
+        surface(SurfaceMethod::BindTurnInputClaimOfReceipt),
+        surface(SurfaceMethod::ReclaimTurnBoundInputs),
+    ]);
+    operations.extend(turnover("turn-bound-second-redrive-owner"));
+    operations.extend([
+        surface(SurfaceMethod::ReclaimTurnBoundInputs),
+        surface(SurfaceMethod::AbandonTurnInputClaim),
+        surface(SurfaceMethod::ListPendingTurnInputs),
+    ]);
+    GeneratedCase {
+        name: CaseName::TurnBoundClaimBindAndReclaim,
+        operations,
     }
 }
 
@@ -585,6 +667,54 @@ impl BackendRunner {
                 let count = claims.len();
                 store.abandon_turn_input_claims(&claims).await?;
                 format!("abandoned={count}")
+            }
+            SurfaceMethod::BindTurnInputClaim => match self.surface.turn_input_claim.take() {
+                Some(claim) => {
+                    let receipt = claim.inputs[0].input_id.clone();
+                    store
+                        .bind_turn_input_claim(
+                            &claim,
+                            &lash_core::TurnId::from(SURFACE_ABORTED_TURN_ID),
+                            &receipt,
+                        )
+                        .await?;
+                    turn_input_statuses(&store, &session_id).await?
+                }
+                None => "no_claim".to_string(),
+            },
+            SurfaceMethod::BindTurnInputClaimOfReceipt => {
+                match self.surface.turn_input_claim.take() {
+                    Some(claim) => {
+                        store
+                            .bind_turn_input_claim_of_receipt(
+                                &session_id,
+                                &claim.inputs[0].input_id,
+                                lease_fence.fencing_token,
+                                &lash_core::TurnId::from(SURFACE_ABORTED_TURN_ID),
+                            )
+                            .await?;
+                        turn_input_statuses(&store, &session_id).await?
+                    }
+                    None => "no_claim".to_string(),
+                }
+            }
+            SurfaceMethod::ReclaimTurnBoundInputs => {
+                let claim = store
+                    .reclaim_turn_bound_inputs(
+                        &session_id,
+                        &lease_fence,
+                        &lease_owner,
+                        &lash_core::TurnId::from(SURFACE_ABORTED_TURN_ID),
+                    )
+                    .await?;
+                let reclaimed = claim.as_ref().map_or(0, |claim| claim.inputs.len());
+                if let Some(claim) = claim {
+                    self.surface.turn_input_claim = Some(claim);
+                }
+                format!(
+                    "reclaimed={reclaimed} {}",
+                    turn_input_statuses(&store, &session_id).await?
+                )
             }
             SurfaceMethod::CancelUnknownPendingTurnInput => {
                 let outcome = store

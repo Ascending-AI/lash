@@ -105,6 +105,7 @@ enum CaseName {
     DeleteThenAttemptAdmission,
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
+    TurnBoundClaimBindAndReclaim,
     RefusedSurfaceOnDeletedSession,
     CorruptGraphNodeRefusals,
     CorruptPendingTurnInputRefusals,
@@ -158,6 +159,9 @@ impl CaseName {
             Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
+            Self::TurnBoundClaimBindAndReclaim => {
+                "turn_bound_claim_binds_defers_and_reclaims_across_generations"
+            }
             Self::RefusedSurfaceOnDeletedSession => {
                 "refused_surface_on_deleted_session_leaves_no_residue"
             }
@@ -639,6 +643,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             ],
         },
         surface_sweep::surface_sweep_case(),
+        surface_sweep::turn_bound_claim_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
         GeneratedCase {
             name: CaseName::StaleHandleAfterDelete,
@@ -2223,7 +2228,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 27);
+    assert_eq!(cases.len(), 28);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2252,6 +2257,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "turn_input_claim_superseded_after_successor_reclaim",
             "delete_then_attempt_admission",
             "store_surface_sweep",
+            "turn_bound_claim_binds_defers_and_reclaims_across_generations",
             "refused_surface_on_deleted_session_leaves_no_residue",
             "stale_handle_after_delete",
             "corrupt_graph_node_refuses_every_reader",
