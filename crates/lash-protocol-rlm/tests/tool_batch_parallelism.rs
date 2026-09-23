@@ -98,7 +98,7 @@ mod native {
         (
             (),
             "native",
-            host,
+            Arc::clone(&host),
             vec![
                 lash_conformance::rlm_promise_all_producer(cell_bridge_factories()),
                 lash_conformance::lashlang_process_aggregate_producer(
@@ -109,6 +109,7 @@ mod native {
                     }),
                 ),
             ],
+            lash_conformance::HostTurnRunner::shared(host),
         )
     });
 }
@@ -133,7 +134,7 @@ mod sqlite {
         (
             dir,
             "sqlite",
-            host,
+            Arc::clone(&host),
             vec![
                 lash_conformance::rlm_promise_all_producer(cell_bridge_factories()),
                 lash_conformance::lashlang_process_aggregate_producer(
@@ -150,6 +151,7 @@ mod sqlite {
                     }),
                 ),
             ],
+            lash_conformance::HostTurnRunner::shared(host),
         )
     });
 }

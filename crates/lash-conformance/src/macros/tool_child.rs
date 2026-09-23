@@ -75,40 +75,39 @@ macro_rules! __turn_runner_register {
 
 /// Register the cross-tier tool-batch parallelism law (FIG-3400).
 ///
-/// The fixture hands back a guard, a session prefix, the tier's effect host and
-/// the product producers reachable on that tier. Every producer runs the same
-/// law, so "this tier overlaps a tool batch" is one statement per surface and
-/// not a family of look-alike tests. Restate is deliberately absent: it is
-/// serial today and its registration lands red-first with FIG-3397.
+/// The fixture hands back a guard, a session prefix, the tier's effect host,
+/// the product producers reachable on that tier and the tier's
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner). Every producer
+/// runs the same law, so "this tier overlaps a tool batch" is one statement
+/// per surface and not a family of look-alike tests. A handler-bound tier
+/// supplies a runner that drives each turn inside a live handler.
 #[macro_export]
 macro_rules! tool_batch_parallelism_tests {
-    ($fixture:block) => {
-        $crate::tool_batch_parallelism_tests!(@catalogue $fixture; [
-            (tool_batch_cross_tier_parallelism, "tool-batch-cross-tier-parallelism"),
-        ]);
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::tool_batch_parallelism_tests!(@law [$(#[$attr])*] $fixture;
+            (tool_batch_cross_tier_parallelism, "tool-batch-cross-tier-parallelism"));
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-            async fn $law() {
-                let (_guard, prefix, host, producers) = $fixture;
-                let _ = $label;
-                assert!(
-                    !producers.is_empty(),
-                    "a tier registers at least one product producer, or the law \
-                     runs on nothing"
-                );
-                for producer in producers {
-                    $crate::registration_macro_support::$law(
-                        prefix,
-                        std::sync::Arc::clone(&host),
-                        producer,
-                    )
-                    .await;
-                }
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+        async fn $law() {
+            let (_guard, prefix, host, producers, runner) = $fixture;
+            assert!(
+                !producers.is_empty(),
+                "a tier registers at least one product producer, or the law \
+                 runs on nothing"
+            );
+            for producer in producers {
+                $crate::registration_macro_support::$law(
+                    prefix,
+                    std::sync::Arc::clone(&host),
+                    std::sync::Arc::clone(&runner),
+                    producer,
+                )
+                .await;
             }
-        )*
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
     };
 }
 

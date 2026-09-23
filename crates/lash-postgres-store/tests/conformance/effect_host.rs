@@ -55,7 +55,7 @@ lash_conformance::tool_batch_parallelism_tests!({
     (
         database_lock,
         "postgres",
-        host,
+        Arc::clone(&host),
         // Every producer this tier reaches: the turn's own parallel model tool
         // calls, `Promise.all` on the RLM cell bridge, and the same aggregate
         // on the process bridge.
@@ -72,6 +72,7 @@ lash_conformance::tool_batch_parallelism_tests!({
                 }),
             ),
         ],
+        lash_conformance::HostTurnRunner::shared(host),
     )
 });
 
