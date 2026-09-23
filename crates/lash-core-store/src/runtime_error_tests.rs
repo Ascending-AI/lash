@@ -264,3 +264,26 @@ fn runtime_error_code_conversion_never_mints_lash_for_foreign_codes() {
     assert_eq!(pair.namespace().as_str(), "agent_workbench");
     assert_eq!(pair.spelling(), "spend_cap");
 }
+
+#[test]
+fn turn_input_source_key_conflict_is_a_typed_identity_conflict() {
+    let conflict = || crate::store::StoreError::PendingTurnInputSourceKeyConflict {
+        session_id: SessionId::from("session"),
+        source_key: "host:retry".to_string(),
+        existing_input_id: crate::InputId::new("ti:existing"),
+    };
+    for error in [
+        crate::runtime_error::runtime_error_from_turn_input_admission(conflict()),
+        crate::runtime_error::runtime_error_from_store_commit(conflict()),
+    ] {
+        assert_eq!(error.code, RuntimeErrorCode::DurableIdentityConflict);
+        assert!(error.is_terminal() && !error.is_retryable());
+    }
+    assert_eq!(
+        crate::runtime_error::runtime_error_from_turn_input_admission(
+            crate::store::StoreError::Backend("disk".to_string())
+        )
+        .code,
+        RuntimeErrorCode::StoreCommitFailed
+    );
+}

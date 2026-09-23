@@ -1599,3 +1599,299 @@ pub async fn pending_turn_input_duplicate_input_id(store: Arc<dyn RuntimePersist
             .is_empty()
     );
 }
+
+fn source_keyed_active_draft(
+    turn_id: &str,
+    min_boundary: crate::TurnInputCheckpointBoundary,
+    text: &str,
+    source_key: &str,
+) -> crate::PendingTurnInputDraft {
+    pending_active_turn_input_draft(
+        &SessionId::from("root"),
+        &TurnId::from(turn_id),
+        min_boundary,
+        text,
+    )
+    .with_source_key(source_key)
+}
+
+fn assert_source_key_conflict(
+    result: Result<crate::PendingTurnInput, StoreError>,
+    source_key: &str,
+    existing: &crate::PendingTurnInput,
+    context: &str,
+) {
+    match result {
+        Err(StoreError::PendingTurnInputSourceKeyConflict {
+            session_id,
+            source_key: conflicting_key,
+            existing_input_id,
+        }) => {
+            assert_eq!(session_id, "root", "{context}");
+            assert_eq!(conflicting_key, source_key, "{context}");
+            assert_eq!(existing_input_id, existing.input_id, "{context}");
+        }
+        other => panic!("{context}: expected a typed source-key conflict, got {other:?}"),
+    }
+}
+
+/// An identical source-key retry is the same submission whatever happened to
+/// the row after admission (FIG-3544).
+///
+/// Both Defer paths rewrite the row's current ingress to `next_turn`: the
+/// final commit of the turn the row named, and orphan repair. The replay
+/// verdict compares the digest written once at admission, so a byte-identical
+/// `active_turn` retry after either rewrite — and after the deferred row later
+/// settles into a tombstone — returns the existing row instead of a conflict.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn identical_retry_after_defer_is_existing_not_conflict(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = SessionId::from("root");
+    let ended_turn = "fig3544-ended-turn";
+    let dead_turn = "fig3544-dead-turn";
+    let commit_deferred = || {
+        source_keyed_active_draft(
+            ended_turn,
+            crate::TurnInputCheckpointBoundary::BeforeCompletion,
+            "deferred by the turn's final commit",
+            "host:fig3544-commit-defer",
+        )
+    };
+    let repair_deferred = || {
+        source_keyed_active_draft(
+            dead_turn,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "deferred by orphan repair",
+            "host:fig3544-repair-defer",
+        )
+    };
+    let first_commit_deferred = store
+        .enqueue_pending_turn_input(commit_deferred())
+        .await
+        .expect("admit the input the turn's final commit defers");
+    let first_repair_deferred = store
+        .enqueue_pending_turn_input(repair_deferred())
+        .await
+        .expect("admit the input orphan repair defers");
+
+    let lease = claim_session_execution_lease_for_test(&store, &session_id, "fig3544-owner").await;
+    let state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    let deferred_commit = store
+        .commit_runtime_state(
+            lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
+                store.as_ref(),
+                &lease.fence(),
+                RuntimeCommit::persisted_state_for_test(&state, &[])
+                    .deferring_interrupted_turn_inputs(ended_turn, None),
+            )
+            .await
+            .expect("authorize the final-commit deferral"),
+        )
+        .await
+        .expect("the turn's final commit defers its undelivered input");
+    let repaired = store
+        .repair_orphaned_active_turn_inputs(
+            &session_id,
+            &lease.fence(),
+            &TurnId::from(dead_turn),
+            &crate::TurnCancelIntentSnapshot::Absent,
+            None,
+        )
+        .await
+        .expect("orphan repair defers the dead turn's input")
+        .into_applied()
+        .expect("unchanged absent intent");
+    assert_eq!(repaired.len(), 1, "orphan repair defers exactly one row");
+
+    let pending = store
+        .list_pending_turn_inputs(&session_id)
+        .await
+        .expect("list the deferred inputs");
+    for first in [&first_commit_deferred, &first_repair_deferred] {
+        let row = pending
+            .iter()
+            .find(|read| read.input.input_id == first.input_id)
+            .expect("the deferred input is still queued");
+        assert_eq!(
+            row.input.state,
+            crate::TurnInputState::DeferredNextTurn,
+            "the Defer rewrote the row's current ingress to next_turn"
+        );
+    }
+
+    for (retry, first, path) in [
+        (
+            commit_deferred(),
+            &first_commit_deferred,
+            "final-commit defer",
+        ),
+        (
+            repair_deferred(),
+            &first_repair_deferred,
+            "orphan-repair defer",
+        ),
+    ] {
+        let replayed = store
+            .enqueue_pending_turn_input(retry)
+            .await
+            .unwrap_or_else(|err| {
+                panic!("an identical retry after a {path} must replay, not conflict: {err}")
+            });
+        assert_eq!(
+            replayed.input_id, first.input_id,
+            "an identical retry after a {path} returns the existing row"
+        );
+        assert_eq!(
+            replayed.state,
+            crate::TurnInputState::DeferredNextTurn,
+            "the replay reports the row's current state, which the retry does not change"
+        );
+    }
+
+    // Settle both deferred rows into tombstones: replay still matches.
+    let next_claim = store
+        .claim_next_turn_inputs(
+            &session_id,
+            &lease.fence(),
+            &lease_owner("fig3544-owner"),
+            10,
+        )
+        .await
+        .expect("claim the deferred inputs")
+        .expect("the deferred inputs are claimable next-turn work");
+    assert_eq!(next_claim.inputs.len(), 2);
+    let mut state = state;
+    state.head_revision = deferred_commit.head_revision;
+    store
+        .commit_runtime_state(
+            RuntimeCommit::persisted_state_for_test(&state, &[])
+                .releasing_session_execution_lease(lease.completion())
+                .completing_turn_input_claim(next_claim.completion()),
+        )
+        .await
+        .expect("complete the deferred inputs");
+    for (retry, first) in [
+        (commit_deferred(), &first_commit_deferred),
+        (repair_deferred(), &first_repair_deferred),
+    ] {
+        let replayed = store
+            .enqueue_pending_turn_input(retry)
+            .await
+            .expect("an identical retry against the completed tombstone replays");
+        assert_eq!(replayed.input_id, first.input_id);
+        assert_eq!(
+            replayed.state.kind(),
+            crate::TurnInputStateKind::Completed,
+            "the tombstone answers the replay until vacuum"
+        );
+    }
+}
+
+/// A source key re-presented with a different submission is a typed conflict
+/// naming the existing row (FIG-3544).
+///
+/// Every submitted field is identity: the input, the turn the ingress names,
+/// its minimum boundary, and the scope. The comparison is against the
+/// submission as admitted, never the row's current ingress: once a Defer has
+/// rewritten that to `next_turn`, a retry that restates `next_turn` is still a
+/// different submission and still conflicts.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn changed_retry_is_typed_conflict(store: Arc<dyn RuntimePersistence>) {
+    let session_id = SessionId::from("root");
+    let turn = "fig3544-conflict-turn";
+    let key = "host:fig3544-conflict";
+    let original = || {
+        source_keyed_active_draft(
+            turn,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "original submission",
+            key,
+        )
+    };
+    let first = store
+        .enqueue_pending_turn_input(original())
+        .await
+        .expect("admit the original submission");
+
+    for (changed, context) in [
+        (
+            source_keyed_active_draft(
+                turn,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+                "changed submission",
+                key,
+            ),
+            "a changed input conflicts",
+        ),
+        (
+            source_keyed_active_draft(
+                turn,
+                crate::TurnInputCheckpointBoundary::BeforeCompletion,
+                "original submission",
+                key,
+            ),
+            "a changed minimum boundary conflicts",
+        ),
+        (
+            source_keyed_active_draft(
+                "fig3544-another-turn",
+                crate::TurnInputCheckpointBoundary::AfterWork,
+                "original submission",
+                key,
+            ),
+            "a changed target turn conflicts",
+        ),
+        (
+            pending_next_turn_input_draft(&session_id, "original submission").with_source_key(key),
+            "a changed scope conflicts",
+        ),
+    ] {
+        assert_source_key_conflict(
+            store.enqueue_pending_turn_input(changed).await,
+            key,
+            &first,
+            context,
+        );
+    }
+
+    let lease =
+        claim_session_execution_lease_for_test(&store, &session_id, "fig3544-conflict-owner").await;
+    store
+        .repair_orphaned_active_turn_inputs(
+            &session_id,
+            &lease.fence(),
+            &TurnId::from(turn),
+            &crate::TurnCancelIntentSnapshot::Absent,
+            None,
+        )
+        .await
+        .expect("orphan repair defers the input")
+        .into_applied()
+        .expect("unchanged absent intent");
+    assert_source_key_conflict(
+        store
+            .enqueue_pending_turn_input(
+                pending_next_turn_input_draft(&session_id, "original submission")
+                    .with_source_key(key),
+            )
+            .await,
+        key,
+        &first,
+        "restating the row's rewritten current ingress is not the admitted submission",
+    );
+    let replayed = store
+        .enqueue_pending_turn_input(original())
+        .await
+        .expect("the admitted submission still replays after the Defer");
+    assert_eq!(replayed.input_id, first.input_id);
+}

@@ -426,9 +426,9 @@ fn pending_turn_input_claim_identity_must_be_all_or_none() {
                 &format!(
                     "INSERT INTO pending_turn_inputs (
                          input_id, session_id, ingress_json, state, input_json,
-                         enqueued_at_ms, {fields}
+                         submitted_ingress_json, submission_digest, enqueued_at_ms, {fields}
                      ) VALUES ('input', 'session', '{{\"scope\":\"next_turn\"}}',
-                               'deferred_next_turn', '{{}}', 0, {values})"
+                               'deferred_next_turn', '{{}}', '{{}}', 'digest', 0, {values})"
                 ),
                 [],
             )

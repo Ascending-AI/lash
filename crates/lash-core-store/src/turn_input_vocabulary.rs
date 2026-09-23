@@ -316,16 +316,79 @@ impl PendingTurnInputDraft {
         self
     }
 
-    /// Compares ingress and canonical JSON input for turn-input store implementors enforcing
-    /// source-key idempotency; generated input IDs and mutable lifecycle fields are deliberately
-    /// ignored.
-    pub fn submitted_content_matches(
-        &self,
-        existing: &PendingTurnInput,
-    ) -> Result<bool, serde_json::Error> {
-        Ok(self.ingress == existing.ingress()
-            && serde_json::to_value(&self.input)? == serde_json::to_value(&existing.input)?)
+    /// The canonical digest of this submission: the immutable value source-key
+    /// replay compares.
+    ///
+    /// Stores write it once, beside the submitted ingress, when they admit the
+    /// row, and never rewrite it. A retry under the same source key is the same
+    /// submission exactly when its digest equals the stored one; the row's
+    /// *current* ingress and state (which a Defer rewrites to `next_turn` when
+    /// the named turn ends) take no part in the verdict (ADR 0010).
+    ///
+    /// The digest covers the submission as the host made it and nothing the
+    /// store generates or mutates:
+    ///
+    /// - the ingress as submitted — scope, and for `active_turn` the turn id
+    ///   and minimum checkpoint boundary;
+    /// - the input's canonical JSON (the persisted `TurnInput` serde form with
+    ///   object keys sorted and `-0.0` folded to `0.0`), as one opaque leaf.
+    ///
+    /// Excluded: the session id and source key (the row is found by them), the
+    /// generated input id, the enqueue time, and every lifecycle and claim
+    /// field. The preimage is the `lash.turn-input-submission` identity family
+    /// at [`TURN_INPUT_SUBMISSION_FAMILY_VERSION`]; the rendered form is
+    /// `turn-input-submission:v<family>:blake3:<hex>`.
+    pub fn submission_digest(&self) -> Result<String, serde_json::Error> {
+        let preimage = turn_input_submission_preimage(&self.ingress, &self.input)?;
+        Ok(crate::stable_identity::rendered_hash(
+            "turn-input-submission",
+            TURN_INPUT_SUBMISSION_FAMILY_VERSION,
+            &preimage,
+        ))
     }
+}
+
+/// Family version of the turn-input submission digest
+/// ([`PendingTurnInputDraft::submission_digest`]).
+///
+/// Stored digests are compared for equality against freshly computed ones, so
+/// any change to the preimage grammar or to the `TurnInput` serde form it
+/// hashes must bump this version together with both SQL store schema versions:
+/// a row admitted under the old grammar would otherwise refuse its own
+/// identical retry as a conflict.
+pub const TURN_INPUT_SUBMISSION_FAMILY_VERSION: u8 = 1;
+
+/// Permanent tag registry for the turn-input submission preimage.
+///
+/// Ingress scope: 1 `active_turn` (followed by the turn id and the boundary),
+/// 2 `next_turn`. Boundary: 1 `after_work`, 2 `before_completion`. The input
+/// follows as one canonical JSON payload leaf. Retired tags remain burned.
+fn turn_input_submission_preimage(
+    ingress: &TurnInputIngress,
+    input: &TurnInput,
+) -> Result<Vec<u8>, serde_json::Error> {
+    let mut identity = crate::stable_identity::IdentityEncoder::new(
+        "lash.turn-input-submission",
+        TURN_INPUT_SUBMISSION_FAMILY_VERSION,
+    );
+    match ingress {
+        TurnInputIngress::ActiveTurn {
+            turn_id,
+            min_boundary,
+        } => {
+            identity.tag(1);
+            identity.string(turn_id.as_str());
+            identity.tag(match min_boundary {
+                TurnInputCheckpointBoundary::AfterWork => 1,
+                TurnInputCheckpointBoundary::BeforeCompletion => 2,
+            });
+        }
+        TurnInputIngress::NextTurn => identity.tag(2),
+    }
+    identity.bytes(&crate::identity_json::payload_leaf(&serde_json::to_value(
+        input,
+    )?));
+    Ok(identity.finish())
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PendingTurnInput {

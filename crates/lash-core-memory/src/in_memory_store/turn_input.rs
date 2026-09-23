@@ -379,6 +379,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         let enqueued_at_ms = self.clock.timestamp_ms();
         let _transaction = self.write_transaction.lock_recover();
         self.ensure_session_not_deleted(&draft.session_id)?;
+        let submission_digest = draft.submission_digest().map_err(|err| {
+            crate::store::StoreError::Backend(format!(
+                "failed to digest pending turn input submission: {err}"
+            ))
+        })?;
         let mut pending = self.pending_turn_inputs.lock_recover();
         if let Some(source_key) = draft.source_key.as_deref()
             && let Some(existing) = pending.iter().find(|entry| {
@@ -386,14 +391,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                     && entry.input.source_key.as_deref() == Some(source_key)
             })
         {
-            if !draft
-                .submitted_content_matches(&existing.input)
-                .map_err(|err| {
-                    crate::store::StoreError::Backend(format!(
-                        "failed to compare pending turn input submission: {err}"
-                    ))
-                })?
-            {
+            if existing.submission_digest != submission_digest {
                 return Err(
                     crate::store::StoreError::PendingTurnInputSourceKeyConflict {
                         session_id: draft.session_id.clone(),
@@ -435,6 +433,7 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         pending.push(InMemoryPendingTurnInput {
             input: stored.clone(),
             claim: super::ClaimHold::with_fencing_token(0),
+            submission_digest,
         });
         pending.sort_by_key(|entry| entry.input.enqueue_seq);
         Ok(stored)

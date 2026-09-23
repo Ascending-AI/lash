@@ -102,11 +102,12 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_pending_turn_inputs (
-             input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+             input_id, session_id, ingress_json, state, input_json,
+             submitted_ingress_json, submission_digest, enqueued_at_ms
          ) VALUES (
              'bad-turn-input-state', 'session',
              '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
-             'waiting', '{}', 0
+             'waiting', '{}', '{}', 'digest', 0
          )",
         "ck_pending_turn_inputs_state",
     )
@@ -114,10 +115,11 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_pending_turn_inputs (
-             input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+             input_id, session_id, ingress_json, state, input_json,
+             submitted_ingress_json, submission_digest, enqueued_at_ms
          ) VALUES (
              'bad-turn-input-pair', 'session', '{\"scope\":\"next_turn\"}',
-             'pending_active', '{}', 0
+             'pending_active', '{}', '{}', 'digest', 0
          )",
         "ck_pending_turn_inputs_state_ingress",
     )
@@ -125,10 +127,11 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_pending_turn_inputs (
-             input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+             input_id, session_id, ingress_json, state, input_json,
+             submitted_ingress_json, submission_digest, enqueued_at_ms
          ) VALUES (
              'bad-turn-input-accepted-pair', 'session', '{\"scope\":\"next_turn\"}',
-             'accepted', '{}', 0
+             'accepted', '{}', '{}', 'digest', 0
          )",
         "ck_pending_turn_inputs_state_ingress",
     )
@@ -136,11 +139,12 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     assert_check_rejects(
         &mut connection,
         "INSERT INTO lash_pending_turn_inputs (
-             input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+             input_id, session_id, ingress_json, state, input_json,
+             submitted_ingress_json, submission_digest, enqueued_at_ms
          ) VALUES (
              'bad-turn-input-deferred-pair', 'session',
              '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
-             'deferred_next_turn', '{}', 0
+             'deferred_next_turn', '{}', '{}', 'digest', 0
          )",
         "ck_pending_turn_inputs_state_ingress",
     )
@@ -175,9 +179,9 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
             &format!(
                 "INSERT INTO lash_pending_turn_inputs (
                      input_id, session_id, ingress_json, state, input_json,
-                     enqueued_at_ms, {fields}
+                     submitted_ingress_json, submission_digest, enqueued_at_ms, {fields}
                  ) VALUES ('pending', 'session', '{{\"scope\":\"next_turn\"}}',
-                           'deferred_next_turn', '{{}}', 0, {values})"
+                           'deferred_next_turn', '{{}}', '{{}}', 'digest', 0, {values})"
             ),
             "ck_pending_turn_inputs_claim_identity_all_or_none",
         )

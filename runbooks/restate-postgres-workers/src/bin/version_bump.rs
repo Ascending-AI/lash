@@ -79,7 +79,9 @@ const POST_FLOOR_INDEXES: [&str; 1] = ["uq_lash_runtime_effect_replay_commit_seq
 /// arbitration state component 110 installs (FIG-3409): the commit-order
 /// counter and lifecycle on the group, the renamed arity expectation, and the
 /// commit protocol columns on the replay row.
-const POST_FLOOR_COLUMNS: [(&str, &str); 9] = [
+const POST_FLOOR_COLUMNS: [(&str, &str); 11] = [
+    ("lash_pending_turn_inputs", "submitted_ingress_json"),
+    ("lash_pending_turn_inputs", "submission_digest"),
     ("lash_trigger_mutation_receipts", "owner_kind"),
     ("lash_trigger_mutation_receipts", "owner_id"),
     ("lash_parent_end_plans", "parent_payload"),
@@ -126,21 +128,15 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// the *current* catalog, so these are exactly the artifacts its refusal must
 /// enumerate.
 ///
-/// The retained 115 -> 116 generation introduced these relations: the
-/// queued-run admission and membership tables and the pending-run index. The
-/// component-116 queued-run cutover and the component-117 receipt-versioning
-/// cutover are both destructive, so no migration path from a predecessor
-/// stamp exists.
-const DIVERGENT_ARTIFACTS: [&str; 3] = [
-    "lash_queued_run_members",
-    "lash_queued_runs",
-    "lash_queued_runs_pending",
-];
+/// The retained 116 -> 117 generation versioned the runtime-commit receipt
+/// payload and introduced no relation or constraint. Component 118
+/// (FIG-3544) is destructive: no 117 → 118 arm exists, so the component-117
+/// stamp over the current catalog is refused for having no applicable
+/// migration and names no artifacts.
+const DIVERGENT_ARTIFACTS: [&str; 0] = [];
 /// A destructive generation has no migration arm, so a predecessor stamp over
 /// the current catalog is refused at the ordinary reject-and-recreate
-/// boundary. Component 117 is destructive: no 116 → 117 arm exists, so the
-/// component-116 stamp over the current catalog is refused for having no
-/// applicable migration.
+/// boundary.
 const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even

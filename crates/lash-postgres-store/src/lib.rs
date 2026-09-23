@@ -451,7 +451,14 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // invalid, or unsupported versions instead of skipping the row; receipts
 // written before the field existed are refused as pre-versioned state.
 // Component-116 catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 117;
+// Version 118 (FIG-3544) gives `lash_pending_turn_inputs` the immutable
+// `submitted_ingress_json` and `submission_digest` columns, written once at
+// admission; source-key replay compares the digest instead of the row's
+// mutable current ingress. Both are NOT NULL and the digest is computed in
+// Rust from the submitted payload, so no DDL arm can backfill them: this is
+// a destructive cutover again. The retained endpoint is 117 and no arm
+// targets 118, so every predecessor is rejected and recreated.
+const SCHEMA_VERSION: i32 = 118;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

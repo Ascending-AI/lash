@@ -970,9 +970,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     .enqueue_pending_turn_input(*draft)
                     .await
                     .map_err(|err| {
+                        let error =
+                            lash_core_store::runtime_error::runtime_error_from_turn_input_admission(
+                                err,
+                            );
                         RuntimeEffectControllerError::new(
-                            crate::RuntimeErrorCode::StoreCommitFailed,
-                            format!("turn acceptance commit failed: {err}"),
+                            error.code,
+                            format!("turn acceptance commit failed: {}", error.message),
                         )
                     })?;
                 Ok(RuntimeEffectOutcome::AcceptTurnInput {

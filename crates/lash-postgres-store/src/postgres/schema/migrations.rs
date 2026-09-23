@@ -3,12 +3,14 @@
 
 use super::*;
 
-/// These declarations retain the component-116 endpoint, including the five
-/// effect-replay constraints component 115 installed and the durable
-/// queued-run admission component 116 adds. Component 117 versions the
-/// runtime-commit receipt payload. No old catalog carries the queued-run
-/// ownership or the receipt version stamp, so the current build offers no
-/// migration and refuses every predecessor, including 116. Source-shape
+/// These declarations retain the component-117 endpoint: the five
+/// effect-replay constraints component 115 installed, the durable queued-run
+/// admission component 116 adds, and the runtime-commit receipt version
+/// component 117 stamps. Component 118 (FIG-3544) gives
+/// `lash_pending_turn_inputs` the NOT NULL `submitted_ingress_json` and
+/// `submission_digest` columns; the digest is computed in Rust from each row's
+/// submitted payload, so no DDL can backfill it. No arm targets 118: the
+/// current build refuses every predecessor, including 117. Source-shape
 /// declarations remain keyed to this build's catalog for precise older-store
 /// fixture construction.
 const ARBITRATION_GUARDS: &[DeclaredGuard] = &[
@@ -66,7 +68,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         // The lists are keyed to the floor, not to one generation: a relation,
         // column, or constraint introduced after 105 belongs here too, so the
         // fixture rebuilds the published component-101 catalog by removing them.
-        to: 116,
+        to: 117,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -74,6 +76,8 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_runtime_effect_group_child",
         ],
         source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
             ("lash_parent_end_plans", "parent_payload"),
@@ -103,13 +107,15 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 116,
+        to: 117,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
         ],
         source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
             ("lash_parent_end_plans", "parent_payload"),
@@ -131,13 +137,15 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 116,
+        to: 117,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
         ],
         source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
             ("lash_parent_end_plans", "parent_payload"),
@@ -158,13 +166,15 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // models, so a component-104 catalog lacks exactly those columns.
     SchemaMigration {
         from: 104,
-        to: 116,
+        to: 117,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
         ],
         source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
             ("lash_parent_end_plans", "parent_payload"),
@@ -186,13 +196,15 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // parent payload, and the arbitration state alone.
     SchemaMigration {
         from: 105,
-        to: 116,
+        to: 117,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
         ],
         source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
             ("lash_runtime_effect_group", "lifecycle"),
@@ -214,13 +226,15 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // to its siblings.
     SchemaMigration {
         from: 106,
-        to: 116,
+        to: 117,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
             "lash_runtime_effect_group_child",
         ],
         source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
             ("lash_runtime_effect_group", "lifecycle"),
@@ -244,9 +258,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // 108 added no relational DDL of its own.
     SchemaMigration {
         from: 107,
-        to: 116,
+        to: 117,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
             ("lash_runtime_effect_group", "lifecycle"),
@@ -267,9 +283,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // guards a component-107 catalog does against this build.
     SchemaMigration {
         from: 108,
-        to: 116,
+        to: 117,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
             ("lash_runtime_effect_group", "lifecycle"),
@@ -300,9 +318,11 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // columns and guards plus the five effect-replay constraints.
     SchemaMigration {
         from: 109,
-        to: 116,
+        to: 117,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_runtime_effect_group", "next_commit_seq"),
             ("lash_runtime_effect_group", "lifecycle"),
             ("lash_runtime_effect_group", "expected_children"),
@@ -327,9 +347,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // All are refused at the queued-run cutover.
     SchemaMigration {
         from: 110,
-        to: 116,
+        to: 117,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
-        source_missing_columns: &[],
+        source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
+        ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
         introduced_relations: &[],
@@ -338,9 +361,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 111,
-        to: 116,
+        to: 117,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
-        source_missing_columns: &[],
+        source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
+        ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
         introduced_relations: &[],
@@ -349,9 +375,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 112,
-        to: 116,
+        to: 117,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
-        source_missing_columns: &[],
+        source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
+        ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
         introduced_relations: &[],
@@ -360,9 +389,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 113,
-        to: 116,
+        to: 117,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
-        source_missing_columns: &[],
+        source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
+        ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
         introduced_relations: &[],
@@ -374,9 +406,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // current component-117 cutover offers no executable migration.
     SchemaMigration {
         from: 114,
-        to: 116,
+        to: 117,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
-        source_missing_columns: &[],
+        source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
+        ],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
         introduced_relations: &[],
@@ -389,9 +424,12 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // foreign key ride the table drops, so only the relations are enumerated.
     SchemaMigration {
         from: 115,
-        to: 116,
+        to: 117,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
-        source_missing_columns: &[],
+        source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
+        ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
         introduced_relations: &[
@@ -399,6 +437,25 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
             "lash_queued_runs",
             "lash_queued_runs_pending",
         ],
+        introduced_constraints: &[],
+        statements: &[],
+    },
+    // The immediate predecessor of the retained endpoint 117. Component 117
+    // versioned the runtime-commit receipt payload and moved no relation, so a
+    // component-116 catalog lacks only the FIG-3544 submission columns this
+    // build carries; component 118 is destructive, so the row is a refusal
+    // boundary that introduces nothing a rewound stamp could be claiming.
+    SchemaMigration {
+        from: 116,
+        to: 117,
+        source_missing_tables: &[],
+        source_missing_columns: &[
+            ("lash_pending_turn_inputs", "submitted_ingress_json"),
+            ("lash_pending_turn_inputs", "submission_digest"),
+        ],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
+        introduced_relations: &[],
         introduced_constraints: &[],
         statements: &[],
     },

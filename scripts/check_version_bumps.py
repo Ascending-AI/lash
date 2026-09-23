@@ -76,6 +76,13 @@ REGISTRATION_BASELINES = {
     "crates/lash-core-execution/src/runtime/process/effect_summary.rs:PROCESS_EVENT_VOCABULARY_VERSION": (
         "sha256:e099c586c0ce0a2d9f284875f03f518c917553448f98c417b6e64734479056c3"
     ),
+    # FIG-3544: source-key replay of a pending turn input compares a digest
+    # written once at admission. A new durable identity family, not a rename:
+    # the digest had no constant before this change. The guard covers the
+    # preimage grammar and the TurnInput serde form hashed as one JSON leaf.
+    "crates/lash-core-store/src/turn_input_vocabulary.rs:TURN_INPUT_SUBMISSION_FAMILY_VERSION": (
+        "sha256:635cac6b7987574524c8b449f38a24fbb17eacffd2ba38777193817c12ce0e0d"
+    ),
     # FIG-2266: ADR 0099 sections 6 and 13 mint the semantic settlement a tool
     # child of a durable effect group carries on its outcome. A new durable
     # format, not a rename: the settlement had no constant before this change,

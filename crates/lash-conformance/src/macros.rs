@@ -253,6 +253,8 @@ macro_rules! runtime_persistence_tests {
             (queue_completion_and_turn_commit_stamp_are_atomic, "root"),
             (pending_turn_inputs_source_keys_order_cancel_and_cross_session, "root"),
             (pending_turn_input_duplicate_input_id, "root"),
+            (identical_retry_after_defer_is_existing_not_conflict, "root"),
+            (changed_retry_is_typed_conflict, "root"),
             (pending_turn_input_bulk_and_suffix_cancellation, "pending-bulk-cancel"),
             (pending_turn_input_claims_reclaim_complete_and_fence, "root"),
             (turn_input_application_identity_survives_pending_tombstone_vacuum, "turn-input-application"),

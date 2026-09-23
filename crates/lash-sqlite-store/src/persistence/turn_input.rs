@@ -499,20 +499,32 @@ impl TurnInputStore for Store {
             .write_flow(move |tx| {
                 let outcome: Result<lash_core::PendingTurnInput, StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &draft.session_id)?;
+                    let submission_digest = draft.submission_digest().map_err(|err| {
+                        StoreError::Backend(format!(
+                            "failed to digest pending turn input submission: {err}"
+                        ))
+                    })?;
                     if let Some(source_key) = draft.source_key.as_deref() {
-                        let existing_id: Option<String> = tx
+                        let existing: Option<(String, String)> = tx
                             .query_row(
                                 crate::turn_ingress::turn_ingress_sql()
                                     .pending_inputs_sqlite
                                     .select_id_by_source_key
                                     .sql(),
                                 params![draft.session_id.as_str(), source_key],
-                                |row| row.get(0),
+                                |row| Ok((row.get(0)?, row.get(1)?)),
                             )
                             .optional()
                             .map_err(sqlite_error)?;
-                        if let Some(input_id) = existing_id {
-                            let existing = load_pending_turn_input_by_id_conn(
+                        if let Some((input_id, existing_digest)) = existing {
+                            if existing_digest != submission_digest {
+                                return Err(StoreError::PendingTurnInputSourceKeyConflict {
+                                    session_id: draft.session_id.clone(),
+                                    source_key: source_key.to_string(),
+                                    existing_input_id: input_id.into(),
+                                });
+                            }
+                            return load_pending_turn_input_by_id_conn(
                                 tx,
                                 &draft.session_id,
                                 &input_id,
@@ -521,19 +533,7 @@ impl TurnInputStore for Store {
                                 StoreError::Backend(
                                     "pending turn input source row disappeared".to_string(),
                                 )
-                            })?;
-                            if !draft.submitted_content_matches(&existing).map_err(|err| {
-                                StoreError::Backend(format!(
-                                    "failed to compare pending turn input submission: {err}"
-                                ))
-                            })? {
-                                return Err(StoreError::PendingTurnInputSourceKeyConflict {
-                                    session_id: draft.session_id.clone(),
-                                    source_key: source_key.to_string(),
-                                    existing_input_id: existing.input_id.clone(),
-                                });
-                            }
-                            return Ok(existing);
+                            });
                         }
                     }
                     let input_id = draft.input_id.clone().unwrap_or_else(|| {
@@ -557,6 +557,7 @@ impl TurnInputStore for Store {
                             encode_json(&draft.ingress)?,
                             state.as_str(),
                             encode_json(&draft.input)?,
+                            submission_digest.as_str(),
                             now as i64,
                         ],
                     )

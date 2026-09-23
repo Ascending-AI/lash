@@ -2036,10 +2036,12 @@ async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_iden
                          OR (\"CLAIM_ID\" IS NOT NULL AND claim_token IS NOT NULL));
              INSERT INTO lash_pending_turn_inputs (
                  input_id, session_id, ingress_json, state, input_json,
+                 submitted_ingress_json, submission_digest,
                  enqueued_at_ms, claim_id, \"STATE\"
              ) VALUES (
                  'quoted-identity-witness', 'session',
                  '{\"scope\":\"active_turn\"}', 'invalid', '{}',
+                 '{\"scope\":\"active_turn\"}', 'digest',
                  0, 'orphan-real-claim-id', 'accepted'
              )",
         )

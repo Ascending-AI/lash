@@ -246,6 +246,8 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     ingress_json text NOT NULL,
     state text NOT NULL,
     input_json text NOT NULL,
+    submitted_ingress_json text NOT NULL,
+    submission_digest text NOT NULL,
     enqueued_at_ms bigint NOT NULL,
     claim_id text,
     claim_owner_id text,
@@ -1073,7 +1075,7 @@ INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', '
 -- Data for Name: lash_pending_turn_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (1, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', 1700000000000, NULL, NULL, NULL, NULL, 0, 0);
+INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (1, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', '{"scope":"next_turn"}', 'turn-input-submission:v1:blake3:cfa33cf885994ad5ebc91e08f8f36422a792cda3baab46dff1f6f4433e6bc20a', 1700000000000, NULL, NULL, NULL, NULL, 0, 0);
 
 
 --
@@ -1180,7 +1182,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:ef3744
 -- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=117', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=118', 1700000000000);
 
 
 --
@@ -1216,7 +1218,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 117);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 118);
 
 
 --

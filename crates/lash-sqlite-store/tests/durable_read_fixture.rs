@@ -116,6 +116,9 @@ const USAGE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const RECEIPT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-107-061de77f7/sqlite-expected.json",
 ];
+const SUBMISSION_DIGEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-108-cc0b9eecf/sqlite-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/sqlite-expected.json",
 ];
@@ -271,7 +274,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 76"),
+        message.contains("supports schema version 77"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -296,7 +299,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 76"),
+        message.contains("supports schema version 77"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(
@@ -356,12 +359,60 @@ async fn sqlite_v73_envelope_database_is_refused_before_blob_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 76"),
+        message.contains("supports schema version 77"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
         message.contains("reports version 73"),
         "open refusal must name the pre-74 database: {message}"
+    );
+}
+
+/// FIG-3544: durable-core schema 77 gives every pending turn input an
+/// immutable submitted ingress and submission digest, which source-key replay
+/// compares. A pre-77 database holds rows with neither, and the digest is a
+/// Rust-computed value no DDL can backfill, so the whole database must be
+/// refused at the version boundary rather than replayed against a missing
+/// digest.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sqlite_v76_pending_input_database_is_refused_before_replay() {
+    let fixture_dir = fixture_dir();
+    let temp = tempfile::tempdir().expect("SQLite fixture tempdir");
+    copy_sqlite_fixture(&fixture_dir, temp.path());
+    let durable_core = temp.path().join("durable-core.db");
+    let connection = rusqlite::Connection::open(&durable_core).expect("open copied fixture");
+    // The pre-77 row shape: no immutable submission columns at all.
+    connection
+        .execute_batch(
+            "ALTER TABLE pending_turn_inputs DROP COLUMN submitted_ingress_json;
+             ALTER TABLE pending_turn_inputs DROP COLUMN submission_digest;
+             INSERT INTO pending_turn_inputs (
+                 input_id, session_id, source_key, ingress_json, state, input_json,
+                 enqueued_at_ms
+             )
+             VALUES (
+                 'ti:pre-77', 'pre-77-session', 'host:pre-77', '{\"scope\":\"next_turn\"}',
+                 'deferred_next_turn', '{\"items\":[]}', 0
+             );",
+        )
+        .expect("rewrite the pending-input table to its pre-77 shape");
+    connection
+        .pragma_update(None, "user_version", 76)
+        .expect("stamp the pre-submission-digest v76 boundary");
+    drop(connection);
+
+    let open_error = match Store::open(&durable_core).await {
+        Err(error) => error,
+        Ok(_) => panic!("a pre-77 durable core must be refused at the schema boundary"),
+    };
+    let message = open_error.to_string();
+    assert!(
+        message.contains("supports schema version 77"),
+        "open refusal must name the current reject-and-recreate boundary: {message}"
+    );
+    assert!(
+        message.contains("reports version 76"),
+        "open refusal must name the pre-77 database: {message}"
     );
 }
 
