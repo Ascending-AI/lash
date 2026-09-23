@@ -2029,6 +2029,7 @@ lash_conformance::effect_controller_lease_fencing_tests!({
     let steal_pool = storage.pool().clone();
     let expire_pool = storage.pool().clone();
     let fail_pool = storage.pool().clone();
+    let stall_pool = storage.pool().clone();
     let heal_pool = storage.pool().clone();
     (
         database_lock,
@@ -2127,16 +2128,56 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                     .expect("install renewal fault");
                 })
             }),
-            heal_renewals: Box::new(move |_replay_key| {
-                let pool = heal_pool.clone();
+            // A stalled renewal sleeps inside its own UPDATE and then lands.
+            stall_renewals: Box::new(move |replay_key| {
+                let pool = stall_pool.clone();
                 Box::pin(async move {
                     sqlx::query(
-                        "DROP TRIGGER IF EXISTS lash_conformance_fail_effect_renewal
+                        "CREATE OR REPLACE FUNCTION lash_conformance_stall_effect_renewal()
+                         RETURNS trigger LANGUAGE plpgsql AS $$
+                         BEGIN
+                           PERFORM pg_sleep(5);
+                           RETURN NEW;
+                         END $$",
+                    )
+                    .execute(&pool)
+                    .await
+                    .expect("install renewal stall function");
+                    sqlx::query(
+                        "DROP TRIGGER IF EXISTS lash_conformance_stall_effect_renewal
                          ON lash_runtime_effect_replay",
                     )
                     .execute(&pool)
                     .await
-                    .expect("remove renewal fault");
+                    .expect("clear a stale renewal stall");
+                    sqlx::query(&format!(
+                        "CREATE TRIGGER lash_conformance_stall_effect_renewal
+                         BEFORE UPDATE OF lease_expires_at_ms ON lash_runtime_effect_replay
+                         FOR EACH ROW
+                         WHEN (OLD.replay_key = '{replay_key}'
+                           AND NEW.status = 'in_progress'
+                           AND OLD.lease_token IS NOT DISTINCT FROM NEW.lease_token)
+                         EXECUTE FUNCTION lash_conformance_stall_effect_renewal()"
+                    ))
+                    .execute(&pool)
+                    .await
+                    .expect("install renewal stall");
+                })
+            }),
+            heal_renewals: Box::new(move |_replay_key| {
+                let pool = heal_pool.clone();
+                Box::pin(async move {
+                    for trigger in [
+                        "lash_conformance_fail_effect_renewal",
+                        "lash_conformance_stall_effect_renewal",
+                    ] {
+                        sqlx::query(&format!(
+                            "DROP TRIGGER IF EXISTS {trigger} ON lash_runtime_effect_replay"
+                        ))
+                        .execute(&pool)
+                        .await
+                        .expect("remove renewal fault");
+                    }
                 })
             }),
         },

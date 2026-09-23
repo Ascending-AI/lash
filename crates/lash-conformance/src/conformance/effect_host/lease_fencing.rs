@@ -42,12 +42,15 @@ pub type EffectLeaseControllerFactory = Box<
 /// every lease renewal of the `replay_key` row fail with a store error (the
 /// row and its fence untouched) until `heal_renewals` lifts the fault; claims,
 /// takeovers and finalization of the row are unaffected. All of them act on
-/// the same store the controllers share.
+/// the same store the controllers share. `stall_renewals` makes renewals of
+/// the row hang for several seconds without failing (the call neither
+/// returns nor errors while the stall lasts); `heal_renewals` lifts it too.
 pub struct EffectLeaseFencingBackend {
     pub make_controller: EffectLeaseControllerFactory,
     pub steal_lease: EffectLeaseMutator,
     pub expire_lease: EffectLeaseMutator,
     pub fail_renewals: EffectLeaseMutator,
+    pub stall_renewals: EffectLeaseMutator,
     pub heal_renewals: EffectLeaseMutator,
 }
 
@@ -123,8 +126,10 @@ impl crate::Clock for LeaseFencingClock {
             .forget();
     }
 
-    async fn sleep_until(&self, _deadline: std::time::Instant) {
-        self.sleep(std::time::Duration::ZERO).await;
+    /// `now()` is the real monotonic clock, so a deadline is real time too:
+    /// only relative sleeps (the renewal cadence and busy backoff) are gated.
+    async fn sleep_until(&self, deadline: std::time::Instant) {
+        tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
     }
 }
 
@@ -661,6 +666,85 @@ pub async fn effect_lease_renew_errors_past_budget_leave_row_reclaimable(
     (backend.heal_renewals)(replay_key.clone()).await;
     let reclaimed = tokio::time::timeout(
         std::time::Duration::from_secs(10),
+        successor.controller.execute_effect(
+            envelope,
+            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                Ok(replay_conformance_exec_outcome("reclaimed-owner"))
+            }),
+        ),
+    )
+    .await
+    .expect("a later claim must reclaim the abandoned row once its lease expires")
+    .expect("the reclaimed effect re-executes instead of replaying a sealed error");
+    assert_replay_conformance_exec_marker(reclaimed, "reclaimed-owner");
+    let _keep_notify_alive = never_release;
+}
+
+/// A renewal that hangs is bounded by the lease TTL: the tool runs beside
+/// the renewal, so the owner must give the lease up at the deadline rather
+/// than whenever the stalled call returns — a peer may reclaim and
+/// re-execute the effect from then on (FIG-3512). Nothing is sealed, and the
+/// next claim re-executes the effect.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn effect_lease_renew_stall_is_abandoned_at_the_deadline(
+    backend: EffectLeaseFencingBackend,
+) {
+    let ttl = std::time::Duration::from_millis(600);
+    let replay_key = format!("lease-renew-stalled-{}", uuid::Uuid::new_v4());
+    let owner = (backend.make_controller)(ttl, lease_fencing_system_clock()).await;
+    let successor = (backend.make_controller)(
+        std::time::Duration::from_secs(30),
+        lease_fencing_system_clock(),
+    )
+    .await;
+    let envelope = lease_fencing_envelope(&replay_key);
+
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel();
+    let never_release = Arc::new(tokio::sync::Notify::new());
+    let owner_controller = Arc::clone(&owner.controller);
+    let owner_envelope = envelope.clone();
+    let owner_release = Arc::clone(&never_release);
+    let owner_task = crate::task::spawn(async move {
+        owner_controller
+            .execute_effect(
+                owner_envelope,
+                RuntimeEffectLocalExecutor::testing(move |_| async move {
+                    let _dropped = DroppedSignal(Some(dropped_tx));
+                    let _ = entered_tx.send(());
+                    owner_release.notified().await;
+                    Ok(replay_conformance_exec_outcome("should-not-finalize"))
+                }),
+            )
+            .await
+    });
+    entered_rx.await.expect("owner executor entered");
+    (backend.stall_renewals)(replay_key.clone()).await;
+
+    // The stall outlasts this window by seconds; only a renewal bounded by the
+    // TTL ends the execution inside it.
+    let err = tokio::time::timeout(std::time::Duration::from_millis(2_500), owner_task)
+        .await
+        .expect("a stalled renewal must not keep the tool running past the lease TTL")
+        .expect("owner task joins")
+        .expect_err("an execution whose lease could not be renewed must not finalize");
+    assert!(
+        err.code.as_str().ends_with("_effect_replay_lease_lost"),
+        "expected an effect-replay lease-lost controller error, got code `{}`: {}",
+        err.code,
+        err.message,
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(1), dropped_rx)
+        .await
+        .expect("the abandoned execution drops the running tool")
+        .expect("drop signal delivered");
+
+    (backend.heal_renewals)(replay_key.clone()).await;
+    let reclaimed = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
         successor.controller.execute_effect(
             envelope,
             RuntimeEffectLocalExecutor::testing(move |_| async move {

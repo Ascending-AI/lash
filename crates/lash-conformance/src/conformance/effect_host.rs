@@ -16,6 +16,7 @@ pub use lease_fencing::{
     EffectLeaseControllerFactory, EffectLeaseFencingBackend, EffectLeaseMutator,
     LeaseFencingController, effect_controller_lease_fencing,
     effect_lease_renew_errors_past_budget_leave_row_reclaimable,
+    effect_lease_renew_stall_is_abandoned_at_the_deadline,
     effect_lease_renew_transient_error_keeps_tool_running,
 };
 pub(super) use outstanding_waits::effect_host_lists_registered_unresolved_waits;
