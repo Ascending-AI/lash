@@ -9,6 +9,9 @@ mod builder;
 pub use lash_core_execution::runtime::causal;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_execution::runtime::causal;
+/// The operation name a process sleep's replay key and durable effect summary
+/// carry, which a language runtime's process sleep records against.
+pub use lash_core_execution::runtime::causal::PROCESS_SLEEP_OPERATION;
 pub(crate) use lash_core_ids::clock;
 #[cfg(feature = "testing")]
 pub mod commit_admission;

@@ -986,7 +986,7 @@ impl LashlangProcessHost<'_> {
         if let (Some(call_site), Some(outcome_class)) = (&call_site, outcome_class) {
             self.record_effect_outcome(
                 call_site,
-                lash_core::runtime::causal::PROCESS_SLEEP_OPERATION,
+                lash_core::runtime::PROCESS_SLEEP_OPERATION,
                 outcome_class,
                 None,
                 &self.ctx.process_sleep_replay_key(&scope, sequence),
