@@ -523,6 +523,8 @@ class ParkedEntryTests(unittest.TestCase):
             skips,
             [
                 "--skip",
+                "tests::conformance_and_poison::direct_turn_acceptance_crash_after_store_commit_admits_one_row",
+                "--skip",
                 "tests::conformance_and_poison::turn_crash_matrix_error_return_fail_stop",
                 "--skip",
                 "tests::conformance_and_poison::turn_crash_matrix_level_1",
