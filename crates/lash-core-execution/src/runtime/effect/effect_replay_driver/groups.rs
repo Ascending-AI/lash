@@ -862,9 +862,14 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 Ok(serde_json::from_str::<RuntimeEffectOutcome>(outcome_json)
                     .map_err(|err| vocabulary.decode_error(err))?)
             }
+            // A settled `Failed` terminal is the child's recorded failure
+            // replaying, not a live fault: stamp it journaled (FIG-3528) so
+            // the settlement consumer keeps it on the model-visible surface
+            // instead of aborting the enclosing turn.
             EffectRowState::Settled(EffectTerminal::Failed { error_json }) => Err(
                 serde_json::from_str::<RuntimeEffectControllerError>(error_json)
-                    .map_err(|err| vocabulary.decode_error(err))?,
+                    .map_err(|err| vocabulary.decode_error(err))?
+                    .into_journaled(),
             ),
             EffectRowState::Corrupt(defect) => {
                 return Err(vocabulary.error(EffectReplayFailure::CorruptRow, defect.message()));

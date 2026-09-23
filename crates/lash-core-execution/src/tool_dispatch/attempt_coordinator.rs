@@ -307,17 +307,13 @@ pub async fn coordinate_tool_invocation<'run>(
             Ok(crate::CompletionKeyPreparation::Issued(key)) => Some(key),
             Ok(crate::CompletionKeyPreparation::NotNeeded)
             | Ok(crate::CompletionKeyPreparation::Unsupported) => None,
+            // A completion-key prederive failure is a controller error, not a
+            // tool result: it must abort like the attempt's own journal faults
+            // do, so nothing the store reported reaches the model (FIG-3528).
             Err(err) => {
+                abandon_to_open_buffers(context, triggers, captures);
                 return CoordinatedToolInvocation {
-                    launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
-                        &call,
-                        "tool_completion_key_prederive_failed",
-                        err.to_string(),
-                        identity.duration_ms(context, started_at, 0),
-                        attempts,
-                        captures,
-                        triggers,
-                    ))),
+                    launch: ToolCallLaunch::ControllerAborted(err.into()),
                 };
             }
         };
@@ -341,7 +337,10 @@ pub async fn coordinate_tool_invocation<'run>(
             .and_then(crate::RuntimeEffectOutcome::into_tool_attempt_effect);
         let outcome = match outcome {
             Ok(outcome) => outcome,
-            Err(err) => {
+            // A journaled error is the attempt's recorded `Failed` terminal
+            // replaying: that durable record is the attempt's outcome, so it
+            // stays model-visible exactly as it does today (FIG-3528).
+            Err(err) if err.journaled => {
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
                         &call,
@@ -352,6 +351,18 @@ pub async fn coordinate_tool_invocation<'run>(
                         captures,
                         triggers,
                     ))),
+                };
+            }
+            // Every other `Err` is a live controller error — the attempt's
+            // claim, renewal or finalize failed and nothing was journaled.
+            // The tool's own failures arrive inside an `Ok` outcome; a store
+            // fault is handled like a crash at that point: abort the turn so
+            // ADR 0042 recovery redrives the attempt, rather than committing a
+            // `tool_attempt_failed` the tool never produced (FIG-3528).
+            Err(err) => {
+                abandon_to_open_buffers(context, triggers, captures);
+                return CoordinatedToolInvocation {
+                    launch: ToolCallLaunch::ControllerAborted(err),
                 };
             }
         };
@@ -474,19 +485,30 @@ pub async fn coordinate_tool_invocation<'run>(
                     )
                     .await
                 {
+                    // The retry backoff is itself a journaled `Sleep` effect.
+                    // A recorded `Failed` terminal replaying is the sleep's
+                    // durable outcome and stays model-visible; a live store
+                    // fault left nothing recorded and aborts like a crash
+                    // (FIG-3528).
+                    if err.journaled {
+                        return CoordinatedToolInvocation {
+                            launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
+                                &call,
+                                "tool_retry_sleep_failed",
+                                format!(
+                                    "retry sleep for tool `{}` failed after attempt {attempt}: {err}",
+                                    call.tool_name
+                                ),
+                                identity.duration_ms(context, started_at, 0),
+                                attempts,
+                                captures,
+                                triggers,
+                            ))),
+                        };
+                    }
+                    abandon_to_open_buffers(context, triggers, captures);
                     return CoordinatedToolInvocation {
-                        launch: ToolCallLaunch::Done(Box::new(runtime_failure_outcome(
-                            &call,
-                            "tool_retry_sleep_failed",
-                            format!(
-                                "retry sleep for tool `{}` failed after attempt {attempt}: {err}",
-                                call.tool_name
-                            ),
-                            identity.duration_ms(context, started_at, 0),
-                            attempts,
-                            captures,
-                            triggers,
-                        ))),
+                        launch: ToolCallLaunch::ControllerAborted(err),
                     };
                 }
             }

@@ -1184,6 +1184,22 @@ async fn durable_routing_with_a_durable_authority_is_accepted() {
         .expect("durable routing under a durable authority is admitted");
 }
 
+/// An executor resolver that opens a group without dispatching the real
+/// child: `open` resolves every child through the registered resolver before
+/// recording the group, and a resolver answering an executor that can never
+/// run leaves the host's dispatched copy to fail fast while the caller's own
+/// resolved runner remains the child's real execution.
+struct UnrunnableGroupExecutors;
+
+impl super::super::group_drain::GroupExecutors for UnrunnableGroupExecutors {
+    fn executor_for(
+        &self,
+        _envelope: &RuntimeEffectEnvelope,
+    ) -> Option<RuntimeEffectLocalExecutor<'static>> {
+        Some(RuntimeEffectLocalExecutor::unavailable())
+    }
+}
+
 /// §2's lifetime line at the driver: the runner `executor_for` hands back owns
 /// the `LiveOpenerContext` it resolved against. Dropping the opener's
 /// registration guard between resolution and execution must neither stall the
@@ -1191,9 +1207,13 @@ async fn durable_routing_with_a_durable_authority_is_accepted() {
 /// the accepted child completes on the captured context.
 #[tokio::test]
 async fn a_resolved_child_executes_on_the_captured_opener_context() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
+    let controller = Arc::new(crate::NativeRuntimeEffectController::default());
+    let host = Arc::new(crate::NativeEffectHost::with_native_controller(Arc::clone(
+        &controller,
+    )));
     let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::default());
-    let tool_children = ToolChildHost::new(&host, env_store.clone());
+    let tool_children =
+        ToolChildHost::new(&(host.clone() as Arc<dyn EffectHost>), env_store.clone());
     let mut request = request();
     request.execution_env = crate::publish_process_execution_env(
         env_store.as_ref(),
@@ -1220,6 +1240,36 @@ async fn a_resolved_child_executes_on_the_captured_opener_context() {
         crate::GroupWakePolicy::All,
         crate::LoserPolicy::Cancel,
     );
+    // The child's admitted controller fences every effect under the group
+    // binding, so the group must exist on the host's controller before the
+    // claim — an unopened group refuses as a controller error, which under
+    // FIG-3528 aborts the child rather than laundering into a tool result.
+    crate::RuntimeEffectController::register_group_executors(
+        controller.as_ref(),
+        Arc::new(UnrunnableGroupExecutors),
+    )
+    .expect("the stub resolver registers once");
+    crate::RuntimeEffectController::open_effect_group(
+        controller.as_ref(),
+        crate::RuntimeEffectGroup::try_new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    ExecutionScope::turn("child-session", "turn"),
+                    "group:group",
+                )
+                .expect("a valid group address"),
+                crate::RuntimeAttribution::none(),
+                "group",
+            ),
+            "group",
+            vec![envelope.clone()],
+            crate::GroupWakePolicy::All,
+            crate::LoserPolicy::Cancel,
+        )
+        .expect("the one-child group assembles"),
+    )
+    .await
+    .expect("the child's group is open before it claims");
     let lent_dispatch = lent();
     let lent_controller = lent_dispatch
         .effect_controller

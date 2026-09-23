@@ -1000,6 +1000,18 @@ impl RuntimeExecutionContext<'_> {
         let resolution = match outcome.and_then(crate::RuntimeEffectOutcome::into_await_event) {
             Ok(resolution) => resolution,
             Err(err) => {
+                // An unrecorded `Err` from the journaled `AwaitEvent` is a
+                // live controller fault — the await's claim or finalize
+                // failed. Recording it aborts the enclosing effect like a
+                // crash, so the store diagnostic cannot commit as a tool
+                // result the tool did not produce (FIG-3528). A journaled
+                // error is the await's recorded `Failed` terminal replaying
+                // and stays on the result surface. The failure outcome below
+                // is still built for callers whose frame never observes the
+                // nested error.
+                if !err.journaled {
+                    self.record_nested_effect_error(err.clone());
+                }
                 let record = ToolCallRecord {
                     call_id: None,
                     tool: pending.tool_name,

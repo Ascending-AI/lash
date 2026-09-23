@@ -194,14 +194,37 @@ impl RuntimeExecutionContext<'_> {
                 .await
             {
                 Ok(handle) => handle,
-                Err(error) => return fail_batch(error.to_string(), &mut replies),
+                // A live controller error here — the group row's claim
+                // faulted, or the formation boundary refused — recorded
+                // nothing durable. The replies keep this API's contract, but
+                // the error is also recorded so the enclosing cell aborts and
+                // the store diagnostic never commits as a tool result the
+                // tools did not produce (FIG-3528). A journaled error is a
+                // recorded `Failed` terminal replaying and stays on the reply
+                // surface.
+                Err(error) => {
+                    if !error.journaled {
+                        self.record_nested_effect_error(error.clone());
+                    }
+                    return fail_batch(error.to_string(), &mut replies);
+                }
             };
             let mut settled = match self
                 .consume_all_tool_child_settlements(handle, &leaves)
                 .await
             {
                 Ok(settled) => settled,
-                Err(error) => return fail_batch(error.to_string(), &mut replies),
+                // Same split as the open: a live fault while consuming or
+                // incorporating settlements aborts the enclosing cell; a
+                // journaled error — a child's recorded `Failed` terminal
+                // surfacing through `settlement.outcome` — stays
+                // model-visible (FIG-3528).
+                Err(error) => {
+                    if !error.journaled {
+                        self.record_nested_effect_error(error.clone());
+                    }
+                    return fail_batch(error.to_string(), &mut replies);
+                }
             };
             // The group reports settlement in child positions; the caller
             // counts in original call positions. Dropping an out-of-range
