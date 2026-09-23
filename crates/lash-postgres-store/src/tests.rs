@@ -914,11 +914,12 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     .expect("insert claim-fence session head");
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs (
-            input_id, session_id, ingress_json, state, input_json, enqueued_at_ms,
-            claim_id, claim_owner_id, claim_owner_incarnation_id, claim_token,
-            claim_fencing_token, claim_session_lease_generation
+            input_id, session_id, ingress_json, state, input_json, submitted_ingress_json,
+            submission_digest, enqueued_at_ms, claim_id, claim_owner_id,
+            claim_owner_incarnation_id, claim_token, claim_fencing_token,
+            claim_session_lease_generation
          )
-         VALUES ($1, $2, '{}', $3, '{}', 1, $4, 'owner-a', 'incarnation-a', $5, 1, 1)",
+         VALUES ($1, $2, '{}', $3, '{}', '{}', 'digest', 1, $4, 'owner-a', 'incarnation-a', $5, 1, 1)",
     )
     .bind(&input_id)
     .bind(session_id.as_str())
@@ -1470,11 +1471,12 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
     };
     sqlx::query(
         "INSERT INTO lash_pending_turn_inputs (
-            input_id, session_id, ingress_json, state, input_json, enqueued_at_ms,
-            claim_id, claim_owner_id, claim_owner_incarnation_id, claim_token,
-            claim_fencing_token, claim_session_lease_generation
+            input_id, session_id, ingress_json, state, input_json, submitted_ingress_json,
+            submission_digest, enqueued_at_ms, claim_id, claim_owner_id,
+            claim_owner_incarnation_id, claim_token, claim_fencing_token,
+            claim_session_lease_generation
          )
-         VALUES ($1, $2, '{}', $3, '{}', 1, 'claim-b', 'owner-b', 'incarnation-b', 'token-b', 2, 9)",
+         VALUES ($1, $2, '{}', $3, '{}', '{}', 'digest', 1, 'claim-b', 'owner-b', 'incarnation-b', 'token-b', 2, 9)",
     )
     .bind(&input_id)
     .bind(session_id.as_str())

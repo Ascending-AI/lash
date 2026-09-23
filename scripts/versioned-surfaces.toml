@@ -317,6 +317,19 @@ paths = ["crates/lash-core-store/src/process_identity.rs"]
 symbols = ["ProcessWakeDelivery"]
 
 [[surface]]
+constant = "TURN_INPUT_SUBMISSION_FAMILY_VERSION"
+constant_path = "crates/lash-core-store/src/turn_input_vocabulary.rs"
+description = "stable pending turn-input submission digest compared by source-key replay (FIG-3544)"
+
+# Stored digests are compared for equality against fresh ones, so the preimage
+# grammar and the `TurnInput` serde form it hashes as one canonical JSON leaf
+# both move the family version.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/turn_input_vocabulary.rs"]
+symbols = ["turn_input_submission_preimage", "TurnInput", "InputItem"]
+
+[[surface]]
 constant = "FRAME_KEY_VERSION"
 constant_path = "crates/lash-sansio/src/frame_key.rs"
 description = "stable agent-frame key hash preimage"

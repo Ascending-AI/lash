@@ -203,7 +203,9 @@ pub enum RuntimeErrorCode {
     /// result; differing content cannot, because the identity is already bound.
     /// Retrying the same changed payload fails identically, so this is terminal
     /// rather than retryable. Hosts see it as one refusal vocabulary at the
-    /// tool-intent front door (FIG-1489).
+    /// tool-intent front door (FIG-1489), and at turn-input admission when a
+    /// source key is re-presented with a submission whose digest differs from
+    /// the one the row was admitted under (FIG-3544).
     DurableIdentityConflict,
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
@@ -359,8 +361,26 @@ pub enum RuntimeErrorCode {
     #[non_exhaustive]
     ForeignCode(String),
 }
+/// Map a turn-input admission failure to the host's error vocabulary.
+///
+/// A source-key conflict is the host's own contract violation (the same key
+/// with a different submission), so it surfaces typed as
+/// [`RuntimeErrorCode::DurableIdentityConflict`]; every other admission failure
+/// is a store commit failure.
+pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
+    match err {
+        err @ crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. } => {
+            RuntimeError::new(RuntimeErrorCode::DurableIdentityConflict, err.to_string())
+        }
+        err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
+    }
+}
+
 pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
+        err @ crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. } => {
+            runtime_error_from_turn_input_admission(err)
+        }
         crate::store::StoreError::Contended => RuntimeError::new(
             RuntimeErrorCode::StoreCommitContended,
             "store commit is contended; retry the identical operation unchanged",

@@ -899,7 +899,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     let enqueued = store
         .enqueue_pending_turn_input(draft)
         .await
-        .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()))?;
+        .map_err(super::error::runtime_error_from_turn_input_admission)?;
     if is_next_turn {
         queued_work.notify_session_work(
             crate::SessionWorkTarget::Session(SessionId::from(

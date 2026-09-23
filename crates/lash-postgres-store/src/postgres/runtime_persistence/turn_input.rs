@@ -518,6 +518,11 @@ impl TurnInputStore for PostgresSessionStore {
             )
         });
         let state = lash_core::TurnInputState::open(draft.ingress.clone());
+        let submission_digest = draft.submission_digest().map_err(|err| {
+            StoreError::Backend(format!(
+                "failed to digest pending turn input submission: {err}"
+            ))
+        })?;
         let ingress_json = encode_json(&draft.ingress)?;
         let input_json = encode_json(&draft.input)?;
         let input = if let Some(source_key) = draft.source_key.as_deref() {
@@ -535,15 +540,14 @@ impl TurnInputStore for PostgresSessionStore {
             .bind(state.as_str())
             .bind(&input_json)
             .bind(now as i64)
+            .bind(&submission_digest)
             .fetch_one(&mut *tx)
             .await
             .map_err(|err| pending_turn_input_insert_error(err, &draft.session_id, &input_id))?;
+            let existing_digest: String =
+                row.try_get("submission_digest").map_err(store_sqlx_error)?;
             let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
-            if !draft.submitted_content_matches(&input).map_err(|err| {
-                StoreError::Backend(format!(
-                    "failed to compare pending turn input submission: {err}"
-                ))
-            })? {
+            if existing_digest != submission_digest {
                 return Err(StoreError::PendingTurnInputSourceKeyConflict {
                     session_id: draft.session_id.clone(),
                     source_key: source_key.to_string(),
@@ -566,6 +570,7 @@ impl TurnInputStore for PostgresSessionStore {
             .bind(state.as_str())
             .bind(&input_json)
             .bind(now as i64)
+            .bind(&submission_digest)
             .execute(&mut *tx)
             .await
             .map_err(|err| pending_turn_input_insert_error(err, &draft.session_id, &input_id))?;

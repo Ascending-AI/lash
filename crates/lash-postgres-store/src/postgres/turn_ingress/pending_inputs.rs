@@ -26,11 +26,15 @@ lash_store_sql::statements! {
         /// PostgreSQL draws `enqueue_seq` from the column's sequence before the
         /// insert so the source-key path knows the value it is about to write;
         /// SQLite lets the row allocate its own.
+        ///
+        /// `?5` is written to both `ingress_json` (the mutable current scope)
+        /// and `submitted_ingress_json` (immutable); `?9` is the submission
+        /// digest.
         insert_new = "INSERT INTO pending_turn_inputs (
                  enqueue_seq, input_id, session_id, source_key, ingress_json, state,
-                 input_json, enqueued_at_ms
+                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?9, ?8)";
 
         /// Enqueue input `?2`, or hand back the row session `?3` already filed
         /// under the same source key.
@@ -40,17 +44,21 @@ lash_store_sql::statements! {
         /// submitter, and the no-op `DO UPDATE` is what makes `RETURNING` hand
         /// back the existing row rather than nothing. SQLite reads the absence
         /// under the same write lock it inserts under and has no counterpart.
+        ///
+        /// `RETURNING` appends the row's admission-time `submission_digest`
+        /// after the decoder's columns: the caller compares it against the
+        /// draft's digest, never the row's mutable current ingress (FIG-3544).
         insert_or_adopt_existing = "INSERT INTO pending_turn_inputs (
                  enqueue_seq, input_id, session_id, source_key, ingress_json, state,
-                 input_json, enqueued_at_ms
+                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?9, ?8)
              ON CONFLICT (session_id, source_key) DO UPDATE
                  SET source_key = pending_turn_inputs.source_key
              RETURNING enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation";
+                    claim_token, claim_session_lease_generation, submission_digest";
 
         /// Input `?2` of session `?1`, locked for the caller's transaction.
         select_by_id_for_update = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,

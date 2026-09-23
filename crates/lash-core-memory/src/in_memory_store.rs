@@ -56,6 +56,10 @@ pub struct InMemoryQueuedBatch {
 pub struct InMemoryPendingTurnInput {
     input: crate::PendingTurnInput,
     claim: ClaimHold,
+    /// [`PendingTurnInputDraft::submission_digest`](crate::PendingTurnInputDraft::submission_digest)
+    /// at admission. Immutable — a Defer rewrites the state's scope, never
+    /// this — and the only value source-key replay compares.
+    submission_digest: String,
 }
 
 #[derive(Clone)]

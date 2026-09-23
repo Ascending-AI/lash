@@ -25,7 +25,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 117
+version 118
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -144,6 +144,8 @@ table lash_pending_turn_inputs
   column session_id text not-null
   column source_key text nullable
   column state text not-null
+  column submission_digest text not-null
+  column submitted_ingress_json text not-null
   unique (input_id)
   unique (session_id, source_key)
   primary-key (enqueue_seq)

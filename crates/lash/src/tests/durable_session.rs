@@ -1228,3 +1228,49 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
     );
     Ok(())
 }
+
+/// A host that reuses an enqueue id for a different submission is told so with
+/// a typed, terminal error rather than a generic store failure; an identical
+/// retry replays the original acceptance (FIG-3544).
+#[tokio::test]
+async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() -> Result<()> {
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .store_factory(Arc::new(
+            lash_core::facade_support::InMemorySessionStoreFactory::new(),
+        ))
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())?;
+    crate::tests::create_catalog_session(&core, "fig3544-enqueue-conflict").await?;
+    let durable = core.session("fig3544-enqueue-conflict").durable().await?;
+
+    let first = durable
+        .enqueue(TurnInput::text("original"))
+        .id("retry-me")
+        .send()
+        .await?;
+    let replay = durable
+        .enqueue(TurnInput::text("original"))
+        .id("retry-me")
+        .send()
+        .await?;
+    assert_eq!(replay, first, "an identical retry replays the acceptance");
+
+    let conflict = durable
+        .enqueue(TurnInput::text("changed"))
+        .id("retry-me")
+        .send()
+        .await
+        .expect_err("a changed submission under a used id is refused");
+    let EmbedError::Runtime(error) = &conflict else {
+        panic!("expected a typed runtime error, got {conflict:?}");
+    };
+    assert_eq!(
+        error.code,
+        lash_core::RuntimeErrorCode::DurableIdentityConflict,
+        "the refusal is typed, not a generic store commit failure"
+    );
+    assert!(conflict.is_terminal() && !conflict.is_retryable());
+    Ok(())
+}

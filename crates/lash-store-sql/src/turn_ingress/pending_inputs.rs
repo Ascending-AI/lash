@@ -16,7 +16,7 @@ pub const COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingres
 /// The columns an enqueue writes on SQLite, where `enqueue_seq` is the table's
 /// `INTEGER PRIMARY KEY AUTOINCREMENT` and is never bound.
 pub const INSERT_COLUMNS: &str = "input_id, session_id, source_key, ingress_json, state,
-     input_json, enqueued_at_ms";
+     input_json, submitted_ingress_json, submission_digest, enqueued_at_ms";
 
 /// The columns an enqueue writes on PostgreSQL.
 ///
@@ -25,7 +25,15 @@ pub const INSERT_COLUMNS: &str = "input_id, session_id, source_key, ingress_json
 /// it is about to write; SQLite lets the row allocate its own. The durable
 /// column is identical, only who allocates it forks.
 pub const INSERT_COLUMNS_WITH_SEQ: &str = "enqueue_seq, input_id, session_id, source_key,
-     ingress_json, state, input_json, enqueued_at_ms";
+     ingress_json, state, input_json, submitted_ingress_json, submission_digest,
+     enqueued_at_ms";
+
+/// The facts source-key replay consults (FIG-3544).
+///
+/// Narrow for the same reason [`SETTLEMENT_COLUMNS`] is: the replay verdict
+/// compares only the admission-time digest, so deciding it never decodes the
+/// unbounded `input_json`; the full row is read back only on a match.
+pub const REPLAY_COLUMNS: &str = "input_id, submission_digest";
 
 /// The facts the settlement verdict
 /// [`require_settleable_turn_input`](lash_core::store_backend_support::require_settleable_turn_input)
@@ -123,6 +131,11 @@ crate::statements! {
         /// The ingress is rewritten, not preserved: a row pinned to a turn
         /// that is over must stop naming it, or the next claim scan pins it to
         /// the same dead turn (FIG-1573).
+        ///
+        /// Only the mutable `ingress_json` moves. `submitted_ingress_json` and
+        /// `submission_digest` are written once at admission and never
+        /// updated, so an identical source-key retry still matches after
+        /// this rewrite (FIG-3544).
         defer_to_next_turn = "UPDATE pending_turn_inputs
              SET state = ?3,
                  ingress_json = ?4,

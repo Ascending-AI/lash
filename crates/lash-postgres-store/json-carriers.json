@@ -27,6 +27,10 @@
     "verdict": "deliberately-excluded",
     "reason": "TurnInputIngress is a shared admission protocol sum type; enroll together with its cross-backend representation."
   },
+  "lash_pending_turn_inputs.submitted_ingress_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "The immutable admission-time copy of the same TurnInputIngress lash_pending_turn_inputs.ingress_json carries; it inherits that deliberately-excluded verdict."
+  },
   "lash_pending_turn_inputs.input_json": {
     "verdict": "deliberately-excluded",
     "reason": "TurnInput includes host-facing content and attachments and has no bounded JsonSchema durability contract yet."

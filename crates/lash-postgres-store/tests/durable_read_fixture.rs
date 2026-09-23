@@ -117,6 +117,9 @@ const USAGE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const RECEIPT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-107-061de77f7/postgres-expected.json",
 ];
+const SUBMISSION_DIGEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-108-cc0b9eecf/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -261,7 +264,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 117);
+    assert_eq!(PostgresStorage::schema_version(), 118);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -626,6 +629,11 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("remove retired observer selection from the refusal fixture catalog");
+    // Component 116 (FIG-3544) adds the immutable submission columns. The
+    // refusal fixture's pending input predates them, so this author-time
+    // refresh writes what admission would have: its ingress as submitted and
+    // the digest of that submission.
+    add_prior_fixture_submission_columns(&pool).await;
     // The enclosing catalog uses the current session-metadata constraints;
     // only the deliberately obsolete checkpoint component remains historical.
     for constraint in lash_core::store_backend_support::required_constraints::EXPECTED_CONSTRAINTS
@@ -719,6 +727,51 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     )
     .expect("write refreshed Postgres refusal fixture catalog");
     drop_fixture_schema(&database_url).await;
+}
+
+// Author-time refresh only: backfill the component-116 submission columns.
+async fn add_prior_fixture_submission_columns(pool: &sqlx::PgPool) {
+    sqlx::raw_sql(
+        "ALTER TABLE lash_pending_turn_inputs
+             ADD COLUMN IF NOT EXISTS submitted_ingress_json TEXT,
+             ADD COLUMN IF NOT EXISTS submission_digest TEXT;",
+    )
+    .execute(pool)
+    .await
+    .expect("add the component-116 submission columns to the refusal fixture catalog");
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        "SELECT input_id, session_id, ingress_json, input_json FROM lash_pending_turn_inputs",
+    )
+    .fetch_all(pool)
+    .await
+    .expect("read the refusal fixture's pending inputs");
+    for (input_id, session_id, ingress_json, input_json) in rows {
+        let digest = lash_core::PendingTurnInputDraft::new(
+            session_id,
+            serde_json::from_str(&ingress_json).expect("decode fixture ingress"),
+            serde_json::from_str(&input_json).expect("decode fixture input"),
+        )
+        .submission_digest()
+        .expect("digest the fixture submission");
+        sqlx::query(
+            "UPDATE lash_pending_turn_inputs
+                SET submitted_ingress_json = ingress_json, submission_digest = $2
+              WHERE input_id = $1",
+        )
+        .bind(&input_id)
+        .bind(digest)
+        .execute(pool)
+        .await
+        .expect("backfill the fixture submission columns");
+    }
+    sqlx::raw_sql(
+        "ALTER TABLE lash_pending_turn_inputs
+             ALTER COLUMN submitted_ingress_json SET NOT NULL,
+             ALTER COLUMN submission_digest SET NOT NULL;",
+    )
+    .execute(pool)
+    .await
+    .expect("require the component-116 submission columns");
 }
 
 // Author-time envelope refresh only: retain the deliberately obsolete leaf bytes

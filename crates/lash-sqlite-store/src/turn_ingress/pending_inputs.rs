@@ -13,19 +13,25 @@ lash_store_sql::statements! {
         /// `enqueue_seq` is this table's `INTEGER PRIMARY KEY AUTOINCREMENT` on
         /// SQLite and is never bound; PostgreSQL draws it from the column's
         /// sequence first so its upsert path knows the value.
+        ///
+        /// `?4` is written to both `ingress_json` (the mutable current scope)
+        /// and `submitted_ingress_json` (immutable); `?7` is the submission
+        /// digest.
         insert_new = "INSERT INTO pending_turn_inputs (
                  input_id, session_id, source_key, ingress_json, state,
-                 input_json, enqueued_at_ms
+                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?4, ?7, ?8)";
 
-        /// The id session `?1` already filed under source key `?2`.
+        /// The id and admission-time submission digest session `?1` already
+        /// filed under source key `?2`.
         ///
-        /// SQLite reads the existing id and then reads the row back, under one
-        /// write lock. PostgreSQL cannot hold "read the absence, then insert"
-        /// atomic under READ COMMITTED, so it detects the conflict in the
-        /// insert itself and has no counterpart to this read.
-        select_id_by_source_key = "SELECT input_id
+        /// SQLite compares the digest and reads the row back only on a match,
+        /// under one write lock, so the unbounded `input_json` is never read to
+        /// decide a replay. PostgreSQL cannot hold "read the absence, then
+        /// insert" atomic under READ COMMITTED, so it detects the conflict in
+        /// the insert itself and has no counterpart to this read.
+        select_id_by_source_key = "SELECT input_id, submission_digest
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2";
 

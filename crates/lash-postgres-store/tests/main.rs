@@ -27,6 +27,8 @@ mod postgres_lease_multiconnection;
 mod pre_frame_key_cutover;
 #[path = "pre_sleep_spec_cutover.rs"]
 mod pre_sleep_spec_cutover;
+#[path = "pre_submission_digest_cutover.rs"]
+mod pre_submission_digest_cutover;
 #[path = "process_prune_reclaim.rs"]
 mod process_prune_reclaim;
 #[path = "refcount_benchmark.rs"]

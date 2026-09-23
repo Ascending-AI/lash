@@ -43,6 +43,7 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     "lash.trigger-subscription-address",
     "lash.trigger-subscription-definition",
     "lash.trigger-subscription-key",
+    "lash.turn-input-submission",
 ];
 
 /// Grandfathered families whose preimages omit the framing header (ADR 0097).

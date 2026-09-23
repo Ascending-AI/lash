@@ -386,6 +386,8 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     ingress_json      TEXT NOT NULL,
     state             TEXT NOT NULL,
     input_json        TEXT NOT NULL,
+    submitted_ingress_json TEXT NOT NULL,
+    submission_digest TEXT NOT NULL,
     enqueued_at_ms    INTEGER NOT NULL,
     claim_id          TEXT,
     claim_owner_id    TEXT,
@@ -764,7 +766,13 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// on a missing, invalid, or unsupported version instead of skipping the
 /// row. Pre-versioned receipts are refused; a pre-76 database is rejected at
 /// open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 76;
+/// Bumped to 77 for FIG-3544: `pending_turn_inputs` gains the immutable
+/// `submitted_ingress_json` and `submission_digest` columns written once at
+/// admission, and source-key replay compares the digest instead of the row's
+/// mutable current ingress. The digest is computed in Rust from the submitted
+/// payload, so no DDL can backfill it; a pre-77 database is rejected at open
+/// and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 77;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -1750,42 +1758,46 @@ mod check_constraint_tests {
         assert_check_rejects(
             &core,
             "INSERT INTO pending_turn_inputs (
-                 input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+                 input_id, session_id, ingress_json, state, input_json,
+                 submitted_ingress_json, submission_digest, enqueued_at_ms
              ) VALUES (
                  'bad-turn-input-state', 'session',
                  '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
-                 'waiting', '{}', 0
+                 'waiting', '{}', '{}', 'digest', 0
              )",
             "ck_pending_turn_inputs_state",
         );
         assert_check_rejects(
             &core,
             "INSERT INTO pending_turn_inputs (
-                 input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+                 input_id, session_id, ingress_json, state, input_json,
+                 submitted_ingress_json, submission_digest, enqueued_at_ms
              ) VALUES (
                  'bad-turn-input-pair', 'session', '{\"scope\":\"next_turn\"}',
-                 'pending_active', '{}', 0
+                 'pending_active', '{}', '{}', 'digest', 0
              )",
             "ck_pending_turn_inputs_state_ingress",
         );
         assert_check_rejects(
             &core,
             "INSERT INTO pending_turn_inputs (
-                 input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+                 input_id, session_id, ingress_json, state, input_json,
+                 submitted_ingress_json, submission_digest, enqueued_at_ms
              ) VALUES (
                  'bad-turn-input-accepted-pair', 'session', '{\"scope\":\"next_turn\"}',
-                 'accepted', '{}', 0
+                 'accepted', '{}', '{}', 'digest', 0
              )",
             "ck_pending_turn_inputs_state_ingress",
         );
         assert_check_rejects(
             &core,
             "INSERT INTO pending_turn_inputs (
-                 input_id, session_id, ingress_json, state, input_json, enqueued_at_ms
+                 input_id, session_id, ingress_json, state, input_json,
+                 submitted_ingress_json, submission_digest, enqueued_at_ms
              ) VALUES (
                  'bad-turn-input-deferred-pair', 'session',
                  '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
-                 'deferred_next_turn', '{}', 0
+                 'deferred_next_turn', '{}', '{}', 'digest', 0
              )",
             "ck_pending_turn_inputs_state_ingress",
         );

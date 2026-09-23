@@ -150,3 +150,65 @@ fn state_spellings_stay_stable() {
         );
     }
 }
+
+fn submission(ingress: TurnInputIngress, text: &str) -> PendingTurnInputDraft {
+    PendingTurnInputDraft::new("session-a", ingress, TurnInput::text(text))
+}
+
+fn digest(draft: &PendingTurnInputDraft) -> String {
+    draft.submission_digest().expect("digest a text submission")
+}
+
+#[test]
+fn submission_digest_is_pinned() {
+    assert_eq!(
+        digest(&submission(active(), "hello")),
+        "turn-input-submission:v1:blake3:9e21f41b5602f8fc559eb39be1aa37d809851e016e398c094ae90e1fa234a378"
+    );
+    assert_eq!(
+        digest(&submission(next(), "hello")),
+        "turn-input-submission:v1:blake3:23da023c1ede8d24906bc158f1149eecbdd8b742409841a3ccc7c4d7771e9981"
+    );
+}
+
+#[test]
+fn submission_digest_ignores_generated_and_lookup_identity() {
+    let base = digest(&submission(active(), "hello"));
+    assert_eq!(
+        digest(
+            &PendingTurnInputDraft::new("session-b", active(), TurnInput::text("hello"))
+                .with_input_id("ti:generated")
+                .with_source_key("host:retry")
+        ),
+        base,
+        "session id, source key and input id locate the row; they are not the submission"
+    );
+}
+
+#[test]
+fn submission_digest_covers_every_submitted_field() {
+    let base = digest(&submission(active(), "hello"));
+    for (changed, field) in [
+        (submission(active(), "hello!"), "input"),
+        (
+            submission(
+                TurnInputIngress::active_turn("turn-b", TurnInputCheckpointBoundary::AfterWork),
+                "hello",
+            ),
+            "target turn",
+        ),
+        (
+            submission(
+                TurnInputIngress::active_turn(
+                    "turn-a",
+                    TurnInputCheckpointBoundary::BeforeCompletion,
+                ),
+                "hello",
+            ),
+            "minimum boundary",
+        ),
+        (submission(next(), "hello"), "scope"),
+    ] {
+        assert_ne!(digest(&changed), base, "the {field} is submission identity");
+    }
+}
