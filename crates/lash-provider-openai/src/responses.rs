@@ -46,7 +46,7 @@ impl OpenAiCompatibleProvider {
             compat.strict_tools,
             &compat.schema_capabilities,
         )?;
-        let input = shared::build_responses_input(req, shared::ResponsesInputOptions::OPENAI);
+        let input = shared::build_responses_input(req);
         let policy = resolve_generation_policy(
             &req.generation,
             &self.options,

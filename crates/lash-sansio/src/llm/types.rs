@@ -413,11 +413,13 @@ pub enum LlmContentBlock {
         input_json: String,
         replay: Option<ProviderReplayMeta>,
     },
-    /// User tool-result block. Some providers allow multiple per user turn;
-    /// adapters that want one-per-message split as needed.
+    /// The one tool-result block answering `call_id`: the tool's text and
+    /// attachment blocks in order. Each adapter renders it as exactly one
+    /// native result for the call, interleaving attachments where the wire
+    /// allows and degrading as documented where it does not.
     ToolResult {
         call_id: String,
-        content: String,
+        content: Vec<crate::ModelToolReturnPart>,
         /// Name of the tool that produced this result. Some provider replay
         /// formats require this; others ignore it.
         tool_name: Option<String>,
@@ -897,15 +899,13 @@ pub struct LlmRequest {
 }
 
 impl LlmRequest {
-    /// Attachment sources in message order, derived from their owning blocks.
+    /// Attachment sources in message order, derived from their owning blocks,
+    /// including the attachments inside tool results.
     pub fn attachments(&self) -> Vec<&AttachmentSource> {
         self.messages
             .iter()
             .flat_map(|message| message.blocks.iter())
-            .filter_map(|block| match block {
-                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
-                _ => None,
-            })
+            .flat_map(LlmContentBlock::attachment_sources)
             .collect()
     }
 

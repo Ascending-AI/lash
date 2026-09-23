@@ -641,7 +641,9 @@ fn feedback_tool_results(wire: Wire) {
             .map(|i| B::ToolResult {
                 call_id: format!("call{i}"),
                 tool_name: Some("lookup".into()),
-                content: format!("RESULT{i}"),
+                content: vec![lash_core::facade_support::ModelToolReturnPart::text(
+                    format!("RESULT{i}"),
+                )],
             })
             .collect::<Vec<_>>();
         let mut messages = vec![

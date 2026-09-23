@@ -132,7 +132,13 @@ impl From<lash_core::Part> for RemotePart {
         Self {
             id: value.id().to_string(),
             kind: value.kind().into(),
-            content: value.content().to_string(),
+            content: value
+                .tool_result_content()
+                .is_none()
+                .then(|| value.content().into_owned()),
+            blocks: value
+                .tool_result_content()
+                .map(|blocks| blocks.iter().cloned().map(Into::into).collect()),
             attachment: value.attachment().cloned().map(Into::into),
             tool_call_id: value.tool_call_id().map(str::to_string),
             tool_name: value.tool_name().map(str::to_string),

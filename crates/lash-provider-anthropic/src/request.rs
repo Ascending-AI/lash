@@ -83,11 +83,39 @@ impl AnthropicProvider {
             }))),
             LlmContentBlock::ToolResult {
                 call_id, content, ..
-            } => Ok(Some(json!({
-                "type": "tool_result",
-                "tool_use_id": normalize_tool_call_id(call_id)?,
-                "content": content.clone(),
-            }))),
+            } => {
+                let mut result = json!({
+                    "type": "tool_result",
+                    "tool_use_id": normalize_tool_call_id(call_id)?,
+                });
+                // One result per call: a lone text block is the plain string
+                // form; anything else is the ordered text/image/document array.
+                match content.as_slice() {
+                    [] => {}
+                    [ModelToolReturnPart::Text { text }] => result["content"] = json!(text),
+                    blocks => {
+                        result["content"] = Value::Array(
+                            blocks
+                                .iter()
+                                .filter_map(|block| match block {
+                                    ModelToolReturnPart::Text { text }
+                                        if text.trim().is_empty() =>
+                                    {
+                                        None
+                                    }
+                                    ModelToolReturnPart::Text { text } => {
+                                        Some(Self::text_block_value(text))
+                                    }
+                                    ModelToolReturnPart::Attachment(source) => {
+                                        Self::attachment_block_value(req, source)
+                                    }
+                                })
+                                .collect(),
+                        );
+                    }
+                }
+                Ok(Some(result))
+            }
             LlmContentBlock::Reasoning { text, replay, .. } => {
                 // Anthropic requires a signature to replay a thinking
                 // block. If we don't have one (e.g. aborted stream, or
@@ -451,10 +479,11 @@ impl AnthropicProvider {
             })?;
         let req = safe_request.as_ref();
         for (message_index, message) in req.messages.iter().enumerate() {
-            for source in message.blocks.iter().filter_map(|block| match block {
-                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
-                _ => None,
-            }) {
+            for source in message
+                .blocks
+                .iter()
+                .flat_map(LlmContentBlock::attachment_sources)
+            {
                 let validation = (|| {
                     if matches!(
                         source,

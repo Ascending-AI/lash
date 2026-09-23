@@ -927,7 +927,7 @@ impl From<core_llm::LlmContentBlock> for RemoteLlmContentBlock {
                 tool_name,
             } => Self::ToolResult {
                 call_id,
-                content,
+                content: content.into_iter().map(Into::into).collect(),
                 tool_name,
             },
             core_llm::LlmContentBlock::Reasoning { text, replay } => Self::Reasoning {
@@ -971,7 +971,10 @@ impl TryFrom<RemoteLlmContentBlock> for core_llm::LlmContentBlock {
                 tool_name,
             } => Self::ToolResult {
                 call_id,
-                content,
+                content: content
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()?,
                 tool_name,
             },
             RemoteLlmContentBlock::Reasoning { text, replay } => Self::Reasoning {

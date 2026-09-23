@@ -443,12 +443,13 @@ fn append_borrowed_entry_image_blocks(
 ) {
     match entry.payload {
         BorrowedChronologicalPayload::Message(message) => {
-            for part in message.parts {
-                let Some(attachment) = part.attachment() else {
-                    continue;
-                };
+            for source in message
+                .parts
+                .iter()
+                .flat_map(|part| part.attachment_sources())
+            {
                 blocks.push(LlmContentBlock::Attachment {
-                    source: Box::new(attachment.source.clone()),
+                    source: Box::new(source.clone()),
                 });
             }
         }
@@ -503,16 +504,19 @@ fn message_text(
 fn message_attachment_refs(parts: &[lash_core::Part]) -> Vec<RlmAttachmentRef> {
     parts
         .iter()
-        .filter_map(|part| {
-            let attachment = part.attachment()?;
-            let (media_type, label, source, reference) = attachment_summary(&attachment.source);
-            Some(RlmAttachmentRef {
-                id: part.id().to_string(),
-                media_type,
-                label,
-                source,
-                reference,
-            })
+        .flat_map(|part| {
+            part.identified_attachment_sources()
+                .into_iter()
+                .map(|(id, attachment)| {
+                    let (media_type, label, source, reference) = attachment_summary(attachment);
+                    RlmAttachmentRef {
+                        id,
+                        media_type,
+                        label,
+                        source,
+                        reference,
+                    }
+                })
         })
         .collect()
 }
@@ -554,7 +558,8 @@ fn message_history_text_parts(parts: &[lash_core::Part]) -> String {
                 lash_core::PartKind::Text | lash_core::PartKind::Prose
             )
         })
-        .map(|part| part.content().trim())
+        .filter_map(|part| part.text_content())
+        .map(str::trim)
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     chunks.join("\n\n")

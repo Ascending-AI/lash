@@ -25,7 +25,12 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
       {
         "ToolResult": {
           "call_id": "provider-id",
-          "content": "runtime error\n\nNext: the host failed while handling this cell. Retry it; if the failure persists, report the host problem.",
+          "content": [
+            {
+              "type": "text",
+              "text": "runtime error\n\nNext: the host failed while handling this cell. Retry it; if the failure persists, report the host problem."
+            }
+          ],
           "tool_name": "execute_code"
         }
       }

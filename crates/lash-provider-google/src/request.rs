@@ -70,10 +70,11 @@ impl GoogleOAuthProvider {
     )]
     pub(crate) fn validate_attachments(req: &LlmRequest) -> Result<(), LlmTransportError> {
         for (message_index, message) in req.messages.iter().enumerate() {
-            for source in message.blocks.iter().filter_map(|block| match block {
-                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
-                _ => None,
-            }) {
+            for source in message
+                .blocks
+                .iter()
+                .flat_map(LlmContentBlock::attachment_sources)
+            {
                 let validation = (|| {
                     let supported = req
                         .model_capability
@@ -137,6 +138,17 @@ impl GoogleOAuthProvider {
         let safe_request = self.reasoning_retention_safe_request(req)?;
         let req = safe_request.as_ref();
         let mut out: Vec<Value> = Vec::new();
+        let attachment_part = |source: &AttachmentSource| {
+            attachment_parts
+                .iter()
+                .find(|(candidate, _)| candidate == source)
+                .map(|(_, part)| part.clone())
+                .unwrap_or_else(|| Self::inline_attachment_part(req, source))
+        };
+        // Gemini 3 accepts media inside a function response; older dialects
+        // (and Claude on Vertex) take it only as ordinary user parts.
+        let multimodal_function_response =
+            matches!(req.model_capability.google_dialect, GoogleDialect::Gemini3);
         let missing_signature = match req.model_capability.google_dialect {
             GoogleDialect::Gemini3 => Some("skip_thought_signature_validator"),
             GoogleDialect::Legacy | GoogleDialect::ClaudeOnVertex => None,
@@ -184,13 +196,7 @@ impl GoogleOAuthProvider {
                     }
                     LlmContentBlock::Attachment { source } => {
                         if matches!(msg.role, LlmRole::User | LlmRole::System) {
-                            parts.push(
-                                attachment_parts
-                                    .iter()
-                                    .find(|(candidate, _)| candidate == source.as_ref())
-                                    .map(|(_, part)| part.clone())
-                                    .unwrap_or_else(|| Self::inline_attachment_part(req, source)),
-                            );
+                            parts.push(attachment_part(source));
                         }
                     }
                     LlmContentBlock::ToolCall {
@@ -223,13 +229,47 @@ impl GoogleOAuthProvider {
                         content,
                         tool_name,
                     } => {
-                        parts.push(json!({
+                        // One function response per call. Its text keeps
+                        // `[Attachment N]` markers where attachments sat. On
+                        // Gemini 3 the attachments Google accepts inside a
+                        // function response ride in its `parts`; every other
+                        // attachment (and all of them on older dialects)
+                        // follows the response as user parts, each after its
+                        // marker.
+                        let mut response = json!({
                             "functionResponse": {
                                 "id": call_id,
                                 "name": tool_name.clone().unwrap_or_else(|| "tool".to_string()),
-                                "response": { "output": content },
+                                "response": { "output": tool_result_text(content) },
                             }
-                        }));
+                        });
+                        let mut inside = Vec::new();
+                        let mut after = Vec::new();
+                        for (index, source) in content
+                            .iter()
+                            .filter_map(ModelToolReturnPart::attachment)
+                            .enumerate()
+                        {
+                            if multimodal_function_response
+                                && function_response_part_accepts(source)
+                            {
+                                inside.push(attachment_part(source));
+                            } else {
+                                after
+                                    .push(json!({ "text": format!("[Attachment {}]", index + 1) }));
+                                after.push(attachment_part(source));
+                            }
+                        }
+                        if !inside.is_empty() {
+                            response["functionResponse"]["parts"] = Value::Array(inside);
+                        }
+                        parts.push(response);
+                        if !after.is_empty() {
+                            parts.push(json!({
+                                "text": format!("Attachments from tool result {call_id}:")
+                            }));
+                            parts.extend(after);
+                        }
                     }
                     LlmContentBlock::Reasoning { text, replay, .. } => {
                         // Gemini replays reasoning as a `thought:true`
@@ -482,4 +522,16 @@ impl GoogleOAuthProvider {
             .with_kind(ProviderFailureKind::Validation)
         })
     }
+}
+
+/// Whether Gemini accepts `source` as a multimodal function-response part.
+/// Google documents images (PNG, JPEG, WebP) and documents (PDF, plain text)
+/// there; audio, video and anything else must travel as ordinary user parts.
+fn function_response_part_accepts(source: &AttachmentSource) -> bool {
+    source.media_type().is_some_and(|media_type| {
+        matches!(
+            media_type.as_str(),
+            "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain"
+        )
+    })
 }

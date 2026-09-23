@@ -920,7 +920,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
                 .flat_map(|message| message.blocks.iter())
                 .collect::<Vec<_>>();
             assert!(blocks.iter().any(|block| matches!(block, lash_core::llm::types::LlmContentBlock::ToolCall { call_id, input_json, .. } if call_id == "truncated" && input_json == arguments)));
-            assert!(blocks.iter().any(|block| matches!(block, lash_core::llm::types::LlmContentBlock::ToolResult { call_id, content, .. } if call_id == "truncated" && content.contains("output limit"))));
+            assert!(blocks.iter().any(|block| matches!(block, lash_core::llm::types::LlmContentBlock::ToolResult { call_id, content, .. } if call_id == "truncated" && lash_core::facade_support::tool_result_text(content).contains("output limit"))));
         }
         let decisions = machine
             .events()

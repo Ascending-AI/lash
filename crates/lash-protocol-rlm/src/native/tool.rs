@@ -70,7 +70,7 @@ pub(super) fn normalize(parts: &[Part]) -> NativeAction {
             "No code executed: unknown tool. Call execute_code; invoke host operations and finish inside code.",
         );
     }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(call.content()) else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&call.content()) else {
         return malformed(
             "retry_invalid_arguments",
             "No code executed: arguments must be valid JSON with exactly one string property, code.",

@@ -1043,7 +1043,11 @@ impl ModelToolReturn {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// One ordered block of a tool's model-facing result: text, or an
+/// attachment at the position the tool's value placed it. The same blocks
+/// travel unchanged into the transcript's one [`crate::Part::ToolResult`]
+/// and the provider request's one tool-result block.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ModelToolReturnPart {
     Text { text: String },
@@ -1053,6 +1057,57 @@ pub enum ModelToolReturnPart {
 impl ModelToolReturnPart {
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
+    }
+
+    /// The attachment this block carries; `None` for text.
+    pub fn attachment(&self) -> Option<&AttachmentSource> {
+        match self {
+            Self::Text { .. } => None,
+            Self::Attachment(source) => Some(source),
+        }
+    }
+}
+
+impl crate::llm::types::LlmContentBlock {
+    /// Every attachment source this block carries, in content order: an
+    /// attachment block's source, or the attachment blocks of a tool result.
+    pub fn attachment_sources(&self) -> impl Iterator<Item = &AttachmentSource> {
+        use crate::llm::types::LlmContentBlock;
+        let (own, result): (Option<&AttachmentSource>, &[ModelToolReturnPart]) = match self {
+            LlmContentBlock::Attachment { source } => (Some(source.as_ref()), &[]),
+            LlmContentBlock::ToolResult { content, .. } => (None, content.as_slice()),
+            LlmContentBlock::Text { .. }
+            | LlmContentBlock::ToolCall { .. }
+            | LlmContentBlock::Reasoning { .. } => (None, &[]),
+        };
+        own.into_iter()
+            .chain(result.iter().filter_map(ModelToolReturnPart::attachment))
+    }
+}
+
+/// One tool result's ordered content as a single string, for readers that
+/// cannot interleave attachments with text: each block on its own line, and
+/// each attachment replaced by an `[Attachment N]` marker (1-based, in content
+/// order) so the reader still sees where it sat. Adapters that move the
+/// attachments elsewhere send them in the same order the markers number.
+pub fn tool_result_text(content: &[ModelToolReturnPart]) -> std::borrow::Cow<'_, str> {
+    match content {
+        [] => std::borrow::Cow::Borrowed(""),
+        [ModelToolReturnPart::Text { text }] => std::borrow::Cow::Borrowed(text),
+        _ => {
+            let mut attachments = 0usize;
+            let lines: Vec<std::borrow::Cow<'_, str>> = content
+                .iter()
+                .map(|block| match block {
+                    ModelToolReturnPart::Text { text } => std::borrow::Cow::Borrowed(text.as_str()),
+                    ModelToolReturnPart::Attachment(_) => {
+                        attachments += 1;
+                        std::borrow::Cow::Owned(format!("[Attachment {attachments}]"))
+                    }
+                })
+                .collect();
+            std::borrow::Cow::Owned(lines.join("\n"))
+        }
     }
 }
 

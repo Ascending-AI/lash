@@ -402,8 +402,6 @@ fn drain_area_witnesses() {
     });
     // W0114: lash::messages::Part::attachment_part [function]
     let _ = lash::messages::Part::attachment_part;
-    // W0115: lash::messages::Part::tool_result_attachment [function]
-    let _ = lash::messages::Part::tool_result_attachment;
     // W0116: lash::messages::PartKind::Attachment [variant]
     variant_witness(|value: &lash::messages::PartKind| {
         matches!(value, lash::messages::PartKind::Attachment)

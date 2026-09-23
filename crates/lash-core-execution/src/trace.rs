@@ -3,7 +3,8 @@ use std::sync::Arc;
 use lash_trace::{
     TraceAttachment, TraceContentBlock, TraceContext, TraceEvent, TraceLlmMessage, TraceLlmRequest,
     TraceRecord, TraceRetryAttempt, TraceRetryAttemptOutcome, TraceSink, TraceTokenUsage,
-    TraceToolSpec, llm_node_id, session_node_id, sha256_hex, tool_node_id, turn_node_id,
+    TraceToolResultBlock, TraceToolSpec, llm_node_id, session_node_id, sha256_hex, tool_node_id,
+    turn_node_id,
 };
 
 use crate::llm::types::{
@@ -568,7 +569,19 @@ fn trace_content_block(block: &LlmContentBlock) -> TraceContentBlock {
         } => TraceContentBlock::ToolResult {
             call_id: Some(call_id.clone()),
             tool_name: tool_name.clone(),
-            content: content.clone(),
+            content: content
+                .iter()
+                .map(|part| match part {
+                    crate::ModelToolReturnPart::Text { text } => {
+                        TraceToolResultBlock::Text { text: text.clone() }
+                    }
+                    crate::ModelToolReturnPart::Attachment(source) => {
+                        TraceToolResultBlock::Attachment {
+                            source: Box::new(trace_attachment(source)),
+                        }
+                    }
+                })
+                .collect(),
         },
         LlmContentBlock::Reasoning { text, replay } => TraceContentBlock::Reasoning {
             text: text.clone(),

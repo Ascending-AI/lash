@@ -254,7 +254,13 @@ pub use usage_activity::*;
 // unchanged, but the published v90 contract document no longer describes this
 // decoder's accepted items, so the new document takes a new window and peers
 // must adopt 91.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 91;
+// Window 92: FIG-3515 answers each tool call with one tool result carrying
+// ordered text and attachment blocks: `RemoteLlmContentBlock::ToolResult`'s
+// `content` and a tool-result `RemotePart`'s `blocks` are block lists, and a
+// tool-result part carries no `content` string. A window-91 peer refuses the
+// block list and a window-92 peer refuses the retired string, so peers must
+// adopt 92.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 92;
 
 /// One versioned remote-protocol message.
 ///

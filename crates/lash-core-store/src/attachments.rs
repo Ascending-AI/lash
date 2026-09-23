@@ -1721,41 +1721,67 @@ pub fn degrade_unmaterializable_request_attachments(
     let request = Arc::make_mut(request);
     let snapshot = &request.model_capability.attachment_acceptance;
     for message in &mut request.messages {
+        use crate::llm::types::LlmContentBlock;
+        if !message
+            .blocks
+            .iter()
+            .flat_map(LlmContentBlock::attachment_sources)
+            .any(|source| attachment_materialization_notice(snapshot, source).is_some())
+        {
+            continue;
+        }
+        // A placeholder already in the message's text (tool execution
+        // appends the same notice to the result it degrades) is not repeated.
         let existing_placeholders = message
             .blocks
             .iter()
-            .filter_map(|block| match block {
-                crate::llm::types::LlmContentBlock::Text { text, .. } => Some(text.to_string()),
-                crate::llm::types::LlmContentBlock::ToolResult { content, .. } => {
-                    Some(content.clone())
-                }
-                _ => None,
+            .flat_map(|block| match block {
+                LlmContentBlock::Text { text, .. } => vec![text.to_string()],
+                LlmContentBlock::ToolResult { content, .. } => content
+                    .iter()
+                    .filter_map(|part| match part {
+                        lash_sansio::ModelToolReturnPart::Text { text } => Some(text.clone()),
+                        lash_sansio::ModelToolReturnPart::Attachment(_) => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
             })
             .collect::<HashSet<_>>();
-        if !message.blocks.iter().any(|block| {
-            matches!(block,
-            crate::llm::types::LlmContentBlock::Attachment { source }
-            if attachment_materialization_notice(snapshot, source).is_some())
-        }) {
-            continue;
-        }
-        Arc::make_mut(&mut message.blocks).retain_mut(|block| {
-            let crate::llm::types::LlmContentBlock::Attachment { source } = block else {
-                return true;
-            };
-            let Some(notice) = attachment_materialization_notice(snapshot, source) else {
-                return true;
-            };
-            let placeholder = notice.model_placeholder();
-            if existing_placeholders.contains(&placeholder) {
-                return false;
+        let degrade = |source: &crate::AttachmentSource| {
+            attachment_materialization_notice(snapshot, source)
+                .map(|notice| notice.model_placeholder())
+        };
+        Arc::make_mut(&mut message.blocks).retain_mut(|block| match block {
+            LlmContentBlock::Attachment { source } => {
+                let Some(placeholder) = degrade(source) else {
+                    return true;
+                };
+                if existing_placeholders.contains(&placeholder) {
+                    return false;
+                }
+                *block = LlmContentBlock::Text {
+                    text: placeholder.into(),
+                    response_meta: None,
+                    cache_breakpoint: false,
+                };
+                true
             }
-            *block = crate::llm::types::LlmContentBlock::Text {
-                text: placeholder.into(),
-                response_meta: None,
-                cache_breakpoint: false,
-            };
-            true
+            // Inside a tool result the placeholder takes the attachment's
+            // place, so the result stays one block in its original order.
+            LlmContentBlock::ToolResult { content, .. } => {
+                content.retain_mut(|part| {
+                    let Some(placeholder) = part.attachment().and_then(degrade) else {
+                        return true;
+                    };
+                    if existing_placeholders.contains(&placeholder) {
+                        return false;
+                    }
+                    *part = lash_sansio::ModelToolReturnPart::text(placeholder);
+                    true
+                });
+                true
+            }
+            _ => true,
         });
     }
     let retained = request

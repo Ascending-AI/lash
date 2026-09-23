@@ -499,7 +499,7 @@ pub(crate) fn render_conformance_history_message(
     let attachment_count = rendered
         .iter()
         .flat_map(|message| message.blocks.iter())
-        .filter(|block| matches!(block, LlmContentBlock::Attachment { .. }))
+        .flat_map(LlmContentBlock::attachment_sources)
         .count();
     match rendered.as_slice() {
         [message] if attachment_count == 0 => Ok(message.clone()),

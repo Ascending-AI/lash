@@ -1415,7 +1415,9 @@ fn request_text(request: &LlmRequest) -> String {
             match block {
                 LlmContentBlock::Text { text, .. } => out.push_str(text),
                 LlmContentBlock::ToolCall { input_json, .. } => out.push_str(input_json),
-                LlmContentBlock::ToolResult { content, .. } => out.push_str(content),
+                LlmContentBlock::ToolResult { content, .. } => {
+                    out.push_str(&lash_core::facade_support::tool_result_text(content));
+                }
                 LlmContentBlock::Reasoning { text, .. } => out.push_str(text),
                 LlmContentBlock::Attachment { .. } => {}
             }

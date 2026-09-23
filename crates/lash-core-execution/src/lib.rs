@@ -694,7 +694,7 @@ pub use lash_trace::{
     TraceLlmResponse, TracePromptComponent, TraceProviderReplayDropEvent,
     TraceProviderReplayDropReason, TraceProviderReplayKind, TraceProviderRequestEvent,
     TraceProviderRouteIdentity, TraceProviderStreamEvent, TraceRuntimeStreamEvent, TraceTokenUsage,
-    TraceToolSpec,
+    TraceToolResultBlock, TraceToolSpec,
 };
 pub use llm::transport::ProviderFailureKind;
 pub use model::{ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder};

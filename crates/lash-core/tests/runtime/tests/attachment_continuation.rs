@@ -118,9 +118,9 @@ fn request_text(request: &lash_core::llm::types::LlmRequest) -> String {
         .iter()
         .flat_map(|message| message.blocks.iter())
         .filter_map(|block| match block {
-            lash_core::llm::types::LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+            lash_core::llm::types::LlmContentBlock::Text { text, .. } => Some(text.to_string()),
             lash_core::llm::types::LlmContentBlock::ToolResult { content, .. } => {
-                Some(content.as_str())
+                Some(lash_core::facade_support::tool_result_text(content).into_owned())
             }
             _ => None,
         })
@@ -271,4 +271,258 @@ async fn accepted_tool_attachment_round_trips_without_degradation() {
     assert_eq!(attachment_ref.label.as_deref(), Some("accepted.png"));
     assert_eq!(replay.attachment_bytes(source), Some(IMAGE_BYTES));
     assert!(!request_text(replay).contains("attachment_unavailable"));
+}
+
+/// Returns `["before", <stored image>, "after"]`: an array tool value that
+/// embeds an attachment between two text fragments.
+struct ArrayAttachmentTool;
+
+fn array_attachment_tool_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:array_attachment",
+        "array_attachment",
+        "Return an array embedding one stored image.",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "array" }),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for ArrayAttachmentTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![array_attachment_tool_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "array_attachment")
+            .then(|| Arc::new(array_attachment_tool_definition().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        (async {
+            let attachment_ref = call
+                .context
+                .attachments()
+                .put(
+                    b"array-image".to_vec(),
+                    lash_core::AttachmentCreateMeta::new(
+                        lash_core::MediaType::parse("image/png").expect("test MIME"),
+                        None,
+                        Some("array.png".to_string()),
+                    ),
+                )
+                .await
+                .expect("store tool attachment");
+            lash_core::ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
+                lash_core::ToolValue::Array(vec![
+                    lash_core::ToolValue::String("before".to_string()),
+                    lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
+                        attachment_ref,
+                    )),
+                    lash_core::ToolValue::String("after".to_string()),
+                ]),
+            ))
+        })
+        .await
+        .into()
+    }
+}
+
+/// FIG-3515: a tool value embedding an attachment used to split into several
+/// results for one call id, which the resume-safety check refuses; every
+/// later prepared checkpoint was then skipped, and an Immediate cancel
+/// committed the stale draft without the new turn's input or calls. In this
+/// harness main commits turn 2's input anyway and fails on the duplicated
+/// result, so the test pins the precondition (one resume-safe result per
+/// call); `turn_boundary::tests::gates_advance_after_an_attachment_bearing_tool_result`
+/// pins the gates themselves.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
+    const SESSION_ID: &str = "array-attachment-immediate-cancel";
+    let (answering_tx, answering_rx) = tokio::sync::oneshot::channel::<()>();
+    let answering_tx = Arc::new(Mutex::new(Some(answering_tx)));
+    let call_index = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let provider = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_request| {
+            let call_index = Arc::clone(&call_index);
+            let answering_tx = Arc::clone(&answering_tx);
+            async move {
+                let tool_call = |call_id: &str| LlmResponse {
+                    parts: vec![LlmOutputPart::ToolCall {
+                        call_id: call_id.to_string(),
+                        tool_name: "array_attachment".to_string(),
+                        input_json: "{}".to_string(),
+                        replay: None,
+                    }],
+                    ..LlmResponse::default()
+                };
+                match call_index.fetch_add(1, Ordering::SeqCst) {
+                    0 => Ok(tool_call("turn-one-call")),
+                    1 => Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text: "turn one done".to_string(),
+                            response_meta: None,
+                        }],
+                        ..LlmResponse::default()
+                    }),
+                    2 => Ok(tool_call("turn-two-call")),
+                    _ => {
+                        // Turn 2's call has executed; hold the model's answer
+                        // open until the host cancels the turn.
+                        if let Some(tx) = answering_tx.lock_recover().take() {
+                            let _ = tx.send(());
+                        }
+                        std::future::pending::<Result<LlmResponse, _>>().await
+                    }
+                }
+            }
+        })
+        .build();
+    let store = Arc::new(RecordingStore::default());
+    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let mut runtime = TestRuntime::new(provider)
+        .plugins(Vec::new())
+        .attachment_acceptance(
+            lash_core::attachments::attachment_test_capability().attachment_acceptance,
+        )
+        .tools(Arc::new(ArrayAttachmentTool))
+        .host(lash_core::facade_support::EmbeddedRuntimeHost::new(
+            test_runtime_host_config(),
+        ))
+        .store(runtime_store)
+        .with_session_id(SESSION_ID)
+        .build()
+        .await;
+
+    let turn_one = runtime
+        .run_turn_assembled(
+            TurnInput::text("return the array"),
+            CancellationToken::new(),
+            host_admitted_scope(
+                &runtime.host.core,
+                lash_core::AdmittedScope::unpinned(
+                    runtime.export_persistence_state().turn_scope("array-turn"),
+                )
+                .expect("turn scope"),
+            ),
+        )
+        .await
+        .expect("array turn assembles");
+    assert!(
+        matches!(turn_one.outcome, TurnOutcome::Finished(_)),
+        "turn one: {:?} {:?}",
+        turn_one.outcome,
+        turn_one
+            .errors
+            .iter()
+            .map(|issue| (&issue.code, &issue.message))
+            .collect::<Vec<_>>()
+    );
+    let committed = runtime.read_view().expect("read view").messages().to_vec();
+    assert!(
+        lash_sansio::messages_are_prompt_resume_safe(&committed),
+        "an attachment-bearing tool value commits a resume-safe transcript"
+    );
+
+    let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
+        Arc::clone(&runtime.host.core.control.effect_host),
+        SESSION_ID,
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+    );
+    let turn_id = "cancelled-turn";
+    let persisted_state = runtime.export_persistence_state();
+    let turn_scope = host_admitted_scope(
+        &runtime.host.core,
+        lash_core::AdmittedScope::unpinned(persisted_state.turn_scope(turn_id))
+            .expect("turn scope"),
+    );
+    let turn_address =
+        lash_core::facade_support::TurnAddress::new(&persisted_state.session_id, turn_id);
+    let turn = lash_core::task::spawn(async move {
+        runtime
+            .run_turn_assembled(
+                TurnInput::text("turn two input"),
+                CancellationToken::new(),
+                turn_scope,
+            )
+            .await
+    });
+    answering_rx
+        .await
+        .expect("the model is answering turn 2's executed call");
+    turn_driver
+        .request_cancel(
+            lash_core::facade_support::TurnCancelRequest::new(
+                turn_address,
+                "cancel-after-call",
+                Some("test-user".to_string()),
+            )
+            .with_reason("user stopped the turn"),
+        )
+        .await
+        .expect("seal user cancellation");
+    let turn_two = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
+        .await
+        .expect("cancelled turn finishes")
+        .expect("cancelled turn task")
+        .expect("cancelled turn assembles");
+    assert!(
+        matches!(
+            turn_two.outcome,
+            TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence })
+                if evidence.mode == lash_core::TurnCancelMode::Immediate
+        ),
+        "{:?}",
+        turn_two.outcome
+    );
+
+    let reopened = lash_core::store::load_persisted_session_read_view(store.as_ref())
+        .await
+        .expect("reopen the cancelled session")
+        .expect("durable session");
+    let parts: Vec<_> = reopened
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .collect();
+    assert!(
+        parts
+            .iter()
+            .any(|part| part.kind() == lash_core::PartKind::Text
+                && part.content() == "turn two input"),
+        "turn 2's input is committed"
+    );
+    for kind in [
+        lash_core::PartKind::ToolCall,
+        lash_core::PartKind::ToolResult,
+    ] {
+        assert_eq!(
+            parts
+                .iter()
+                .filter(|part| part.kind() == kind && part.tool_call_id() == Some("turn-two-call"))
+                .count(),
+            1,
+            "turn 2's executed call commits exactly one {kind:?}"
+        );
+    }
+    let turn_one_result = parts
+        .iter()
+        .find(|part| {
+            part.kind() == lash_core::PartKind::ToolResult
+                && part.tool_call_id() == Some("turn-one-call")
+        })
+        .expect("turn 1's result is committed");
+    let blocks = turn_one_result
+        .tool_result_content()
+        .expect("tool result blocks");
+    assert_eq!(blocks.len(), 3, "{blocks:?}");
+    assert!(
+        blocks[1].attachment().is_some(),
+        "the image keeps its place"
+    );
+    assert!(lash_sansio::messages_are_prompt_resume_safe(
+        reopened.messages()
+    ));
 }

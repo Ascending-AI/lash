@@ -114,9 +114,17 @@ impl RemoteLlmRequest {
         self.messages
             .iter()
             .flat_map(|message| message.content.iter())
-            .filter_map(|block| match block {
-                RemoteLlmContentBlock::Attachment { source } => Some(source.as_ref()),
-                _ => None,
+            .flat_map(|block| {
+                let (own, result): (Option<&RemoteAttachmentSource>, &[RemoteToolResultBlock]) =
+                    match block {
+                        RemoteLlmContentBlock::Attachment { source } => {
+                            (Some(source.as_ref()), &[])
+                        }
+                        RemoteLlmContentBlock::ToolResult { content, .. } => (None, content),
+                        _ => (None, &[]),
+                    };
+                own.into_iter()
+                    .chain(result.iter().filter_map(RemoteToolResultBlock::attachment))
             })
             .collect()
     }
@@ -857,9 +865,11 @@ pub enum RemoteLlmContentBlock {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         replay: Option<RemoteProviderReplayMeta>,
     },
+    /// The one result answering `call_id`: its text and attachment blocks
+    /// in the tool value's order.
     ToolResult {
         call_id: String,
-        content: String,
+        content: Vec<RemoteToolResultBlock>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool_name: Option<String>,
     },
@@ -868,6 +878,25 @@ pub enum RemoteLlmContentBlock {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         replay: Option<RemoteProviderReasoningReplay>,
     },
+}
+
+/// One ordered block of a tool result: text, or an attachment at the
+/// position the tool's value placed it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteToolResultBlock {
+    Text { text: String },
+    Attachment { source: Box<RemoteAttachmentSource> },
+}
+
+impl RemoteToolResultBlock {
+    /// The attachment this block carries; `None` for text.
+    pub fn attachment(&self) -> Option<&RemoteAttachmentSource> {
+        match self {
+            Self::Text { .. } => None,
+            Self::Attachment { source } => Some(source),
+        }
+    }
 }
 
 impl RemoteLlmContentBlock {

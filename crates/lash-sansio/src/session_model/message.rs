@@ -4,6 +4,8 @@ use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay,
     ProviderReplayMeta, ResponseTextMeta,
 };
+use crate::tool_output::{ModelToolReturnPart, tool_result_text};
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 
@@ -152,7 +154,8 @@ pub enum MessageOrigin {
 }
 
 /// An ordered message part whose variant owns its kind-specific fields.
-/// `id` identifies the part within its message; `content` is rendered text.
+/// `id` identifies the part within its message; `content` is rendered text,
+/// except on a tool result, whose content is its ordered blocks.
 /// Serialization uses a flat object and rejects unknown fields and invalid
 /// kind/field combinations through [`InvalidPartCombination`].
 #[derive(Clone, Debug, PartialEq)]
@@ -165,16 +168,14 @@ pub enum Part {
         content: String,
         response_meta: Option<ResponseTextMeta>,
     },
-    /// A pointer at a stored attachment. Tool-result attachments also
-    /// carry the `tool_call_id`/`tool_name` of the call they answer;
-    /// `content` holds the placeholder text rendered when the blob is
-    /// elided.
+    /// A pointer at a stored attachment; `content` holds the placeholder
+    /// text rendered when the blob is elided. An attachment a tool returned
+    /// is a block inside that call's [`Part::ToolResult`], never a part of
+    /// its own.
     Attachment {
         id: String,
         content: String,
         attachment: Option<PartAttachment>,
-        tool_call_id: Option<String>,
-        tool_name: Option<String>,
     },
     /// Fenced code block.
     Code { id: String, content: String },
@@ -200,10 +201,12 @@ pub enum Part {
         tool_name: String,
         tool_replay: Option<ProviderReplayMeta>,
     },
-    /// The text result answering a tool call.
+    /// The one result answering a tool call: its text and attachment
+    /// blocks in the order the tool's value produced them. A call is
+    /// answered by exactly one result part, whatever its value holds.
     ToolResult {
         id: String,
-        content: String,
+        content: Vec<ModelToolReturnPart>,
         tool_call_id: String,
         tool_name: String,
     },
@@ -251,7 +254,10 @@ impl std::error::Error for InvalidPartCombination {}
 struct FlatPart {
     id: String,
     kind: PartKind,
-    content: String,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    blocks: Option<Vec<ModelToolReturnPart>>,
     #[serde(default)]
     attachment: Option<PartAttachment>,
     #[serde(default)]
@@ -271,6 +277,8 @@ impl FlatPart {
     fn invalid_field(&self) -> Option<&'static str> {
         use PartKind::*;
         let tainted = [
+            ("content", self.content.is_some(), self.kind != ToolResult),
+            ("blocks", self.blocks.is_some(), self.kind == ToolResult),
             (
                 "attachment",
                 self.attachment.is_some(),
@@ -279,12 +287,12 @@ impl FlatPart {
             (
                 "tool_call_id",
                 self.tool_call_id.is_some(),
-                matches!(self.kind, Attachment | ToolCall | ToolResult),
+                matches!(self.kind, ToolCall | ToolResult),
             ),
             (
                 "tool_name",
                 self.tool_name.is_some(),
-                matches!(self.kind, Attachment | ToolCall | ToolResult),
+                matches!(self.kind, ToolCall | ToolResult),
             ),
             (
                 "tool_replay",
@@ -318,76 +326,62 @@ impl FlatPart {
             kind: self.kind,
             field,
         };
+        let tool_pair = |call_id: Option<String>, name: Option<String>| match (call_id, name) {
+            (Some(call_id), Some(name)) => Ok((call_id, name)),
+            (None, _) => Err(missing("missing:tool_call_id")),
+            (_, None) => Err(missing("missing:tool_name")),
+        };
+        let text = |content: Option<String>| content.ok_or_else(|| missing("missing:content"));
         let part = match self.kind {
             PartKind::Text => Part::Text {
                 id: self.id,
-                content: self.content,
+                content: text(self.content)?,
                 response_meta: self.response_meta,
             },
-            PartKind::Attachment => {
-                // A tool-result attachment carries the call pair; an
-                // ordinary one carries neither. A lone id or name is
-                // a pairing the constructors cannot produce.
-                let (tool_call_id, tool_name) = match (self.tool_call_id, self.tool_name) {
-                    (Some(_), None) => return Err(missing("missing:tool_name")),
-                    (None, Some(_)) => return Err(missing("missing:tool_call_id")),
-                    pair => pair,
-                };
-                Part::Attachment {
-                    id: self.id,
-                    content: self.content,
-                    attachment: self.attachment,
-                    tool_call_id,
-                    tool_name,
-                }
-            }
+            PartKind::Attachment => Part::Attachment {
+                id: self.id,
+                content: text(self.content)?,
+                attachment: self.attachment,
+            },
             PartKind::Code => Part::Code {
                 id: self.id,
-                content: self.content,
+                content: text(self.content)?,
             },
             PartKind::Output => Part::Output {
                 id: self.id,
-                content: self.content,
+                content: text(self.content)?,
             },
             PartKind::Error => Part::Error {
                 id: self.id,
-                content: self.content,
+                content: text(self.content)?,
             },
             PartKind::Prose => Part::Prose {
                 id: self.id,
-                content: self.content,
+                content: text(self.content)?,
                 response_meta: self.response_meta,
             },
             PartKind::ToolCall => {
-                let (tool_call_id, tool_name) = match (self.tool_call_id, self.tool_name) {
-                    (Some(call_id), Some(name)) => (call_id, name),
-                    (None, _) => return Err(missing("missing:tool_call_id")),
-                    (_, None) => return Err(missing("missing:tool_name")),
-                };
+                let (tool_call_id, tool_name) = tool_pair(self.tool_call_id, self.tool_name)?;
                 Part::ToolCall {
                     id: self.id,
-                    content: self.content,
+                    content: text(self.content)?,
                     tool_call_id,
                     tool_name,
                     tool_replay: self.tool_replay,
                 }
             }
             PartKind::ToolResult => {
-                let (tool_call_id, tool_name) = match (self.tool_call_id, self.tool_name) {
-                    (Some(call_id), Some(name)) => (call_id, name),
-                    (None, _) => return Err(missing("missing:tool_call_id")),
-                    (_, None) => return Err(missing("missing:tool_name")),
-                };
+                let (tool_call_id, tool_name) = tool_pair(self.tool_call_id, self.tool_name)?;
                 Part::ToolResult {
                     id: self.id,
-                    content: self.content,
+                    content: self.blocks.ok_or_else(|| missing("missing:blocks"))?,
                     tool_call_id,
                     tool_name,
                 }
             }
             PartKind::Reasoning => Part::Reasoning {
                 id: self.id,
-                content: self.content,
+                content: text(self.content)?,
                 reasoning_meta: self.reasoning_meta,
             },
         };
@@ -395,15 +389,17 @@ impl FlatPart {
     }
 }
 
-/// The borrowed counterpart of [`FlatPart`], in the same declaration
-/// order the pre-enum struct used. [`Part`]'s `Serialize` impl writes
-/// through it so the emitted bytes — including field order — are
-/// identical to what the flat struct produced for the same value.
+/// The borrowed counterpart of [`FlatPart`]. [`Part`]'s `Serialize` impl
+/// writes through it: a tool result writes its `blocks` and no `content`,
+/// every other kind writes its `content` string.
 #[derive(serde::Serialize)]
 struct FlatPartRef<'a> {
     id: &'a str,
     kind: PartKind,
-    content: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocks: Option<&'a [ModelToolReturnPart]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     attachment: Option<&'a PartAttachment>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -423,7 +419,8 @@ impl serde::Serialize for Part {
         FlatPartRef {
             id: self.id(),
             kind: self.kind(),
-            content: self.content(),
+            content: self.text_content(),
+            blocks: self.tool_result_content(),
             attachment: self.attachment(),
             tool_call_id: self.tool_call_id(),
             tool_name: self.tool_name(),
@@ -482,8 +479,6 @@ impl Part {
                 id,
                 content,
                 attachment: None,
-                tool_call_id: None,
-                tool_name: None,
             },
             PartKind::Code => Self::Code { id, content },
             PartKind::Output => Self::Output { id, content },
@@ -502,7 +497,7 @@ impl Part {
             },
             PartKind::ToolResult => Self::ToolResult {
                 id,
-                content,
+                content: vec![ModelToolReturnPart::text(content)],
                 tool_call_id: String::new(),
                 tool_name: String::new(),
             },
@@ -561,24 +556,19 @@ impl Part {
     }
 
     /// Human-readable or tool-facing text; attachments may carry the
-    /// placeholder text rendered when the blob is elided.
-    pub fn content(&self) -> &str {
+    /// placeholder text rendered when the blob is elided. A tool result
+    /// renders its blocks through [`tool_result_text`], so its attachments
+    /// read as numbered markers in place.
+    pub fn content(&self) -> Cow<'_, str> {
         match self {
-            Self::Text { content, .. }
-            | Self::Attachment { content, .. }
-            | Self::Code { content, .. }
-            | Self::Output { content, .. }
-            | Self::Error { content, .. }
-            | Self::Prose { content, .. }
-            | Self::ToolCall { content, .. }
-            | Self::ToolResult { content, .. }
-            | Self::Reasoning { content, .. } => content,
+            Self::ToolResult { content, .. } => tool_result_text(content),
+            _ => Cow::Borrowed(self.text_content().unwrap_or_default()),
         }
     }
 
-    /// Mutable access to the rendered text — used by pruning and recovery
-    /// paths that rewrite part content in place.
-    pub fn content_mut(&mut self) -> &mut String {
+    /// The part's own text string; `None` for a tool result, whose content
+    /// is its ordered blocks.
+    pub fn text_content(&self) -> Option<&str> {
         match self {
             Self::Text { content, .. }
             | Self::Attachment { content, .. }
@@ -587,8 +577,92 @@ impl Part {
             | Self::Error { content, .. }
             | Self::Prose { content, .. }
             | Self::ToolCall { content, .. }
-            | Self::ToolResult { content, .. }
-            | Self::Reasoning { content, .. } => content,
+            | Self::Reasoning { content, .. } => Some(content),
+            Self::ToolResult { .. } => None,
+        }
+    }
+
+    /// Mutable access to the part's text — used by pruning and recovery
+    /// paths that rewrite part content in place. `None` for a tool result;
+    /// rewrite its blocks through [`Part::tool_result_content_mut`].
+    pub fn content_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Text { content, .. }
+            | Self::Attachment { content, .. }
+            | Self::Code { content, .. }
+            | Self::Output { content, .. }
+            | Self::Error { content, .. }
+            | Self::Prose { content, .. }
+            | Self::ToolCall { content, .. }
+            | Self::Reasoning { content, .. } => Some(content),
+            Self::ToolResult { .. } => None,
+        }
+    }
+
+    /// A tool result's ordered text and attachment blocks; `None` for every
+    /// other kind.
+    pub fn tool_result_content(&self) -> Option<&[ModelToolReturnPart]> {
+        match self {
+            Self::ToolResult { content, .. } => Some(content),
+            _ => None,
+        }
+    }
+
+    /// Mutable access to a tool result's blocks, for paths that elide an
+    /// attachment or shorten text inside the one result.
+    pub fn tool_result_content_mut(&mut self) -> Option<&mut Vec<ModelToolReturnPart>> {
+        match self {
+            Self::ToolResult { content, .. } => Some(content),
+            _ => None,
+        }
+    }
+
+    /// Every attachment source the part carries, in content order: an
+    /// attachment part's pointer, or the attachment blocks of a tool result.
+    pub fn attachment_sources(&self) -> impl Iterator<Item = &AttachmentSource> {
+        let own = self.attachment().map(|attachment| &attachment.source);
+        let blocks = self
+            .tool_result_content()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(ModelToolReturnPart::attachment);
+        own.into_iter().chain(blocks)
+    }
+
+    /// Every attachment source the part carries, each with an id unique
+    /// within the message: an attachment part's own id, or `{id}#{n}` for
+    /// the tool result's `n`th attachment (1-based, matching its
+    /// `[Attachment n]` marker).
+    pub fn identified_attachment_sources(&self) -> Vec<(String, &AttachmentSource)> {
+        match self {
+            Self::ToolResult { id, .. } => self
+                .attachment_sources()
+                .enumerate()
+                .map(|(index, source)| (format!("{id}#{}", index + 1), source))
+                .collect(),
+            _ => self
+                .attachment_sources()
+                .map(|source| (self.id().to_string(), source))
+                .collect(),
+        }
+    }
+
+    /// Mutable access to every attachment source the part carries, in the
+    /// order [`Part::attachment_sources`] yields them.
+    pub fn attachment_sources_mut(&mut self) -> Vec<&mut AttachmentSource> {
+        match self {
+            Self::Attachment {
+                attachment: Some(attachment),
+                ..
+            } => vec![&mut attachment.source],
+            Self::ToolResult { content, .. } => content
+                .iter_mut()
+                .filter_map(|block| match block {
+                    ModelToolReturnPart::Attachment(source) => Some(source),
+                    ModelToolReturnPart::Text { .. } => None,
+                })
+                .collect(),
+            _ => Vec::new(),
         }
     }
 
@@ -612,11 +686,9 @@ impl Part {
     }
 
     /// The provider-side call id this part's call issues or result
-    /// answers; `Some` for tool calls, tool results, and tool-result
-    /// attachments.
+    /// answers; `Some` for tool calls and tool results.
     pub fn tool_call_id(&self) -> Option<&str> {
         match self {
-            Self::Attachment { tool_call_id, .. } => tool_call_id.as_deref(),
             Self::ToolCall { tool_call_id, .. } | Self::ToolResult { tool_call_id, .. } => {
                 Some(tool_call_id)
             }
@@ -628,7 +700,6 @@ impl Part {
     /// [`Part::tool_call_id`].
     pub fn tool_name(&self) -> Option<&str> {
         match self {
-            Self::Attachment { tool_name, .. } => tool_name.as_deref(),
             Self::ToolCall { tool_name, .. } | Self::ToolResult { tool_name, .. } => {
                 Some(tool_name)
             }
@@ -682,24 +753,6 @@ impl Part {
             id,
             content,
             attachment,
-            tool_call_id: None,
-            tool_name: None,
-        }
-    }
-
-    pub fn tool_result_attachment(
-        id: String,
-        content: String,
-        attachment: PartAttachment,
-        tool_call_id: String,
-        tool_name: String,
-    ) -> Self {
-        Self::Attachment {
-            id,
-            content,
-            attachment: Some(attachment),
-            tool_call_id: Some(tool_call_id),
-            tool_name: Some(tool_name),
         }
     }
 
@@ -739,9 +792,11 @@ impl Part {
         }
     }
 
+    /// The one result answering `tool_call_id`, carrying the tool's text and
+    /// attachment blocks in order.
     pub fn tool_result(
         id: String,
-        content: String,
+        content: Vec<ModelToolReturnPart>,
         tool_call_id: String,
         tool_name: String,
     ) -> Self {
@@ -798,7 +853,7 @@ impl Part {
                 content.clone()
             };
         }
-        self.content().to_string()
+        self.content().into_owned()
     }
 }
 
@@ -873,6 +928,14 @@ fn render_message_for_transcript(msg: &Message, attachments: &mut Vec<Attachment
             out.push("[Attachment]".to_string());
             continue;
         }
+        if let Some(content) = part.tool_result_content() {
+            attachments.extend(
+                content
+                    .iter()
+                    .filter_map(ModelToolReturnPart::attachment)
+                    .cloned(),
+            );
+        }
         let rendered = render_part_for_chat(msg.role, part);
         if !rendered.trim().is_empty() {
             out.push(rendered);
@@ -887,15 +950,13 @@ pub struct RenderedPrompt {
 }
 
 impl RenderedPrompt {
-    /// Sources in message order, derived from the structured blocks.
+    /// Sources in message order, derived from the structured blocks,
+    /// including the attachments inside tool results.
     pub fn attachments(&self) -> Vec<&AttachmentSource> {
         self.messages
             .iter()
             .flat_map(|message| message.blocks.iter())
-            .filter_map(|block| match block {
-                LlmContentBlock::Attachment { source } => Some(source.as_ref()),
-                _ => None,
-            })
+            .flat_map(LlmContentBlock::attachment_sources)
             .collect()
     }
 }
@@ -1374,11 +1435,10 @@ fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
                     });
                 }
                 PartKind::ToolResult => {
-                    let text = part.render();
                     let call_id = part.tool_call_id().unwrap_or_default().to_string();
                     blocks.push(LlmContentBlock::ToolResult {
                         call_id,
-                        content: text,
+                        content: part.tool_result_content().unwrap_or_default().to_vec(),
                         tool_name: part.tool_name().map(str::to_string),
                     });
                 }

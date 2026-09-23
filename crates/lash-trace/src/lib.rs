@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+mod content_block;
 mod jsonl_records;
 mod language_execution;
 mod language_execution_failure;
@@ -40,6 +41,7 @@ mod lashlang_graph;
 #[cfg(feature = "otel")]
 pub mod otel;
 
+pub use content_block::{TraceContentBlock, TraceToolResultBlock};
 use jsonl_records::truncate_torn_tail;
 pub use jsonl_records::{JsonlTraceReadError, parse_jsonl_records};
 pub use language_execution::{
@@ -143,7 +145,10 @@ pub use lashlang_graph::{
 /// skips from selection and map membership, and closes workflow site kinds.
 /// Version 32 (FIG-3535) adds `PromptViewAttachmentsPruned`, emitted when
 /// old-attachment pruning changes the prompt view without a tail-window cut.
-pub const TRACE_SCHEMA_VERSION: u32 = 32;
+/// Version 33 (FIG-3515) gives a traced tool result its ordered content:
+/// `tool_result.content` is a list of text and attachment blocks, one
+/// result per call, instead of a string beside loose attachment blocks.
+pub const TRACE_SCHEMA_VERSION: u32 = 33;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1010,42 +1015,6 @@ impl TraceLlmRequest {
 pub struct TraceLlmMessage {
     pub role: String,
     pub blocks: Vec<TraceContentBlock>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TraceContentBlock {
-    Text {
-        text: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        cache_breakpoint: bool,
-    },
-    Attachment {
-        source: Box<TraceAttachment>,
-    },
-    ToolCall {
-        call_id: Option<String>,
-        tool_name: String,
-        input_json: Value,
-        item_id: Option<String>,
-        has_signature: bool,
-    },
-    ToolResult {
-        call_id: Option<String>,
-        tool_name: Option<String>,
-        content: String,
-    },
-    Reasoning {
-        text: String,
-        item_id: Option<String>,
-        summary: Vec<String>,
-        has_encrypted: bool,
-        redacted: bool,
-    },
-}
-
-fn is_false(value: &bool) -> bool {
-    !*value
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

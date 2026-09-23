@@ -272,10 +272,15 @@ pub struct SessionNodeRecord {
 /// checked `TokenUsage` shape; generation-20 bodies carrying the retired
 /// `PromptUsage` snapshot fields are refused rather than remapped.
 ///
+/// Version 22 (FIG-3515) answers each tool call with one `ToolResult` part
+/// whose `blocks` hold the tool's text and attachments in order. Generation-21
+/// bodies carrying a text-only result `content` or an attachment part bound to
+/// a call id are refused rather than coalesced.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as an exact-generation fence rather
 /// than a counter, because that is what the check above is.
-pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 21;
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 22;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {

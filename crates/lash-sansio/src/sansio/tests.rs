@@ -173,7 +173,7 @@ fn turn_checkpoint_stamps_current_generation() {
     );
     let checkpoint = machine.checkpoint();
     assert_eq!(checkpoint.schema_version(), TURN_CHECKPOINT_SCHEMA_VERSION);
-    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 7);
+    assert_eq!(TURN_CHECKPOINT_SCHEMA_VERSION, 8);
 }
 
 #[test]

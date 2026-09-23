@@ -37,7 +37,7 @@ pub(crate) use lash_llm_transport::{
     LlmHttpRequest, LlmHttpTransport, ReqwestLlmHttpTransport, ResponseMetadataCapture,
     first_header_value, read_http_body_text,
 };
-pub(crate) use lash_sansio::Redacted;
+pub(crate) use lash_sansio::{ModelToolReturnPart, Redacted};
 
 pub(crate) use crate::config::*;
 pub(crate) use crate::policy::*;
