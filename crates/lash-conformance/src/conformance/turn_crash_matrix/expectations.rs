@@ -56,7 +56,12 @@ pub(super) fn validate_error_return_rulings(rulings: &[ErrorReturnRuling]) -> Re
             ));
         }
         seen.push(ruling.placement);
-        match (&ruling.ticket, ruling.violations.is_empty()) {
+        let pins_violations = !ruling.violations.is_empty()
+            || ruling
+                .non_journaled_violations
+                .as_ref()
+                .is_some_and(|violations| !violations.is_empty());
+        match (&ruling.ticket, !pins_violations) {
             (Some(ticket), false) => {
                 if !is_ticket_id(ticket) {
                     return Err(format!(

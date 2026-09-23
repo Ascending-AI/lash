@@ -223,33 +223,31 @@
   {
     "error_return": {
       "placement": "tool-attempt",
-      "outcome": "FIG-3528: an unretried store error from execute_effect(ToolAttempt) is converted into a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
+      "outcome": "FIG-3528: a live store error from execute_effect(ToolAttempt) now aborts the turn instead of laundering into a model-visible tool_attempt_failed. A journaled tier propagates the typed error to the caller for redrive — no commit, dispatch or provider request follows. A non-journaled tier has no journal to redrive, so the abort fails the turn terminally: the turn's own teardown commits cross the seam and the caller receives the failed turn rather than the typed error.",
       "ticket": "FIG-3528",
-      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+      "violations": [],
+      "non_journaled_violations": ["durable_commit", "caller_missed_typed_error"]
     }
   },
   {
     "error_return": {
       "placement": "effect-journal-claim",
-      "outcome": "FIG-3528: an unretried store error from the effect journal's claim is converted into a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
-      "ticket": "FIG-3528",
-      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+      "outcome": "A store error returned by the effect journal's claim aborts the turn: no durable commit, tool dispatch or provider request follows, and the typed store error reaches the caller for redrive.",
+      "violations": []
     }
   },
   {
     "error_return": {
       "placement": "effect-journal-finalize",
-      "outcome": "FIG-3528: an unretried store error from the effect journal's finalize is converted into a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
-      "ticket": "FIG-3528",
-      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+      "outcome": "A store error returned by the effect journal's finalize aborts the turn: no durable commit, tool dispatch or provider request follows, and the typed store error reaches the caller for redrive.",
+      "violations": []
     }
   },
   {
     "error_return": {
       "placement": "effect-journal-renew",
-      "outcome": "FIG-3512: an unretried store error from the effect-lease renew aborts the running tool and the attempt becomes a model-visible tool_attempt_failed; the turn continues to its after-tool provider request and commits instead of returning the typed error to the caller.",
-      "ticket": "FIG-3512",
-      "violations": ["durable_commit", "provider_request", "caller_missed_typed_error"]
+      "outcome": "A store error returned by the effect-lease renew aborts the turn: no durable commit, tool dispatch or provider request follows, and the typed store error reaches the caller for redrive.",
+      "violations": []
     }
   }
 ]

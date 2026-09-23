@@ -144,12 +144,20 @@ pub(super) struct ErrorReturnRuling {
     pub(super) placement: ErrorReturnPlacement,
     /// Reviewable prose explaining the ruling.
     pub(super) outcome: String,
-    /// The fix ticket, when `violations` pins a known defect.
+    /// The fix ticket, when the row pins a known defect on any tier.
     #[serde(default)]
     pub(super) ticket: Option<String>,
     /// The fail-stop violations the placement exhibits today, pinned
     /// exactly; empty asserts the fail-stop law already holds.
     pub(super) violations: Vec<FailStopViolation>,
+    /// The violations the same placement exhibits behind a controller whose
+    /// [`crate::EffectJournaling`] is `Local`, when they differ from
+    /// `violations`: a live fault on that tier cannot redrive — it has no
+    /// journal — so the abort fails the turn terminally and the turn's own
+    /// teardown commits cross the seam where a journaled tier's abort
+    /// commits nothing. Absent, `violations` rules every tier.
+    #[serde(default)]
+    pub(super) non_journaled_violations: Option<Vec<FailStopViolation>>,
 }
 
 /// A ruling-table row carrying an error-return ruling. The `error_return`
@@ -260,6 +268,7 @@ async fn run_error_return_case<F>(
     ))
     .await;
     control.arm_error_return(ruling.placement);
+    let journaled = effect_controller.effect_journaling() == crate::EffectJournaling::Journaled;
     let result = Box::pin(drive_turn(runtime, effect_controller, identity)).await;
     invocation.end();
 
@@ -304,6 +313,14 @@ async fn run_error_return_case<F>(
         faults.store_code()
     });
     let violations = fail_stop_violations(&observation, expected_code);
+    let expected_violations = if journaled {
+        &ruling.violations
+    } else {
+        ruling
+            .non_journaled_violations
+            .as_deref()
+            .unwrap_or(&ruling.violations)
+    };
     match &ruling.ticket {
         None => assert!(
             violations.is_empty(),
@@ -312,10 +329,10 @@ async fn run_error_return_case<F>(
             ruling.placement
         ),
         Some(ticket) => assert_eq!(
-            violations, ruling.violations,
+            violations, expected_violations,
             "{scenario} ({:?}): known defect {ticket} drifted: observed {violations:?}, \
-             expected {:?} — if the fix landed, flip this ruling to fail-stop",
-            ruling.placement, ruling.violations
+             expected {expected_violations:?} — if the fix landed, flip this ruling to fail-stop",
+            ruling.placement
         ),
     }
 }
@@ -402,7 +419,13 @@ mod tests {
         );
         let defective = rulings
             .iter_mut()
-            .find(|ruling| !ruling.violations.is_empty())
+            .find(|ruling| {
+                !ruling.violations.is_empty()
+                    || ruling
+                        .non_journaled_violations
+                        .as_ref()
+                        .is_some_and(|violations| !violations.is_empty())
+            })
             .expect("a defective ruling fixture");
         defective.ticket = None;
         assert!(
