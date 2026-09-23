@@ -190,7 +190,7 @@ impl RuntimeEffectController for SeamEffectController {
         cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
         self.control
-            .around(
+            .around_completion(
                 TurnSeamOperation::Effect(EffectOperation::GroupSettle),
                 self.inner.await_next_settlement(handle, cancel),
             )
