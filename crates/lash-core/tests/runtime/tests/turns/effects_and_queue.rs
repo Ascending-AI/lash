@@ -238,7 +238,8 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
     let first_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            host_queued_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("queued-frame-chain"),
             ),
@@ -290,7 +291,8 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
     let second_result = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            host_queued_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("second-queued-after-frame-chain"),
             ),
@@ -377,7 +379,8 @@ pub(super) async fn fig1123_committed_frame_handoff_survives_before_inline_claim
     let first = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            host_queued_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("handoff-crash-window"),
             ),
@@ -431,7 +434,8 @@ pub(super) async fn fig1123_committed_frame_handoff_survives_before_inline_claim
     let recovered = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            host_queued_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("handoff-crash-window"),
             ),
@@ -506,7 +510,8 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_queued_scope(
+            host_queued_scope(
+                &runtime.host.core,
                 &SessionId::from(SESSION_ID),
                 &TurnId::from("mid-chain-cancel"),
             ),
@@ -681,7 +686,11 @@ pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
             TurnInput::text("store an attachment"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(&SessionId::from("root"), &TurnId::from(TURN_ID)),
+                host_turn_scope(
+                    &runtime.host.core,
+                    &SessionId::from("root"),
+                    &TurnId::from(TURN_ID),
+                ),
             ),
         )
         .await
@@ -727,7 +736,11 @@ pub(super) async fn stream_prepared_turn_tool_put_is_bound_to_the_turn_id() {
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            named_turn_scope(&SessionId::from("root"), &TurnId::from(TURN_ID)),
+            host_turn_scope(
+                &runtime.host.core,
+                &SessionId::from("root"),
+                &TurnId::from(TURN_ID),
+            ),
             CancellationToken::new(),
             None,
             None,
@@ -809,7 +822,11 @@ pub(super) async fn stream_prepared_turn_follows_agent_frame_switch() {
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            named_turn_scope(&SessionId::from("root"), &TurnId::from("prepared-chain")),
+            host_turn_scope(
+                &runtime.host.core,
+                &SessionId::from("root"),
+                &TurnId::from("prepared-chain"),
+            ),
             CancellationToken::new(),
             None,
             None,
@@ -991,7 +1008,8 @@ pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue()
             TurnInput::text("start finalized borrowed append probe"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("finalized-lapsed-borrow"),
                 ),
@@ -1074,7 +1092,7 @@ pub(super) async fn retained_turn_graph_service_does_not_extend_the_execution_la
     let output = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(&SessionId::from("root"), &TurnId::from("retained-service")),
+            host_queued_scope(&runtime.host.core, &SessionId::from("root"), &TurnId::from("retained-service")),
         ))
         .await
         .expect_err("post-commit delivery failure leaves the handoff pending");
@@ -1204,7 +1222,8 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
     let error = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            host_queued_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("queued-lapsed-handoff"),
             ),
@@ -1367,7 +1386,8 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
             TurnInput::text("start lapsed in-process handoff"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("inprocess-lapsed-handoff"),
                 ),
@@ -1496,7 +1516,11 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
             TurnInput::text("start retained lease chain"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(&SessionId::from("root"), &TurnId::from("resident-chain")),
+                host_turn_scope(
+                    &runtime.host.core,
+                    &SessionId::from("root"),
+                    &TurnId::from("resident-chain"),
+                ),
             ),
         )
         .await
@@ -1540,7 +1564,11 @@ pub(super) async fn retained_lease_reuses_graph_and_reacquisition_reloads() {
             TurnInput::text("turn after lease release"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(&SessionId::from("root"), &TurnId::from("reacquired-turn")),
+                host_turn_scope(
+                    &runtime.host.core,
+                    &SessionId::from("root"),
+                    &TurnId::from("reacquired-turn"),
+                ),
             ),
         )
         .await
@@ -1630,7 +1658,8 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
             TurnInput::text("lose the retained lease"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("lost-retained-lease"),
                 ),
@@ -1673,7 +1702,8 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
             TurnInput::text("turn after lease loss"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("turn-after-lease-loss"),
                 ),
@@ -1747,7 +1777,8 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
     let terminal = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            host_queued_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("bounded-frame-chain"),
             ),
@@ -1864,7 +1895,8 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
     let committed = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            host_queued_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("bounded-frame-capture-abort"),
             ),

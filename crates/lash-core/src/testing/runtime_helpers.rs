@@ -138,6 +138,18 @@ pub fn host_turn_scope(
     host_admitted_scope(config, crate::AdmittedScope::turn(session_id, turn_id))
 }
 
+/// `host_admitted_scope` for a queued-work drain scope.
+pub fn host_queued_scope(
+    config: &crate::RuntimeHostConfig,
+    session_id: &SessionId,
+    drain_id: &TurnId,
+) -> crate::ScopedEffectController<'static> {
+    host_admitted_scope(
+        config,
+        crate::AdmittedScope::queue_drain(session_id, drain_id.as_str()),
+    )
+}
+
 /// `host_admitted_scope` for the process scope a test registry's first
 /// registration mints (registration sequence 1), standing in for the worker's
 /// admission step.
