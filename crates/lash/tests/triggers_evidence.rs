@@ -26,12 +26,12 @@ fn drain_area_witnesses() {
     let _ = lash::durability::DurableProcessWorkerConfig::with_trigger_store;
     // W0003: lash::plugins::PluginSession::triggers [function]
     let _ = lash::plugins::PluginSession::triggers;
-    // W0006: lash::testing::conformance::TriggerOccurrenceRetentionFaultInjector::clear_occurrence_delete_failure [function]
-    fn meth_0006<T: lash::testing::conformance::TriggerOccurrenceRetentionFaultInjector>(_: &T) {
+    // W0006: lash_conformance::TriggerOccurrenceRetentionFaultInjector::clear_occurrence_delete_failure [function]
+    fn meth_0006<T: lash_conformance::TriggerOccurrenceRetentionFaultInjector>(_: &T) {
         let _ = T::clear_occurrence_delete_failure;
     }
-    // W0007: lash::testing::conformance::TriggerOccurrenceRetentionFaultInjector::fail_occurrence_delete [function]
-    fn meth_0007<T: lash::testing::conformance::TriggerOccurrenceRetentionFaultInjector>(_: &T) {
+    // W0007: lash_conformance::TriggerOccurrenceRetentionFaultInjector::fail_occurrence_delete [function]
+    fn meth_0007<T: lash_conformance::TriggerOccurrenceRetentionFaultInjector>(_: &T) {
         let _ = T::fail_occurrence_delete;
     }
     // W0008: lash::tools::ToolContext::triggers [function]

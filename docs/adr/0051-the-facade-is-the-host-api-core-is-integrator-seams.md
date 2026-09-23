@@ -47,7 +47,9 @@ write against, are:
 4. **Conformance-suite embedders** — everything
    `lash::testing::conformance` exposes, closed over its signatures, so an
    integrator can hold a custom backend to the same executable contract the
-   built-in backends answer to.
+   built-in backends answer to. *(Superseded on this point on 2026-09-23: the
+   store laws are reached through `lash-internal-conformance` directly, not
+   through the facade.)*
 
 Membership is decided by **transitive signature closure**, not by direct-use
 scanning. A type that appears only in a public trait method's parameters or

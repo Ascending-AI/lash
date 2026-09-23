@@ -51,8 +51,8 @@ fn processes_area_witnesses() {
     let _ = lash::runtime::RuntimeEffectLocalExecutor::with_process_turn_cancellation;
     // W0008: lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_observation [function]
     let _ = lash::runtime::RuntimeEffectLocalExecutor::with_turn_cancel_observation;
-    // W0009: lash::testing::conformance::WakeDeliveryOrderingGroupFaultInjector::discard_without_reason [function]
-    fn meth_0009<T: lash::testing::conformance::WakeDeliveryOrderingGroupFaultInjector>(_: &T) {
+    // W0009: lash_conformance::WakeDeliveryOrderingGroupFaultInjector::discard_without_reason [function]
+    fn meth_0009<T: lash_conformance::WakeDeliveryOrderingGroupFaultInjector>(_: &T) {
         let _ = T::discard_without_reason;
     }
     // W0010: lash::LashCoreBuilder::process_wake_delivery_policy [function]

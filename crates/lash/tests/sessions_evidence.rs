@@ -990,18 +990,18 @@ fn drain_area_witnesses() {
     let _ = lash::runtime::SessionSnapshot::replace_active_read_state;
     // W0217: lash::runtime::TurnContext [struct]
     type_witness::<lash::runtime::TurnContext>();
-    // W0218: lash::testing::conformance::cold_process_durable_recovery_expectation [function]
-    let _ = lash::testing::conformance::cold_process_durable_recovery_expectation;
-    // W0219: lash::testing::conformance::cold_process_real_turn_driver [function]
-    let _ = lash::testing::conformance::cold_process_real_turn_driver;
-    // W0220: lash::testing::conformance::cold_process_turn_expectations [function]
-    let _ = lash::testing::conformance::cold_process_turn_expectations;
-    // W0221: lash::testing::conformance::cold_process_turn_scope [function]
-    let _ = lash::testing::conformance::cold_process_turn_scope;
-    // W0222: lash::testing::conformance::turn_crash_matrix_level_1 [function]
-    let _ = lash::testing::conformance::turn_crash_matrix_level_1(
+    // W0218: lash_conformance::cold_process_durable_recovery_expectation [function]
+    let _ = lash_conformance::cold_process_durable_recovery_expectation;
+    // W0219: lash_conformance::cold_process_real_turn_driver [function]
+    let _ = lash_conformance::cold_process_real_turn_driver;
+    // W0220: lash_conformance::cold_process_turn_expectations [function]
+    let _ = lash_conformance::cold_process_turn_expectations;
+    // W0221: lash_conformance::cold_process_turn_scope [function]
+    let _ = lash_conformance::cold_process_turn_scope;
+    // W0222: lash_conformance::turn_crash_matrix_level_1 [function]
+    let _ = lash_conformance::turn_crash_matrix_level_1(
         |_: &str| -> std::sync::Arc<dyn lash::persistence::RuntimePersistence> { todo!() },
-        |_: &str| -> lash::testing::conformance::ConformanceInvocation { todo!() },
+        |_: &str| -> lash_conformance::ConformanceInvocation { todo!() },
     );
     // W0223: lash::turn::AssistantOutput [struct]
     type_witness::<lash::turn::AssistantOutput>();
