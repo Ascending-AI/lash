@@ -596,9 +596,14 @@ One wholehog cutover, one PR series ending in one cutover commit.
   cutovers do, and durable-read fixtures are regenerated.
 * **No data migration and no aliases.** No converter step, no compatibility
   reader for the old tables, no old names re-exported.
-* **Drain in-flight Restate invocations** on the old deployment before the new
-  one takes traffic. A journal written by the old binary carries acceptance and
-  claim shapes the new binary does not replay.
+* **In-flight Restate invocations are refused, not drained.** A journal written
+  by the old binary carries acceptance and claim shapes the new binary does not
+  replay. The cutover bumps the journaled acceptance and claim formats, and the
+  new binary refuses an old-shape journal entry fail-closed with a typed error
+  before any effect. There is no drain step and no compatibility replay. This
+  follows the standing clean-cutover rule (Sam, 2026-09-24): a change that would
+  otherwise need a migration, a drain or compatibility with older in-flight state
+  bumps the gating version and refuses old durable state before any effect.
 * A cancelled turn must not settle withheld wakes as completed (FIG-3543, D10).
   Whatever the interim lanes ship, the cutover replaces it with §10.
 
