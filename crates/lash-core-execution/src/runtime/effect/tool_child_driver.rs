@@ -955,13 +955,37 @@ fn child_turn_cancel_wait(
     match request.cancellation_authority.as_ref() {
         Some(_) => crate::runtime::TurnCancelWait::observing(
             cancel.clone(),
-            dispatch
-                .effect_controller
-                .scoped()
-                .execution_scope()
-                .clone(),
+            child_turn_cancel_scope(dispatch, request),
         ),
         None => crate::runtime::TurnCancelWait::unobserved(cancel.clone()),
+    }
+}
+
+/// The scope a child's turn-cancel gate registers under: the *physical* turn
+/// its call was issued in, exactly as the opener's own waits register it.
+///
+/// A turn's admitted scope stays the root turn's across agent frames, while a
+/// follow-on frame is a distinct physical turn whose cancel gate is its own.
+/// The child's attempts and retry sleeps are attributed to the call's
+/// physical turn (the parent invocation's), so the gate must name the same
+/// turn — a durable journal refuses a wait whose cancel scope and attribution
+/// disagree. A non-turn opener (a process) keeps its admitted scope.
+fn child_turn_cancel_scope(
+    dispatch: &Arc<ToolDispatchContext<'_>>,
+    request: &ToolChildRequest,
+) -> crate::ExecutionScope {
+    let scoped = dispatch.effect_controller.scoped();
+    let admitted = scoped.execution_scope();
+    let physical_turn = request
+        .attempt_identity
+        .parent_invocation()
+        .and_then(|parent| parent.attribution.turn_id.as_ref());
+    match (admitted, physical_turn) {
+        (crate::ExecutionScope::Turn { .. }, Some(turn_id)) => match admitted.session_id() {
+            Some(session_id) => crate::ExecutionScope::turn(session_id.clone(), turn_id.clone()),
+            None => admitted.clone(),
+        },
+        _ => admitted.clone(),
     }
 }
 
