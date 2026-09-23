@@ -219,6 +219,9 @@ pub(super) struct OpenGroupChild {
     envelope_json: String,
     /// The hash inside `envelope_json`.
     envelope_hash: String,
+    /// The completion key the child parks on when it is a deferrable tool
+    /// child, which its cancel decision closes (ADR 0099 §4, W17).
+    completion_wait: Option<(crate::ExecutionScope, crate::AwaitEventWaitIdentity)>,
 }
 
 impl DurableEffectGroups {
@@ -1052,6 +1055,13 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                             terminal: EffectTerminal::Failed { error_json },
                             envelope_json: child.envelope_json.clone(),
                             envelope_hash: child.envelope_hash.clone(),
+                            completion_fence: child
+                                .completion_wait
+                                .as_ref()
+                                .map(|(scope, wait)| {
+                                    self.await_events.cancel_decision_fence(scope, wait)
+                                })
+                                .transpose()?,
                         })
                         .await?;
                     // The drain budget is measured from the decision, not the
@@ -1217,6 +1227,7 @@ fn child_identities_of(
                     )
                 })?,
                 envelope_hash: canonical.hash().to_string(),
+                completion_wait: child.command.group_child_completion_wait(),
             })
         })
         .collect()

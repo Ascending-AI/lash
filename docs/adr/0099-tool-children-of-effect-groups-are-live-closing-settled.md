@@ -505,9 +505,14 @@ committed final by itself. The journaled cooperative path and retained
 protected-work recovery must preserve this section's rules even when implicit
 cancellation interrupts a child invocation.
 
-*Status.* The local committed-final protection and the 50 ms grace **hold today**.
-The durable linearization point, the cancel disposition, the descendant rule and
-the deletion exclusion are **new** (FIG-3396).
+*Status.* **Implemented** (FIG-3396). The durable linearization point and the
+cancel disposition landed in FIG-3409, the nested-admission fence in FIG-3470,
+and the completion-delivery fence in FIG-3568: the substrate that owns a
+child's cancel decision closes the child's completion key in the same step, so
+a late `resolve` of that key is refused with
+`RuntimeEffectGroupChildCancelDecided`, writes nothing, and leaves the recorded
+disposition `Cancel` (W17). The deletion exclusion is §7's. The local
+committed-final protection and the 50 ms grace hold as before.
 
 ---
 

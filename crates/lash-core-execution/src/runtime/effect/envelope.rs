@@ -452,6 +452,20 @@ pub enum RuntimeEffectCommand {
 const _: () = assert!(std::mem::size_of::<RuntimeEffectCommand>() <= 256);
 
 impl RuntimeEffectCommand {
+    /// The completion key a group child running this command parks on, when
+    /// it is a deferrable tool child (see
+    /// [`ToolChildRequest::completion_wait`](super::ToolChildRequest::completion_wait)).
+    /// Every other command delivers no completion to a key of its own.
+    #[must_use]
+    pub fn group_child_completion_wait(
+        &self,
+    ) -> Option<(crate::ExecutionScope, crate::AwaitEventWaitIdentity)> {
+        match self {
+            Self::ToolInvocation { request } => request.completion_wait(),
+            _ => None,
+        }
+    }
+
     /// Boxes one process command at the effect boundary for effect-host and process-engine
     /// implementors so the durable envelope remains size-bounded.
     pub fn process(command: ProcessCommand) -> Self {

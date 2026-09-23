@@ -107,11 +107,11 @@ pub use durable_wait::{
     LashDurableWaitIndexClient, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
     LashDurableWaitWorkflowClient, LashDurableWaitWorkflowImpl, RestateDurableWaitAddress,
     RestateDurableWaitAwaitInput, RestateDurableWaitAwaitRequest,
-    RestateDurableWaitAwakeableRequest, RestateDurableWaitClassification,
-    RestateDurableWaitDeadline, RestateDurableWaitEffectRequest, RestateDurableWaitGroupRequest,
-    RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
-    RestateDurableWaitResolveRequest, RestateDurableWaitScope, RestateDurableWaitSettleRequest,
-    ServeLashDurableWaitIndex, ServeLashDurableWaitWorkflow,
+    RestateDurableWaitAwakeableRequest, RestateDurableWaitCancelDecidedRequest,
+    RestateDurableWaitClassification, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
+    RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
+    RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateDurableWaitScope,
+    RestateDurableWaitSettleRequest, ServeLashDurableWaitIndex, ServeLashDurableWaitWorkflow,
 };
 pub use effect_group::{
     EffectGroupAdmissionRequest, EffectGroupAdmissionResponse, EffectGroupAdoptRequest,

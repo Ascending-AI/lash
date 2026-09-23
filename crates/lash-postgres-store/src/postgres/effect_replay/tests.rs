@@ -887,6 +887,7 @@ impl GroupFixture {
                 },
                 envelope_json: format!(r#"{{"json":"{replay_key}","hash":"hash-{replay_key}"}}"#),
                 envelope_hash: format!("hash-{replay_key}"),
+                completion_fence: None,
             })
             .await
             .expect("journal the cancel decision");

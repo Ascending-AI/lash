@@ -46,6 +46,12 @@ impl Completions {
             .map_err(EmbedError::from)
     }
 
+    /// Resolves `key`'s wait, first writer wins.
+    ///
+    /// A key whose owning effect-group child is already cancel-decided is
+    /// refused with a typed [`lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided`]
+    /// runtime error and nothing is written (ADR 0099 §4): the completion
+    /// arrived after the cancel decision, so it is late.
     pub async fn resolve(
         &self,
         key: lash_core::AwaitEventKey,
@@ -58,7 +64,7 @@ impl Completions {
             .effect_host
             .resolve_await_event(&key, resolution)
             .await
-            .map_err(|err| EmbedError::Plugin(lash_core::PluginError::Session(err.to_string())))
+            .map_err(EmbedError::from)
     }
 }
 

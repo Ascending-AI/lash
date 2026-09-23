@@ -164,6 +164,18 @@ SELECT key_id, scope_json, wait_json, turn_control
                    WHERE session_id = $1
                )
              ORDER BY key_id
+=== wait::waits::WaitStatements | await_event_wait.fence_cancel_decided
+INSERT INTO lash_await_event_waits (
+                key_id, scope_json, wait_json, session_id, turn_control,
+                terminal_json, created_at_ms, resolved_at_ms
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+             ON CONFLICT (key_id) DO UPDATE
+                 SET terminal_json = excluded.terminal_json,
+                     resolved_at_ms = excluded.resolved_at_ms
+                 WHERE lash_await_event_waits.terminal_json IS NULL
+                   AND lash_await_event_waits.scope_json = excluded.scope_json
+                   AND lash_await_event_waits.wait_json = excluded.wait_json
 === wait::waits::WaitStatements | await_event_wait.delete_by_session
 DELETE FROM lash_await_event_waits WHERE session_id = $1
 === wait::waits::WaitStatements | await_event_wait.delete_by_scope_json

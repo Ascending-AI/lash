@@ -28,8 +28,9 @@ use tokio_util::sync::CancellationToken;
 use crate::RuntimeError;
 
 use crate::promise_semantics::{
-    PromiseState, PromiseTransition, SessionRevocationTransition, cancel_sweep, constant_time_eq,
-    derive_key_id, resolve, revoke_session, session_allows_access, sign_material,
+    PromiseState, PromiseTransition, SessionRevocationTransition, cancel_decided_observation,
+    cancel_decision_fences, cancel_sweep, constant_time_eq, derive_key_id, resolve, revoke_session,
+    session_allows_access, sign_material,
 };
 // Only the cancellation/deadline arms of the wait loop — which `cfg(loom)`
 // replaces with a deterministic direct await — consume these.
@@ -101,7 +102,7 @@ const REVOKED_SESSION_LIMIT: usize = 4_096;
 #[derive(Debug)]
 struct AwaitEventEntry {
     verified_key: AwaitEventKey,
-    terminal: Option<Resolution>,
+    terminal: Option<LiveTerminal>,
     notify: Arc<Notify>,
     /// Waiters currently parked on this promise. A scope with a parked waiter
     /// is not quiescent: retiring it would strand a live continuation.
@@ -117,6 +118,35 @@ impl AwaitEventEntry {
             waiters: 0,
         }
     }
+}
+
+/// What closed a live promise: a resolution that won, or the owning group
+/// child's cancel decision (ADR 0099 §4), which refuses every later resolve
+/// and reads as `Cancelled`.
+#[derive(Clone, Debug)]
+enum LiveTerminal {
+    Resolved(Resolution),
+    CancelDecided,
+}
+
+impl LiveTerminal {
+    fn promise_state(&self) -> PromiseState {
+        match self {
+            Self::Resolved(resolution) => PromiseState::Resolved(resolution.clone()),
+            Self::CancelDecided => PromiseState::CancelDecided,
+        }
+    }
+
+    fn observed(&self) -> Resolution {
+        match self {
+            Self::Resolved(resolution) => resolution.clone(),
+            Self::CancelDecided => cancel_decided_observation(),
+        }
+    }
+}
+
+fn live_state(terminal: Option<&LiveTerminal>) -> PromiseState {
+    terminal.map_or(PromiseState::Pending, LiveTerminal::promise_state)
 }
 
 struct ParkedWaiter {
@@ -440,33 +470,29 @@ impl AwaitEventRegistry {
         let mut state = Self::locked_state(&shard);
         match self.promise_lookup(&mut state, key)? {
             PromiseLookup::Revoked => {
-                return Ok(resolve(PromiseState::Revoked, resolution)
+                return resolve(PromiseState::Revoked, resolution)
                     .resolve_outcome()
-                    .expect("revoked resolve always has a public outcome"));
+                    .expect("revoked resolve always has a public outcome");
             }
             PromiseLookup::Mismatched => return Ok(ResolveOutcome::UnknownOrRevoked),
             PromiseLookup::Slot(PromiseSlot::ArchivedTurnControl(completed)) => {
-                return Ok(resolve(
+                return resolve(
                     PromiseState::Resolved(completed.terminal.clone()),
                     resolution,
                 )
                 .resolve_outcome()
-                .expect("resolved promise always has a public outcome"));
+                .expect("resolved promise always has a public outcome");
             }
             PromiseLookup::Slot(PromiseSlot::Live(entry)) => {
-                let observed = entry
-                    .terminal
-                    .clone()
-                    .map_or(PromiseState::Pending, PromiseState::Resolved);
-                match resolve(observed, resolution) {
+                match resolve(live_state(entry.terminal.as_ref()), resolution) {
                     PromiseTransition::Store(terminal) => {
-                        entry.terminal = Some(terminal);
+                        entry.terminal = Some(LiveTerminal::Resolved(terminal));
                         entry.notify.notify_waiters();
                     }
                     transition => {
-                        return Ok(transition
+                        return transition
                             .resolve_outcome()
-                            .expect("normal resolve always has a public outcome"));
+                            .expect("normal resolve always has a public outcome");
                     }
                 }
             }
@@ -476,7 +502,7 @@ impl AwaitEventRegistry {
                 else {
                     unreachable!("missing promise always buffers the proposed terminal")
                 };
-                entry.terminal = Some(terminal);
+                entry.terminal = Some(LiveTerminal::Resolved(terminal));
                 entry.notify.notify_waiters();
                 state
                     .promises
@@ -497,7 +523,9 @@ impl AwaitEventRegistry {
             PromiseLookup::Slot(PromiseSlot::ArchivedTurnControl(completed)) => {
                 Ok(Some(completed.terminal.clone()))
             }
-            PromiseLookup::Slot(PromiseSlot::Live(entry)) => Ok(entry.terminal.clone()),
+            PromiseLookup::Slot(PromiseSlot::Live(entry)) => {
+                Ok(entry.terminal.as_ref().map(LiveTerminal::observed))
+            }
             PromiseLookup::Missing => {
                 if !self.verify_uncached(key)? {
                     return Err(Self::unknown_or_revoked());
@@ -530,7 +558,7 @@ impl AwaitEventRegistry {
             let Some(PromiseSlot::Live(entry)) = state.promises.remove(key_id) else {
                 unreachable!("checked live above");
             };
-            let Some(terminal) = entry.terminal else {
+            let Some(terminal) = entry.terminal.as_ref().map(LiveTerminal::observed) else {
                 // An escalation nobody wrote is a bare waiter slot the
                 // finished turn no longer needs.
                 continue;
@@ -603,7 +631,7 @@ impl AwaitEventRegistry {
                         entry
                     }
                 };
-                if let Some(terminal) = entry.terminal.clone() {
+                if let Some(terminal) = entry.terminal.as_ref().map(LiveTerminal::observed) {
                     return Ok(terminal);
                 }
                 // Register while the state lock still excludes resolvers and
@@ -828,6 +856,53 @@ impl AwaitEventRegistry {
         )
     }
 
+    /// Close the completion key `scope`/`wait` names because the group child
+    /// that owns it is cancel-decided (ADR 0099 §4, W17).
+    ///
+    /// Called by the owner of the child's cancel fence while it holds that
+    /// fence, so the decision and the closed key are one step. A promise
+    /// nobody resolved yet — including one no waiter registered — becomes
+    /// cancel-decided: every later resolve is refused, typed, and a waiter
+    /// reads `Cancelled`. A terminal that won first stays authoritative, and a
+    /// revoked session or retired scope is left as it is.
+    pub fn fence_cancel_decided(
+        &self,
+        scope: &ExecutionScope,
+        wait: AwaitEventWaitIdentity,
+    ) -> Result<(), RuntimeError> {
+        let key = self.derive_key(scope, wait)?;
+        let shard = self.shard_for_scope(&key.scope);
+        let mut state = Self::locked_state(&shard);
+        let observed = match self.promise_lookup(&mut state, &key)? {
+            PromiseLookup::Revoked | PromiseLookup::Mismatched => return Ok(()),
+            PromiseLookup::Slot(PromiseSlot::ArchivedTurnControl(_)) => return Ok(()),
+            PromiseLookup::Slot(PromiseSlot::Live(entry)) => live_state(entry.terminal.as_ref()),
+            PromiseLookup::Missing => PromiseState::Missing,
+        };
+        if !cancel_decision_fences(&observed) {
+            return Ok(());
+        }
+        let entry = match state.promises.entry(key.key_id.clone()) {
+            std::collections::hash_map::Entry::Occupied(slot) => match slot.into_mut() {
+                PromiseSlot::Live(entry) => entry,
+                PromiseSlot::ArchivedTurnControl(_) => {
+                    unreachable!("an archived slot is never fenced")
+                }
+            },
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                let PromiseSlot::Live(entry) =
+                    slot.insert(PromiseSlot::Live(AwaitEventEntry::for_key(&key)))
+                else {
+                    unreachable!("a live slot was inserted")
+                };
+                entry
+            }
+        };
+        entry.terminal = Some(LiveTerminal::CancelDecided);
+        entry.notify.notify_waiters();
+        Ok(())
+    }
+
     /// Resolve every *outstanding* wait for `session_id` with
     /// [`Resolution::Cancelled`], leaving the session usable: already-terminal
     /// waits keep their terminal, and waits registered afterwards behave
@@ -845,14 +920,11 @@ impl AwaitEventRegistry {
             let PromiseSlot::Live(entry) = slot else {
                 continue;
             };
-            let observed = entry
-                .terminal
-                .clone()
-                .map_or(PromiseState::Pending, PromiseState::Resolved);
-            if let PromiseTransition::Store(terminal) =
-                cancel_sweep(&entry.verified_key.wait, observed)
-            {
-                entry.terminal = Some(terminal);
+            if let PromiseTransition::Store(terminal) = cancel_sweep(
+                &entry.verified_key.wait,
+                live_state(entry.terminal.as_ref()),
+            ) {
+                entry.terminal = Some(LiveTerminal::Resolved(terminal));
                 entry.notify.notify_waiters();
             }
         }
@@ -869,6 +941,63 @@ mod tests {
 
     fn turn_scope(session_id: &SessionId, turn_id: &TurnId) -> ExecutionScope {
         ExecutionScope::turn(session_id, turn_id)
+    }
+
+    /// ADR 0099 §4, W17: a cancel decision closes an unresolved completion
+    /// key — registered or not — so every later resolve is refused, typed,
+    /// and a reader observes `Cancelled`; a completion that won first keeps
+    /// its answer.
+    #[tokio::test]
+    async fn a_cancel_decision_refuses_every_later_resolve_of_an_unresolved_key() {
+        let registry = AwaitEventRegistry::new();
+        let scope = turn_scope(&SessionId::from("fence"), &TurnId::from("turn"));
+        let late = Resolution::Ok(serde_json::json!("late"));
+        for (call, registered) in [("unregistered", false), ("registered", true)] {
+            let wait = AwaitEventWaitIdentity::tool_completion(call);
+            let key = registry.key_for(&scope, wait.clone()).expect("key");
+            if registered {
+                // One poll parks a waiter, which registers the pending slot.
+                let parked = registry.await_resolution(
+                    &key,
+                    CancellationToken::new(),
+                    None,
+                    &crate::SystemClock,
+                );
+                let mut parked = std::pin::pin!(parked);
+                let polled = std::future::Future::poll(
+                    parked.as_mut(),
+                    &mut std::task::Context::from_waker(std::task::Waker::noop()),
+                );
+                assert!(polled.is_pending(), "the waiter parks on the pending key");
+            }
+            registry
+                .fence_cancel_decided(&scope, wait.clone())
+                .expect("fence");
+            for _ in 0..2 {
+                let refusal = registry
+                    .resolve(&key, late.clone())
+                    .expect_err("a late resolve is refused");
+                assert_eq!(
+                    refusal.code,
+                    crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided
+                );
+            }
+            assert_eq!(
+                registry.peek_resolution(&key).expect("peek"),
+                Some(Resolution::Cancelled)
+            );
+        }
+        let wait = AwaitEventWaitIdentity::tool_completion("won-first");
+        let key = registry.key_for(&scope, wait.clone()).expect("key");
+        let first = Resolution::Ok(serde_json::json!("first"));
+        registry
+            .resolve(&key, first.clone())
+            .expect("first resolve");
+        registry.fence_cancel_decided(&scope, wait).expect("fence");
+        assert_eq!(
+            registry.resolve(&key, late).expect("not refused"),
+            ResolveOutcome::AlreadyResolved { terminal: first }
+        );
     }
 
     #[tokio::test]

@@ -21,7 +21,7 @@ use lash_core::{
 };
 
 use crate::durable_wait::{
-    RestateDurableWaitAddress, RestateDurableWaitResolveRequest,
+    RestateDurableWaitAddress, RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse,
     RestateTurnCancelClosureParticipantRequest, durable_wait_index_key_for_scope,
     durable_wait_index_object_key, restate_await_event_key_for_authority,
     restate_await_event_key_is_valid, restate_await_event_key_is_valid_for_authority,

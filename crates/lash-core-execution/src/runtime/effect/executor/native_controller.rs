@@ -331,7 +331,7 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         disposition: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.groups.registered_executors()?;
-        NativeEffectGroups::close(&self.groups, &handle, disposition)
+        NativeEffectGroups::close(&self.groups, &self.await_events, &handle, disposition)
     }
 
     /// The §4 boundary under the group's own lock — the same lock `record` and
@@ -576,6 +576,11 @@ struct NativeEffectGroup {
     /// the identity its own envelope carries rather than by a position a
     /// caller could mistake.
     positions: HashMap<String, usize>,
+    /// Position → the completion key a deferrable tool child parks on, as the
+    /// scope and wait it is minted from. A cancel decision closes the key in
+    /// the controller's registry under the group lock, so the decision and
+    /// the refused late completion are one step (ADR 0099 §4, W17).
+    completion_waits: HashMap<usize, (ExecutionScope, AwaitEventWaitIdentity)>,
     state: Mutex<NativeEffectGroupState>,
     settled: Notify,
     /// Fired when a child task *returns* — not when it settles, which `settled`
@@ -698,6 +703,17 @@ impl NativeEffectGroup {
                 .iter()
                 .enumerate()
                 .map(|(position, child)| (child.invocation.replay_key().to_string(), position))
+                .collect(),
+            completion_waits: group
+                .children()
+                .iter()
+                .enumerate()
+                .filter_map(|(position, child)| {
+                    child
+                        .command
+                        .group_child_completion_wait()
+                        .map(|wait| (position, wait))
+                })
                 .collect(),
             state: Mutex::new(NativeEffectGroupState {
                 next_sequence: 0,
@@ -1156,6 +1172,7 @@ impl NativeEffectGroups {
     /// resolves to.
     fn close(
         groups: &Arc<Self>,
+        await_events: &AwaitEventRegistry,
         handle: &EffectGroupHandle,
         requested: LoserPolicy,
     ) -> Result<(), RuntimeEffectControllerError> {
@@ -1203,6 +1220,16 @@ impl NativeEffectGroups {
                 for position in 0..state.children {
                     if inner.decisions.contains_key(&position) {
                         continue;
+                    }
+                    // Completion delivery is one of the sinks the decision
+                    // fences (§4): the child's completion key is closed
+                    // under the same lock, before the decision is seated, so
+                    // a late resolve is refused and a refusal here leaves the
+                    // child undecided rather than half-decided.
+                    if let Some((scope, wait)) = state.completion_waits.get(&position) {
+                        await_events
+                            .fence_cancel_decided(scope, wait.clone())
+                            .map_err(RuntimeEffectControllerError::from)?;
                     }
                     inner
                         .decisions

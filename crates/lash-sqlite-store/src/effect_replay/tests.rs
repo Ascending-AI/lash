@@ -1104,6 +1104,7 @@ async fn cancel_child(store: &SqliteEffectReplayRowStore, replay_key: &str) -> u
             },
             envelope_json,
             envelope_hash: format!("hash-{replay_key}"),
+            completion_fence: None,
         })
         .await
         .expect("journal the cancel decision");

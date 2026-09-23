@@ -528,6 +528,12 @@ pub struct EffectCancelRequest {
     pub envelope_json: String,
     /// Hash of `envelope_json`'s canonical payload.
     pub envelope_hash: String,
+    /// The completion key a deferrable tool child parks on, as the promise
+    /// row the decision closes in the same transaction (ADR 0099 §4, W17):
+    /// completion delivery is one of the sinks the cancel fence covers, so a
+    /// resolve after the decision is refused, typed, and writes nothing.
+    /// `None` for a child that takes no completion key.
+    pub completion_fence: Option<super::await_event_coordinator::AwaitEventCancelFence>,
 }
 
 /// What [`discharge_child`](super::effect_replay_driver::EffectReplayRowStore::discharge_child)

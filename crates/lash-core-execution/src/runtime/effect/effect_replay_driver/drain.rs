@@ -315,9 +315,13 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         child: &UnsettledGroupChild,
     ) -> Result<ChildDrainOutcome, RuntimeEffectControllerError> {
         let cancelled = child_cancelled_error(&record.group_key, child.position as usize);
-        let canonical = CanonicalRuntimeEffectEnvelope::capture(
-            &self.decode_drained_child(&record.group_key, child)?,
-        )?;
+        let envelope = self.decode_drained_child(&record.group_key, child)?;
+        let canonical = CanonicalRuntimeEffectEnvelope::capture(&envelope)?;
+        let completion_fence = envelope
+            .command
+            .group_child_completion_wait()
+            .map(|(scope, wait)| self.await_events.cancel_decision_fence(&scope, &wait))
+            .transpose()?;
         let outcome = self
             .row_store
             .decide_cancel(&EffectCancelRequest {
@@ -330,6 +334,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 envelope_json: serde_json::to_string(&canonical)
                     .map_err(|err| self.vocabulary().encode_error(err))?,
                 envelope_hash: canonical.hash().to_string(),
+                completion_fence,
             })
             .await?;
         match outcome {

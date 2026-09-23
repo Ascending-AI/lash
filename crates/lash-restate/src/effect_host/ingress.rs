@@ -18,19 +18,21 @@ pub(super) async fn resolve_restate_await_event_via_ingress(
     let index_key = durable_wait_index_object_key(&address);
     let outcome = ingress
         .ingress
-        .call_object_json::<_, ResolveOutcome>(
+        .call_object_json::<_, RestateDurableWaitResolveResponse>(
             "LashDurableWaitIndex",
             &index_key,
             "resolve",
             &request,
         )
         .await;
-    outcome.map_err(|err| {
-        RuntimeError::new(
-            lash_core::RuntimeErrorCode::RestateAwaitEventResolve,
-            err.to_string(),
-        )
-    })
+    outcome
+        .map_err(|err| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::RestateAwaitEventResolve,
+                err.to_string(),
+            )
+        })?
+        .into_result()
 }
 
 pub(super) async fn update_restate_session_waits_via_ingress(
@@ -179,13 +181,22 @@ pub(super) async fn await_restate_await_event_via_ingress(
                 ingress,
                 key,
                 Resolution::Cancelled,
-            ).await?;
-            Ok(match outcome {
-                ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked => {
-                    Resolution::Cancelled
+            ).await;
+            // A cancel-decided child's key refuses the release (ADR 0099 §4):
+            // the waiter was cancelled either way.
+            match outcome {
+                Ok(ResolveOutcome::AlreadyResolved { terminal }) => Ok(terminal),
+                Ok(ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked) => {
+                    Ok(Resolution::Cancelled)
                 }
-                ResolveOutcome::AlreadyResolved { terminal } => terminal,
-            })
+                Err(error)
+                    if error.code
+                        == lash_core::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided =>
+                {
+                    Ok(Resolution::Cancelled)
+                }
+                Err(error) => Err(error),
+            }
         },
     }
 }

@@ -51,7 +51,9 @@ const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 static ADMISSION_WITNESSES: std::sync::OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =
     std::sync::OnceLock::new();
 
+mod group_waits;
 mod wire;
+use group_waits::{fence_cancel_decided_completions, resolve_group_wait, wait_resolution};
 pub(crate) use wire::btree_map_as_pairs;
 pub use wire::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupPhase,
@@ -517,34 +519,6 @@ fn notify_admission_witness(group_key: &str) {
     {
         hook.notify_one();
     }
-}
-
-fn wait_resolution(value: EffectGroupWaitResolution) -> Result<Resolution, TerminalError> {
-    serde_json::to_value(value)
-        .map(Resolution::Ok)
-        .map_err(|error| TerminalError::new(format!("serialize effect-group wake: {error}")))
-}
-
-async fn resolve_group_wait(
-    ctx: &ObjectContext<'_>,
-    scope: &ExecutionScope,
-    group_key: &str,
-    kind: EffectGroupWaitKind<'_>,
-    value: EffectGroupWaitResolution,
-) -> Result<(), TerminalError> {
-    let key = group_wait_key(scope, group_key, kind)?;
-    let replay_key = key.key_id.clone();
-    let address = RestateDurableWaitAddress::for_key(&key);
-    let Json(_) = ctx
-        .object_client::<LashDurableWaitIndexClient>(durable_wait_index_object_key(&address))
-        .resolve(Json(RestateDurableWaitResolveRequest {
-            key,
-            resolution: wait_resolution(value)?,
-        }))
-        .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-        .call()
-        .await?;
-    Ok(())
 }
 
 fn phase(lifecycle: &EffectGroupLifecycle) -> EffectGroupPhase {
@@ -1263,6 +1237,7 @@ impl EffectGroupIndex {
         if prior.as_ref() == Some(&EffectGroupCloseDisposition::from(effective)) {
             return Ok(Json(EffectGroupCloseResponse::AlreadyClosed));
         }
+        let mut decided = Vec::new();
         if effective == LoserPolicy::Cancel {
             let live = record.live_mut()?;
             for position in 0..live.shape.children() {
@@ -1274,6 +1249,7 @@ impl EffectGroupIndex {
                 }
                 live.commit_states
                     .insert(position, EffectGroupChildCommitState::CancelDecided);
+                decided.push(position);
                 let rank = live.next_rank;
                 live.next_rank = live.next_rank.checked_add(1).ok_or_else(|| {
                     TerminalError::new(format!(
@@ -1291,6 +1267,7 @@ impl EffectGroupIndex {
                 live.settled_positions.insert(position, rank);
             }
         }
+        fence_cancel_decided_completions(&ctx, &group_key, &shape, &decided).await?;
         let live = record.live()?.clone();
         record.lifecycle = EffectGroupLifecycle::Closed {
             effective: effective.into(),
@@ -1468,7 +1445,8 @@ impl EffectGroupIndex {
         let Some(mut record) = load_index(&ctx).await? else {
             return Ok(Json(EffectGroupRetirementCancelResponse::UnknownGroup));
         };
-        let (facts, ranks, changed) = {
+        let mut decided = Vec::new();
+        let (facts, ranks, changed, shape) = {
             let (facts, live) = match &mut record.lifecycle {
                 EffectGroupLifecycle::Retired {
                     cleanup: EffectGroupCleanup::Pending { facts, live },
@@ -1487,6 +1465,7 @@ impl EffectGroupIndex {
                 }
                 live.commit_states
                     .insert(position, EffectGroupChildCommitState::CancelDecided);
+                decided.push(position);
                 let rank = live.next_rank;
                 live.next_rank = live.next_rank.checked_add(1).ok_or_else(|| {
                     TerminalError::new(format!(
@@ -1516,8 +1495,9 @@ impl EffectGroupIndex {
                         .map(|rank| (position, rank))
                 })
                 .collect::<Vec<_>>();
-            (facts.clone(), ranks, changed)
+            (facts.clone(), ranks, changed, live.shape.clone())
         };
+        fence_cancel_decided_completions(&ctx, &group_key, &shape, &decided).await?;
         store_index(&ctx, record.clone());
         for (position, rank) in ranks.iter().copied() {
             resolve_group_wait(

@@ -170,6 +170,10 @@ enum Adr0099Ruling {
     /// ADR 0099 promises nothing at this window, so there is no oracle to
     /// write.
     NothingPromised(&'static str),
+    /// The row is not residue a redrive comes back for — it is a ruling on a
+    /// live write — so a cross-tier law drives it instead of this matrix; the
+    /// string names the law.
+    CoveredByLaw(&'static str),
 }
 
 /// One row of the reviewed table: the ADR's window number and summary, and
@@ -291,9 +295,8 @@ const ADR_0099_ROWS: &[Adr0099Row] = &[
     Adr0099Row {
         row: "W17",
         summary: "late completion arrives after a cancel decision",
-        ruling: Adr0099Ruling::NoSeam(
-            "turn-cancel closure for group children does not exist on this \
-             substrate",
+        ruling: Adr0099Ruling::CoveredByLaw(
+            "tool_child_invocation::a_late_completion_after_a_cancel_decision_is_refused",
         ),
     },
     Adr0099Row {
@@ -348,6 +351,11 @@ fn assert_adr_0099_table_is_reviewed() {
             Adr0099Ruling::Covered(window) => assert!(
                 GroupCrashWindow::ALL.contains(window),
                 "row {} covers a window the matrix does not drive",
+                row.row
+            ),
+            Adr0099Ruling::CoveredByLaw(law) => assert!(
+                !law.trim().is_empty(),
+                "a row covered elsewhere must name the law that covers it (row {})",
                 row.row
             ),
             Adr0099Ruling::NoSeam(reason) | Adr0099Ruling::NothingPromised(reason) => assert!(

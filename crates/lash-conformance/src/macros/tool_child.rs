@@ -167,6 +167,10 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-admission-fence"
             ),
             (
+                a_late_completion_after_a_cancel_decision_is_refused,
+                "tool-child-late-completion-refused"
+            ),
+            (
                 a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ranks,
                 "tool-child-group-prefix-incorporation"
             ),
