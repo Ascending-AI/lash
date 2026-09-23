@@ -100,8 +100,12 @@ pub(crate) const SELECT_TABLE_DDL: &str = "SELECT name, sql
 pub(crate) const SELECT_MAIN_DATABASE_FILE: &str =
     "SELECT file FROM pragma_database_list WHERE name = 'main'";
 
-/// Whether this connection already has the process registry attached: an
-/// attach whose caller was dropped still ran to completion on the connection
-/// thread, and SQLite refuses a second `ATTACH` under the same name.
+/// Whether this connection has a process registry attached: an attach whose
+/// caller was dropped still ran to completion on the connection thread, so
+/// the fence binder looks before it attaches.
 pub(crate) const SELECT_PROCESS_REGISTRY_IS_ATTACHED: &str =
     "SELECT 1 FROM pragma_database_list WHERE name = 'process_registry'";
+
+/// Detach the process registry, so the fence binder can attach the one it
+/// was asked for in place of an attach it never recorded.
+pub(crate) const DETACH_PROCESS_REGISTRY: &str = "DETACH DATABASE process_registry";

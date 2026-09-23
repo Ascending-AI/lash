@@ -400,9 +400,18 @@ impl RegistryAttachment {
                 }
                 // The connection thread finishes a call whose awaiting
                 // future was dropped (a timed-out await-event read), so an
-                // earlier attach may have landed without this binder
-                // recording it: recognise it instead of attaching twice.
-                let already_attached = connection
+                // attach may have landed without this binder recording it,
+                // possibly of a registry the request has since moved away
+                // from. The binder never handed out locations for it (this
+                // method is the only way to them, and the state is still
+                // `Requested`), so no fence was read or written through it.
+                // It is detached and the requested registry attached, so the
+                // connection holds exactly what the binder then records.
+                // Replacing is unconditional because an attached `memdb`
+                // database reports no file to compare; refusing instead
+                // would poison the connection over a cancellation artifact
+                // rather than a caller error.
+                let stranded = connection
                     .query_row(
                         crate::connection_sql::SELECT_PROCESS_REGISTRY_IS_ATTACHED,
                         [],
@@ -410,12 +419,13 @@ impl RegistryAttachment {
                     )
                     .optional()?
                     .is_some();
-                if !already_attached {
-                    connection.execute(
-                        crate::connection_sql::ATTACH_PROCESS_REGISTRY,
-                        params![registry_name],
-                    )?;
+                if stranded {
+                    connection.execute(crate::connection_sql::DETACH_PROCESS_REGISTRY, [])?;
                 }
+                connection.execute(
+                    crate::connection_sql::ATTACH_PROCESS_REGISTRY,
+                    params![registry_name],
+                )?;
                 Ok(FenceLocations::attached(Schema::Main))
             })
             .await?;
@@ -584,5 +594,137 @@ mod fenced_predicate_tests {
                 .is_fenced(&connection, "scope-b")
                 .expect("read fence")
         );
+    }
+}
+
+#[cfg(test)]
+mod registry_attachment_tests {
+    use super::*;
+    use crate::{SqliteBackend, SqliteDatabase};
+
+    /// A backend over a directory or in memory, with its directory kept.
+    async fn backend(file: bool) -> (SqliteBackend, Option<tempfile::TempDir>) {
+        if file {
+            let dir = tempfile::tempdir().expect("backend directory");
+            let backend = SqliteBackend::open(dir.path())
+                .await
+                .expect("open a file backend");
+            (backend, Some(dir))
+        } else {
+            let backend = SqliteBackend::memory()
+                .await
+                .expect("open a memory backend");
+            (backend, None)
+        }
+    }
+
+    /// A fresh connection to `backend`'s effect journal, which no binder has
+    /// touched.
+    async fn journal_connection(backend: &SqliteBackend) -> SqliteConnection {
+        SqliteConnection::open(&backend.location().target(SqliteDatabase::EffectReplay))
+            .await
+            .expect("open the effect journal")
+    }
+
+    /// Tag `registry` with a marker table, so a test can tell which registry
+    /// a connection has attached: an attached `memdb` database reports no
+    /// file.
+    fn mark(registry: &DatabaseTarget, marker: &str) {
+        rusqlite::Connection::open(registry.open_name())
+            .expect("open the registry")
+            .execute_batch(&format!("CREATE TABLE {marker} (x INTEGER)"))
+            .expect("mark the registry");
+    }
+
+    /// Attach `registry` by hand, as an attach whose caller was dropped
+    /// leaves the connection: attached, and unrecorded by the binder.
+    async fn attach_by_hand(conn: &SqliteConnection, registry: &DatabaseTarget) {
+        let name = registry.open_name();
+        conn.call(move |connection| {
+            connection.execute(
+                crate::connection_sql::ATTACH_PROCESS_REGISTRY,
+                params![name],
+            )
+        })
+        .await
+        .expect("attach the registry by hand");
+    }
+
+    /// The markers of the registry `conn` has attached.
+    async fn attached_markers(conn: &SqliteConnection) -> Vec<String> {
+        conn.call(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT name FROM process_registry.sqlite_master \
+                 WHERE name LIKE '%_marker' ORDER BY name",
+            )?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .await
+        .expect("read the attached registry's markers")
+    }
+
+    async fn adopts_an_unrecorded_attach_of_the_requested_registry(file: bool) {
+        let (backend, _dir) = backend(file).await;
+        let registry = backend.location().target(SqliteDatabase::ProcessRegistry);
+        mark(&registry, "requested_marker");
+        let conn = journal_connection(&backend).await;
+        let binder = RegistryAttachment::default();
+        binder.request(registry.clone());
+        attach_by_hand(&conn, &registry).await;
+
+        let locations = binder
+            .ensure_attached(&conn)
+            .await
+            .expect("an attach that already landed must not make the binder fail");
+
+        assert!(locations.registry.is_some());
+        assert_eq!(attached_markers(&conn).await, ["requested_marker"]);
+    }
+
+    async fn replaces_an_unrecorded_attach_of_another_registry(file: bool) {
+        let (backend, _dir) = self::backend(file).await;
+        let (stranded, _stranded_dir) = self::backend(file).await;
+        let registry = backend.location().target(SqliteDatabase::ProcessRegistry);
+        let other = stranded.location().target(SqliteDatabase::ProcessRegistry);
+        mark(&registry, "requested_marker");
+        mark(&other, "stranded_marker");
+        let conn = journal_connection(&backend).await;
+        let binder = RegistryAttachment::default();
+        // The stranded attach named a registry the request has since moved
+        // away from.
+        attach_by_hand(&conn, &other).await;
+        binder.request(registry.clone());
+
+        binder
+            .ensure_attached(&conn)
+            .await
+            .expect("the requested registry replaces the stranded attach");
+
+        assert_eq!(
+            attached_markers(&conn).await,
+            ["requested_marker"],
+            "fences must reach the requested registry, not the stranded one"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unrecorded_attach_of_the_requested_memory_registry_is_adopted() {
+        adopts_an_unrecorded_attach_of_the_requested_registry(false).await;
+    }
+
+    #[tokio::test]
+    async fn an_unrecorded_attach_of_the_requested_file_registry_is_adopted() {
+        adopts_an_unrecorded_attach_of_the_requested_registry(true).await;
+    }
+
+    #[tokio::test]
+    async fn an_unrecorded_attach_of_another_memory_registry_is_replaced() {
+        replaces_an_unrecorded_attach_of_another_registry(false).await;
+    }
+
+    #[tokio::test]
+    async fn an_unrecorded_attach_of_another_file_registry_is_replaced() {
+        replaces_an_unrecorded_attach_of_another_registry(true).await;
     }
 }

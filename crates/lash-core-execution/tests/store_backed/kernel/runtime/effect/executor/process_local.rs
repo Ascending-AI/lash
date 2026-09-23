@@ -73,35 +73,35 @@ mod attach_terminal_tests {
         }
 
         /// Runs the journaled arming exactly as a (re)driven turn does.
-        async fn arm(&self, effect_id: &str) {
-            let outcome = self
-                .controller
-                .execute_effect(
-                    crate::RuntimeEffectEnvelope::new(
-                        crate::RuntimeEffectInvocation::new(
-                            crate::EffectAddress::new(
-                                crate::ExecutionScope::runtime_operation("runtime"),
-                                effect_id,
-                            )
-                            .expect("valid attach test address"),
-                            crate::RuntimeAttribution::none(),
-                            effect_id,
-                        ),
-                        crate::RuntimeEffectCommand::process(ProcessCommand::AttachTerminal {
-                            process_ref: self.process_ref.clone(),
-                            key: self.key.clone(),
-                        }),
-                    ),
-                    crate::RuntimeEffectLocalExecutor::processes(
-                        Arc::clone(&self.registry),
-                        Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
-                            &self.registry,
-                        ))),
+        fn arm_envelope(&self, effect_id: &str) -> crate::RuntimeEffectEnvelope {
+            crate::RuntimeEffectEnvelope::new(
+                crate::RuntimeEffectInvocation::new(
+                    crate::EffectAddress::new(
+                        crate::ExecutionScope::runtime_operation("runtime"),
+                        effect_id,
                     )
-                    .with_process_effect_controller(Arc::clone(&self.controller)),
-                )
-                .await
-                .expect("arming the process terminal must succeed");
+                    .expect("valid attach test address"),
+                    crate::RuntimeAttribution::none(),
+                    effect_id,
+                ),
+                crate::RuntimeEffectCommand::process(ProcessCommand::AttachTerminal {
+                    process_ref: self.process_ref.clone(),
+                    key: self.key.clone(),
+                }),
+            )
+        }
+
+        fn arm_executor(&self) -> crate::RuntimeEffectLocalExecutor<'static> {
+            crate::RuntimeEffectLocalExecutor::processes(
+                Arc::clone(&self.registry),
+                Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+                    &self.registry,
+                ))),
+            )
+            .with_process_effect_controller(Arc::clone(&self.controller))
+        }
+
+        fn assert_armed(outcome: crate::RuntimeEffectOutcome) {
             assert!(
                 matches!(
                     outcome,
@@ -111,6 +111,33 @@ mod attach_terminal_tests {
                 ),
                 "arming must return so the turn can park, never carry a terminal"
             );
+        }
+
+        /// Arms the terminal through the journal, as the waiting turn does.
+        async fn arm(&self, effect_id: &str) {
+            let outcome = self
+                .controller
+                .execute_effect(self.arm_envelope(effect_id), self.arm_executor())
+                .await
+                .expect("arming the process terminal must succeed");
+            Self::assert_armed(outcome);
+        }
+
+        /// Runs the arm again as the crash after the local arm and before its
+        /// journal commit leaves it: the executor runs once more, over a fresh
+        /// journal that holds no record of the first run (a redrive over the
+        /// same journal would only replay it). The wait it arms is still this
+        /// fixture's.
+        async fn rerun_arm(&self, effect_id: &str) {
+            let uncommitted = crate::support::memory_backend().await;
+            let outcome = crate::support::scoped_controller(
+                &uncommitted,
+                crate::AdmittedScope::runtime_operation("runtime"),
+            )
+            .execute_effect(self.arm_envelope(effect_id), self.arm_executor())
+            .await
+            .expect("re-running the arm must succeed");
+            Self::assert_armed(outcome);
         }
 
         /// Terminalizes the awaited process the way its executor does: under
@@ -245,7 +272,7 @@ mod attach_terminal_tests {
     async fn a_redriven_arming_resolves_the_same_wait_exactly_once() {
         let fixture = AttachFixture::new("attach-redrive").await;
         fixture.arm("attach-redrive").await;
-        fixture.arm("attach-redrive").await;
+        fixture.rerun_arm("attach-redrive").await;
 
         let terminal = fixture.complete(serde_json::json!({"done": "once"})).await;
         let resolved = process_terminal_resolution(terminal);
@@ -369,10 +396,16 @@ mod tests {
             .execute_effect(command.clone(), executor())
             .await
             .expect("initial process start");
-        controller
+        // The second attempt runs the local start again, as the crash after
+        // the local start and before its journal commit leaves it: over a
+        // fresh journal that holds no record of the first run (a redrive over
+        // the same journal would only replay it), against the same registry
+        // and environment store.
+        let uncommitted = crate::support::memory_backend().await;
+        runtime_controller(&uncommitted)
             .execute_effect(command, executor())
             .await
-            .expect("replayed process start after staging retirement");
+            .expect("re-run process start after staging retirement");
         let record = registry
             .get_process(&process_id)
             .await
