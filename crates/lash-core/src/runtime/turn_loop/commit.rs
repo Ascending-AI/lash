@@ -955,20 +955,16 @@ impl LashRuntime {
         .await;
         // A cancelled turn starts no follow-on (FIG-3157). Its final commit
         // settles withheld turn input through the cancellation's undelivered
-        // disposition (FIG-3531); withheld queued work settles with the turn,
-        // as it always has.
+        // disposition (FIG-3531), handed over directly rather than inferred
+        // from the committed outcome; withheld queued work settles with the
+        // turn, as it always has.
         let crate::runtime::logical_turn::WithheldTerminalWork {
             queued: withheld_queue_claims,
             turn_inputs: withheld_turn_inputs,
         } = withheld_terminal_work;
         pending_queue_claims.extend(withheld_queue_claims);
         let claims = LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims)
-            .with_withheld_terminal_work(Some(
-                crate::runtime::logical_turn::WithheldTerminalWork {
-                    queued: Vec::new(),
-                    turn_inputs: withheld_turn_inputs,
-                },
-            ));
+            .with_undelivered_turn_inputs(withheld_turn_inputs);
         Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
                 turn_pipeline,

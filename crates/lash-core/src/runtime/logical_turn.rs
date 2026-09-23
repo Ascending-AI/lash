@@ -58,6 +58,10 @@ pub(super) struct LogicalTurnClaims {
     /// starts no follow-on for withheld turn input; its commit settles that
     /// input through the undelivered disposition instead (FIG-3531).
     pub(super) withheld_terminal_work: Option<WithheldTerminalWork>,
+    /// Withheld turn input a turn that aborted on a cancel hands straight to
+    /// the undelivered disposition, whatever outcome the commit assembles
+    /// (FIG-3531).
+    pub(super) undelivered_turn_inputs: Vec<TurnInputDrive>,
 }
 
 impl LogicalTurnClaims {
@@ -69,7 +73,13 @@ impl LogicalTurnClaims {
             queued,
             turn_inputs,
             withheld_terminal_work: None,
+            undelivered_turn_inputs: Vec::new(),
         }
+    }
+
+    pub(super) fn with_undelivered_turn_inputs(mut self, undelivered: Vec<TurnInputDrive>) -> Self {
+        self.undelivered_turn_inputs = undelivered;
+        self
     }
 
     pub(super) fn with_withheld_terminal_work(
@@ -163,7 +173,10 @@ impl LogicalTurnClaims {
             .iter()
             .filter(|_| cancelled)
             .flat_map(|withheld| &withheld.turn_inputs);
-        let undelivered_turn_inputs = withheld_turn_inputs
+        let undelivered_turn_inputs = self
+            .undelivered_turn_inputs
+            .iter()
+            .chain(withheld_turn_inputs)
             .filter_map(TurnInputDrive::as_claim)
             .cloned()
             .collect();
