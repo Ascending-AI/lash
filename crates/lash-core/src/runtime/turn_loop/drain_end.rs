@@ -11,11 +11,17 @@
 //! `redrive_missing_opener_parent_end_rows`, which confirms the receipt
 //! through `SessionCommitStore::drain_end_exists` before re-deriving the row.
 //!
+//! A durable `Failed` settlement is an end as well (FIG-3559): it is terminal,
+//! so nothing retries it, and the epilogue runs right after it under the
+//! same held lane — the failed run's closing groups settle and its `Cancel`
+//! children are swept like any other ended drain's.
+//!
 //! What is *not* a drain end: the worker dying (nothing is written — the
 //! retry under the same `drain_id` ends it), a physical-turn commit inside
 //! the drain (one drain can run several; its owner end is its own write), a
-//! failed run (interrupted, not ended), and a fresh empty poll (nothing was
-//! ever owned). Ordering is the §7 one this ticket fixes: protected
+//! run whose failure retains ownership (interrupted, not ended — its retry
+//! ends it), and a fresh empty poll (nothing was ever owned). Ordering is the
+//! §7 one this ticket fixes: protected
 //! obligations drain first, then the outcome commit, then the receipt, then
 //! the ledger row — the ledger row is what sweeps `OnParentEnd::Cancel`
 //! children, so it must land only after the drain cannot owe more work.
@@ -24,8 +30,10 @@ use super::*;
 
 impl LashRuntime {
     /// Run the drain-end epilogue for `drain_scope` after a successful drain
-    /// (`ran` = a logical turn executed) or a nothing-to-do drain (`ran` =
-    /// false). Only called with the session execution lease still held and
+    /// (`ran` = this process just committed the drain's final head), or after
+    /// a drain that ran nothing here (`ran` = false): the replay of a settled
+    /// run, a frozen empty selection, or a run just settled durably `Failed`.
+    /// Only called with the session execution lease still held and
     /// only when the admitted scope is `QueueDrain`; a `turn_id`-scoped drain
     /// is a `Turn` owner and takes `record_turn_parent_end` instead.
     ///
@@ -35,7 +43,7 @@ impl LashRuntime {
     /// the receipt, and a missing receipt leaves the drain for its retry.
     /// Every decline therefore only traces.
     pub(super) async fn end_queue_drain(
-        &self,
+        &mut self,
         drain_scope: &crate::ExecutionScope,
         session_execution_lease: &SessionExecutionLeaseGuard,
         store: &Arc<dyn crate::store::RuntimePersistence>,
@@ -153,6 +161,24 @@ impl LashRuntime {
                     return;
                 }
             }
+        }
+
+        // The end commit persists the resident state as the session's
+        // checkpoint, so the resident state must be the committed one. A run
+        // that failed invalidated it — the failed turn may have mutated the
+        // live execution — and the reload restores it from the store; a valid
+        // resident state makes this a no-op.
+        if let Err(error) = self
+            .reload_invalidated_resident_session_state_under_lease(Some(session_execution_lease))
+            .await
+        {
+            tracing::warn!(
+                session_id = %session_id,
+                drain_id = %drain_id,
+                error = %error,
+                "queue drain end withheld: the resident session state could not be reloaded",
+            );
+            return;
         }
 
         // The end fact: a state-preserving commit receipted under the drain's

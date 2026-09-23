@@ -315,25 +315,20 @@ impl LashRuntime {
                 return Err(super::runtime_error_from_store_commit(error).into());
             }
         };
-        if selected.is_some()
-            && let Some(crate::store::QueuedRunTerminal::Failed { message, .. }) =
-                &admission.terminal
-        {
-            let _ = lease.release_if_live().await;
-            return Err(
-                RuntimeError::new(RuntimeErrorCode::QueuedRunFailed, message.clone()).into(),
-            );
-        }
-        if admission.terminal.is_some() {
+        if let Some(terminal) = &admission.terminal {
             // A retry of a settled run is how a drain that crashed after its
-            // terminal commit, before its end, reaches the epilogue again
-            // (FIG-3419): the persisted scope is the same owner. A `Failed`
-            // settlement is not an end, exactly as on the live path.
-            if !matches!(
-                admission.terminal,
-                Some(crate::store::QueuedRunTerminal::Failed { .. })
-            ) {
-                Box::pin(self.end_queue_drain(&admission.scope, &lease, &store, false)).await;
+            // terminal settlement, before its end, reaches the epilogue again
+            // (FIG-3419): the persisted scope is the same owner, and every
+            // terminal settlement — a durable `Failed` included (FIG-3559) —
+            // is an end.
+            Box::pin(self.end_queue_drain(&admission.scope, &lease, &store, false)).await;
+            if selected.is_some()
+                && let crate::store::QueuedRunTerminal::Failed { message, .. } = terminal
+            {
+                let _ = lease.release_if_live().await;
+                return Err(
+                    RuntimeError::new(RuntimeErrorCode::QueuedRunFailed, message.clone()).into(),
+                );
             }
             lease
                 .release_if_live()
@@ -390,14 +385,15 @@ impl LashRuntime {
         let opts = match preparation {
             Ok(opts) => opts,
             Err(error) => {
-                let error = retain_or_settle_queued_error(
-                    store.as_ref(),
-                    &fence,
-                    &admission,
-                    anonymous_caller,
-                    error,
-                )
-                .await;
+                let error = self
+                    .retain_or_settle_queued_error(
+                        &store,
+                        &lease,
+                        &admission,
+                        anonymous_caller,
+                        error,
+                    )
+                    .await;
                 let _ = lease.release_if_live().await;
                 return Err(error.into());
             }
@@ -427,26 +423,16 @@ impl LashRuntime {
                             | crate::StoreError::QueuedWorkRowExceedsContextWindow { .. }
                     )
                 {
-                    store
-                        .settle_queued_run(
-                            &fence,
-                            crate::store::QueuedRunCommit {
-                                scope: admission.scope.clone(),
-                                expected_revision: admission.revision,
-                                progress: if anonymous_caller && admission.can_forget_unworked() {
-                                    crate::store::QueuedRunProgress::ForgetUnworked
-                                } else {
-                                    crate::store::QueuedRunProgress::Settle {
-                                        terminal: crate::store::QueuedRunTerminal::Failed {
-                                            code: RuntimeErrorCode::QueuedWork,
-                                            message: error.to_string(),
-                                        },
-                                    }
-                                },
-                            },
-                        )
-                        .await
-                        .map_err(super::runtime_error_from_store_commit)?;
+                    self.settle_failed_queued_run(
+                        &store,
+                        &lease,
+                        &admission,
+                        anonymous_caller,
+                        RuntimeErrorCode::QueuedWork,
+                        error.to_string(),
+                    )
+                    .await
+                    .map_err(super::runtime_error_from_store_commit)?;
                 }
                 let _ = lease.release_if_live().await;
                 return Err(match error {
@@ -556,13 +542,13 @@ impl LashRuntime {
             )
             .await;
         if let Err(error) = result {
-            let error = if let Some(run) = &self.queued_run {
-                retain_or_settle_queued_error(store.as_ref(), &fence, run, anonymous_caller, error)
-                    .await
-            } else {
-                error
-            };
-            result = Err(error);
+            result = Err(match (self.queued_run.take(), lease.as_ref()) {
+                (Some(run), Some(held)) => {
+                    self.retain_or_settle_queued_error(&store, held, &run, anonymous_caller, error)
+                        .await
+                }
+                _ => error,
+            });
         }
         self.queued_run = None;
         if result.is_ok()
@@ -698,17 +684,65 @@ impl LashRuntime {
     }
 }
 
-async fn retain_or_settle_queued_error(
-    store: &dyn crate::RuntimePersistence,
-    fence: &crate::SessionExecutionLeaseAuthority,
-    run: &crate::store::QueuedRunAdmission,
-    anonymous_caller: bool,
-    error: RuntimeError,
-) -> RuntimeError {
-    if error.is_terminal() {
-        if let Err(disposition) = store
+impl LashRuntime {
+    /// Dispose of a queued run's error: a terminal error settles the run
+    /// failed, an unclassified one retains ownership for recovery, and a
+    /// retryable one passes through.
+    async fn retain_or_settle_queued_error(
+        &mut self,
+        store: &Arc<dyn crate::store::RuntimePersistence>,
+        lease: &SessionExecutionLeaseGuard,
+        run: &crate::store::QueuedRunAdmission,
+        anonymous_caller: bool,
+        error: RuntimeError,
+    ) -> RuntimeError {
+        if error.is_terminal() {
+            if let Err(disposition) = self
+                .settle_failed_queued_run(
+                    store,
+                    lease,
+                    run,
+                    anonymous_caller,
+                    error.code.clone(),
+                    error.message.clone(),
+                )
+                .await
+            {
+                return RuntimeError::new(
+                    RuntimeErrorCode::QueuedRunPending,
+                    format!("queued terminal disposition remains pending: {disposition}"),
+                );
+            }
+        } else if !error.is_retryable() {
+            return RuntimeError::new(
+                RuntimeErrorCode::QueuedRunPending,
+                format!("queued run remains recoverable: {error}"),
+            );
+        }
+        error
+    }
+
+    /// Settle `run` terminally failed — durably `Failed`, or forgotten when an
+    /// anonymous caller's run never worked anything — and then end the drain.
+    ///
+    /// A durable `Failed` is terminal: nothing retries it, so no later drain
+    /// would end it, and the settlement is the drain's end exactly as a
+    /// successful run's commit is (FIG-3559). The drain-end epilogue therefore
+    /// runs here, under the lane the caller still holds, and decides as it
+    /// does on every other end path — a drain that owns no children has no end
+    /// to write.
+    async fn settle_failed_queued_run(
+        &mut self,
+        store: &Arc<dyn crate::store::RuntimePersistence>,
+        lease: &SessionExecutionLeaseGuard,
+        run: &crate::store::QueuedRunAdmission,
+        anonymous_caller: bool,
+        code: RuntimeErrorCode,
+        message: String,
+    ) -> Result<(), crate::StoreError> {
+        store
             .settle_queued_run(
-                fence,
+                &lease.fence(),
                 crate::store::QueuedRunCommit {
                     scope: run.scope.clone(),
                     expected_revision: run.revision,
@@ -716,26 +750,13 @@ async fn retain_or_settle_queued_error(
                         crate::store::QueuedRunProgress::ForgetUnworked
                     } else {
                         crate::store::QueuedRunProgress::Settle {
-                            terminal: crate::store::QueuedRunTerminal::Failed {
-                                code: error.code.clone(),
-                                message: error.message.clone(),
-                            },
+                            terminal: crate::store::QueuedRunTerminal::Failed { code, message },
                         }
                     },
                 },
             )
-            .await
-        {
-            return RuntimeError::new(
-                RuntimeErrorCode::QueuedRunPending,
-                format!("queued terminal disposition remains pending: {disposition}"),
-            );
-        }
-    } else if !error.is_retryable() {
-        return RuntimeError::new(
-            RuntimeErrorCode::QueuedRunPending,
-            format!("queued run remains recoverable: {error}"),
-        );
+            .await?;
+        Box::pin(self.end_queue_drain(&run.scope, lease, store, false)).await;
+        Ok(())
     }
-    error
 }

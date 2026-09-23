@@ -413,7 +413,8 @@ in the session store — `OperationId::new(ExecutionScope::queue_drain(session,
 drain_id), "final")` — committed by the drain epilogue
 (`turn_loop/drain_end.rs`) as a state-preserving `RuntimeCommit` under the
 still-held session execution lease, after `drive_logical_turn` returns
-successfully and before the lease is released. `drain_id` is the caller's
+successfully — or after a terminal error settles the run durably `Failed` —
+and before the lease is released. `drain_id` is the caller's
 idempotency identity: a retried drain under the same `drain_id` is the same
 owner, so receipt replay makes a repeated epilogue a no-op.
 
@@ -432,9 +433,13 @@ What is not an end: the worker dying, an empty first poll (a drain that never
 owned children writes nothing — a nothing-to-do retry of a drained owner ends
 only when the registry already lists its children), an intermediate
 physical-turn commit inside the drain (one drain may run several; the owner
-end is its own write), and a failed `drive_logical_turn` (interrupted, not
-ended). The sweep then settles `OnParentEnd::Cancel` children with
-`ParentEnded`; `Abandon` children stay host-managed.
+end is its own write), and a failed `drive_logical_turn` whose error retains
+ownership (interrupted, not ended — its retry ends it). A durable `Failed` is
+different (FIG-3559): it is terminal, nothing retries it, so it counts as an
+end and the epilogue runs on that path too, under the same held lane, with the
+same ordering and the same ownership test. The sweep then settles
+`OnParentEnd::Cancel` children with `ParentEnded`; `Abandon` children stay
+host-managed.
 
 The incarnation stays *beside* `ExecutionScope`, not inside it: the scope
 remains the claim address, the pin is the admission-time fact, and

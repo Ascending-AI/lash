@@ -2,10 +2,12 @@
 //! owner, and an owner ends through its own write.
 //!
 //! The end fact is the session-store receipt `{queue_drain scope}/final`; the
-//! parent-end ledger row in the process registry follows it. What is *not* an
-//! end: a fresh empty poll, an intermediate physical-turn commit, a failed or
-//! interrupted run, or the worker dying — a retry under the same `drain_id` is
-//! the drain that ends. These laws drive real drains through
+//! parent-end ledger row in the process registry follows it. A durable
+//! `Failed` settlement is an end: it is terminal, so the drain that settled it
+//! ends there (FIG-3559). What is *not* an end: a fresh empty poll, an
+//! intermediate physical-turn commit, a run whose failure retains ownership,
+//! an interrupted run, or the worker dying — a retry under the same
+//! `drain_id` is the drain that ends. These laws drive real drains through
 //! `LashRuntime::stream_next_queued_work` under an admitted `QueueDrain` scope
 //! and read the outcome only through the surfaces a backend already owes:
 //! `SessionCommitStore::drain_end_exists`, the parent-end ledger, and the
@@ -179,13 +181,15 @@ impl crate::ToolProvider for DrainEndTool {
     }
 }
 
+/// The commit budget every law's runtime runs under unless it needs a
+/// terminal commit failure.
+fn law_commit_budget() -> crate::CommitBudget {
+    crate::CommitBudget::bounded(1024 * 1024, 512)
+}
+
 /// The runtime fixture every law shares: one queued-work-capable runtime over
 /// the world's store with `registry` wired as its own, so the drain-end
 /// epilogue writes to exactly the handles the law asserts on.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn drain_runtime(
     world: &DrainEndWorld,
     registry: Arc<dyn ProcessRegistry>,
@@ -193,10 +197,32 @@ async fn drain_runtime(
     plugin_factories: Vec<Arc<dyn PluginFactory>>,
     lease_owner: LeaseOwnerIdentity,
 ) -> LashRuntime {
-    let mut host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+    drain_runtime_with_budget(
+        world,
+        registry,
+        provider,
+        plugin_factories,
+        lease_owner,
+        law_commit_budget(),
+    )
+    .await
+}
+
+/// [`drain_runtime`] under an explicit commit budget.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn drain_runtime_with_budget(
+    world: &DrainEndWorld,
+    registry: Arc<dyn ProcessRegistry>,
+    provider: crate::ProviderHandle,
+    plugin_factories: Vec<Arc<dyn PluginFactory>>,
+    lease_owner: LeaseOwnerIdentity,
+    commit_budget: crate::CommitBudget,
+) -> LashRuntime {
+    let mut host =
+        crate::RuntimeHostConfig::in_memory(commit_budget, crate::QueuedWorkBatchingConfig::new(1));
     host.control.effect_host = Arc::clone(&world.effect_host);
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = crate::testing::mock_session_policy();
@@ -207,7 +233,7 @@ async fn drain_runtime(
     // a fresh frame the drain-end receipt commit would refuse.
     Box::pin(
         crate::LashRuntime::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
+            commit_budget,
             crate::QueuedWorkBatchingConfig::new(1),
             lease_owner,
         )
@@ -663,9 +689,11 @@ pub async fn an_empty_drain_writes_nothing_and_a_retried_one_ends(
     );
 }
 
-/// **L5 — failed run.** A drain whose run fails writes neither receipt nor
-/// row — interrupted, not ended — and its children stay live. The retry under
-/// the same `drain_id` is the drain that ends.
+/// **L5 — failed run that retains ownership.** A drain whose run fails with
+/// an unclassified error — a `before_turn` refusal, which leaves the run
+/// pending rather than settling it — writes neither receipt nor row
+/// (interrupted, not ended), and its children stay live. The retry under the
+/// same `drain_id` is the drain that ends. A terminal failure is L8's.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1003,6 +1031,129 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
     );
 }
 
+/// **L8 — a durably `Failed` drain ends.** A terminal error settles the run
+/// durably `Failed`, which nothing retries, so the settlement is the drain's
+/// end: the epilogue runs under the lane the failed drain still holds. Here a
+/// tool child is still live under a `closing` group of the drain's scope when
+/// the run fails; the epilogue waits out that protected obligation, then
+/// writes the receipt and the ledger row, and the sweep cancels the drain's
+/// `Cancel` child. No retry is involved — without the epilogue on the
+/// `Failed` path the drain never reaches it.
+///
+/// The group runs on the drain's own host, so on every tier its loser is this
+/// host's running obligation and the finalizer waits for it rather than
+/// reporting `Pending`. The terminal error is a turn commit over a one-node
+/// budget; the end receipt appends no node, so it fits.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
+    prefix: &str,
+    world: DrainEndWorld,
+) {
+    let Some(closing) = world.effect_host.effect_group_closing() else {
+        // No group seam on this tier's embedding — see the module doc.
+        return;
+    };
+    let drain_id = format!("{prefix}-l8-drain");
+    let cancel_id = format!("{prefix}-l8-cancel");
+    register_drain_child(&world.registry, &drain_id, &cancel_id, OnParentEnd::Cancel).await;
+    bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
+    seed_turn_input(&world.store, "a drain that fails terminally").await;
+
+    // A group under the drain's scope, closed while its loser — the live tool
+    // child — still runs.
+    let loser_release = CancellationToken::new();
+    let loser_entered = Arc::new(AtomicUsize::new(0));
+    let scoped = world
+        .effect_host
+        .scoped(admit(drain_scope(&drain_id)))
+        .expect("scope the closing group's opener");
+    let group_key = super::effect_group_drain::group_key(prefix, "l8");
+    let mut handle = super::effect_group_drain::open(
+        &scoped,
+        &group_key,
+        2,
+        crate::LoserPolicy::RunToCompletion,
+        vec![
+            super::effect_group_drain::settles(0),
+            gated_executor(&loser_entered, loser_release.clone()),
+        ],
+    )
+    .await;
+    let _winner = super::effect_group_drain::next(&scoped, &mut handle).await;
+    super::effect_group_drain::close(&scoped, handle, crate::LoserPolicy::RunToCompletion)
+        .await
+        .expect("the group records closing");
+    super::effect_group_drain::until(|| loser_entered.load(Ordering::SeqCst) == 1).await;
+
+    let epilogue_entered = Arc::new(tokio::sync::Notify::new());
+    let mut runtime = drain_runtime_with_budget(
+        &world,
+        Arc::clone(&world.registry),
+        fixed_text_provider("a turn too large to commit"),
+        Vec::new(),
+        crate::testing::runtime_lease_owner(),
+        crate::CommitBudget::bounded(1024 * 1024, 1),
+    )
+    .await;
+    runtime.set_turn_phase_probe(Arc::new(EpilogueSignal {
+        entered: Arc::clone(&epilogue_entered),
+    }));
+    let drain = crate::task::spawn({
+        let effect_host = Arc::clone(&world.effect_host);
+        let drain_id = drain_id.clone();
+        async move { drive_drain(&mut runtime, &effect_host, &drain_id).await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        epilogue_entered.notified(),
+    )
+    .await
+    .expect("the durably Failed drain reaches its end epilogue");
+
+    assert!(
+        world
+            .store
+            .pending_queued_run(&SessionId::from(SESSION_ID))
+            .await
+            .expect("read the pending queued run")
+            .is_none(),
+        "the terminal error settled the run: nothing is left to retry"
+    );
+    assert!(
+        !drain_ended(&world.store, &drain_id).await,
+        "the live tool child's obligation withholds the end until it settles"
+    );
+
+    loser_release.cancel();
+    let error = drain
+        .await
+        .expect("the failed drain task joins")
+        .expect_err("the drain's run failed");
+    assert!(
+        error.is_terminal(),
+        "the drain failed terminally, not retryably: {error:?}"
+    );
+    until_group_settled(&closing, &group_key).await;
+    assert!(
+        drain_ended(&world.store, &drain_id).await,
+        "the durably Failed drain wrote its end receipt"
+    );
+    assert!(
+        drain_ledger_row(&world.registry, &drain_id).await.is_some(),
+        "the durably Failed drain wrote its ledger row"
+    );
+
+    run_sweep(&world).await;
+    assert_eq!(
+        cancel_origin(&child(&world.registry, &cancel_id).await),
+        Some(crate::CancelOrigin::ParentEnded),
+        "the ended drain's Cancel child is swept"
+    );
+}
+
 /// The probe a law parks on: signals that the drain reached its epilogue, so
 /// "still running" below means "parked on the closing group's obligation",
 /// not "still running the turn".
@@ -1103,6 +1254,10 @@ macro_rules! drain_end_tests {
             (
                 a_closing_group_under_the_drain_scope_withholds_its_end,
                 "drain-end-protected-obligation"
+            ),
+            (
+                a_durably_failed_drain_settles_its_closing_group_and_ends,
+                "drain-end-durably-failed"
             ),
         ]);
     };
