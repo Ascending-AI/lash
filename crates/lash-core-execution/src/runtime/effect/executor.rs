@@ -37,6 +37,8 @@ pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
 pub use lash_core_store::admitted_scope::{AdmittedScope, AdmittedScopeError};
 pub use lash_core_store::effect_opener::EffectOpener;
+#[cfg(feature = "testing")]
+pub(crate) use process_local::process_terminal_resolution;
 
 /// The one typed refusal a controller that does not implement durable effect
 /// groups returns from `open_effect_group`, `await_next_settlement` and
@@ -1600,7 +1602,9 @@ mod task_boundary_tests {
             local_executed.store(true, Ordering::SeqCst);
             Ok(RuntimeEffectOutcome::Sleep)
         });
-        let controller = NativeRuntimeEffectController::default();
+        // The proxy answers the request itself, so the controller behind it
+        // never executes: one with no host is enough.
+        let controller = crate::testing::UnavailableEffectController;
         let execution_scope = ExecutionScope::runtime_operation("replay-skips-local");
         let (proxy, mut requests) = EffectTaskController::scoped(
             &controller,

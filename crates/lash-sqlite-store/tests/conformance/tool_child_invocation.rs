@@ -58,12 +58,17 @@ fn fixture() -> ((TestBackend, Retained), &'static str, ToolChildLawFixture) {
     // carry the previous scenario's rows.
     let retained = Retained::default();
     let registries = retained.clone();
-    let make_registry: lash_conformance::ToolChildRegistryFactory = Arc::new(move || {
+    let make_processes: lash_conformance::ToolChildProcessesFactory = Arc::new(move || {
         let registries = registries.clone();
         Box::pin(async move {
             let backend = TestBackend::open(SUBSTRATE).await;
             registries.keep(&backend);
-            backend.process_registry() as Arc<dyn lash_core_execution::ProcessRegistry>
+            lash_conformance::ToolChildProcesses {
+                registry: backend.process_registry()
+                    as Arc<dyn lash_core_execution::ProcessRegistry>,
+                process_env_store: backend.process_env_store()
+                    as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
+            }
         })
     });
     (
@@ -71,7 +76,7 @@ fn fixture() -> ((TestBackend, Retained), &'static str, ToolChildLawFixture) {
         "sqlite",
         ToolChildLawFixture {
             make_world,
-            make_registry,
+            make_processes,
             deferrable_routing: ToolChildDeferrableRouting::Durable,
         },
     )

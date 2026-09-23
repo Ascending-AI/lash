@@ -48,9 +48,10 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
         .expect("a turn scope derives an opener");
     let group_key_a = format!("{prefix}-mismatch-group-a");
     let group_key_b = format!("{prefix}-mismatch-group-b");
-    let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
+    let env_store = (fixture.make_processes)().await.process_env_store;
+    let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
     let observation = Arc::new(LawObservation::default());
-    let registry = (fixture.make_registry)().await;
+    let registry = (fixture.make_processes)().await.registry;
 
     let provider = |session_id: &crate::SessionId| -> Arc<dyn crate::ToolProvider> {
         Arc::new(LawLeafProvider {

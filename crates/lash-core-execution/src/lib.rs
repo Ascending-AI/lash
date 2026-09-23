@@ -68,8 +68,8 @@ pub mod session_model;
 /// it was before the carve-out.
 #[cfg(feature = "testing")]
 pub mod stable_hash {
-    pub use lash_core_ids::stable_hash::sha256_hex;
-    pub(crate) use lash_core_ids::stable_hash::{blake3_hex, stable_json_string};
+    pub(crate) use lash_core_ids::stable_hash::stable_json_string;
+    pub use lash_core_ids::stable_hash::{blake3_hex, sha256_hex};
 }
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_ids::stable_hash;
@@ -839,8 +839,6 @@ pub(crate) use runtime::{
     publish_process_execution_env, require_event_replay, settle_started_process_engine_artifacts,
     settle_started_process_execution_env,
 };
-#[cfg(test)]
-pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{ExecRequest, RuntimeExecutionContext, SessionError};
 pub use session_graph::{

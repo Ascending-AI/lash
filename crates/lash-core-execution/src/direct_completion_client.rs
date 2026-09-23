@@ -519,7 +519,7 @@ impl<'run> DirectCompletionClient<'run> {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn unavailable(message: impl Into<String>) -> Self {
+    pub fn unavailable(message: impl Into<String>) -> Self {
         Self {
             source: DirectCompletionSource::Unavailable(message.into()),
             parent_invocation: None,

@@ -623,11 +623,18 @@ impl TestRuntime {
         let mut policy = standard_test_policy();
         policy.model.capability.attachment_acceptance = self.attachment_acceptance.clone();
         initial_state.policy.model.capability.attachment_acceptance = self.attachment_acceptance;
+        let attachment_store = Arc::clone(&self.host.core.durability.attachment_store);
+        let process_env_store = Arc::clone(&self.host.core.durability.process_env_store);
         let runtime = match (self.store, self.process_registry) {
             (Some(store), None) => LashRuntime::from_persistent_embedded_state(
                 policy,
                 self.host,
-                crate::PersistentRuntimeServices::new(plugin_session, store),
+                crate::PersistentRuntimeServices::new(
+                    plugin_session,
+                    store,
+                    attachment_store,
+                    process_env_store,
+                ),
                 initial_state.clone(),
                 crate::testing::runtime_lease_owner(),
             )
@@ -636,7 +643,7 @@ impl TestRuntime {
             (None, None) => LashRuntime::from_embedded_state(
                 policy,
                 self.host,
-                crate::RuntimeServices::new(plugin_session),
+                crate::RuntimeServices::new(plugin_session, attachment_store, process_env_store),
                 initial_state.clone(),
                 crate::testing::runtime_lease_owner(),
             )
@@ -651,7 +658,12 @@ impl TestRuntime {
                 LashRuntime::from_persistent_background_state(
                     policy,
                     host,
-                    crate::PersistentRuntimeServices::new(plugin_session, store),
+                    crate::PersistentRuntimeServices::new(
+                        plugin_session,
+                        store,
+                        attachment_store,
+                        process_env_store,
+                    ),
                     initial_state.clone(),
                     crate::testing::runtime_lease_owner(),
                 )
@@ -667,7 +679,11 @@ impl TestRuntime {
                 LashRuntime::from_background_state(
                     policy,
                     host,
-                    crate::RuntimeServices::new(plugin_session),
+                    crate::RuntimeServices::new(
+                        plugin_session,
+                        attachment_store,
+                        process_env_store,
+                    ),
                     initial_state,
                     crate::testing::runtime_lease_owner(),
                 )

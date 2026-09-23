@@ -90,7 +90,8 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-capture-group");
-    let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
+    let process_env_store = (fixture.make_processes)().await.process_env_store;
+    let env_ref = crate::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
 
     let probe_world = (fixture.make_world)(ToolChildWorldSpec {
         lease_ttl_ms: LIVE_LEASE_MS,
@@ -208,7 +209,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
         intent_target: crate::ProcessId::from("unused-in-capture"),
         start_metadata: serde_json::Value::Null,
     });
-    let registry = (fixture.make_registry)().await;
+    let registry = (fixture.make_processes)().await.registry;
     let _guard = register_opener(
         &successor.host,
         &scope,

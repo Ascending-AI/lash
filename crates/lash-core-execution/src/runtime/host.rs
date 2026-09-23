@@ -668,26 +668,3 @@ impl From<ProcessRuntimeHost> for RuntimeHost {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn attachment_limit_defaults_unbounded_and_accepts_host_override() {
-        let unbounded = RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
-        assert_eq!(
-            unbounded.durability.attachment_store.max_attachment_bytes(),
-            None
-        );
-
-        let bounded = unbounded.with_max_attachment_bytes(Some(4096));
-        assert_eq!(
-            bounded.durability.attachment_store.max_attachment_bytes(),
-            Some(4096)
-        );
-    }
-}

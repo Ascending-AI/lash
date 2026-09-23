@@ -54,11 +54,18 @@ impl SessionLifecycleService for NoopSessionManager {}
 #[cfg(any(test, feature = "testing"))]
 impl SessionGraphService for NoopSessionManager {}
 impl RuntimeServices {
-    pub fn new(plugins: Arc<PluginSession>) -> Self {
+    /// Services over the attachment facade and process-exec-env store the
+    /// caller's backend supplies. There is no in-memory default (ADR 0102):
+    /// a runtime with no session store still takes both ports from its host.
+    pub fn new(
+        plugins: Arc<PluginSession>,
+        attachment_store: Arc<crate::SessionAttachmentStore>,
+        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    ) -> Self {
         Self {
             plugins,
-            attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
-            process_env_store: Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            attachment_store,
+            process_env_store,
             clock: Arc::new(crate::SystemClock),
             store: None,
             attachment_manifest_store: None,
@@ -70,6 +77,8 @@ impl RuntimeServices {
         self
     }
 
+    /// Rebind the attachment facade: a runtime binds its services to the
+    /// session-scoped facade its host wraps around the backend's port.
     pub fn with_attachment_store(
         mut self,
         attachment_store: Arc<crate::SessionAttachmentStore>,
@@ -88,14 +97,18 @@ impl RuntimeServices {
 }
 
 impl PersistentRuntimeServices {
+    /// Services persisting through `store`, over the attachment facade and
+    /// process-exec-env store the caller's backend supplies.
     pub fn new(
         plugins: Arc<PluginSession>,
         store: Arc<dyn crate::store::RuntimePersistence>,
+        attachment_store: Arc<crate::SessionAttachmentStore>,
+        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     ) -> Self {
         Self(RuntimeServices {
             plugins,
-            attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
-            process_env_store: Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            attachment_store,
+            process_env_store,
             clock: Arc::new(crate::SystemClock),
             store: Some(Arc::clone(&store)),
             attachment_manifest_store: Some(store),

@@ -123,12 +123,14 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
                 });
             let ctx = lash_core::testing::with_engine_child_max_attempts(
                 lash_core::testing::code_execution_context_with_process_dependencies(
+                    lash_core::testing::TestExecutionPorts::over_host(
+                        effect_host,
+                        process_env_store,
+                    ),
                     Arc::new(ProcessControlToolProvider),
                     process_control_tool_catalog(),
                     None,
                     processes,
-                    effect_host,
-                    process_env_store,
                     lash_core::ProcessExecutionEnvSpec::new(
                         lash_core::PluginOptions::default(),
                         session_policy,
@@ -285,12 +287,11 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
     });
     let ctx = lash_core::testing::with_engine_child_max_attempts(
         lash_core::testing::code_execution_context_with_process_dependencies(
+            lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
             Arc::new(ProcessControlToolProvider),
             process_control_tool_catalog(),
             None,
             processes,
-            effect_host,
-            process_env_store,
             lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::PluginOptions::default(),
                 session_policy,

@@ -88,6 +88,7 @@ async fn drain_reports_superseded_terminal_as_peer_settled() {
         .await;
 
     let report = native_worker(registry.clone(), owner)
+        .await
         .drain_owner_bound_work()
         .await
         .expect("owner drain");
@@ -131,6 +132,7 @@ async fn drain_does_not_claim_an_already_applied_terminal_as_this_pass() {
         .await;
 
     let report = native_worker(registry.clone(), owner)
+        .await
         .drain_owner_bound_work()
         .await
         .expect("owner drain");
@@ -166,6 +168,7 @@ async fn drain_reports_already_terminal_completed_as_peer_settled() {
     registry.set_process_read_override(peer).await;
 
     let report = native_worker(registry, owner)
+        .await
         .drain_owner_bound_work()
         .await
         .expect("owner drain");
@@ -194,7 +197,7 @@ async fn drain_reports_renewal_supersession_as_lease_lost() {
         }))
         .await;
 
-    let worker = native_worker(registry, owner);
+    let worker = native_worker(registry, owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 
@@ -229,7 +232,7 @@ async fn drain_reports_terminal_write_supersession_as_lease_lost() {
         }))
         .await;
 
-    let worker = native_worker(registry, owner);
+    let worker = native_worker(registry, owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 
@@ -265,7 +268,7 @@ async fn drain_release_failure_overrides_absent_disposition() {
         )))
         .await;
 
-    let worker = native_worker(registry, owner);
+    let worker = native_worker(registry, owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 

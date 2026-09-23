@@ -430,17 +430,27 @@ impl LiveConformanceHarness {
                 Box::pin(async move { lash_conformance::ToolChildWorld { host, drain: None } })
             }),
             // Deliberately one registry for every scenario, despite
-            // `ToolChildLawFixture::make_registry` promising a fresh one: the
+            // `ToolChildLawFixture::make_processes` promising a fresh one: the
             // endpoint's LashProcessWorkflow writes the segment terminal into
             // the registry the orchestrating child's start recorded, so the
             // dispatched context and the workflow must share this one. Rows
             // do not collide because scenario prefixes keep process ids
-            // distinct.
-            make_registry: Arc::new({
+            // distinct. The process-exec-env store is a fresh SQLite memory
+            // backend's: the endpoint reads no environment itself.
+            make_processes: Arc::new({
                 let registry = Arc::clone(&self.process_registry);
                 move || {
                     let registry = Arc::clone(&registry);
-                    Box::pin(async move { registry as Arc<dyn lash_core::ProcessRegistry> })
+                    Box::pin(async move {
+                        let backend = lash_sqlite_store::SqliteBackend::memory()
+                            .await
+                            .expect("tool-child process-exec-env backend");
+                        lash_conformance::ToolChildProcesses {
+                            registry: registry as Arc<dyn lash_core::ProcessRegistry>,
+                            process_env_store: backend.process_env_store()
+                                as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+                        }
+                    })
                 }
             }),
             deferrable_routing: lash_conformance::ToolChildDeferrableRouting::Durable,

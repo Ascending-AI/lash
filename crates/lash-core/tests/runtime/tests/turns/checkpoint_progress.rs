@@ -186,10 +186,17 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
         None => plugin_host.build_session("root"),
     }
     .expect("reloaded plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        runtime_store,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let reloaded = lash_core::facade_support::LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(plugins, runtime_store),
+        runtime_host,
+        runtime_services,
         reloaded_state,
         lash_core::testing::runtime_lease_owner(),
     )

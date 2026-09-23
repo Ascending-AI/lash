@@ -56,8 +56,11 @@ pub(crate) fn park_tool_definition() -> lash_core::ToolDefinition {
     .with_tool_binding(ToolBinding::new(["cell"], "park"))
 }
 
-pub(crate) fn parked_cell_context_for_tests() -> lash_core::RuntimeExecutionContext<'static> {
+pub(crate) fn parked_cell_context_for_tests(
+    ports: impl Into<lash_core::testing::TestExecutionPorts>,
+) -> lash_core::RuntimeExecutionContext<'static> {
     lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+        ports,
         Arc::new(ParkToolProvider),
         lash_core::ToolCatalog::from_tool_definitions(vec![park_tool_definition()]),
     )

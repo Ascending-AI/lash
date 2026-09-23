@@ -84,7 +84,7 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::NativeRuntimeEffectController::default(),
+            crate::testing::UnavailableEffectController,
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
@@ -100,7 +100,7 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         turn_activity_tx: None,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
+        attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -108,8 +108,8 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
     let ctx = RuntimeExecutionContext::new(
         SessionId::from("session"),
         dispatch,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
-        Arc::new(crate::SessionAttachmentStore::in_memory()),
+        Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
+        Arc::new(crate::SessionAttachmentStore::unavailable()),
         Arc::new(crate::ChronologicalProjection::default()),
         None,
         crate::TurnContext::default(),
@@ -126,7 +126,9 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
 }
 
 fn test_execution_context() -> RuntimeExecutionContext<'static> {
-    test_execution_context_with_env_store(Arc::new(crate::InMemoryProcessExecutionEnvStore::new()))
+    test_execution_context_with_env_store(Arc::new(
+        crate::testing::UnavailableProcessExecutionEnvStore,
+    ))
 }
 
 fn test_execution_context_with_env_store(
@@ -149,7 +151,7 @@ fn test_execution_context_with_env_store(
         process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::NativeRuntimeEffectController::default(),
+            crate::testing::UnavailableEffectController,
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
@@ -165,7 +167,7 @@ fn test_execution_context_with_env_store(
         turn_activity_tx: None,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
+        attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -174,53 +176,11 @@ fn test_execution_context_with_env_store(
         SessionId::from("session"),
         dispatch,
         env_store,
-        Arc::new(crate::SessionAttachmentStore::in_memory()),
+        Arc::new(crate::SessionAttachmentStore::unavailable()),
         Arc::new(crate::ChronologicalProjection::default()),
         None,
         crate::TurnContext::default(),
     )
-}
-
-/// The session path publishes nothing before the process-start effect is journaled.
-///
-/// This is the FIG-3028 / #1390 regression, re-pointed at the journaled publish (FIG-3050).
-/// #1390 kept the pre-journal staging publish and taught it to tolerate the permanently retired
-/// staging owner a replay revisits; the spec now travels in the command instead, so there is no
-/// pre-journal artifact and no owner to revisit. The journaled publish keeps the tolerance, and
-/// `process_start_transfers_environment_and_replays_after_staging_retirement`
-/// (`runtime::effect::executor::process_local`) exercises it there.
-#[tokio::test]
-async fn a_session_path_process_start_publishes_no_environment_before_its_journal() {
-    use crate::ProcessExecutionEnvStore;
-
-    let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
-    let context = test_execution_context_with_env_store(env_store.clone());
-    let registration = crate::ProcessRegistration::new(
-        "journaled-process",
-        crate::ProcessInput::Engine {
-            kind: "test-engine".to_string(),
-            payload: serde_json::json!({"program": "probe"}),
-        },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
-
-    let (prepared, env_spec) = context.process_start_execution_env(registration);
-    assert_eq!(
-        prepared.env_ref, None,
-        "a session-path start must not carry a reference its journal has not produced"
-    );
-    let env_spec = env_spec.expect("the captured spec rides the process-start command");
-    let staged_ref = env_spec.stable_ref().expect("stable environment reference");
-    assert_eq!(
-        env_store
-            .get_process_execution_env(&staged_ref)
-            .await
-            .expect("read the environment store"),
-        None,
-        "nothing is published before the process-start effect runs"
-    );
 }
 
 /// A start made inside a process execution reuses the reference its own registration records.
@@ -229,7 +189,7 @@ async fn a_session_path_process_start_publishes_no_environment_before_its_journa
 /// nothing and hands the executor the recorded reference rather than a fresh spec.
 #[tokio::test]
 async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
-    let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+    let env_store = Arc::new(crate::testing::UnavailableProcessExecutionEnvStore);
     let inherited = crate::ProcessExecutionEnvRef::new("process-env:inherited");
     let parent = crate::ProcessRegistration::new(
         "parent-process",
@@ -260,39 +220,6 @@ async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
     assert!(
         env_spec.is_none(),
         "an inherited environment is already durable; the command carries no spec"
-    );
-}
-
-/// The replay tolerance is scoped to process-start staging. A durable owner (trigger
-/// registration publishes under the execution's own artifact owner and then persists the
-/// reference) must still fail at publish time once that owner is fenced, rather than record a
-/// reference to bytes the retirement reclaimed.
-#[tokio::test]
-async fn a_retired_durable_owner_still_fails_the_public_env_ref_publish() {
-    use crate::ProcessExecutionEnvStore;
-
-    let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
-    let context = test_execution_context_with_env_store(env_store.clone());
-    let owner =
-        crate::ArtifactOwner::Execution(crate::ExecutionScope::runtime_operation("durable-owner"));
-
-    context
-        .captured_process_execution_env_ref(&owner)
-        .await
-        .expect("first publish under a live owner");
-
-    env_store
-        .retire_process_execution_env_owner(&owner)
-        .await
-        .expect("retire the durable owner");
-
-    let error = context
-        .captured_process_execution_env_ref(&owner)
-        .await
-        .expect_err("a fenced durable owner must not resolve to a reclaimed reference");
-    assert!(
-        crate::artifact_owner_is_permanently_retired(&error),
-        "unexpected error: {error}"
     );
 }
 
@@ -394,51 +321,20 @@ async fn execution_context_without_process_execution_returns_typed_error_from_ap
 // re-resolves the reusable process name against the registry.
 // ---------------------------------------------------------------------------
 
-fn registration_for_parent_scope(process_id: &str) -> crate::ProcessRegistration {
-    crate::ProcessRegistration::new(
-        ProcessId::from(process_id),
-        crate::ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
-        crate::RecoveryContract::ExternallyOwned,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    )
-}
-
 fn scoped_context(
     session_id: &str,
     admitted: crate::AdmittedScope,
 ) -> RuntimeExecutionContext<'static> {
     let controller = crate::ScopedEffectController::shared(
-        Arc::new(crate::NativeRuntimeEffectController::default()),
+        Arc::new(crate::testing::UnavailableEffectController),
         admitted,
     )
     .expect("the test scope validates");
-    crate::testing::TestExecutionContextBuilder::new()
+    crate::testing::TestExecutionContextBuilder::over_controller(controller)
         .session_id(session_id)
-        .borrowed_effect_controller(controller)
         .plugin_factories(vec![])
         .build()
         .into_runtime()
-}
-
-fn process_event_context(
-    process_id: &ProcessId,
-    registry: Arc<dyn crate::ProcessRegistry>,
-) -> RuntimeExecutionProcessEventContext {
-    RuntimeExecutionProcessEventContext {
-        execution_write_authority: crate::ProcessExecutionWriteAuthority::invocation(
-            process_id.clone(),
-            "test-write-authority",
-        ),
-        process_work: crate::testing::process_work_wiring_for_registry(registry),
-        store: None,
-        session_store_factory: None,
-        queued_work: Arc::new(crate::NoQueuedWork::new()),
-        process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
-        clock: Arc::new(crate::SystemClock),
-    }
 }
 
 /// A child a turn starts takes the turn as its lifecycle parent.
@@ -453,93 +349,6 @@ async fn a_child_started_from_a_turn_parents_on_the_turn() {
             .child_process_parent_scope()
             .expect("a turn scope derives a turn parent"),
         crate::ParentScope::turn(SessionId::from("session-1"), crate::TurnId::from("turn-7")),
-    );
-}
-
-/// A process scope nobody bound an admitted incarnation to cannot be built —
-/// `AdmittedScope` refuses the unpinned pair at construction, so no execution
-/// context can ever carry the reusable name as a fallback. The registry in
-/// this fixture *could* resolve the name, which is what makes the construction
-/// refusal prove the derivation never asks it.
-#[tokio::test]
-async fn a_process_scope_without_an_admitted_incarnation_is_unconstructible() {
-    let registry: Arc<dyn crate::ProcessRegistry> =
-        Arc::new(crate::TestLocalProcessRegistry::default());
-    registry
-        .register_process(registration_for_parent_scope("worker"))
-        .await
-        .expect("first registration");
-    assert!(
-        matches!(
-            crate::AdmittedScope::new(crate::ExecutionScope::process("worker"), None),
-            Err(crate::AdmittedScopeError::ProcessIncarnationMissing { .. })
-        ),
-        "the reusable name alone is never admitted"
-    );
-}
-
-/// A same-name successor already retained in the registry does not rebind the
-/// pinned parent: a child started by incarnation 1 of `worker` parents on
-/// incarnation 1 even though the registry now holds incarnation 2.
-#[tokio::test]
-async fn a_child_started_from_a_process_incarnation_keeps_the_pinned_parent() {
-    let registry: Arc<dyn crate::ProcessRegistry> =
-        Arc::new(crate::TestLocalProcessRegistry::default());
-    let retired = registry
-        .register_process(registration_for_parent_scope("worker"))
-        .await
-        .expect("first registration");
-    registry
-        .complete_process(
-            &retired.id,
-            crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!("old"),
-            )),
-            crate::ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("complete the first incarnation");
-    registry
-        .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
-        .await
-        .expect("prune the retired incarnation");
-    let successor = registry
-        .register_process(registration_for_parent_scope("worker"))
-        .await
-        .expect("same-name successor registration");
-    assert_ne!(
-        successor.incarnation, retired.incarnation,
-        "the fixture must hold a successor incarnation under the same name"
-    );
-    // Recovery validates a retained pair with get_process_ref — and the
-    // superseded incarnation is refused there, not rebound.
-    assert!(
-        registry
-            .get_process_ref(&crate::ProcessRef::new(
-                retired.id.clone(),
-                retired.incarnation,
-            ))
-            .await
-            .is_err(),
-        "get_process_ref must refuse the superseded incarnation"
-    );
-
-    let context = scoped_context(
-        "session-1",
-        crate::AdmittedScope::process(crate::ProcessRef::new(
-            retired.id.clone(),
-            retired.incarnation,
-        )),
-    )
-    .with_process_execution(
-        &registration_for_parent_scope("worker"),
-        Some(process_event_context(&retired.id, Arc::clone(&registry))),
-    );
-    assert_eq!(
-        context
-            .child_process_parent_scope()
-            .expect("the pinned incarnation is the parent"),
-        crate::ParentScope::process(crate::ProcessRef::from_record(&retired)),
     );
 }
 
@@ -564,11 +373,14 @@ fn native_authority_retains_attempt_correlation_without_restate_identity() {
     })
     .bind_attempt(3);
     super::attach_process_invocation_correlation(&mut turn_context, &process_id, &native_authority);
-    let context = crate::testing::TestExecutionContextBuilder::new()
-        .turn_context(turn_context)
-        .plugin_factories(vec![])
-        .build()
-        .into_runtime();
+    let context = crate::testing::TestExecutionContextBuilder::over_controller(Arc::new(
+        crate::testing::UnavailableEffectController,
+    )
+        as Arc<dyn crate::RuntimeEffectController>)
+    .turn_context(turn_context)
+    .plugin_factories(vec![])
+    .build()
+    .into_runtime();
 
     assert_eq!(context.restate_invocation_id(), None);
     assert_eq!(context.admitted_process_attempt(), Some(3));

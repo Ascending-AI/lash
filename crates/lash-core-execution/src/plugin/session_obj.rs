@@ -1046,3 +1046,17 @@ impl lash_core_store::session_state::SessionPluginStateSource for PluginSession 
         self.capture_state()
     }
 }
+
+#[cfg(feature = "testing")]
+impl PluginSession {
+    /// A state handle for `plugin_id` over this session's plugin-state
+    /// registry, bound to `session_id` the way the host binds the handle a
+    /// plugin receives.
+    pub(crate) fn plugin_state_store_for_testing(
+        &self,
+        session_id: &SessionId,
+        plugin_id: &str,
+    ) -> super::PluginStateStore {
+        super::PluginStateStore::bind(session_id, plugin_id, Arc::clone(&self.state))
+    }
+}

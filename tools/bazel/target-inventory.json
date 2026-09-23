@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 154,
+  "cargo_target_count": 155,
   "feature_lane_units": [
     {
       "features": [],
@@ -1020,9 +1020,11 @@
       "package": "lash-internal-core-effect"
     },
     {
-      "features": [],
+      "features": [
+        "default"
+      ],
       "kind": "test",
-      "label": "//crates/lash-core-execution:effect_model__test__fv_ecbe9667",
+      "label": "//crates/lash-core-execution:effect_model__test__fv_1b88c62a",
       "package": "lash-internal-core-execution"
     },
     {
@@ -1051,6 +1053,14 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-execution:lash-core-execution__fv_30830668",
+      "package": "lash-internal-core-execution"
+    },
+    {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-core-execution:lash-core-execution__fv_46307028",
       "package": "lash-internal-core-execution"
     },
     {
@@ -1810,21 +1820,19 @@
       "package": "lash-internal-core-execution"
     },
     {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-core-execution:lash-core-execution__fv_ecbe9667",
-      "package": "lash-internal-core-execution"
-    },
-    {
-      "features": [],
+      "features": [
+        "default"
+      ],
       "kind": "bin",
-      "label": "//crates/lash-core-execution:process_event_schema_generator__bin__fv_ecbe9667",
+      "label": "//crates/lash-core-execution:process_event_schema_generator__bin__fv_1b88c62a",
       "package": "lash-internal-core-execution"
     },
     {
-      "features": [],
+      "features": [
+        "default"
+      ],
       "kind": "test",
-      "label": "//crates/lash-core-execution:process_model__test__fv_ecbe9667",
+      "label": "//crates/lash-core-execution:process_model__test__fv_1b88c62a",
       "package": "lash-internal-core-execution"
     },
     {
@@ -10984,6 +10992,17 @@
     {
       "features": [
         "backend-pikevm",
+        "default",
+        "std",
+        "utf16"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-regress:lash-regress",
+      "package": "lash-regress"
+    },
+    {
+      "features": [
+        "backend-pikevm",
         "prohibit-unsafe",
         "std",
         "utf16"
@@ -13057,6 +13076,15 @@
       "package": "lash-internal-sqlite-store"
     },
     {
+      "features": [
+        "default",
+        "lashlang"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_6fc66767",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_7069c5c5",
@@ -13344,6 +13372,14 @@
       "kind": "test",
       "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_0054d240",
       "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-store-sql:lash-store-sql",
+      "package": "lash-internal-store-sql"
     },
     {
       "features": [
@@ -17014,6 +17050,12 @@
     {
       "features": [],
       "kind": "lib",
+      "label": "//crates/lashlang:lashlang__fv_138504b6",
+      "package": "lash-internal-lashlang"
+    },
+    {
+      "features": [],
+      "kind": "lib",
       "label": "//crates/lashlang:lashlang__fv_5a70e97d",
       "package": "lash-internal-lashlang"
     },
@@ -17500,7 +17542,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 213,
+  "generated_label_count": 214,
   "packages": [
     {
       "declared_features": [
@@ -17619,6 +17661,7 @@
         "lash-internal-core-memory",
         "lash-internal-core-store",
         "lash-internal-sansio",
+        "lash-internal-sqlite-store",
         "lash-internal-trace",
         "proptest",
         "rmp-serde",
@@ -17679,6 +17722,12 @@
           "kind": "test",
           "label": "//crates/lash-core-execution:process_model__test",
           "tags": []
+        },
+        {
+          "cargo": "store_backed",
+          "kind": "test",
+          "label": "//crates/lash-core-execution:store_backed__test",
+          "tags": []
         }
       ],
       "test_batch": {
@@ -17687,7 +17736,8 @@
           "//crates/lash-core-execution:effect_model__test",
           "//crates/lash-core-execution:lash-core-execution__unit_test",
           "//crates/lash-core-execution:process_event_schema_generator__bin__unit_test",
-          "//crates/lash-core-execution:process_model__test"
+          "//crates/lash-core-execution:process_model__test",
+          "//crates/lash-core-execution:store_backed__test"
         ]
       }
     },

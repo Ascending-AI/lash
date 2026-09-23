@@ -79,7 +79,7 @@ async fn register_ingress_trigger_subscription(
     store: &lash_core::facade_support::InMemoryTriggerStore,
 ) -> Result<lash_core::TriggerSubscriptionRecord> {
     use lash_core::TriggerStore as _;
-    let (_, process_env_ref) = lash_core::testing::process_execution_env_fixture();
+    let process_env_ref = lash_core::testing::process_execution_env_fixture_ref();
     let draft = lash_core::TriggerSubscriptionDraft::for_process(
         "test/intent-ingress-delivery",
         process_env_ref,
@@ -121,7 +121,13 @@ async fn ingress_core_with_trigger_store(
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let subscription = register_ingress_trigger_subscription(&store).await?;
     let registry = Arc::new(TestLocalProcessRegistry::default());
-    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("process-exec-env backend")
+            .process_env_store();
+    // The fixture environment every subscription draft here records.
+    lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .effect_host(effect_host)
         .provider(mock_provider())

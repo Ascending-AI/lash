@@ -1,0 +1,934 @@
+mod tests {
+    //! Unit tests for the process awaiter, watched registry, and work driver.
+
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use crate::PluginError;
+    use crate::runtime::ProcessRegistryFaults;
+    use crate::runtime::native_substrate::*;
+    use crate::runtime::process::*;
+    use crate::support::prelude::*;
+    use crate::{
+        AbandonRequest, ProcessEventAppendRequest, ProcessEventSink, ProcessExternalRef,
+        ProcessInput, ProcessProvenance, ProcessRegistration, ProcessStarted, ProjectionWatermark,
+        TestProcessRegistryWriteExt, WaitState, WatchedRegistry, watch_process_registry,
+        watch_process_registry_with_sink,
+    };
+
+    async fn memory_registry() -> Arc<dyn ProcessRegistry> {
+        crate::support::memory_backend().await.process_registry()
+    }
+    use lash_sansio::sync::MutexExt;
+
+    fn watched_parts(watched: WatchedRegistry) -> (Arc<dyn ProcessRegistry>, ProcessChangeHub) {
+        (Arc::clone(watched.registry()), watched.hub().clone())
+    }
+
+    fn registration(process_id: &ProcessId) -> ProcessRegistration {
+        ProcessRegistration::new(
+            process_id,
+            ProcessInput::External {
+                metadata: serde_json::json!({}),
+            },
+            crate::RecoveryContract::ExternallyOwned,
+            ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        )
+    }
+
+    fn plain_event_type(name: &str) -> crate::ProcessEventType {
+        crate::ProcessEventType {
+            name: name.to_string(),
+            payload_schema: crate::LashSchema::any(),
+            semantics: crate::ProcessEventSemanticsSpec::default(),
+        }
+    }
+
+    fn registration_with_events(
+        process_id: &ProcessId,
+        event_types: &[&str],
+    ) -> ProcessRegistration {
+        registration(process_id)
+            .with_extra_event_types(event_types.iter().map(|name| plain_event_type(name)))
+    }
+
+    #[derive(Clone, Default)]
+    struct CollectingSink {
+        events: Arc<Mutex<Vec<(String, u64)>>>,
+    }
+
+    impl CollectingSink {
+        fn collected(&self) -> Vec<(String, u64)> {
+            self.events.lock_recover().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProcessEventSink for CollectingSink {
+        async fn emit(&self, event: &ProcessEvent) {
+            self.events
+                .lock_recover()
+                .push((event.event_type.clone(), event.sequence));
+        }
+    }
+
+    fn success(value: serde_json::Value) -> ProcessAwaitOutput {
+        ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
+    }
+
+    #[tokio::test]
+    async fn superseded_await_receipt_is_refused_instead_of_returning_the_successor_outcome() {
+        let registry = memory_registry().await;
+        let old = registry
+            .register_process(registration(&ProcessId::from("reused-await")))
+            .await
+            .expect("register old incarnation");
+        let old_ref = crate::ProcessRef::from_record(&old);
+        registry
+            .complete_process(
+                &old.id,
+                success(serde_json::json!("old")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete old incarnation");
+        registry
+            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune old incarnation");
+        let current = registry
+            .register_process(registration(&ProcessId::from("reused-await")))
+            .await
+            .expect("register successor incarnation");
+        registry
+            .complete_process(
+                &current.id,
+                success(serde_json::json!("successor")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete successor incarnation");
+        let awaiter = NativeProcessAwaiter::for_registry(registry);
+
+        let result = awaiter.await_terminal_ref(&old_ref).await;
+
+        assert!(
+            matches!(
+                result,
+                Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+            ),
+            "old await receipt must refuse the successor, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn superseded_event_await_is_refused_instead_of_polling_the_successor() {
+        let registry = memory_registry().await;
+        let old = registry
+            .register_process(registration(&ProcessId::from("reused-event-await")))
+            .await
+            .expect("register old incarnation");
+        let old_ref = crate::ProcessRef::from_record(&old);
+        registry
+            .complete_process(
+                &old.id,
+                success(serde_json::json!("old")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete old incarnation");
+        registry
+            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune old incarnation");
+        registry
+            .register_process(registration(&ProcessId::from("reused-event-await")))
+            .await
+            .expect("register successor incarnation");
+        let awaiter = NativeProcessAwaiter::for_registry(registry);
+
+        let result = awaiter
+            .await_event_ref(&old_ref, "process.completed", 0)
+            .await;
+
+        assert!(
+            matches!(
+                result,
+                Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+            ),
+            "old event await must refuse the successor, got {result:?}"
+        );
+    }
+
+    /// ADR 0016 pins the default awaiter cadence while allowing native backends
+    /// to tune both bounds through `WorkCadencePolicy`.
+    #[tokio::test(start_paused = true)]
+    async fn polling_awaiter_uses_configured_work_cadence_floor() {
+        let registry = memory_registry().await;
+        registry
+            .register_process(registration(&ProcessId::from("configured-cadence")))
+            .await
+            .expect("register");
+        let work_cadence = WorkCadencePolicy {
+            poll_initial: Duration::from_secs(2),
+            poll_max: Duration::from_secs(3),
+            ..WorkCadencePolicy::default()
+        };
+        let awaiter = NativeProcessAwaiter::for_registry(Arc::clone(&registry))
+            .with_work_cadence(work_cadence);
+        let waiter = crate::task::spawn(async move {
+            awaiter
+                .await_terminal(&ProcessId::from("configured-cadence"))
+                .await
+        });
+        tokio::task::yield_now().await;
+
+        registry
+            .complete_process(
+                &ProcessId::from("configured-cadence"),
+                success(serde_json::json!("done")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete");
+        tokio::time::advance(Duration::from_millis(1_999)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            !waiter.is_finished(),
+            "the awaiter must not poll before the configured initial delay"
+        );
+
+        tokio::time::advance(Duration::from_millis(1)).await;
+        let output = waiter
+            .await
+            .expect("configured-cadence waiter joins")
+            .expect("configured-cadence wait resolves");
+        assert_eq!(output, success(serde_json::json!("done")));
+    }
+
+    /// ADR 0017: the decorator delegates `prune_terminal_processes` without a
+    /// hub bump — pruned rows are terminal, so their waiters resolved long ago
+    /// and a tick would only wake unrelated subscribers spuriously.
+    #[tokio::test]
+    async fn prune_through_decorator_does_not_bump_the_hub() {
+        let raw = memory_registry().await;
+        let (registry, hub) = watched_parts(watch_process_registry(raw));
+        registry
+            .register_process(registration(&ProcessId::from("proc-terminal")))
+            .await
+            .expect("register terminal");
+        registry
+            .complete_process(
+                &ProcessId::from("proc-terminal"),
+                success(serde_json::json!("done")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete");
+        registry
+            .register_process(registration(&ProcessId::from("proc-live")))
+            .await
+            .expect("register live");
+
+        // Subscribe after the mutations above so only post-subscription bumps
+        // are observable.
+        let mut terminal_rx = hub.subscribe(&ProcessId::from("proc-terminal"));
+        let mut live_rx = hub.subscribe(&ProcessId::from("proc-live"));
+        terminal_rx.mark_unchanged();
+        live_rx.mark_unchanged();
+
+        let report = registry
+            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune");
+        assert_eq!(report.pruned_processes, 1, "the terminal process pruned");
+
+        assert!(
+            !terminal_rx.has_changed().expect("terminal sender open"),
+            "prune must not bump the pruned process's hub entry"
+        );
+        assert!(
+            !live_rx.has_changed().expect("live sender open"),
+            "prune must not bump surviving processes' hub entries"
+        );
+    }
+
+    #[tokio::test]
+    async fn await_event_returns_historical_event_immediately() {
+        let raw = memory_registry().await;
+        let (registry, hub) = watched_parts(watch_process_registry(raw));
+        registry
+            .register_process(registration(&ProcessId::from("proc")))
+            .await
+            .expect("register");
+        let appended = registry
+            .append_event(
+                &ProcessId::from("proc"),
+                ProcessEventAppendRequest::cancel_requested(
+                    &registry
+                        .resolve_process_ref(&ProcessId::from("proc"))
+                        .await
+                        .expect("retained cancellation target"),
+                    &crate::CancelRequest::new(
+                        crate::CancelOrigin::OperatorRequested,
+                        "actor:fixture:await_event_returns_historical_event_immediately",
+                        11,
+                    ),
+                ),
+            )
+            .await
+            .expect("append");
+
+        let event = NativeProcessAwaiter::new(Arc::clone(&registry), hub)
+            .await_event(&ProcessId::from("proc"), "process.cancel_requested", 0)
+            .await
+            .expect("await event");
+        assert_eq!(event.sequence, appended.event.sequence);
+    }
+
+    #[tokio::test]
+    async fn await_terminal_unknown_process_errors() {
+        let registry = memory_registry().await;
+        let err = NativeProcessAwaiter::for_registry(registry)
+            .await_terminal(&ProcessId::from("missing"))
+            .await
+            .expect_err("unknown process should error");
+        assert!(
+            matches!(
+                err,
+                PluginError::ProcessUnknown { ref process_id } if process_id == "missing"
+            ),
+            "unknown process should return ProcessUnknown, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn await_terminal_propagates_process_store_read_errors() {
+        let registry = Arc::new(ProcessRegistryFaults::new(memory_registry().await));
+        registry.set_process_read_error(Some(PluginError::Session(
+            "process store read failed".to_string(),
+        )));
+        let err = NativeProcessAwaiter::for_registry(registry)
+            .await_terminal(&ProcessId::from("unreadable"))
+            .await
+            .expect_err("store read failure should surface");
+        assert!(
+            matches!(
+                err,
+                PluginError::Session(ref message) if message == "process store read failed"
+            ),
+            "store read failure should remain a session error, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn polling_awaiter_resolves_via_backoff() {
+        let registry = memory_registry().await;
+        registry
+            .register_process(registration(&ProcessId::from("proc")))
+            .await
+            .expect("register");
+        let writer = Arc::clone(&registry);
+        crate::task::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            writer
+                .complete_process(
+                    &ProcessId::from("proc"),
+                    success(serde_json::json!({ "ok": true })),
+                    crate::ProcessCompletionAuthority::external_owner(),
+                )
+                .await
+                .expect("complete");
+        });
+
+        let output = tokio::time::timeout(
+            Duration::from_secs(1),
+            NativeProcessAwaiter::for_registry(registry).await_terminal(&ProcessId::from("proc")),
+        )
+        .await
+        .expect("polling await timeout")
+        .expect("await terminal");
+        assert_eq!(output, success(serde_json::json!({ "ok": true })));
+    }
+
+    #[tokio::test]
+    async fn watched_awaiter_observes_terminal_without_lost_wakeup() {
+        let raw = memory_registry().await;
+        let (registry, hub) = watched_parts(watch_process_registry(raw));
+        registry
+            .register_process(registration(&ProcessId::from("proc")))
+            .await
+            .expect("register");
+        let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
+        let waiter =
+            crate::task::spawn(
+                async move { awaiter.await_terminal(&ProcessId::from("proc")).await },
+            );
+        registry
+            .complete_process(
+                &ProcessId::from("proc"),
+                success(serde_json::json!("done")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete");
+
+        let output = tokio::time::timeout(Duration::from_millis(200), waiter)
+            .await
+            .expect("watched await timeout")
+            .expect("join")
+            .expect("await terminal");
+        assert_eq!(output, success(serde_json::json!("done")));
+    }
+
+    #[tokio::test]
+    async fn watched_registry_bumps_on_mutations() {
+        let raw = memory_registry().await;
+        let (registry, hub) = watched_parts(watch_process_registry(raw));
+        let mut rx = hub.subscribe(&ProcessId::from("proc"));
+        registry
+            .register_process(registration(&ProcessId::from("proc")))
+            .await
+            .expect("register");
+        tokio::time::timeout(Duration::from_millis(100), rx.changed())
+            .await
+            .expect("register bump")
+            .expect("sender remains open");
+
+        registry
+            .append_event(
+                &ProcessId::from("proc"),
+                ProcessEventAppendRequest::cancel_requested(
+                    &registry
+                        .resolve_process_ref(&ProcessId::from("proc"))
+                        .await
+                        .expect("retained cancellation target"),
+                    &crate::CancelRequest::new(
+                        crate::CancelOrigin::OperatorRequested,
+                        "actor:fixture:watched_registry_bumps_on_mutations",
+                        11,
+                    ),
+                ),
+            )
+            .await
+            .expect("append");
+        tokio::time::timeout(Duration::from_millis(100), rx.changed())
+            .await
+            .expect("append bump")
+            .expect("sender remains open");
+    }
+
+    #[tokio::test]
+    async fn sink_receives_appended_events_in_order() {
+        let raw = memory_registry().await;
+        let sink = CollectingSink::default();
+        let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+            raw,
+            Some(Arc::new(sink.clone())),
+        ));
+        registry
+            .register_process(registration_with_events(
+                &ProcessId::from("proc"),
+                &["producer.a", "producer.b"],
+            ))
+            .await
+            .expect("register");
+        registry
+            .append_event(
+                &ProcessId::from("proc"),
+                ProcessEventAppendRequest::new("producer.a", serde_json::json!({})),
+            )
+            .await
+            .expect("append a");
+        registry
+            .append_event(
+                &ProcessId::from("proc"),
+                ProcessEventAppendRequest::new("producer.b", serde_json::json!({})),
+            )
+            .await
+            .expect("append b");
+
+        let collected = sink.collected();
+        assert_eq!(
+            collected
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["producer.a", "producer.b"],
+            "the sink must observe appended events after their write, in append order"
+        );
+        assert!(collected[0].1 < collected[1].1);
+    }
+
+    #[tokio::test]
+    async fn sink_absent_leaves_appends_unchanged() {
+        let raw = memory_registry().await;
+        let (registry, _hub) = watched_parts(watch_process_registry_with_sink(raw, None));
+        registry
+            .register_process(registration_with_events(
+                &ProcessId::from("proc"),
+                &["producer.a"],
+            ))
+            .await
+            .expect("register");
+        let appended = registry
+            .append_event(
+                &ProcessId::from("proc"),
+                ProcessEventAppendRequest::new("producer.a", serde_json::json!({})),
+            )
+            .await
+            .expect("append succeeds with no sink installed");
+        assert!(appended.event.sequence > 0);
+    }
+
+    #[tokio::test]
+    async fn sink_receives_complete_process_terminal_append() {
+        let raw = memory_registry().await;
+        let sink = CollectingSink::default();
+        let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+            raw,
+            Some(Arc::new(sink.clone())),
+        ));
+        registry
+            .register_process(registration_with_events(
+                &ProcessId::from("proc"),
+                &["producer.a"],
+            ))
+            .await
+            .expect("register");
+        registry
+            .append_event(
+                &ProcessId::from("proc"),
+                ProcessEventAppendRequest::new("producer.a", serde_json::json!({})),
+            )
+            .await
+            .expect("explicit append");
+        registry
+            .complete_process(
+                &ProcessId::from("proc"),
+                success(serde_json::json!("done")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete");
+
+        let collected = sink.collected();
+        assert_eq!(
+            collected
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["producer.a", "process.completed"],
+            "the sink must observe terminal events appended through completion verbs"
+        );
+        assert!(
+            collected[0].1 < collected[1].1,
+            "terminal event sequences must follow preceding appends"
+        );
+    }
+
+    #[tokio::test]
+    async fn sink_receives_runtime_lifecycle_events_in_order() {
+        let raw = memory_registry().await;
+        let sink = CollectingSink::default();
+        let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+            raw,
+            Some(Arc::new(sink.clone())),
+        ));
+        let mut lifecycle_registration = ProcessRegistration::new(
+            "proc",
+            ProcessInput::Engine {
+                kind: "test".to_string(),
+                payload: serde_json::json!({}),
+            },
+            crate::RecoveryContract::Rerunnable,
+            ProcessProvenance::host(),
+            crate::ProcessLifecyclePolicy::new(
+                crate::ParentScope::Host,
+                crate::OnParentEnd::Abandon,
+            ),
+        );
+        lifecycle_registration.env_ref =
+            Some(crate::ProcessExecutionEnvRef::new("process-env:test"));
+        registry
+            .register_process(lifecycle_registration)
+            .await
+            .expect("register");
+        registry
+            .record_first_started(
+                &ProcessId::from("proc"),
+                ProcessStarted {
+                    owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+                    fencing_token: 0,
+                    attempt: 1,
+                    started_at_ms: 1,
+                },
+            )
+            .await
+            .expect("record first start");
+        let wait = WaitState {
+            kind: crate::WaitKind::Signal {
+                name: "ready".to_string(),
+                event_type: "signal.ready".to_string(),
+                key: "process:proc:signal.ready:1".to_string(),
+                ordinal: 1,
+            },
+            since_ms: 2,
+        };
+        registry
+            .set_process_wait(&ProcessId::from("proc"), wait)
+            .await
+            .expect("enter wait");
+        registry
+            .clear_process_wait(&ProcessId::from("proc"))
+            .await
+            .expect("clear wait");
+        registry
+            .set_external_ref(
+                &ProcessId::from("proc"),
+                ProcessExternalRef {
+                    backend: "test".to_string(),
+                    id: "external".to_string(),
+                    metadata: None,
+                    segment_ordinal: None,
+                },
+            )
+            .await
+            .expect("set external ref");
+        registry
+            .request_process_abandon(
+                &ProcessId::from("proc"),
+                AbandonRequest {
+                    requested_by: "test".to_string(),
+                    requested_at_ms: 3,
+                    reason: None,
+                },
+            )
+            .await
+            .expect("request abandon");
+
+        let process_ref = registry
+            .resolve_process_ref(&ProcessId::from("proc"))
+            .await
+            .expect("retained lifecycle target");
+        let before_cancel = registry
+            .get_process_ref(&process_ref)
+            .await
+            .expect("read before cancel")
+            .expect("retained target");
+        assert!(!before_cancel.is_terminal());
+        assert!(before_cancel.cancel_request.is_none());
+        let cancelled = registry
+            .request_process_cancel(
+                &process_ref,
+                crate::CancelOrigin::OperatorRequested,
+                "actor:lifecycle-sink".to_string(),
+                None,
+            )
+            .await
+            .expect("request cancellation through watched registry");
+        assert_eq!(
+            cancelled
+                .cancel_request
+                .as_ref()
+                .expect("folded cancellation")
+                .origin,
+            crate::CancelOrigin::OperatorRequested
+        );
+        let repeated = registry
+            .request_process_cancel(
+                &process_ref,
+                crate::CancelOrigin::OperatorRequested,
+                "actor:lifecycle-sink".to_string(),
+                None,
+            )
+            .await
+            .expect("replay cancellation through watched registry");
+        assert_eq!(
+            repeated, cancelled,
+            "watch notification preserves the first durable request"
+        );
+
+        let collected = sink.collected();
+        assert_eq!(
+            collected
+                .iter()
+                .map(|(event_type, _)| event_type.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "process.first_started",
+                "process.waiting",
+                "process.resumed",
+                "process.external_ref_set",
+                "process.abandon_requested",
+                "process.cancel_requested",
+            ],
+            "the sink must observe every runtime lifecycle append"
+        );
+        assert!(
+            collected.windows(2).all(|events| events[0].1 < events[1].1),
+            "runtime lifecycle event sequences must be strictly ordered"
+        );
+    }
+
+    #[tokio::test]
+    async fn sink_present_still_bumps_hub_on_append() {
+        let raw = memory_registry().await;
+        let sink = CollectingSink::default();
+        let (registry, hub) =
+            watched_parts(watch_process_registry_with_sink(raw, Some(Arc::new(sink))));
+        let mut rx = hub.subscribe(&ProcessId::from("proc"));
+        registry
+            .register_process(registration_with_events(
+                &ProcessId::from("proc"),
+                &["producer.a"],
+            ))
+            .await
+            .expect("register");
+        tokio::time::timeout(Duration::from_millis(100), rx.changed())
+            .await
+            .expect("register bump")
+            .expect("sender remains open");
+        registry
+            .append_event(
+                &ProcessId::from("proc"),
+                ProcessEventAppendRequest::new("producer.a", serde_json::json!({})),
+            )
+            .await
+            .expect("append");
+        tokio::time::timeout(Duration::from_millis(100), rx.changed())
+            .await
+            .expect("append bump with a sink installed")
+            .expect("sender remains open");
+    }
+
+    #[tokio::test]
+    async fn native_awaiter_returns_an_already_terminal_process() {
+        let raw = memory_registry().await;
+        let (registry, hub) = watched_parts(watch_process_registry(raw));
+        let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
+        registry
+            .register_process(registration(&ProcessId::from("proc")))
+            .await
+            .expect("register");
+        registry
+            .complete_process(
+                &ProcessId::from("proc"),
+                success(serde_json::json!("ready")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete");
+
+        let output = awaiter
+            .await_terminal(&ProcessId::from("proc"))
+            .await
+            .expect("await terminal");
+        assert_eq!(output, success(serde_json::json!("ready")));
+    }
+
+    /// A caller-departed row is refused because no writer can terminalize it.
+    #[tokio::test]
+    async fn native_awaiter_refuses_await_on_caller_departed_row() {
+        let raw = memory_registry().await;
+        let (registry, hub) = watched_parts(watch_process_registry(raw));
+        let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
+        registry
+            .register_process(registration(&ProcessId::from("proc")))
+            .await
+            .expect("register");
+        registry
+            .record_caller_departure(&ProcessId::from("proc"))
+            .await
+            .expect("record caller departure");
+
+        let error = awaiter
+            .await_terminal(&ProcessId::from("proc"))
+            .await
+            .expect_err("awaiting a caller-departed row must be refused, not parked");
+        assert!(
+            matches!(
+                error,
+                PluginError::ProcessCallerDeparted { ref process_id } if process_id == "proc"
+            ),
+            "unexpected refusal: {error}"
+        );
+    }
+
+    /// FIG-1744 / ADR 0019: CallerDeparted refusal wins over a recorded terminal
+    /// outcome.
+    #[tokio::test]
+    async fn caller_departed_refuses_before_terminal_outcome() {
+        let raw = Arc::new(ProcessRegistryFaults::new(memory_registry().await));
+        let (registry, hub) = watched_parts(watch_process_registry(
+            Arc::clone(&raw) as Arc<dyn ProcessRegistry>
+        ));
+        let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
+
+        registry
+            .register_process(registration(&ProcessId::from("proc-departed")))
+            .await
+            .expect("register");
+
+        let mut record = registry
+            .get_process(&ProcessId::from("proc-departed"))
+            .await
+            .expect("get_process")
+            .expect("record exists");
+        let process_ref = crate::ProcessRef::from_record(&record);
+        record.status = crate::ProcessStatus::CallerDeparted;
+        record.outcome = Some(success(serde_json::json!("completed-value")));
+
+        raw.set_process_read_override(record);
+        let awaiter_err = awaiter
+            .await_terminal_ref(&process_ref)
+            .await
+            .expect_err("awaiter must refuse CallerDeparted even if outcome is present");
+        assert!(
+            matches!(
+                awaiter_err,
+                PluginError::ProcessCallerDeparted { ref process_id } if process_id == "proc-departed"
+            ),
+            "awaiter expected ProcessCallerDeparted refusal, got: {awaiter_err:?}"
+        );
+    }
+
+    /// Sim-style race: many waiters attach to one process and completion fires
+    /// while they are mid-flight between their subscribe and their first read.
+    /// The change hub must resolve every one with identical output — no lost
+    /// wakeups, no divergent results (ADR 0016).
+    #[tokio::test]
+    async fn concurrent_waiters_all_resolve_with_identical_output_on_completion() {
+        let raw = memory_registry().await;
+        let (registry, hub) = watched_parts(watch_process_registry(raw));
+        registry
+            .register_process(registration(&ProcessId::from("proc")))
+            .await
+            .expect("register");
+
+        const WAITERS: usize = 16;
+        let barrier = Arc::new(tokio::sync::Barrier::new(WAITERS + 1));
+        let mut waiters = Vec::with_capacity(WAITERS);
+        for _ in 0..WAITERS {
+            let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub.clone());
+            let barrier = Arc::clone(&barrier);
+            waiters.push(crate::task::spawn(async move {
+                barrier.wait().await;
+                awaiter.await_terminal(&ProcessId::from("proc")).await
+            }));
+        }
+        // Release every waiter, then complete at once so completion races their
+        // first read and subscribe.
+        barrier.wait().await;
+        let output = success(serde_json::json!({ "raced": true }));
+        registry
+            .complete_process(
+                &ProcessId::from("proc"),
+                output.clone(),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete");
+
+        for waiter in waiters {
+            let resolved = tokio::time::timeout(Duration::from_secs(2), waiter)
+                .await
+                .expect("each racing waiter resolves under 2s")
+                .expect("join waiter")
+                .expect("await terminal");
+            assert_eq!(
+                resolved, output,
+                "every concurrent waiter resolves with identical terminal output"
+            );
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct LossySink {
+        seen: Arc<Mutex<Vec<u64>>>,
+        dropped: Arc<Mutex<Vec<u64>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ProcessEventSink for LossySink {
+        async fn emit(&self, event: &ProcessEvent) {
+            if event.sequence.is_multiple_of(2) {
+                self.dropped.lock_recover().push(event.sequence);
+            } else {
+                self.seen.lock_recover().push(event.sequence);
+            }
+        }
+    }
+
+    /// Sim-style sink loss: a sink that drops a fraction of emits still leaves
+    /// the durable log complete. Reconciling through `event_page` at terminal
+    /// recovers every event the push feed missed — ADR 0017's "push loss never
+    /// loses truth".
+    #[tokio::test]
+    async fn lossy_sink_still_reconciles_complete_log_from_event_pages() {
+        let raw = memory_registry().await;
+        let sink = LossySink::default();
+        let (registry, _hub) = watched_parts(watch_process_registry_with_sink(
+            raw,
+            Some(Arc::new(sink.clone())),
+        ));
+        registry
+            .register_process(registration_with_events(
+                &ProcessId::from("proc"),
+                &["producer.step"],
+            ))
+            .await
+            .expect("register");
+
+        const EVENTS: u64 = 6;
+        for _ in 0..EVENTS {
+            registry
+                .append_event(
+                    &ProcessId::from("proc"),
+                    ProcessEventAppendRequest::new("producer.step", serde_json::json!({})),
+                )
+                .await
+                .expect("append");
+        }
+        // Terminal events remain durable for reconciliation if that push is dropped.
+        registry
+            .complete_process(
+                &ProcessId::from("proc"),
+                success(serde_json::json!("done")),
+                crate::ProcessCompletionAuthority::external_owner(),
+            )
+            .await
+            .expect("complete");
+
+        // The push feed genuinely lost some events...
+        assert!(
+            !sink.dropped.lock_recover().is_empty(),
+            "the lossy sink must drop at least one emit for the scenario to be meaningful"
+        );
+        assert!(
+            (sink.seen.lock_recover().len() as u64) < EVENTS,
+            "the sink observed fewer events than were appended"
+        );
+        let reconciled = registry
+            .full_event_window(&ProcessId::from("proc"), 0)
+            .await
+            .expect("events")
+            .into_iter()
+            .filter(|event| event.event_type == "producer.step")
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reconciled.len(),
+            EVENTS as usize,
+            "paged reads reconcile the complete non-terminal log despite push loss"
+        );
+        assert!(
+            reconciled.windows(2).all(|events| events[0] < events[1]),
+            "the reconciled durable log must remain strictly ordered"
+        );
+    }
+}

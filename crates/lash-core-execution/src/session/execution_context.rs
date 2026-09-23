@@ -402,7 +402,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .with_agent_frame_id(Some(self.dispatch.agent_frame_id.clone()))
     }
 
-    pub(super) fn record_started_process(&self, process_id: &ProcessId) {
+    pub(crate) fn record_started_process(&self, process_id: &ProcessId) {
         self.started_process_ids
             .lock_recover()
             .insert(ProcessId::from(process_id.to_string()));

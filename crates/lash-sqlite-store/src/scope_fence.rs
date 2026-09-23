@@ -32,7 +32,7 @@ use std::sync::LazyLock;
 
 use lash_store_sql::effect::scope_retirement::ScopeRetirementStatements;
 use lash_store_sql::{Dialect, SchemaTables, TableLayout};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::conn::SqliteConnection;
 use crate::location::DatabaseTarget;
@@ -398,10 +398,24 @@ impl RegistryAttachment {
                 {
                     return Ok(FenceLocations::JOURNAL_ONLY);
                 }
-                connection.execute(
-                    crate::connection_sql::ATTACH_PROCESS_REGISTRY,
-                    params![registry_name],
-                )?;
+                // The connection thread finishes a call whose awaiting
+                // future was dropped (a timed-out await-event read), so an
+                // earlier attach may have landed without this binder
+                // recording it: recognise it instead of attaching twice.
+                let already_attached = connection
+                    .query_row(
+                        crate::connection_sql::SELECT_PROCESS_REGISTRY_IS_ATTACHED,
+                        [],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if !already_attached {
+                    connection.execute(
+                        crate::connection_sql::ATTACH_PROCESS_REGISTRY,
+                        params![registry_name],
+                    )?;
+                }
                 Ok(FenceLocations::attached(Schema::Main))
             })
             .await?;

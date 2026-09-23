@@ -188,9 +188,10 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         crate::EffectOpener::for_scope(&crate::AdmittedScope::process(successor_ref.clone()))
             .expect("a pinned process scope derives an opener");
     let group_key = format!("{prefix}-incarnation-group");
-    let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
+    let env_store = (fixture.make_processes)().await.process_env_store;
+    let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
     let observation = Arc::new(LawObservation::default());
-    let registry = (fixture.make_registry)().await;
+    let registry = (fixture.make_processes)().await.registry;
     let provider = || -> Arc<dyn crate::ToolProvider> {
         Arc::new(LawLeafProvider {
             definitions: leaf_definitions(),

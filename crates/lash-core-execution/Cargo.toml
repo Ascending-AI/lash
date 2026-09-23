@@ -56,7 +56,20 @@ tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
 insta = "1"
+# ADR 0102: the crate's tests that need a concrete store or effect host run in
+# `tests/store_backed` over a SQLite memory backend. The store depends on this
+# crate, so only an integration test (one copy of the kernel) may use it; an
+# in-crate `cfg(test)` module would see a second copy with distinct traits.
+# Version-less so packaging strips the cyclic dev-dependency.
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store" }
 proptest = "1"
 syn = { version = "2", features = ["full"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+
+# The store-backed kernel tests reach crate internals through the `testing`
+# seam (`testing::kernel_internals`), so they build only with it.
+[[test]]
+name = "store_backed"
+path = "tests/store_backed.rs"
+required-features = ["testing"]

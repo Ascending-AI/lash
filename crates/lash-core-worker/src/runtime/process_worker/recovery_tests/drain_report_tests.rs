@@ -34,7 +34,7 @@ async fn drain_reports_claim_backend_error_and_retries() {
         )))
         .await;
 
-    let worker = native_worker(registry.clone(), owner);
+    let worker = native_worker(registry.clone(), owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
     assert!(report.abandoned.is_empty());
@@ -94,7 +94,7 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
         )))
         .await;
 
-    let worker = native_worker(registry.clone(), owner);
+    let worker = native_worker(registry.clone(), owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
     assert!(report.abandoned.is_empty());
@@ -154,7 +154,7 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
         )))
         .await;
 
-    let worker = native_worker(registry.clone(), owner);
+    let worker = native_worker(registry.clone(), owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
     assert!(report.abandoned.is_empty());
@@ -219,7 +219,7 @@ async fn drain_reports_release_failure_over_absent() {
         )))
         .await;
 
-    let worker = native_worker(registry.clone(), owner);
+    let worker = native_worker(registry.clone(), owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
     assert!(report.abandoned.is_empty());
@@ -276,7 +276,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
         .expect("claim live peer lease")
         .acquired()
         .expect("peer acquires lease");
-    let worker = native_worker(registry.clone(), owner);
+    let worker = native_worker(registry.clone(), owner).await;
 
     let busy = worker.drain_owner_bound_work().await.expect("busy drain");
     assert_eq!(

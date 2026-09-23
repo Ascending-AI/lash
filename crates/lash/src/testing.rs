@@ -34,14 +34,17 @@ pub use lash_core::testing::{
 /// constructors for host tests that drive context-bound execution —
 /// e.g. [`tools::link_with_deferred_resolution`](crate::tools::link_with_deferred_resolution)
 /// — without a production runtime.
+///
+/// Each takes the [`TestExecutionPorts`] it runs over: a backend's ports
+/// (`&backend` converts), or a host's with
+/// [`TestExecutionPorts::over_host`]. There is no in-memory default.
 pub use lash_core::testing::{
-    cancelled_code_execution_context, code_execution_context,
+    TestExecutionPorts, cancelled_code_execution_context, code_execution_context,
     code_execution_context_cancelling_after_yield, code_execution_context_for_process,
-    code_execution_context_with_effect_host_and_invocation, code_execution_context_with_invocation,
-    code_execution_context_with_process_dependencies, code_execution_context_with_tool_catalog,
+    code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
+    code_execution_context_with_tool_catalog,
     code_execution_context_with_tool_provider_and_catalog,
     code_execution_context_with_tool_provider_catalog_and_invocation,
-    code_execution_context_with_tool_provider_catalog_effect_host_and_invocation,
     code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
     exec_code_invocation,
 };

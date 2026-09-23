@@ -53,7 +53,13 @@ async fn second_invocation_on_trigger_store(
     store: Arc<lash_core::facade_support::InMemoryTriggerStore>,
     registry: Arc<TestLocalProcessRegistry>,
 ) -> Result<LashCore> {
-    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("process-exec-env backend")
+            .process_env_store();
+    // The fixture environment every subscription draft here records.
+    lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .effect_host(Arc::new(KeyJournalController::default()))
         .provider(mock_provider())

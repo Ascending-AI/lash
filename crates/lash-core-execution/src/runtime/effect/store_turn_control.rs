@@ -289,3 +289,88 @@ impl EffectHost for StoreDelegatedTurnControlHost {
         self.owner.bind_process_registry(binding);
     }
 }
+
+/// The store-delegated turn-cancellation authority seam: a native host paired
+/// with a store's promise registry. It exists only for that pairing (ADR 0102
+/// D2), so its tests go with it.
+#[cfg(test)]
+mod store_authority_tests {
+
+    #[tokio::test]
+    async fn store_authority_recovery_preserves_promises_across_reopen() {
+        let factory = crate::InMemorySessionStoreFactory::new();
+        let request = crate::testing::store_fixtures::session_store_request(
+            &crate::SessionId::from("authority-reopen"),
+            "model",
+            crate::SessionRelation::Root,
+        );
+        let store = factory.create_store(&request).await.unwrap();
+        let first = crate::runtime::effect::executor::concrete_turn_cancellation_authority(
+            &store.turn_cancellation_authority().unwrap(),
+        );
+        let scope = crate::ExecutionScope::turn("authority-reopen", "turn");
+        let key = first
+            .resolver()
+            .await_event_key(&scope, crate::AwaitEventWaitIdentity::TurnCancelGate)
+            .await
+            .unwrap();
+        let reopened = factory
+            .open_existing_store(&request)
+            .await
+            .unwrap()
+            .unwrap();
+        let second = crate::runtime::effect::executor::concrete_turn_cancellation_authority(
+            &reopened.turn_cancellation_authority().unwrap(),
+        );
+        assert_eq!(first.binding_id(), second.binding_id());
+        assert_eq!(
+            second
+                .resolver()
+                .await_event_key(&scope, crate::AwaitEventWaitIdentity::TurnCancelGate)
+                .await
+                .unwrap(),
+            key
+        );
+        assert_eq!(
+            second
+                .resolver()
+                .resolve_await_event(&key, crate::Resolution::Cancelled)
+                .await
+                .unwrap(),
+            crate::ResolveOutcome::Accepted
+        );
+        assert_eq!(
+            first.resolver().peek_await_event(&key).await.unwrap(),
+            Some(crate::Resolution::Cancelled)
+        );
+        first
+            .resolver()
+            .revoke_await_events_for_session(&crate::SessionId::from("authority-reopen"))
+            .await
+            .unwrap();
+        assert_eq!(
+            second
+                .resolver()
+                .peek_await_event(&key)
+                .await
+                .unwrap_err()
+                .code,
+            crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked
+        );
+    }
+
+    #[tokio::test]
+    async fn concrete_custom_authority_recovery_preserves_resolver_identity() {
+        let resolver: std::sync::Arc<dyn crate::AwaitEventResolver> =
+            std::sync::Arc::new(crate::NativeRuntimeEffectController::default());
+        let authority = crate::runtime::effect::executor::TurnCancellationAuthority::new(
+            "custom-authority",
+            resolver.clone(),
+        );
+        let recovered = crate::runtime::effect::executor::concrete_turn_cancellation_authority(
+            &authority.into_store_authority(),
+        );
+        assert_eq!(recovered.binding_id(), "custom-authority");
+        assert!(std::sync::Arc::ptr_eq(&recovered.resolver(), &resolver));
+    }
+}

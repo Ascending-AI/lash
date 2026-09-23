@@ -189,20 +189,21 @@ fn register_fence_opener(
     let engines = crate::ProcessEngineRegistry::new().with_registration(
         crate::ProcessEngineRegistration::accepting(Arc::new(LawFenceEngine)),
     );
-    let dispatch = crate::testing::TestExecutionContextBuilder::new()
-        .provider(provider)
-        .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
-        .tool_registry(Arc::new(tool_registry))
-        .processes(processes)
-        .process_definitions(process_definitions)
-        .process_engines(engines)
-        .direct_completions(crate::DirectCompletionClient::from_fn(
-            |_request, _source| Ok(law_direct_completion()),
-        ))
-        .process_env_store(process_env_store)
-        .borrowed_effect_controller(controller)
-        .build()
-        .dispatch;
+    let dispatch = crate::testing::TestExecutionContextBuilder::new(
+        crate::testing::TestExecutionPorts::over_host(Arc::clone(host), process_env_store),
+    )
+    .provider(provider)
+    .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
+    .tool_registry(Arc::new(tool_registry))
+    .processes(processes)
+    .process_definitions(process_definitions)
+    .process_engines(engines)
+    .direct_completions(crate::DirectCompletionClient::from_fn(
+        |_request, _source| Ok(law_direct_completion()),
+    ))
+    .borrowed_effect_controller(controller)
+    .build()
+    .dispatch;
     let lent_controller = host
         .scoped_static(admitted)
         .expect("the host lends a scoped controller")
@@ -331,7 +332,10 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
         Arc::new(crate::InMemoryProcessDefinitionRegistry::default());
     let sink = Arc::new(IntentSink::default());
     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-        inner: crate::testing::effect_backed_process_service(Arc::clone(&scenario.registry)),
+        inner: crate::testing::effect_backed_process_service(
+            Arc::clone(&scenario.registry),
+            Arc::clone(&scenario.process_env_store),
+        ),
         sink: Arc::clone(&sink),
     });
     // The nested leaf's body parks until the law releases it — held before

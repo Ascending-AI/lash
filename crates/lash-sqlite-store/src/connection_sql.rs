@@ -99,3 +99,9 @@ pub(crate) const SELECT_TABLE_DDL: &str = "SELECT name, sql
 /// name.
 pub(crate) const SELECT_MAIN_DATABASE_FILE: &str =
     "SELECT file FROM pragma_database_list WHERE name = 'main'";
+
+/// Whether this connection already has the process registry attached: an
+/// attach whose caller was dropped still ran to completion on the connection
+/// thread, and SQLite refuses a second `ATTACH` under the same name.
+pub(crate) const SELECT_PROCESS_REGISTRY_IS_ATTACHED: &str =
+    "SELECT 1 FROM pragma_database_list WHERE name = 'process_registry'";

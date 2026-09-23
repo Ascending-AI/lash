@@ -453,13 +453,20 @@ async fn append_conformance_runtime(
         None => host.build_session(request.session_id.clone()),
     }
     .expect("append conformance plugin session");
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    ));
+    let runtime_services = crate::PersistentRuntimeServices::new(
+        plugins,
+        Arc::clone(store),
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     crate::LashRuntime::from_persistent_embedded_state(
         request.policy.clone(),
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )),
-        crate::PersistentRuntimeServices::new(plugins, Arc::clone(store)),
+        runtime_host,
+        runtime_services,
         state,
         crate::testing::runtime_lease_owner(),
     )

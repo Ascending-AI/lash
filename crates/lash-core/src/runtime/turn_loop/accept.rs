@@ -622,12 +622,15 @@ mod process_invocation_correlation_tests {
     use super::*;
 
     fn invocation_id(input: &TurnInput) -> Option<String> {
-        crate::testing::TestExecutionContextBuilder::new()
-            .turn_context(input.turn_context.clone())
-            .build()
-            .into_runtime()
-            .restate_invocation_id()
-            .map(str::to_owned)
+        crate::testing::TestExecutionContextBuilder::over_controller(std::sync::Arc::new(
+            crate::testing::UnavailableEffectController,
+        )
+            as std::sync::Arc<dyn crate::RuntimeEffectController>)
+        .turn_context(input.turn_context.clone())
+        .build()
+        .into_runtime()
+        .restate_invocation_id()
+        .map(str::to_owned)
     }
 
     fn correlated_input() -> TurnInput {

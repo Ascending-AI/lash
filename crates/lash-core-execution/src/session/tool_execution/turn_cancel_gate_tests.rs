@@ -154,9 +154,8 @@ async fn deferred_tool_await_shape(
         crate::AdmittedScope::unpinned(turn_scope()).expect("a turn admits unpinned"),
     )
     .expect("valid turn scope");
-    let mut context = crate::testing::TestExecutionContextBuilder::new()
+    let mut context = crate::testing::TestExecutionContextBuilder::over_controller(scoped)
         .plugin_factories(Vec::new())
-        .borrowed_effect_controller(scoped)
         .build()
         .into_runtime();
     if !observe_turn_cancel {
@@ -223,13 +222,12 @@ async fn scalar_retry_sleep_attaches_the_owning_turn_cancel_gate() {
         crate::AdmittedScope::unpinned(turn_scope()).expect("a turn admits unpinned"),
     )
     .expect("valid turn scope");
-    let context = crate::testing::TestExecutionContextBuilder::new()
+    let context = crate::testing::TestExecutionContextBuilder::over_controller(scoped)
         .plugin_factories(Vec::new())
         .provider(provider)
         .tool_catalog(crate::ToolCatalog::from_tool_definitions(vec![
             definition.clone(),
         ]))
-        .borrowed_effect_controller(scoped)
         .build()
         .into_runtime();
 

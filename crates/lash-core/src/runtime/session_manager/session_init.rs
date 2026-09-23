@@ -537,9 +537,9 @@ async fn initialize_session(
             // finishes the create — `create_store`'s metadata insert is
             // idempotent and the head commit completes what the crashed
             // attempt started — so the session is not stranded retry-proof.
-            None => commit_fresh_session_init(current, plan).await,
+            None => Box::pin(commit_fresh_session_init(current, plan)).await,
         },
-        None => commit_fresh_session_init(current, plan).await,
+        None => Box::pin(commit_fresh_session_init(current, plan)).await,
     }
 }
 
@@ -1333,11 +1333,14 @@ mod tests {
         .expect("valid process-backed child turn input");
 
         assert_eq!(
-            crate::testing::TestExecutionContextBuilder::new()
-                .turn_context(input.turn_context)
-                .build()
-                .into_runtime()
-                .restate_invocation_id(),
+            crate::testing::TestExecutionContextBuilder::over_controller(std::sync::Arc::new(
+                crate::testing::UnavailableEffectController
+            )
+                as std::sync::Arc<dyn crate::RuntimeEffectController>,)
+            .turn_context(input.turn_context)
+            .build()
+            .into_runtime()
+            .restate_invocation_id(),
             Some("invocation:subagent:call")
         );
     }

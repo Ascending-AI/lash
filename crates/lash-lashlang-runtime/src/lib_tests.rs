@@ -2,6 +2,23 @@ use super::*;
 
 use lashlang::testing::ast_builders as b;
 
+thread_local! {
+    /// Backends opened on this test thread, held until the thread ends: a
+    /// memory backend's effect journal reaches its process registry by name,
+    /// so the backend must outlive every context built over its ports.
+    static HELD_BACKENDS: std::cell::RefCell<Vec<lash_sqlite_store::SqliteBackend>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A fresh SQLite memory backend (ADR 0102), held for the rest of the test.
+pub(crate) async fn memory_backend() -> lash_sqlite_store::SqliteBackend {
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a memory backend");
+    HELD_BACKENDS.with(|held| held.borrow_mut().push(backend.clone()));
+    backend
+}
+
 #[test]
 fn effect_group_wait_identity_uses_the_durable_group_contract() {
     let invocation = |replay_key: &str| {
@@ -53,7 +70,7 @@ async fn durable_process_events(
     registration: &lash_core::ProcessRegistration,
     authority: &lash_core::ProcessExecutionWriteAuthority,
 ) -> lash_core_execution::session::RuntimeExecutionProcessEventContext {
-    let (_, env_ref) = lash_core::testing::process_execution_env_fixture();
+    let env_ref = lash_core::testing::process_execution_env_fixture_ref();
     registry
         .register_process(registration.clone().with_execution_env_ref(Some(env_ref)))
         .await
@@ -149,8 +166,7 @@ async fn real_process_sleep_until_emits_deadline_and_completion() {
         lash_core::RuntimeAttribution::none(),
         "process-body",
     );
-    let built = lash_core::testing::TestExecutionContextBuilder::new()
-        .borrowed_effect_controller(scoped.clone())
+    let built = lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone())
         .runtime_parent_invocation(parent)
         .build();
     let plugins = Arc::clone(&built.dispatch.plugins);
@@ -362,8 +378,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         lash_core::RuntimeAttribution::none(),
         "process-body",
     );
-    let built = lash_core::testing::TestExecutionContextBuilder::new()
-        .borrowed_effect_controller(scoped.clone())
+    let built = lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone())
         .runtime_parent_invocation(parent)
         .build();
     let plugins = Arc::clone(&built.dispatch.plugins);
@@ -546,10 +561,9 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
         lash_core::RuntimeAttribution::none(),
         "process-body",
     );
-    let built = lash_core::testing::TestExecutionContextBuilder::new()
+    let built = lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone())
         .provider(Arc::new(lash_core::testing::FixtureTools::new()))
         .tool_catalog(catalog)
-        .borrowed_effect_controller(scoped.clone())
         .runtime_parent_invocation(parent)
         .build();
     let plugins = Arc::clone(&built.dispatch.plugins);
@@ -1876,6 +1890,7 @@ process scan(root: str) -> str {
             input.process_identity(),
         ));
         let context = lash_core::testing::process_engine_run_context_for_validation(
+            &memory_backend().await,
             registration,
             catalog,
             registry_available,

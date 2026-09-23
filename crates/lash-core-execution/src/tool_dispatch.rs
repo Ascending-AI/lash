@@ -6,8 +6,6 @@ mod intent_executor;
 mod pending_resolver;
 mod preparation;
 mod retry;
-#[cfg(test)]
-mod tests;
 
 pub use context::{
     REBIND_FIELDS, RebindDisposition, RebindField, TOOL_CHILD_REBIND_VERSION, ToolDispatchContext,
@@ -34,13 +32,17 @@ pub use execution::{
 pub use intent_executor::execute_final_tool_intents;
 #[cfg(not(feature = "testing"))]
 pub(crate) use intent_executor::execute_final_tool_intents;
-#[cfg(test)]
-pub(crate) use preparation::dispatch_tool_call;
-#[cfg(test)]
-pub(crate) use preparation::dispatch_tool_call_with_execution_context;
+// The store-backed dispatch tests (`tests/store_backed`) drive a single call
+// and the directive fold the way a turn does; nothing in the runtime calls
+// these outside a turn.
+#[cfg(any(test, feature = "testing"))]
+pub use directives::{BeforeToolDirectiveOutcome, apply_before_tool_directives};
 pub use preparation::resolve_callable_manifest_by_id;
-#[cfg(test)]
-pub(crate) use preparation::resolve_tool_argument_projection_policy;
+#[cfg(any(test, feature = "testing"))]
+pub use preparation::{
+    dispatch_tool_call, dispatch_tool_call_with_execution_context,
+    resolve_tool_argument_projection_policy,
+};
 pub use preparation::{
     prepare_granted_tool_call_with_context, prepare_tool_call_with_context,
     resolve_callable_manifest, resolve_internal_manifest_by_id,
@@ -51,3 +53,12 @@ pub(crate) use retry::settle_completed_pending_tool_call;
 pub(crate) use retry::{
     mark_retry_exhausted, normalized_outcome, resolve_retry_policy, retry_after_ms,
 };
+
+/// The static checks over this module's own source; the dispatch tests that
+/// run tool attempts need an effect host and run over a SQLite memory
+/// backend in `tests/store_backed` (ADR 0102).
+#[cfg(test)]
+mod tests {
+    mod context_source;
+    mod rebind_checklist;
+}

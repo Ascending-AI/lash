@@ -28,10 +28,14 @@ crate::tool_child_invocation_tests!({
                 let host = Arc::clone(&host);
                 Box::pin(async move { crate::ToolChildWorld { host, drain: None } })
             }),
-            make_registry: Arc::new(|| {
+            make_processes: Arc::new(|| {
                 Box::pin(async {
-                    Arc::new(crate::TestLocalProcessRegistry::default())
-                        as Arc<dyn crate::ProcessRegistry>
+                    crate::ToolChildProcesses {
+                        registry: Arc::new(crate::TestLocalProcessRegistry::default())
+                            as Arc<dyn crate::ProcessRegistry>,
+                        process_env_store: Arc::new(crate::InMemoryProcessExecutionEnvStore::new())
+                            as Arc<dyn crate::ProcessExecutionEnvStore>,
+                    }
                 })
             }),
             deferrable_routing: crate::ToolChildDeferrableRouting::ProcessLifetime,
@@ -55,10 +59,14 @@ crate::tool_batch_group_tests!({
                 let host = Arc::clone(&host);
                 Box::pin(async move { crate::ToolChildWorld { host, drain: None } })
             }),
-            make_registry: Arc::new(|| {
+            make_processes: Arc::new(|| {
                 Box::pin(async {
-                    Arc::new(crate::TestLocalProcessRegistry::default())
-                        as Arc<dyn crate::ProcessRegistry>
+                    crate::ToolChildProcesses {
+                        registry: Arc::new(crate::TestLocalProcessRegistry::default())
+                            as Arc<dyn crate::ProcessRegistry>,
+                        process_env_store: Arc::new(crate::InMemoryProcessExecutionEnvStore::new())
+                            as Arc<dyn crate::ProcessExecutionEnvStore>,
+                    }
                 })
             }),
             deferrable_routing: crate::ToolChildDeferrableRouting::ProcessLifetime,

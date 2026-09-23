@@ -1664,7 +1664,10 @@ async fn nested_owner_binding_restores_the_previous_owner() {
 
 #[tokio::test]
 async fn ephemeral_facade_passes_reads_through_without_a_guard() {
-    let store = SessionAttachmentStore::in_memory();
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("memory backend");
+    let store = SessionAttachmentStore::ephemeral(crate::Backend::attachment_store(&backend));
     let reference = store.put(vec![1, 2, 3], meta()).await.expect("put");
     assert_eq!(
         store.get(&reference.id).await.expect("get").bytes,

@@ -621,7 +621,7 @@ impl TurnWorkDriver {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "state", content = "cancellation", rename_all = "snake_case")]
-enum TurnGateTerminal {
+pub(crate) enum TurnGateTerminal {
     CancelRequested(TurnCancellationEvidence),
     CompletionSealed,
 }
@@ -670,7 +670,7 @@ enum TurnEscalationTerminal {
     CompletionSealed,
 }
 
-fn gate_resolution(value: impl Serialize) -> Result<Resolution, RuntimeError> {
+pub(crate) fn gate_resolution(value: impl Serialize) -> Result<Resolution, RuntimeError> {
     serde_json::to_value(value)
         .map(Resolution::Ok)
         .map_err(|err| {
@@ -728,7 +728,7 @@ fn decode_terminal(
     }
 }
 
-async fn cancel_gate_key(
+pub(crate) async fn cancel_gate_key(
     resolver: &dyn AwaitEventResolver,
     address: &TurnAddress,
 ) -> Result<AwaitEventKey, RuntimeError> {
@@ -752,7 +752,7 @@ async fn terminal_key(
         .await
 }
 
-async fn escalation_key(
+pub(crate) async fn escalation_key(
     resolver: &dyn AwaitEventResolver,
     address: &TurnAddress,
 ) -> Result<AwaitEventKey, RuntimeError> {
@@ -1371,7 +1371,7 @@ impl ActiveTurnControl {
         }
     }
 
-    fn internal_evidence(&self) -> TurnCancellationEvidence {
+    pub(crate) fn internal_evidence(&self) -> TurnCancellationEvidence {
         TurnCancellationEvidence {
             origin: self.local_cancel_origin.get(),
             ..TurnCancellationEvidence::internal(&self.address.turn_id)
@@ -1379,6 +1379,8 @@ impl ActiveTurnControl {
     }
 }
 
+/// The pure turn-control laws; the laws that drive a host and a session store
+/// run over a SQLite memory backend in `tests/store_backed` (ADR 0102).
 #[cfg(test)]
 #[path = "turn_control/tests.rs"]
 mod tests;

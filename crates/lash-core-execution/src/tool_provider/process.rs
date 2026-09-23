@@ -437,87 +437,27 @@ impl Drop for ExternalLaunchAudit {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{ProcessLifecycle as _, ProcessObserverRegistry as _, ProcessRegistrar as _};
-
-    use crate::runtime::RuntimeEffectControllerHandle;
-
-    fn admin(processes: Arc<dyn crate::ProcessService>) -> InternalProcessAdmin<'static> {
-        InternalProcessAdmin {
-            session_id: SessionId::from("session"),
-            agent_frame_id: crate::session_graph::frame_node_id(
-                &SessionId::from("session"),
-                "frame",
-            ),
+#[cfg(feature = "testing")]
+impl<'run> InternalProcessAdmin<'run> {
+    /// An admin surface for `session_id` over `processes`, as the internal
+    /// tool context hands one to a process tool, with no parent invocation
+    /// and no orchestrating-start sink.
+    pub(crate) fn for_testing(
+        session_id: SessionId,
+        agent_frame_id: crate::FrameNodeId,
+        processes: Arc<dyn crate::ProcessService>,
+        effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
+        execution_env_spec: crate::ProcessExecutionEnvSpec,
+    ) -> Self {
+        Self {
+            session_id,
+            agent_frame_id,
             processes,
-            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::NativeRuntimeEffectController::default(),
-            )),
+            effect_controller,
             parent_invocation: None,
             tool_call_id: None,
-            execution_env_spec: crate::ProcessExecutionEnvSpec::new(
-                crate::PluginOptions::default(),
-                crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-            ),
+            execution_env_spec,
             orchestrating_starts: None,
         }
-    }
-
-    #[tokio::test]
-    async fn await_process_requires_visibility_then_allows_observed_process() {
-        let host = Arc::new(crate::testing::MockSessionManager::default());
-        host.process_registry
-            .register_process(crate::ProcessRegistration::new(
-                "process",
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                crate::RecoveryContract::ExternallyOwned,
-                crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
-            ))
-            .await
-            .expect("register process");
-        host.process_registry
-            .complete_process(
-                &ProcessId::from("process"),
-                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                    serde_json::json!("done"),
-                )),
-                crate::ProcessCompletionAuthority::external_owner(),
-            )
-            .await
-            .expect("complete process");
-        let processes: Arc<dyn crate::ProcessService> = host.clone();
-        let admin = admin(processes);
-
-        let hidden = admin
-            .await_process(&ProcessId::from("process"))
-            .await
-            .expect_err("unobserved process must be hidden");
-        assert_eq!(
-            hidden.to_string(),
-            "plugin session error: process handle `process` is not live or visible in this session"
-        );
-
-        host.process_registry
-            .add_observer(
-                &SessionId::from("session"),
-                &ProcessId::from("process"),
-                crate::ProcessObserverBy::host("tool-provider-test"),
-            )
-            .await
-            .expect("observe process");
-        assert!(
-            admin
-                .await_process(&ProcessId::from("process"))
-                .await
-                .is_ok()
-        );
     }
 }

@@ -69,6 +69,9 @@ impl CellOutcome {
 pub(crate) struct Session {
     mode: HarnessMode,
     state: RlmExecutionState,
+    /// The SQLite memory backend (ADR 0102) every cell of the session runs
+    /// over; each cell gets its own invocation, so no cell replays another.
+    backend: lash_sqlite_store::SqliteBackend,
     /// Cells run so far, so a failure names the sequence that produced it.
     history: Vec<String>,
 }
@@ -78,6 +81,8 @@ impl Session {
         Self {
             mode,
             state: RlmExecutionState::for_engine(LANGUAGE_ID),
+            backend: block_on(lash_sqlite_store::SqliteBackend::memory())
+                .expect("open a memory backend"),
             history: Vec::new(),
         }
     }
@@ -90,11 +95,12 @@ impl Session {
             language: LANGUAGE_ID.to_string(),
             code: code.to_string(),
         };
+        let context = self.cell_context();
         let state = &mut self.state;
         let response = block_on(async move {
             execute_code_with_channel_and_bounds(
                 state,
-                lash_core::testing::code_execution_context(),
+                context,
                 request,
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::default(),
@@ -146,6 +152,25 @@ impl Session {
     /// This is the harness's whole model of a restart, and it is the
     /// production path: the same capture the runtime persists, hydrated back
     /// through the same restore a rehydrating worker uses.
+    /// The next cell's context: the session's backend under an invocation
+    /// of its own, numbered by the cells run so far. The number is fixed
+    /// width, so the persisted state the size laws measure never moves with
+    /// the cell count.
+    fn cell_context(&self) -> lash_core::RuntimeExecutionContext<'static> {
+        let cell = self.history.len();
+        lash_core::testing::code_execution_context_with_invocation(
+            &self.backend,
+            lash_core::testing::exec_code_invocation(
+                "cell-conformance-session",
+                "cell-conformance-turn",
+                0,
+                cell,
+                format!("exec-code:{cell:08}"),
+                format!("exec-code:cell-conformance:{cell:08}"),
+            ),
+        )
+    }
+
     pub(crate) fn restart(&mut self) {
         let hydrated = self
             .state
@@ -217,13 +242,21 @@ impl Session {
     pub(crate) fn run_parked(&mut self, code: &str) -> ParkedCellEvidence {
         let mut state =
             std::mem::replace(&mut self.state, RlmExecutionState::for_engine(LANGUAGE_ID));
-        let evidence = block_on(execute_parked_cell_for_tests(
-            &mut state,
-            crate::executor::parked_cell_context_for_tests(),
-            LANGUAGE_ID,
-            code,
-            false,
-        ))
+        let evidence = block_on(async {
+            // A parked cell runs on a backend of its own, as it ran on a host
+            // of its own: its context carries no per-cell invocation.
+            let backend = lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .expect("open a memory backend");
+            Box::pin(execute_parked_cell_for_tests(
+                &mut state,
+                crate::executor::parked_cell_context_for_tests(&backend),
+                LANGUAGE_ID,
+                code,
+                false,
+            ))
+            .await
+        })
         .unwrap_or_else(|error| panic!("parked cell `{code}` must suspend and resume: {error}"));
         self.state = state;
         self.history.push(code.to_string());
@@ -235,13 +268,21 @@ impl Session {
     pub(crate) fn run_parked_broken(&mut self, code: &str) -> String {
         let mut state =
             std::mem::replace(&mut self.state, RlmExecutionState::for_engine(LANGUAGE_ID));
-        let result = block_on(execute_parked_cell_for_tests(
-            &mut state,
-            crate::executor::parked_cell_context_for_tests(),
-            LANGUAGE_ID,
-            code,
-            true,
-        ));
+        let result = block_on(async {
+            // A parked cell runs on a backend of its own, as it ran on a host
+            // of its own: its context carries no per-cell invocation.
+            let backend = lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .expect("open a memory backend");
+            Box::pin(execute_parked_cell_for_tests(
+                &mut state,
+                crate::executor::parked_cell_context_for_tests(&backend),
+                LANGUAGE_ID,
+                code,
+                true,
+            ))
+            .await
+        });
         self.state = state;
         result.expect_err("the deliberately broken continuation must fail")
     }

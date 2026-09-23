@@ -929,3 +929,266 @@ mod tests {
         assert_eq!(refused.code.as_str(), "await_event_scope_not_retirable");
     }
 }
+
+/// The native host's runtime-owned tool-intent preparation: the sink's
+/// submission gate, held for the preparation's lifetime. The SQL and Restate
+/// hosts prepare controller-owned instead, so this test goes with the native
+/// host (ADR 0102).
+#[cfg(test)]
+mod tool_intent_gate_tests {
+    use std::sync::Arc;
+
+    use crate::runtime::effect::executor::control::{
+        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    };
+    use crate::{EffectHost as _, ProcessId, RuntimeError, SessionId};
+
+    struct ToolIntentGateSink {
+        gate: Arc<tokio::sync::Mutex<()>>,
+        admissions: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Default for ToolIntentGateSink {
+        fn default() -> Self {
+            Self {
+                gate: Arc::new(tokio::sync::Mutex::new(())),
+                admissions: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToolIntentOutcomeSink for ToolIntentGateSink {
+        async fn lock_submission_gate(&self, _replay_key: &str) -> ToolIntentSubmissionGuard {
+            ToolIntentSubmissionGuard::from_owned_mutex_guard(
+                Arc::clone(&self.gate).lock_owned().await,
+            )
+        }
+
+        async fn admit(
+            &self,
+            _record: crate::ToolIntentSubmissionRecord,
+        ) -> Result<crate::ToolIntentSubmissionAdmission, RuntimeError> {
+            self.admissions
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(crate::ToolIntentSubmissionAdmission::Admitted)
+        }
+
+        async fn complete_submission(
+            &self,
+            _identity: &crate::ToolIntentIdentity,
+            _outcome: crate::ToolIntentExecutionOutcome,
+        ) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+
+        async fn retain_in_journal(
+            &self,
+            _identity: &crate::ToolIntentIdentity,
+            _submitted: crate::ToolIntent,
+            _outcome: crate::ToolIntentExecutionOutcome,
+        ) -> Result<(), RuntimeError> {
+            Ok(())
+        }
+    }
+
+    fn test_tool_intent() -> (crate::ToolIntentIdentity, crate::ToolIntent) {
+        let identity = crate::derive_tool_intent_identity(
+            &SessionId::from("tool-intent-gate-session"),
+            "tool-intent-gate-turn",
+            Some("tool-intent-gate-call"),
+            0,
+        )
+        .expect("tool-intent gate identity");
+        let intent = crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
+            session_id: SessionId::from("tool-intent-gate-session"),
+            process_id: ProcessId::from("tool-intent-gate-process"),
+        });
+        (identity, intent)
+    }
+
+    #[tokio::test]
+    async fn runtime_tool_intent_preparation_holds_the_gate_until_dropped() {
+        let host = crate::NativeEffectHost::default();
+        let sink = ToolIntentGateSink::default();
+        let (identity, intent) = test_tool_intent();
+        let first = host
+            .prepare_tool_intent(&sink, &identity, intent.clone())
+            .await
+            .expect("first tool-intent preparation");
+
+        let blocked = tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            host.prepare_tool_intent(&sink, &identity, intent.clone()),
+        )
+        .await;
+        assert!(
+            blocked.is_err(),
+            "a duplicate preparation must remain blocked while the first preparation is held"
+        );
+
+        drop(first);
+        let second = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            host.prepare_tool_intent(&sink, &identity, intent),
+        )
+        .await
+        .expect("duplicate preparation unblocks after release")
+        .expect("second tool-intent preparation");
+        assert!(matches!(second, ToolIntentPreparation::RuntimeOwned { .. }));
+        assert_eq!(sink.admissions.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+}
+
+/// The native host's own forwarding and key-lifetime rules (ADR 0102: they go
+/// with the native host).
+#[cfg(test)]
+mod host_forwarding_tests {
+    use std::sync::Arc;
+
+    use crate::runtime::effect::*;
+
+    struct ControllerOwnedReplay {
+        authority_id: std::sync::OnceLock<String>,
+    }
+
+    impl AwaitEventResolver for ControllerOwnedReplay {
+        fn await_event_authority_binding_id(&self) -> Option<String> {
+            self.authority_id.get().cloned()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RuntimeEffectController for ControllerOwnedReplay {
+        fn effect_journaling(&self) -> crate::EffectJournaling {
+            crate::EffectJournaling::Journaled
+        }
+
+        async fn execute_effect(
+            &self,
+            _envelope: RuntimeEffectEnvelope,
+            _local_executor: RuntimeEffectLocalExecutor<'_>,
+        ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+            unreachable!("ownership propagation does not execute effects")
+        }
+
+        async fn open_effect_group(
+            &self,
+            _group: crate::RuntimeEffectGroup,
+        ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("ControllerOwnedReplay"))
+        }
+
+        async fn await_next_settlement(
+            &self,
+            _handle: &mut crate::EffectGroupHandle,
+            _cancel: crate::CancellationToken,
+        ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("ControllerOwnedReplay"))
+        }
+
+        async fn close_effect_group(
+            &self,
+            _handle: crate::EffectGroupHandle,
+            _disposition: crate::LoserPolicy,
+        ) -> Result<(), crate::RuntimeEffectControllerError> {
+            Err(crate::effect_groups_unsupported("ControllerOwnedReplay"))
+        }
+    }
+
+    #[tokio::test]
+    async fn native_host_forwards_tagged_controller_operations_without_inferring_key_lifetime() {
+        let controller = Arc::new(ControllerOwnedReplay {
+            authority_id: std::sync::OnceLock::new(),
+        });
+        let host = NativeEffectHost::new(controller.clone());
+        controller
+            .authority_id
+            .set(host.turn_control_binding_id())
+            .unwrap();
+        assert_eq!(host.effect_journaling(), crate::EffectJournaling::Journaled);
+        let scoped = host
+            .scoped(AdmittedScope::turn("ownership-session", "ownership-turn"))
+            .expect("scope wrapped controller");
+        assert_eq!(
+            scoped.controller().effect_journaling(),
+            crate::EffectJournaling::Journaled
+        );
+        assert!(matches!(
+            scoped
+                .controller()
+                .prepare_completion_key(
+                    &ExecutionScope::turn("ownership-session", "ownership-turn"),
+                    AwaitEventWaitIdentity::tool_completion("call"),
+                    true,
+                )
+                .await
+                .expect("preparation"),
+            crate::CompletionKeyPreparation::Unsupported
+        ));
+        assert!(matches!(
+            host.turn_control_binding(&scoped).await.expect("binding"),
+            crate::TurnControlBinding::RunScoped {
+                resolver: _,
+                durable_cancel_after_llm: true,
+                ..
+            }
+        ));
+
+        let local_host = NativeEffectHost::default();
+        let local_scoped = local_host
+            .scoped(AdmittedScope::turn("local-session", "local-turn"))
+            .expect("local scoped controller");
+        assert!(
+            matches!(
+                local_host
+                    .turn_control_binding(&local_scoped)
+                    .await
+                    .expect("local binding"),
+                crate::TurnControlBinding::HostOwned { .. }
+            ),
+            "a local native host must construct HostOwned turn control"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_host_owns_registry_and_shares_it_only_with_its_scoped_controllers() {
+        let host_a = NativeEffectHost::default();
+        let host_b = NativeEffectHost::default();
+        let scope = ExecutionScope::turn("owned-native-session", "owned-native-turn");
+        let key = host_a
+            .await_event_key(
+                &scope,
+                AwaitEventWaitIdentity::tool_completion("owned-native-call"),
+            )
+            .await
+            .expect("host A key");
+        let scoped_a = host_a
+            .scoped(AdmittedScope::unpinned(scope).expect("a turn admits unpinned"))
+            .expect("host A scoped controller");
+        let terminal = Resolution::Ok(serde_json::json!("owned"));
+        assert_eq!(
+            scoped_a
+                .controller()
+                .resolve_await_event(&key, terminal.clone())
+                .await
+                .expect("scoped A resolves host A key"),
+            ResolveOutcome::Accepted
+        );
+        assert_eq!(
+            host_a
+                .peek_await_event(&key)
+                .await
+                .expect("host A observes scoped terminal"),
+            Some(terminal)
+        );
+        assert_eq!(
+            host_b
+                .resolve_await_event(&key, Resolution::Cancelled)
+                .await
+                .expect("independent host rejects key"),
+            ResolveOutcome::UnknownOrRevoked,
+            "independent native hosts must not rendezvous through process-global state"
+        );
+    }
+}

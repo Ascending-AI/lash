@@ -68,6 +68,7 @@ async fn run_step_with_sink(
     let executions = Arc::new(AtomicUsize::new(0));
     let mut ctx =
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+            crate::testing::memory_backend_ports().await,
             Arc::new(BindingRecordingDeferredProvider {
                 executions: executions.clone(),
                 observed_bindings: Default::default(),

@@ -322,10 +322,17 @@ async fn park_resume_restores_tool_and_subagent_authority() {
         .expect("initial authority plugin session");
     let store = Arc::new(RecordingStore::default());
     let owner = lash_core::LeaseOwnerIdentity::opaque("authority-worker", "authority-boot");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        store,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(plugins, store),
+        runtime_host,
+        runtime_services,
         root_state(&SessionId::from("authority-child")),
         owner.clone(),
     )
@@ -383,10 +390,17 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
         .expect("narrower live-authority plugin session");
     let store = Arc::new(RecordingStore::default());
     let owner = lash_core::LeaseOwnerIdentity::opaque("persisted-worker", "persisted-boot");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        store,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(plugins, store),
+        runtime_host,
+        runtime_services,
         root_state(&SessionId::from("persisted-broader")),
         owner.clone(),
     )
@@ -1627,7 +1641,7 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
         )
         .expect("fork with broader child authority");
     let session = lash_core::testing::runtime_internals::Session::new(
-        lash_core::testing::runtime_internals::RuntimeServices::new(child),
+        lash_core::testing::runtime_services_without_ports(child),
         &SessionId::from("broader-child"),
     )
     .await
@@ -1687,10 +1701,16 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
             ..LlmResponse::default()
         }),
     }]);
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+        plugins,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::testing::runtime_internals::RuntimeServices::new(plugins),
+        runtime_host,
+        runtime_services,
         root_state(&SessionId::from("compose-child")),
         lash_core::testing::runtime_lease_owner(),
     )
@@ -1758,10 +1778,17 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
         hidden.name,
         None,
     );
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        store.clone(),
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(plugins, store.clone()),
+        runtime_host,
+        runtime_services,
         root_state(&SessionId::from("cold-hidden-child")),
         lash_core::testing::runtime_lease_owner(),
     )
@@ -1795,10 +1822,17 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
         hidden.name,
         state.plugin_state(),
     );
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        store,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let rebuilt = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(plugins, store),
+        runtime_host,
+        runtime_services,
         state,
         lash_core::testing::runtime_lease_owner(),
     )
@@ -2127,7 +2161,8 @@ async fn no_rows_registered(
 #[tokio::test]
 async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_gate() {
     let session_id = "recorded-intent-engine-session";
-    let (registry, runtime) = payload_gated_engine_runtime(&SessionId::from(session_id)).await;
+    let (registry, runtime) =
+        Box::pin(payload_gated_engine_runtime(&SessionId::from(session_id))).await;
     let service = runtime
         .runtime_session_services()
         .expect("runtime session services")
@@ -2212,7 +2247,8 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
 #[tokio::test]
 async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct_start() {
     let session_id = "recorded-intent-unregistered-kind-session";
-    let (registry, runtime) = payload_gated_engine_runtime(&SessionId::from(session_id)).await;
+    let (registry, runtime) =
+        Box::pin(payload_gated_engine_runtime(&SessionId::from(session_id))).await;
     let service = runtime
         .runtime_session_services()
         .expect("runtime session services")
@@ -2261,7 +2297,8 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
 #[tokio::test]
 async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
     let session_id = "recorded-intent-no-env-session";
-    let (registry, runtime) = payload_gated_engine_runtime(&SessionId::from(session_id)).await;
+    let (registry, runtime) =
+        Box::pin(payload_gated_engine_runtime(&SessionId::from(session_id))).await;
     let service = runtime
         .runtime_session_services()
         .expect("runtime session services")

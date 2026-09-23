@@ -13,6 +13,68 @@ pub enum TestEffectController<'run> {
     Borrowed(crate::ScopedEffectController<'run>),
 }
 
+impl From<Arc<dyn crate::RuntimeEffectController>> for TestEffectController<'_> {
+    fn from(controller: Arc<dyn crate::RuntimeEffectController>) -> Self {
+        Self::Shared(controller)
+    }
+}
+
+impl<'run> From<crate::ScopedEffectController<'run>> for TestEffectController<'run> {
+    fn from(controller: crate::ScopedEffectController<'run>) -> Self {
+        Self::Borrowed(controller)
+    }
+}
+
+/// The ports an execution context runs over: the effect host that journals
+/// its effects, the store its process executions publish environments to, the
+/// attachment backend its tool bodies write through, and the clock it stamps
+/// from.
+///
+/// There is no in-memory default (ADR 0102). A fixture that has a backend
+/// takes [`TestExecutionPorts::of`]; a conformance tier that proves a host
+/// without one names each port it runs the law over.
+#[derive(Clone)]
+pub struct TestExecutionPorts {
+    pub effect_host: Arc<dyn crate::EffectHost>,
+    pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    pub attachment_store: Arc<dyn crate::AttachmentStore>,
+    pub clock: Arc<dyn crate::Clock>,
+}
+
+impl TestExecutionPorts {
+    /// Every port from one backend, on its clock.
+    pub fn of(backend: &dyn crate::Backend) -> Self {
+        Self::from(backend)
+    }
+
+    /// Ports over a tier's bare host, for a conformance law that proves a
+    /// host rather than a backend: the process-exec-env store the tier
+    /// supplies beside it, no attachment port (puts are refused), and the
+    /// system clock.
+    pub fn over_host(
+        effect_host: Arc<dyn crate::EffectHost>,
+        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    ) -> Self {
+        Self {
+            effect_host,
+            process_env_store,
+            attachment_store: Arc::new(crate::attachments::UnavailableAttachmentStore),
+            clock: Arc::new(crate::SystemClock),
+        }
+    }
+}
+
+impl<D: crate::Backend + ?Sized> From<&D> for TestExecutionPorts {
+    fn from(backend: &D) -> Self {
+        Self {
+            effect_host: backend.effect_host(),
+            process_env_store: backend.process_env_store(),
+            attachment_store: backend.attachment_store(),
+            clock: backend.clock(),
+        }
+    }
+}
+
 pub struct TestExecutionContextBuilder<'run> {
     session_id: SessionId,
     provider: Arc<dyn crate::ToolProvider>,
@@ -28,20 +90,20 @@ pub struct TestExecutionContextBuilder<'run> {
     turn_context: crate::TurnContext,
     session_host_mode: TestSessionHostMode,
     session_lifecycle: Option<Arc<dyn crate::plugin::SessionLifecycleService>>,
-    effect_controller: TestEffectController<'run>,
-    /// An explicit effect host the context's group wiring is built against.
-    /// `None` wraps the shared controller in a `NativeEffectHost` when it is
-    /// the built-in native one (tracked concretely, because an
-    /// `Arc<dyn RuntimeEffectController>` cannot be downcast); a `Borrowed`
-    /// controller or a foreign shared one has no host to lend a `'static`
-    /// controller or register a resolver on, and the context simply routes no
-    /// tool children.
+    /// The host the context's effects run on. Unless `effect_controller`
+    /// overrides it, its controller, scoped to the context's admitted scope,
+    /// serves them and its tool-child host routes the context's group
+    /// children (ADR 0099 §2/§3). `None` for a context built
+    /// [`over_controller`](TestExecutionContextBuilder::over_controller).
     effect_host: Option<Arc<dyn crate::EffectHost>>,
-    /// The concrete native controller behind `effect_controller`, kept so the
-    /// builder can wrap it in a `NativeEffectHost::with_native_controller` —
-    /// the constructor that wires the group-admin handles a bound group-child
-    /// controller needs.
-    native_controller: Option<Arc<crate::runtime::NativeRuntimeEffectController>>,
+    /// A controller that serves the context's effects in place of the host's
+    /// own: a fixture that already holds a scoped controller over the host's
+    /// journal, or a foreign one it is proving.
+    effect_controller: Option<TestEffectController<'run>>,
+    /// Whether the host routes the context's group children. Always when the
+    /// host's own controller serves the context; opt-in beside an override
+    /// controller, through [`TestExecutionContextBuilder::route_tool_children`].
+    route_tool_children: bool,
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
     runtime_parent_invocation: Option<crate::RuntimeInvocation>,
     /// Which cell of the turn this context executes.
@@ -85,18 +147,32 @@ pub struct BuiltTestExecutionContext<'run> {
     tool_child_host: Option<Arc<dyn crate::EffectHost>>,
 }
 
-impl<'run> Default for TestExecutionContextBuilder<'run> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<'run> TestExecutionContextBuilder<'run> {
-    pub fn new() -> Self {
-        let controller = Arc::new(
-            crate::runtime::NativeRuntimeEffectController::default()
-                .allow_process_lifetime_completion_keys(),
-        );
+    /// A builder over `ports`: the host's own controller serves the context's
+    /// effects and its tool-child host routes the context's group children.
+    pub fn new(ports: TestExecutionPorts) -> Self {
+        let TestExecutionPorts {
+            effect_host,
+            process_env_store,
+            attachment_store,
+            clock,
+        } = ports;
+        Self::assemble(
+            Some(effect_host),
+            None,
+            process_env_store,
+            attachment_store,
+            clock,
+        )
+    }
+
+    fn assemble(
+        effect_host: Option<Arc<dyn crate::EffectHost>>,
+        effect_controller: Option<TestEffectController<'run>>,
+        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        attachment_store: Arc<dyn crate::AttachmentStore>,
+        clock: Arc<dyn crate::Clock>,
+    ) -> Self {
         Self {
             session_id: SessionId::from("test-session"),
             provider: Arc::new(EmptyToolProvider),
@@ -107,7 +183,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             direct_completions: None,
-            process_env_store: Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+            process_env_store,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -115,16 +191,37 @@ impl<'run> TestExecutionContextBuilder<'run> {
             turn_context: crate::TurnContext::default(),
             session_host_mode: TestSessionHostMode::Independent,
             session_lifecycle: None,
-            effect_controller: TestEffectController::Shared(controller.clone()),
-            native_controller: Some(controller),
-            effect_host: None,
+            route_tool_children: effect_host.is_some(),
+            effect_host,
+            effect_controller,
             dispatch_parent_invocation: None,
             runtime_parent_invocation: None,
             protocol_iteration: 0,
-            attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
-            clock: Arc::new(crate::SystemClock),
+            attachment_store: Arc::new(crate::SessionAttachmentStore::ephemeral(attachment_store)),
+            clock,
             plugin_factories: None,
         }
+    }
+
+    /// A builder over every port of `backend`.
+    pub fn for_backend(backend: &dyn crate::Backend) -> Self {
+        Self::new(TestExecutionPorts::of(backend))
+    }
+
+    /// A builder with no host: `effect_controller` serves the context's
+    /// effects, no group children are routed, and the context has no
+    /// process-exec-env store and no attachment port (both refuse). For a
+    /// test of the context's own logic over a fake or recording controller;
+    /// a test that journals, publishes environments or stores attachments
+    /// builds its context over a backend.
+    pub fn over_controller(effect_controller: impl Into<TestEffectController<'run>>) -> Self {
+        Self::assemble(
+            None,
+            Some(effect_controller.into()),
+            Arc::new(super::UnavailableProcessExecutionEnvStore),
+            Arc::new(crate::attachments::UnavailableAttachmentStore),
+            Arc::new(crate::SystemClock),
+        )
     }
 
     pub fn session_id(mut self, session_id: impl Into<SessionId>) -> Self {
@@ -178,14 +275,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
-    pub fn process_env_store(
-        mut self,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-    ) -> Self {
-        self.process_env_store = process_env_store;
-        self
-    }
-
     pub fn execution_env_spec(
         mut self,
         execution_env_spec: crate::ProcessExecutionEnvSpec,
@@ -212,47 +301,39 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
+    /// Serves the context's effects through `effect_controller`, admitted
+    /// under the context's scope, instead of the host's own controller. The
+    /// host then routes no group children unless
+    /// [`route_tool_children`](Self::route_tool_children) says so.
     pub fn shared_effect_controller(
         mut self,
         effect_controller: Arc<dyn crate::RuntimeEffectController>,
     ) -> Self {
-        self.native_controller = None;
-        self.effect_controller = TestEffectController::Shared(effect_controller);
+        self.effect_controller = Some(TestEffectController::Shared(effect_controller));
+        self.route_tool_children = false;
         self
     }
 
-    /// Shares the built-in native controller, keeping the concrete `Arc` so
-    /// the context can wrap it in the admin-wired `NativeEffectHost` a group
-    /// child's bound controller needs.
-    pub fn shared_native_effect_controller(
-        mut self,
-        effect_controller: Arc<crate::runtime::NativeRuntimeEffectController>,
-    ) -> Self {
-        self.native_controller = Some(Arc::clone(&effect_controller));
-        self.effect_controller = TestEffectController::Shared(effect_controller);
-        self
-    }
-
+    /// Serves the context's effects through an already scoped controller
+    /// instead of the host's own. The host then routes no group children
+    /// unless [`route_tool_children`](Self::route_tool_children) says so.
     pub fn borrowed_effect_controller(
         mut self,
         effect_controller: crate::ScopedEffectController<'run>,
     ) -> Self {
-        self.native_controller = None;
-        self.effect_controller = TestEffectController::Borrowed(effect_controller);
+        self.effect_controller = Some(TestEffectController::Borrowed(effect_controller));
+        self.route_tool_children = false;
         self
     }
 
-    /// Supplies the effect host the built context routes tool children
-    /// through (ADR 0099 §2/§3): its controller serves the context's effects,
-    /// the tool-child host is installed on it, and the context's opener is
-    /// registered in its live-opener registry for the context's lifetime.
-    ///
-    /// A conformance or differential fixture running `call_tool_batch` against
-    /// a tier's host must pass it here — the default wiring builds a native
-    /// host over the shared controller, which is wrong for a fixture that is
-    /// proving a store backend.
-    pub fn effect_host(mut self, host: Arc<dyn crate::EffectHost>) -> Self {
-        self.effect_host = Some(host);
+    /// Routes the context's group children through the ports' host beside an
+    /// override controller (ADR 0099 §2/§3): the tool-child host is installed
+    /// on it, and the context's opener is registered in its live-opener
+    /// registry for the context's lifetime. A conformance or differential
+    /// fixture running `call_tool_batch` against a tier's host calls this
+    /// after handing in the controller it scoped from that host.
+    pub fn route_tool_children(mut self) -> Self {
+        self.route_tool_children = true;
         self
     }
 
@@ -282,11 +363,11 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
-    /// Overrides the session attachment store the context binds.
+    /// Overrides the session attachment facade the context binds.
     ///
-    /// The default is a fresh in-memory store; a law that must observe or
-    /// share the store a presentation step retains artifacts through (FIG-3420)
-    /// hands in its own facade over a backend it holds.
+    /// The default is an ephemeral facade over the builder's attachment port;
+    /// a law that must observe or share the facade a presentation step retains
+    /// artifacts through (FIG-3420) hands in its own.
     pub fn attachment_store(
         mut self,
         attachment_store: Arc<crate::SessionAttachmentStore>,
@@ -378,26 +459,27 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 })
         };
         let effect_host = self.effect_host;
+        // The admitted pair must match the scope the installed parent
+        // invocation claims: the fixture models the turn driver, which scopes
+        // its controller to the same scope the code-execution effect runs
+        // under, and `HostBridge` refuses a claim/opener disagreement rather
+        // than re-pairing the two halves itself.
         let effect_controller = match self.effect_controller {
-            TestEffectController::Shared(effect_controller) => {
-                // The admitted pair must match the scope the installed parent
-                // invocation claims: the fixture models the turn driver, which
-                // scopes its controller to the same scope the code-execution
-                // effect runs under, and `HostBridge` refuses a claim/opener
-                // disagreement rather than re-pairing the two halves itself.
-                match effect_host.as_ref() {
-                    Some(host) => crate::runtime::RuntimeEffectControllerHandle::borrowed(
-                        host.scoped_static(default_admitted())
-                            .expect("the supplied host binds the fixture's admitted scope")
-                            .expect("the supplied host lends a static controller"),
-                    ),
-                    None => crate::runtime::RuntimeEffectControllerHandle::Shared {
-                        controller: effect_controller,
-                        admitted: default_admitted(),
-                    },
+            None => crate::runtime::RuntimeEffectControllerHandle::borrowed(
+                effect_host
+                    .as_ref()
+                    .expect("a builder with no host is built over a controller")
+                    .scoped_static(default_admitted())
+                    .expect("the supplied host binds the fixture's admitted scope")
+                    .expect("the supplied host lends a static controller"),
+            ),
+            Some(TestEffectController::Shared(effect_controller)) => {
+                crate::runtime::RuntimeEffectControllerHandle::Shared {
+                    controller: effect_controller,
+                    admitted: default_admitted(),
                 }
             }
-            TestEffectController::Borrowed(effect_controller) => {
+            Some(TestEffectController::Borrowed(effect_controller)) => {
                 crate::runtime::RuntimeEffectControllerHandle::borrowed(effect_controller)
             }
         };
@@ -435,15 +517,12 @@ impl<'run> TestExecutionContextBuilder<'run> {
             clock: self.clock,
         });
 
-        let host: Option<Arc<dyn crate::EffectHost>> = match effect_host {
-            Some(host) => Some(host),
-            None => self.native_controller.map(|controller| {
-                Arc::new(crate::runtime::NativeEffectHost::with_native_controller(
-                    controller,
-                )) as Arc<dyn crate::EffectHost>
-            }),
+        let tool_child_host = if self.route_tool_children {
+            Some(effect_host.expect("tool children are routed only through the builder's host"))
+        } else {
+            None
         };
-        let (tool_child_guard, tool_child_completion_issuer) = host
+        let (tool_child_guard, tool_child_completion_issuer) = tool_child_host
             .as_ref()
             .and_then(|host| wire_test_tool_children(&dispatch, &self.process_env_store, host))
             .map(|(guard, issuer)| (Some(guard), issuer))
@@ -458,7 +537,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             protocol_iteration: self.protocol_iteration,
             tool_child_guard,
             tool_child_completion_issuer,
-            tool_child_host: host,
+            tool_child_host,
         }
     }
 }

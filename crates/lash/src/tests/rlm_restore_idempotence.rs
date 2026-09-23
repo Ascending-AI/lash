@@ -297,10 +297,17 @@ async fn open_with_plugins(
         script,
         Arc::clone(&store),
     )));
+    let runtime_host = EmbeddedRuntimeHost::new(config);
+    let runtime_services = PersistentRuntimeServices::new(
+        plugins.clone(),
+        store as Arc<dyn RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         policy(),
-        EmbeddedRuntimeHost::new(config),
-        PersistentRuntimeServices::new(plugins.clone(), store as Arc<dyn RuntimePersistence>),
+        runtime_host,
+        runtime_services,
         state,
         lash_core::testing::runtime_lease_owner(),
     )
@@ -1125,10 +1132,16 @@ async fn storeless_runtime(
     );
     config.providers.provider_resolver =
         Arc::new(SingleProviderResolver::new(provider(script, detached)));
+    let runtime_host = EmbeddedRuntimeHost::new(config);
+    let runtime_services = RuntimeServices::new(
+        plugins,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_embedded_state(
         policy(),
-        EmbeddedRuntimeHost::new(config),
-        RuntimeServices::new(plugins),
+        runtime_host,
+        runtime_services,
         state,
         lash_core::testing::runtime_lease_owner(),
     )

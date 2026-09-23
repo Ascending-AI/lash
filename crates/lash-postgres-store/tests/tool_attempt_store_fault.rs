@@ -179,12 +179,13 @@ async fn faulted_world(
         answer,
         calls: Arc::clone(&calls),
     });
-    let built = TestExecutionContextBuilder::new()
-        .session_id(SESSION)
-        .provider(provider)
-        .tool_catalog(ToolCatalog::from_tool_definitions(vec![probe_definition()]))
-        .shared_effect_controller(Arc::new(controller.clone()))
-        .build();
+    let built = TestExecutionContextBuilder::over_controller(
+        Arc::new(controller.clone()) as Arc<dyn lash_core_execution::RuntimeEffectController>
+    )
+    .session_id(SESSION)
+    .provider(provider)
+    .tool_catalog(ToolCatalog::from_tool_definitions(vec![probe_definition()]))
+    .build();
     Some(((*built.dispatch).clone(), controller, calls, lock))
 }
 

@@ -106,7 +106,7 @@ fn incorporating_context(
         .scoped_static(admitted.clone())
         .expect("the host lends a scoped controller")
         .expect("this host hands out owned scoped controllers");
-    crate::testing::TestExecutionContextBuilder::new()
+    crate::testing::TestExecutionContextBuilder::over_controller(controller)
         .session_id(session_id.clone())
         .direct_completions(
             crate::DirectCompletionClient::from_fn(|_request, _source| {
@@ -116,7 +116,6 @@ fn incorporating_context(
             })
             .with_usage_charge_sink(charge),
         )
-        .borrowed_effect_controller(controller)
         .build()
         .into_runtime()
 }

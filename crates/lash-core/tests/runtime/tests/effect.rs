@@ -1262,10 +1262,16 @@ async fn exec_and_execution_environment_effects_cross_controller_once() {
         })])
         .build_session("root")
         .expect("plugins");
+    let runtime_host = host_with_effect_recorder(recorder.clone());
+    let runtime_services = RuntimeServices::new(
+        plugin_session,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_embedded_state(
         policy,
-        host_with_effect_recorder(recorder.clone()),
-        RuntimeServices::new(plugin_session),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -1315,12 +1321,18 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() {
         })])
         .build_session("root")
         .expect("plugins");
+    let runtime_host = EmbeddedRuntimeHost::new(test_runtime_host_config_with_provider(
+        mock_provider(Vec::new()).into_handle(),
+    ));
+    let runtime_services = RuntimeServices::new(
+        plugin_session,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_embedded_state(
         policy,
-        EmbeddedRuntimeHost::new(test_runtime_host_config_with_provider(
-            mock_provider(Vec::new()).into_handle(),
-        )),
-        RuntimeServices::new(plugin_session),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),

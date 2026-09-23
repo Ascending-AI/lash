@@ -355,7 +355,9 @@ mod tests {
                 DialectSession::new(lash_lashlang_runtime::LashlangSurface::default(), services);
             let response = session
                 .execute(
-                    lash_core::testing::code_execution_context(),
+                    lash_core::testing::code_execution_context(
+                        crate::testing::memory_backend_ports().await,
+                    ),
                     ExecRequest {
                         language: "typescript".to_string(),
                         code: "const payload = `".to_string(),

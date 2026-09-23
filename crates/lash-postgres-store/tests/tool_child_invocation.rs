@@ -75,13 +75,18 @@ lash_conformance::tool_child_invocation_tests!({
     // so one registry over the shared database cannot confuse two scenarios;
     // connecting per call keeps the handle inside the caller's runtime.
     let registry_url = url.clone();
-    let make_registry: lash_conformance::ToolChildRegistryFactory = Arc::new(move || {
+    let make_processes: lash_conformance::ToolChildProcessesFactory = Arc::new(move || {
         let url = registry_url.clone();
         Box::pin(async move {
             let storage = PostgresStorage::connect(&url)
                 .await
                 .expect("PostgreSQL tool-child process registry storage");
-            Arc::new(storage.process_registry()) as Arc<dyn lash_core_execution::ProcessRegistry>
+            lash_conformance::ToolChildProcesses {
+                registry: Arc::new(storage.process_registry())
+                    as Arc<dyn lash_core_execution::ProcessRegistry>,
+                process_env_store: Arc::new(storage.process_env_store())
+                    as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
+            }
         })
     });
     (
@@ -89,7 +94,7 @@ lash_conformance::tool_child_invocation_tests!({
         "postgres",
         ToolChildLawFixture {
             make_world,
-            make_registry,
+            make_processes,
             deferrable_routing: ToolChildDeferrableRouting::Durable,
         },
     )
@@ -118,13 +123,18 @@ lash_conformance::tool_batch_group_tests!({
             Box::pin(async move { world(url, spec).await })
         });
     let registry_url = url.clone();
-    let make_registry: lash_conformance::ToolChildRegistryFactory = Arc::new(move || {
+    let make_processes: lash_conformance::ToolChildProcessesFactory = Arc::new(move || {
         let url = registry_url.clone();
         Box::pin(async move {
             let storage = PostgresStorage::connect(&url)
                 .await
                 .expect("PostgreSQL tool-batch-group process registry storage");
-            Arc::new(storage.process_registry()) as Arc<dyn lash_core_execution::ProcessRegistry>
+            lash_conformance::ToolChildProcesses {
+                registry: Arc::new(storage.process_registry())
+                    as Arc<dyn lash_core_execution::ProcessRegistry>,
+                process_env_store: Arc::new(storage.process_env_store())
+                    as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
+            }
         })
     });
     (
@@ -132,7 +142,7 @@ lash_conformance::tool_batch_group_tests!({
         "postgres",
         ToolChildLawFixture {
             make_world,
-            make_registry,
+            make_processes,
             deferrable_routing: ToolChildDeferrableRouting::Durable,
         },
     )

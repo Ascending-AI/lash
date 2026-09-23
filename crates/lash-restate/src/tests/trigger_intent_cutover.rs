@@ -22,6 +22,7 @@ trait TriggerIntentCutoverReplay {
 
 struct TriggerIntentCutoverReplayImpl {
     registry: Arc<dyn ProcessRegistry>,
+    process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     router: lash_core::facade_support::TriggerRouter,
 }
 
@@ -100,7 +101,10 @@ impl TriggerIntentCutoverReplay for TriggerIntentCutoverReplayImpl {
             controller
                 .scoped_effect_controller(durable_admission(&scope))
                 .map_err(TerminalError::from_error)?,
-            lash_core::testing::effect_backed_process_service(Arc::clone(&self.registry)),
+            lash_core::testing::effect_backed_process_service(
+                Arc::clone(&self.registry),
+                Arc::clone(&self.process_env_store),
+            ),
             self.router.clone(),
             &SessionId::from(TRIGGER_INTENT_CUTOVER_SESSION),
             "trigger-intent-cutover-call",
@@ -149,8 +153,19 @@ async fn trigger_intent_cutover_endpoint() -> (
         Arc::clone(&store) as Arc<dyn TriggerStore>,
         lash_core::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
     );
+    let process_env_store = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open trigger-cutover process-exec-env backend")
+        .process_env_store();
     let endpoint = Endpoint::builder()
-        .bind(TriggerIntentCutoverReplayImpl { registry, router }.serve())
+        .bind(
+            TriggerIntentCutoverReplayImpl {
+                registry,
+                process_env_store,
+                router,
+            }
+            .serve(),
+        )
         .build();
     (endpoint, store)
 }

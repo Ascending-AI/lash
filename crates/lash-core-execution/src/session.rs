@@ -7,15 +7,11 @@ use crate::tool_dispatch::ToolDispatchContext;
 use crate::{PromptContribution, RuntimeServices, SessionStreamEvent, ToolProvider};
 
 mod execution_context;
-#[cfg(test)]
-mod fig790_tests;
 mod opener_groups;
 mod process_handles;
 mod settlement_incorporation;
 #[cfg(test)]
 mod settlement_incorporation_tests;
-#[cfg(test)]
-mod settlement_latency_tests;
 pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
@@ -712,7 +708,7 @@ mod tool_catalog_cache_tests {
     async fn admission_probe_session(provider: Arc<dyn ToolProvider>) -> Session {
         let plugins = admission_probe_plugins(provider, crate::SessionToolAccess::default());
         Session::new(
-            crate::RuntimeServices::new(plugins),
+            crate::testing::runtime_services_without_ports(plugins),
             &SessionId::from("admission-probe"),
         )
         .await
@@ -892,7 +888,7 @@ mod tool_catalog_cache_tests {
             .build_session("pinned-surface")
             .expect("plugin session");
         let session = Session::new(
-            crate::RuntimeServices::new(plugins),
+            crate::testing::runtime_services_without_ports(plugins),
             &SessionId::from("pinned-surface"),
         )
         .await
@@ -1029,9 +1025,12 @@ mod tool_catalog_cache_tests {
             .build_session("route-reassignment")
             .expect("plugin session");
         let session_id = SessionId::from("route-reassignment");
-        let session = Session::new(crate::RuntimeServices::new(plugins), &session_id)
-            .await
-            .expect("runtime session");
+        let session = Session::new(
+            crate::testing::runtime_services_without_ports(plugins),
+            &session_id,
+        )
+        .await
+        .expect("runtime session");
 
         let old = session
             .pin_tool_surface(&session_id, &crate::SessionToolAccess::default(), None)

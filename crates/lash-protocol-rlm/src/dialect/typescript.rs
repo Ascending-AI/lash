@@ -1094,7 +1094,9 @@ mod tests {
                 let mut session = dialect.create_session();
                 let response = session
                     .execute(
-                        lash_core::testing::code_execution_context(),
+                        lash_core::testing::code_execution_context(
+                            crate::testing::memory_backend_ports().await,
+                        ),
                         ExecRequest {
                             language: "typescript".to_string(),
                             code: "const answer: number = 40 + 2; finish(answer);".to_string(),
