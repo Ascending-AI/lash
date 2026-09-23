@@ -796,7 +796,7 @@ impl JournalLayer {
     /// The next effect of `kind` runs to completion, and then the worker dies
     /// before its outcome is recorded, so the redrive runs its body again.
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
-    fn lose_outcome_at_next(&self, kind: crate::RuntimeEffectKind) {
+    pub(super) fn lose_outcome_at_next(&self, kind: crate::RuntimeEffectKind) {
         *self.lose_outcome_at.lock().expect("lose-outcome lock") = Some(kind);
     }
 

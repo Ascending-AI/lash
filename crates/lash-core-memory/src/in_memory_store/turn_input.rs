@@ -71,11 +71,42 @@ impl InMemoryPendingTurnInput {
     }
 }
 
-/// The bound claim a cancelled row carried, whose other rows go back to the
-/// queue with it (FIG-3589).
-fn bound_claim_of(entry: &InMemoryPendingTurnInput) -> Option<(String, String)> {
-    entry.claim.bound_turn()?;
-    Some((entry.claim.id()?, entry.claim.token()?))
+/// Cancel the row at `index`, refusing a row of an aborted turn's bound drive
+/// that is not the receipt's input unless `covered` also names the receipt's
+/// input (FIG-3589). Cancelling the receipt's input returns the rest of the
+/// bound drive to the queue.
+fn cancel_bound_aware(
+    pending: &mut [InMemoryPendingTurnInput],
+    index: usize,
+    session_id: &SessionId,
+    claim_is_live: bool,
+    covered: &std::collections::BTreeSet<crate::InputId>,
+) -> crate::PendingTurnInputCancelOutcome {
+    let bound = crate::store_backend_support::bound_turn_input_cancel(
+        &pending[index].input.input_id,
+        pending[index].claim.binding().cloned(),
+        covered,
+    );
+    if let crate::store_backend_support::BoundTurnInputCancel::Refused {
+        turn_id,
+        receipt_input_id,
+    } = bound
+    {
+        return crate::PendingTurnInputCancelOutcome::TurnBound {
+            input: pending[index].input.clone(),
+            turn_id,
+            receipt_input_id,
+        };
+    }
+    let released = (bound == crate::store_backend_support::BoundTurnInputCancel::Receipt)
+        .then(|| Some((pending[index].claim.id()?, pending[index].claim.token()?)))
+        .flatten();
+    let outcome = pending[index].cancel_outcome(claim_is_live);
+    if let (Some(claim), crate::PendingTurnInputCancelOutcome::Cancelled(_)) = (released, &outcome)
+    {
+        release_bound_claim(pending, session_id, &claim);
+    }
+    outcome
 }
 
 /// Return the other rows of bound claim `claim_id`/`token` to the next-turn
@@ -486,10 +517,12 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                             | crate::TurnInputState::DeferredNextTurn
                     )
             })
-            .map(|entry| match (entry.claim.bound_turn(), live_lease) {
-                (Some(turn_id), _) => {
-                    crate::PendingTurnInputRead::turn_bound(entry.input.clone(), turn_id.clone())
-                }
+            .map(|entry| match (entry.claim.binding(), live_lease) {
+                (Some((turn_id, receipt_input_id)), _) => crate::PendingTurnInputRead::turn_bound(
+                    entry.input.clone(),
+                    turn_id.clone(),
+                    receipt_input_id.clone(),
+                ),
                 (None, Some((generation, lease_expires_at_ms)))
                     if entry.claim.live_under(Some(generation)) =>
                 {
@@ -537,6 +570,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         let live_generation = self.live_session_lease_generation(session_id, now);
         let runs = self.queued_runs.lock_recover();
         let mut pending = self.pending_turn_inputs.lock_recover();
+        let covered = targets
+            .iter()
+            .filter_map(|target| find_pending_turn_input_index(&pending, session_id, target))
+            .map(|index| pending[index].input.input_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
         let mut results = Vec::with_capacity(targets.len());
         for target in targets {
             let outcome = match find_pending_turn_input_index(&pending, session_id, target) {
@@ -549,14 +587,13 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                                 pending[index].input.input_id.clone(),
                             ))
                     });
-                    let bound = bound_claim_of(&pending[index]);
-                    let outcome = pending[index].cancel_outcome(claim_is_live || run_owns_input);
-                    if let (Some(bound), crate::PendingTurnInputCancelOutcome::Cancelled(_)) =
-                        (bound, &outcome)
-                    {
-                        release_bound_claim(&mut pending, session_id, &bound);
-                    }
-                    outcome
+                    cancel_bound_aware(
+                        &mut pending,
+                        index,
+                        session_id,
+                        claim_is_live || run_owns_input,
+                        &covered,
+                    )
                 }
                 None => crate::PendingTurnInputCancelOutcome::NotFound,
             };
@@ -594,9 +631,13 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             })
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
+        let covered = suffix
+            .iter()
+            .map(|&index| pending[index].input.input_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
         let mut outcomes = Vec::with_capacity(suffix.len());
         for index in suffix {
-            let entry = &mut pending[index];
+            let entry = &pending[index];
             let claim_is_live = entry.claim.live_under(live_generation);
             let run_owns_input = runs.values().any(|run| {
                 run.scope.session_id() == Some(session_id)
@@ -605,14 +646,13 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                         entry.input.input_id.clone(),
                     ))
             });
-            let bound = bound_claim_of(entry);
-            let outcome = entry.cancel_outcome(claim_is_live || run_owns_input);
-            if let (Some(bound), crate::PendingTurnInputCancelOutcome::Cancelled(_)) =
-                (bound, &outcome)
-            {
-                release_bound_claim(&mut pending, session_id, &bound);
-            }
-            outcomes.push(outcome);
+            outcomes.push(cancel_bound_aware(
+                &mut pending,
+                index,
+                session_id,
+                claim_is_live || run_owns_input,
+                &covered,
+            ));
         }
         Ok(crate::PendingTurnInputSuffixCancelOutcome::Outcomes {
             anchor: anchor.clone(),
@@ -682,17 +722,44 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         &self,
         claim: &crate::TurnInputClaim,
         turn_id: &crate::TurnId,
+        receipt_input_id: &crate::InputId,
     ) -> Result<(), crate::store::StoreError> {
         let _transaction = self.write_transaction.lock_recover();
-        let mut pending = self.pending_turn_inputs.lock_recover();
-        for entry in pending.iter_mut() {
-            if entry.input.session_id == claim.session_id
-                && entry.input.state.is_next_turn_pending()
-            {
-                entry
-                    .claim
-                    .bind(&claim.claim_id, &claim.lease_token, turn_id);
-            }
+        self.bind_claim_skipping_run_members(
+            &claim.session_id,
+            &claim.claim_id,
+            &claim.lease_token,
+            turn_id,
+            receipt_input_id,
+        );
+        Ok(())
+    }
+
+    async fn bind_turn_input_claim_of_receipt(
+        &self,
+        session_id: &SessionId,
+        receipt_input_id: &crate::InputId,
+        generation: u64,
+        turn_id: &crate::TurnId,
+    ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let identity = self
+            .pending_turn_inputs
+            .lock_recover()
+            .iter()
+            .find(|entry| {
+                entry.input.session_id == session_id && entry.input.input_id == *receipt_input_id
+            })
+            .filter(|entry| entry.claim.generation() == Some(generation))
+            .and_then(|entry| Some((entry.claim.id()?, entry.claim.token()?)));
+        if let Some((claim_id, token)) = identity {
+            self.bind_claim_skipping_run_members(
+                session_id,
+                &claim_id,
+                &token,
+                turn_id,
+                receipt_input_id,
+            );
         }
         Ok(())
     }
@@ -848,6 +915,38 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                 .remove(turn_id);
         }
         Ok(crate::store::TurnCancelRepairResult::Applied(outcome))
+    }
+}
+
+impl InMemorySessionStore {
+    /// Bind the open next-turn rows claim `claim_id`/`token` still holds to
+    /// `turn_id`, leaving every row a pending queued run owns to lapse to the
+    /// run (FIG-3589). The caller holds the write transaction.
+    fn bind_claim_skipping_run_members(
+        &self,
+        session_id: &SessionId,
+        claim_id: &str,
+        token: &str,
+        turn_id: &crate::TurnId,
+        receipt_input_id: &crate::InputId,
+    ) {
+        let runs = self.queued_runs.lock_recover();
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        for entry in pending.iter_mut() {
+            let run_owns_input = runs.values().any(|run| {
+                run.scope.session_id() == Some(session_id)
+                    && run.terminal.is_none()
+                    && run.owns_member(&crate::store::QueuedRunMember::Input(
+                        entry.input.input_id.clone(),
+                    ))
+            });
+            if entry.input.session_id == session_id
+                && entry.input.state.is_next_turn_pending()
+                && !run_owns_input
+            {
+                entry.claim.bind(claim_id, token, turn_id, receipt_input_id);
+            }
+        }
     }
 }
 

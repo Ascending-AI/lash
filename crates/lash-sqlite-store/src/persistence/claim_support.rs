@@ -1,9 +1,34 @@
 use super::*;
 
+/// The binding input `input_id` of `session_id` carries, if any (FIG-3589).
+fn turn_input_binding_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    input_id: &str,
+) -> Result<Option<(lash_core_execution::TurnId, lash_core_execution::InputId)>, StoreError> {
+    let (turn_id, receipt): (Option<String>, Option<String>) = conn
+        .query_row(
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .binding_facts
+                .sql(),
+            params![session_id.as_str(), input_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(sqlite_error)?;
+    Ok(turn_id
+        .zip(receipt)
+        .map(|(turn_id, receipt)| (turn_id.into(), receipt.into())))
+}
+
+/// Cancel one row. `covered` is every input the same cancel operation
+/// targets, which decides whether a row bound to an aborted turn may go
+/// (FIG-3589).
 pub(super) fn cancel_pending_turn_input_row_conn(
     conn: &Connection,
     row: PendingTurnInputRow,
     now_epoch_ms: u64,
+    covered: &std::collections::BTreeSet<lash_core_execution::InputId>,
 ) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
     let mut input = pending_turn_input_from_row(row.clone())?;
     match input.state.kind() {
@@ -16,6 +41,29 @@ pub(super) fn cancel_pending_turn_input_row_conn(
         lash_core_execution::runtime::TurnInputStateKind::PendingActive
         | lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
         | lash_core_execution::runtime::TurnInputStateKind::Accepted => {
+            let binding = if row.claim_token.is_some() {
+                turn_input_binding_conn(conn, &row.session_id, &row.input_id)?
+            } else {
+                None
+            };
+            let bound = lash_core_execution::store_backend_support::bound_turn_input_cancel(
+                &input.input_id,
+                binding,
+                covered,
+            );
+            if let lash_core_execution::store_backend_support::BoundTurnInputCancel::Refused {
+                turn_id,
+                receipt_input_id,
+            } = bound
+            {
+                return Ok(
+                    lash_core_execution::PendingTurnInputCancelOutcome::TurnBound {
+                        input,
+                        turn_id,
+                        receipt_input_id,
+                    },
+                );
+            }
             // A claim is live only while the session-execution-lease generation it
             // pins still holds the session lease (ADR 0029).
             let live_claim = row.claim_token.is_some()
@@ -70,10 +118,12 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                 ],
             )
             .map_err(sqlite_error)?;
-            // A cancel of one row of a claim bound to an aborted turn leaves
-            // that turn's redrive nothing to settle, so the claim's other rows
-            // go back to the queue rather than stay bound (FIG-3589).
-            if let (Some(claim_id), Some(claim_token)) = (&row.claim_id, &row.claim_token) {
+            // Cancelling the receipt's input leaves the aborted turn's redrive
+            // nothing to settle, so the rest of its drive goes back to the
+            // queue rather than stay bound (FIG-3589).
+            if bound == lash_core_execution::store_backend_support::BoundTurnInputCancel::Receipt
+                && let (Some(claim_id), Some(claim_token)) = (&row.claim_id, &row.claim_token)
+            {
                 conn.execute(
                     crate::turn_ingress::turn_ingress_sql()
                         .pending_inputs

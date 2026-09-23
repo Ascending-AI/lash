@@ -198,7 +198,8 @@ lash_store_sql::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3";
 
         /// The batch form of [`abandon_claim`](Self::abandon_claim), over the
@@ -225,7 +226,8 @@ lash_store_sql::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE (session_id, claim_id, claim_token) IN (
                  SELECT json_extract(abandoned.value, '$[0]'),
                         json_extract(abandoned.value, '$[1]'),

@@ -24,6 +24,15 @@ pub(super) fn is_resumable_turn_or_follow_on(
         .is_some_and(|rest| rest.is_empty() || rest.starts_with(":agent-frame:"))
 }
 
+/// Which drive claim an aborted direct turn binds to itself (FIG-3589).
+pub(super) enum DriveClaimToBind<'a> {
+    /// The drive the turn holds, from its journaled drive effect.
+    Claim(&'a crate::TurnInputClaim),
+    /// The drive effect failed after its body may have claimed rows: whatever
+    /// claim the accepted row carries under this lease generation.
+    HeldUnder { generation: u64 },
+}
+
 struct SessionExecutionLaneProbe {
     store: Arc<dyn crate::store::RuntimePersistence>,
     session_id: SessionId,
@@ -287,9 +296,14 @@ impl LashRuntime {
     /// and this must not replace its error. A binding the store cannot write
     /// leaves the rows exactly as a crash leaves them, recoverable by the next
     /// generation, never lost.
+    ///
+    /// The binding is fenced by the claim's id and token. If the live fault was
+    /// a lease loss and a successor generation already re-claimed the rows, the
+    /// binding is a no-op and that successor may fold the input into its turn.
     pub(super) async fn bind_drive_claim_after_abort(
         &self,
-        claim: &crate::TurnInputClaim,
+        claim: DriveClaimToBind<'_>,
+        receipt_input_id: &crate::InputId,
         turn_id: &TurnId,
     ) {
         let Some(store) = self
@@ -299,18 +313,35 @@ impl LashRuntime {
         else {
             return;
         };
-        match store.bind_turn_input_claim(claim, turn_id).await {
+        let bound = match claim {
+            DriveClaimToBind::Claim(claim) => {
+                store
+                    .bind_turn_input_claim(claim, turn_id, receipt_input_id)
+                    .await
+            }
+            DriveClaimToBind::HeldUnder { generation } => {
+                store
+                    .bind_turn_input_claim_of_receipt(
+                        &self.state.session_id,
+                        receipt_input_id,
+                        generation,
+                        turn_id,
+                    )
+                    .await
+            }
+        };
+        match bound {
             Ok(()) => tracing::debug!(
                 session_id = %self.state.session_id,
                 turn_id = %turn_id,
-                claim_id = %claim.claim_id,
+                receipt_input_id = %receipt_input_id,
                 event = "turn_input.bound_to_aborted_turn",
                 "bound the aborted direct turn's drive claim to the turn"
             ),
             Err(error) => tracing::warn!(
                 session_id = %self.state.session_id,
                 turn_id = %turn_id,
-                claim_id = %claim.claim_id,
+                receipt_input_id = %receipt_input_id,
                 error = %error,
                 event = "turn_input.bind_to_aborted_turn_failed",
                 "failed to bind the aborted direct turn's drive claim; the next lease \

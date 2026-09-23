@@ -39,9 +39,13 @@ async fn statuses(
         .collect()
 }
 
-fn bound_to(turn_id: &TurnId) -> crate::PendingTurnInputReadStatus {
+fn bound_to(
+    turn_id: &TurnId,
+    receipt_input_id: &crate::InputId,
+) -> crate::PendingTurnInputReadStatus {
     crate::PendingTurnInputReadStatus::TurnBound {
         turn_id: turn_id.clone(),
+        receipt_input_id: receipt_input_id.clone(),
     }
 }
 
@@ -131,7 +135,7 @@ pub async fn aborted_direct_turn_input_is_bound_until_its_redrive(
         abort_direct_turn(&journal, &store, provider.clone(), &turn_id, "bound words").await;
     assert_eq!(
         statuses(&store).await,
-        vec![(accepted.clone(), bound_to(&turn_id))]
+        vec![(accepted.clone(), bound_to(&turn_id, &accepted))]
     );
 
     let drain = drain_as_another_worker(prefix, &store, &journal, provider.clone()).await;
@@ -141,7 +145,7 @@ pub async fn aborted_direct_turn_input_is_bound_until_its_redrive(
     );
     assert_eq!(
         statuses(&store).await,
-        vec![(accepted.clone(), bound_to(&turn_id))]
+        vec![(accepted.clone(), bound_to(&turn_id, &accepted))]
     );
 
     let redriven = journal
@@ -215,7 +219,7 @@ pub async fn later_direct_turn_never_folds_in_a_bound_input(
     );
     assert_eq!(
         statuses(&store).await,
-        vec![(accepted.clone(), bound_to(&aborted_turn))]
+        vec![(accepted.clone(), bound_to(&aborted_turn, &accepted))]
     );
 
     let cancelled = store
@@ -252,10 +256,36 @@ pub async fn cancelling_a_bound_input_returns_its_drive_to_the_queue(
     assert_eq!(
         statuses(&store).await,
         vec![
-            (earlier.input_id.clone(), bound_to(&turn_id)),
-            (accepted.clone(), bound_to(&turn_id)),
+            (earlier.input_id.clone(), bound_to(&turn_id, &accepted)),
+            (accepted.clone(), bound_to(&turn_id, &accepted)),
         ],
         "the aborted turn's whole drive is bound to it"
+    );
+
+    // Cancelling the absorbed row alone would change the drive the aborted
+    // turn's journal replays: refused, naming the turn and the receipt.
+    let refused = store
+        .cancel_pending_turn_input(&SessionId::from(SESSION_ID), &earlier.input_id)
+        .await
+        .expect("a cancel of a bound row other than the receipt's");
+    assert!(
+        matches!(
+            &refused,
+            crate::PendingTurnInputCancelOutcome::TurnBound {
+                turn_id: refused_turn,
+                receipt_input_id,
+                ..
+            } if *refused_turn == turn_id && *receipt_input_id == accepted
+        ),
+        "a cancel of a bound row other than the receipt's is refused: {refused:?}"
+    );
+    assert_eq!(
+        statuses(&store).await,
+        vec![
+            (earlier.input_id.clone(), bound_to(&turn_id, &accepted)),
+            (accepted.clone(), bound_to(&turn_id, &accepted)),
+        ],
+        "the refused cancel changed nothing"
     );
 
     let cancelled = store
@@ -332,7 +362,7 @@ pub async fn journal_less_redrive_retakes_its_bound_drive(
         .expect("the aborted turn's input is open");
     assert_eq!(
         statuses(&store).await,
-        vec![(accepted.clone(), bound_to(&turn_id))]
+        vec![(accepted.clone(), bound_to(&turn_id, &accepted))]
     );
 
     let redriven = run(Vec::new())
@@ -347,6 +377,74 @@ pub async fn journal_less_redrive_retakes_its_bound_drive(
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0].matches("unjournaled words").count(),
+        1,
+        "{requests:?}"
+    );
+    let applied = applications(&store).await;
+    assert_eq!(applied.len(), 1, "{applied:?}");
+    assert_eq!(applied[0].input_id, accepted);
+    assert_eq!(applied[0].turn_id, turn_id);
+    assert!(pending_input_ids(&store).await.is_empty());
+}
+
+/// The drive's body claimed the accepted row and the worker then lost the
+/// drive's outcome, so the turn aborts without ever holding its drive claim.
+/// The abort binds the claim the accepted row carries under the turn's lease
+/// generation; no drain answers the input, and the redrive, which has no
+/// journaled drive to replay, re-takes the bound rows and commits once.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn lost_drive_outcome_still_binds_its_claimed_input(
+    prefix: &str,
+    store: Arc<dyn crate::RuntimePersistence>,
+) {
+    let turn_id = TurnId::from(format!("{prefix}-lost-drive-outcome"));
+    let journal = Journal::new();
+    journal
+        .controller
+        .lose_outcome_at_next(crate::RuntimeEffectKind::ClaimAcceptedTurnInput);
+    let (provider, requests) = recording_provider("answered by the redrive");
+    let aborted = journal
+        .run(&store, provider.clone(), &turn_id, "lost drive words")
+        .await
+        .expect_err("the lost drive outcome aborts the turn");
+    let accepted = aborted
+        .turn_input_acceptance
+        .as_deref()
+        .expect("the aborted turn carries its acceptance receipt")
+        .input_id
+        .clone();
+    assert!(
+        journal.controller.journaled_drive().is_none(),
+        "the drive's outcome was never journaled"
+    );
+    assert_eq!(
+        statuses(&store).await,
+        vec![(accepted.clone(), bound_to(&turn_id, &accepted))],
+        "the rows the lost drive claimed are bound to the aborted turn"
+    );
+
+    let drain = drain_as_another_worker(prefix, &store, &journal, provider.clone()).await;
+    assert!(
+        matches!(drain, crate::QueuedTurnDrain::Empty(_)),
+        "a drain must not answer the lost drive's input"
+    );
+
+    let redriven = journal
+        .run(&store, provider, &turn_id, "lost drive words")
+        .await
+        .expect("the redrive re-takes its bound rows and commits");
+    assert!(
+        matches!(redriven.outcome, crate::TurnOutcome::Finished(_)),
+        "{:?}",
+        redriven.outcome
+    );
+    let requests = requests.lock().expect("request lock").clone();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].matches("lost drive words").count(),
         1,
         "{requests:?}"
     );

@@ -220,12 +220,12 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         rendered(
             "pending_turn_inputs",
             "ck_pending_turn_inputs_bound_claim_is_next_turn",
-            "claim_bound_turn_id IS NULL OR (claim_token IS NOT NULL AND state = 'deferred_next_turn')",
+            "(claim_bound_turn_id IS NULL AND claim_bound_receipt_input_id IS NULL) OR (claim_bound_turn_id IS NOT NULL AND claim_bound_receipt_input_id IS NOT NULL AND claim_token IS NOT NULL AND state = 'deferred_next_turn')",
         ),
         rendered(
             "lash_pending_turn_inputs",
             "ck_pending_turn_inputs_bound_claim_is_next_turn",
-            "claim_bound_turn_id IS NULL OR (claim_token IS NOT NULL AND state = 'deferred_next_turn')",
+            "(claim_bound_turn_id IS NULL AND claim_bound_receipt_input_id IS NULL) OR (claim_bound_turn_id IS NOT NULL AND claim_bound_receipt_input_id IS NOT NULL AND claim_token IS NOT NULL AND state = 'deferred_next_turn')",
         ),
     ),
     expected_constraint(

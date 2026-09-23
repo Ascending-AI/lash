@@ -79,9 +79,10 @@ const POST_FLOOR_INDEXES: [&str; 1] = ["uq_lash_runtime_effect_replay_commit_seq
 /// arbitration state component 110 installs (FIG-3409): the commit-order
 /// counter and lifecycle on the group, the renamed arity expectation, and the
 /// commit protocol columns on the replay row.
-const POST_FLOOR_COLUMNS: [(&str, &str); 12] = [
+const POST_FLOOR_COLUMNS: [(&str, &str); 13] = [
     ("lash_pending_turn_inputs", "submitted_ingress_json"),
     ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+    ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
     ("lash_pending_turn_inputs", "submission_digest"),
     ("lash_trigger_mutation_receipts", "owner_kind"),
     ("lash_trigger_mutation_receipts", "owner_id"),

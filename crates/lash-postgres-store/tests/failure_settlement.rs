@@ -454,9 +454,27 @@ async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input()
             input_id,
             lash_core::PendingTurnInputReadStatus::TurnBound {
                 turn_id: lash_core::TurnId::from("bound-turn"),
+                receipt_input_id: receipt.input_id.clone(),
             }
         )],
         "the aborted turn's input is still open, bound to its turn"
+    );
+
+    // The aborted turn's journal was recorded against the head before the
+    // later turn committed, so its redrive can no longer replay it.
+    let late_redrive = session
+        .turn(TurnInput::text(STRANDED_WORDS))
+        .turn_id("bound-turn")
+        .run()
+        .await
+        .expect_err("a redrive after a later turn committed cannot replay the aborted journal");
+    let lash::EmbedError::Runtime(late_redrive) = late_redrive else {
+        panic!("the refused redrive is a runtime error: {late_redrive:?}");
+    };
+    assert_eq!(
+        late_redrive.code,
+        lash_core::RuntimeErrorCode::PostgresEffectReplayHashConflict,
+        "{late_redrive:?}"
     );
 
     let cancelled = session
@@ -495,6 +513,7 @@ async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id()
         session.durable().pending_turn_inputs().await?[0].status,
         lash_core::PendingTurnInputReadStatus::TurnBound {
             turn_id: lash_core::TurnId::from("redriven-turn"),
+            receipt_input_id: receipt.input_id.clone(),
         }
     );
 
@@ -597,6 +616,70 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation()
         "the next generation reclaims the crashed turn's input and answers it once: {}",
         seen[0]
     );
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    Ok(())
+}
+
+/// FIG-3589 on PostgreSQL: the drive's journal fails to finalize after the
+/// drive's body claimed the input. The abort binds the claim the accepted row
+/// carries under this lease generation, so a later direct turn never folds the
+/// input in; the host cancels it by the receipt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drive_whose_outcome_was_lost_still_binds_its_input()
+-> Result<(), Box<dyn std::error::Error>> {
+    const SESSION: &str = "pg-direct-drive-finalize-fault";
+    let Some(deployment) = PostgresDeployment::open().await else {
+        return Ok(());
+    };
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let core = deployment.core(
+        counting_text_provider(Arc::default(), Arc::clone(&requests)),
+        None,
+    );
+    let session = core.session(SESSION).open().await?;
+    let faults = deployment.effect_host.effect_journal_faults();
+    faults.fail_next(
+        EffectJournalFaultPoint::Finalize,
+        &format!("{SESSION}:drive-lost-turn:accept_turn_input:claim_accepted_turn_input"),
+    );
+    let error = session
+        .turn(TurnInput::text(STRANDED_WORDS))
+        .turn_id("drive-lost-turn")
+        .run()
+        .await
+        .expect_err("a drive whose journal cannot finalize aborts the turn");
+    assert!(faults.fired(), "the armed drive finalize fault fired");
+    let receipt = error
+        .turn_input_acceptance()
+        .cloned()
+        .expect("the aborted turn returns its acceptance receipt");
+    assert_eq!(
+        session.durable().pending_turn_inputs().await?[0].status,
+        lash_core::PendingTurnInputReadStatus::TurnBound {
+            turn_id: lash_core::TurnId::from("drive-lost-turn"),
+            receipt_input_id: receipt.input_id.clone(),
+        },
+        "the rows the lost drive claimed are bound to the aborted turn"
+    );
+
+    let next = session
+        .turn(TurnInput::text("the next turn"))
+        .turn_id("next-turn")
+        .run()
+        .await?;
+    assert!(next.is_success(), "{:?}", next.result.outcome);
+    let seen = requests.lock_recover().clone();
+    assert_eq!(seen.len(), 1);
+    assert!(
+        !seen[0].contains(STRANDED_WORDS),
+        "a later direct turn must not fold in the lost drive's input: {}",
+        seen[0]
+    );
+    let cancelled = session
+        .durable()
+        .cancel_pending_turn_input(&receipt.input_id)
+        .await?;
+    assert!(cancelled.is_cancelled(), "{cancelled:?}");
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
     Ok(())
 }

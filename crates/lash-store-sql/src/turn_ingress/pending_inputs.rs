@@ -64,6 +64,20 @@ pub const SETTLEMENT_COLUMNS: &str = "claim_id, claim_token, claim_session_lease
 pub const ORPHAN_SCAN_COLUMNS: &str = "state, ingress_json, claim_token,
      claim_session_lease_generation";
 
+/// The claim identity a bound claim's rows share, which a cancel locks the
+/// whole claim by (FIG-3589).
+///
+/// Narrow because the lock only has to name the claim; the rows it locks are
+/// read afterwards through [`COLUMNS`].
+pub const CLAIM_IDENTITY_COLUMNS: &str = "claim_id, claim_token";
+
+/// The binding a cancel consults (FIG-3589).
+///
+/// Narrow because the cancel verdict needs only whether the row is bound, to
+/// which turn, and which input that turn's receipt names; the row itself was
+/// already read through [`COLUMNS`].
+pub const BINDING_COLUMNS: &str = "claim_bound_turn_id, claim_bound_receipt_input_id";
+
 /// The ordering key the pending-work comparison reads.
 ///
 /// Narrow because the comparison is only ever between this pair and the queued
@@ -107,6 +121,7 @@ crate::statements! {
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
                     claim_owner_id, claim_owner_incarnation_id,
                     claim_token, claim_session_lease_generation, claim_bound_turn_id,
+                    claim_bound_receipt_input_id,
                     (SELECT sel.lease_expires_at_ms
                      FROM session_execution_leases sel
                      WHERE pending_turn_inputs.claim_token IS NOT NULL
@@ -133,7 +148,8 @@ crate::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE session_id = ?1 AND input_id = ?2";
 
         /// Re-defer input `?2` of session `?1` to state `?3` under the
@@ -155,7 +171,8 @@ crate::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE session_id = ?1 AND input_id = ?2";
 
         /// Claim input `?2` of session `?1` into state `?3` for claim `?4`,
@@ -179,7 +196,8 @@ crate::statements! {
                  claim_token = ?7,
                  claim_fencing_token = ?9,
                  claim_session_lease_generation = ?8,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE session_id = ?1
                AND input_id = ?2
                AND (
@@ -189,18 +207,35 @@ crate::statements! {
                AND (claim_bound_turn_id IS NULL OR claim_bound_turn_id = ?10)";
 
         /// Bind the next-turn rows claim `?2`/`?3` of session `?1` still
-        /// holds to the aborted turn `?4` (FIG-3589).
+        /// holds to the aborted turn `?4`, whose receipt names input `?5`
+        /// (FIG-3589).
         ///
         /// The claim identity is the predicate: a row another driver settled
         /// or reclaimed no longer carries it and is left alone. Only open
         /// next-turn rows bind, which is what
         /// `ck_pending_turn_inputs_bound_claim_is_next_turn` holds the table to.
+        /// A row a pending queued run owns never binds: the run re-claims its
+        /// frozen members on retry, so they lapse to the run as before.
         bind_claim = "UPDATE pending_turn_inputs
-             SET claim_bound_turn_id = ?4
+             SET claim_bound_turn_id = ?4,
+                 claim_bound_receipt_input_id = ?5
              WHERE session_id = ?1
                AND claim_id = ?2
                AND claim_token = ?3
-               AND {{deferred_next_turn_turn_input_state(state)}}";
+               AND {{deferred_next_turn_turn_input_state(state)}}
+               AND NOT EXISTS (
+                 SELECT 1 FROM queued_run_members m
+                 JOIN queued_runs r ON r.session_id = m.session_id AND r.scope_id = m.scope_id
+                 WHERE m.session_id = pending_turn_inputs.session_id
+                   AND m.member_kind = 'input' AND m.member_id = pending_turn_inputs.input_id
+                   AND r.status = 'pending'
+               )";
+
+        /// The binding input `?2` of session `?1` carries: the aborted turn
+        /// and the receipt's input, both NULL for an unbound row (FIG-3589).
+        binding_facts = "SELECT claim_bound_turn_id, claim_bound_receipt_input_id
+             FROM pending_turn_inputs
+             WHERE session_id = ?1 AND input_id = ?2";
 
         /// Return the other rows of bound claim `?2`/`?3` on session `?1` to
         /// the next-turn queue, releasing the whole claim identity and the
@@ -217,7 +252,8 @@ crate::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE session_id = ?1
                AND claim_id = ?2
                AND claim_token = ?3
@@ -232,7 +268,8 @@ crate::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE session_id = ?1
                AND input_id = ?2
                AND claim_id = ?4
@@ -252,7 +289,8 @@ crate::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE session_id = ?1
                AND input_id = ?2
                AND claim_id IS NULL

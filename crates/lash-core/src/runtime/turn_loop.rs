@@ -36,6 +36,7 @@ use execute::{
     TURN_CANCEL_START_GATE_ATTEMPTS, await_turn_cancellation_start_gate,
     await_turn_cancellation_with_retry,
 };
+use lease::DriveClaimToBind;
 use post_commit::PostCommitDelivery;
 pub(in crate::runtime) use prepare::TurnPrepareContext;
 pub use queued_work::{

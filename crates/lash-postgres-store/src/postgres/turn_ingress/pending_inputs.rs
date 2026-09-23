@@ -230,6 +230,48 @@ lash_store_sql::statements! {
              ORDER BY enqueue_seq ASC
              FOR UPDATE";
 
+        /// Lock, in queue order, cancel targets `?2` of session `?1` together
+        /// with every row of a bound claim one of them carries (FIG-3589).
+        ///
+        /// A cancel of a bound receipt row rewrites the claim's other rows, and
+        /// every other writer of those rows (the redrive's commit, a
+        /// journal-less redrive's re-take) locks them in queue order. Taking the
+        /// whole set in that order first is what keeps a concurrent cancel and
+        /// redrive from deadlocking.
+        lock_cancel_targets_in_queue_order = "SELECT enqueue_seq
+             FROM pending_turn_inputs
+             WHERE session_id = ?1
+               AND (
+                    input_id = ANY(?2::TEXT[])
+                    OR (claim_id, claim_token) IN (
+                        SELECT claim_id, claim_token
+                        FROM pending_turn_inputs
+                        WHERE session_id = ?1
+                          AND input_id = ANY(?2::TEXT[])
+                          AND claim_bound_turn_id IS NOT NULL
+                    )
+               )
+             ORDER BY enqueue_seq ASC
+             FOR UPDATE";
+
+        /// [`lock_cancel_targets_in_queue_order`](Self::lock_cancel_targets_in_queue_order)
+        /// for the suffix of session `?1` from `enqueue_seq` `?2`.
+        lock_cancel_suffix_in_queue_order = "SELECT enqueue_seq
+             FROM pending_turn_inputs
+             WHERE session_id = ?1
+               AND (
+                    enqueue_seq >= ?2
+                    OR (claim_id, claim_token) IN (
+                        SELECT claim_id, claim_token
+                        FROM pending_turn_inputs
+                        WHERE session_id = ?1
+                          AND enqueue_seq >= ?2
+                          AND claim_bound_turn_id IS NOT NULL
+                    )
+               )
+             ORDER BY enqueue_seq ASC
+             FOR UPDATE";
+
         /// Give up claim `?2`/`?3` on session `?1`, restoring each row to the
         /// open spelling its own ingress carries (FIG-1573).
         abandon_claim = "UPDATE pending_turn_inputs
@@ -246,7 +288,8 @@ lash_store_sql::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3";
 
         /// The batch form of [`abandon_claim`](Self::abandon_claim), over the
@@ -270,7 +313,8 @@ lash_store_sql::statements! {
                  claim_owner_incarnation_id = NULL,
                  claim_token = NULL,
                  claim_session_lease_generation = 0,
-                 claim_bound_turn_id = NULL
+                 claim_bound_turn_id = NULL,
+                 claim_bound_receipt_input_id = NULL
              FROM unnest(?1::TEXT[], ?2::TEXT[], ?3::TEXT[])
                   AS abandoned(session_id, claim_id, claim_token)
              WHERE pending_turn_inputs.session_id = abandoned.session_id

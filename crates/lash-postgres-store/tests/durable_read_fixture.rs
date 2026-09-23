@@ -646,8 +646,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // refresh writes what admission would have: its ingress as submitted and
     // the digest of that submission.
     add_prior_fixture_submission_columns(&pool).await;
-    // Component 120 (FIG-3589) adds the nullable turn binding. The refusal
-    // fixture's pending input is unclaimed, so it is unbound.
+    // Component 120 (FIG-3589) adds the nullable turn binding pair. The
+    // refusal fixture's pending input is unclaimed, so it is unbound.
     add_prior_fixture_turn_binding_column(&pool).await;
     // The enclosing catalog uses the current session-metadata constraints;
     // only the deliberately obsolete checkpoint component remains historical.
@@ -745,15 +745,20 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     drop_fixture_schema(&database_url).await;
 }
 
-// Author-time refresh only: add the component-120 turn binding and its CHECK.
+// Author-time refresh only: add the component-120 turn binding pair and its
+// CHECK.
 async fn add_prior_fixture_turn_binding_column(pool: &sqlx::PgPool) {
     sqlx::raw_sql(
         "ALTER TABLE lash_pending_turn_inputs
              ADD COLUMN IF NOT EXISTS claim_bound_turn_id TEXT,
+             ADD COLUMN IF NOT EXISTS claim_bound_receipt_input_id TEXT,
              DROP CONSTRAINT IF EXISTS ck_pending_turn_inputs_bound_claim_is_next_turn,
              ADD CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn
-                 CHECK (claim_bound_turn_id IS NULL
-                        OR (claim_token IS NOT NULL AND state = 'deferred_next_turn'));",
+                 CHECK ((claim_bound_turn_id IS NULL AND claim_bound_receipt_input_id IS NULL)
+                        OR (claim_bound_turn_id IS NOT NULL
+                            AND claim_bound_receipt_input_id IS NOT NULL
+                            AND claim_token IS NOT NULL
+                            AND state = 'deferred_next_turn'));",
     )
     .execute(pool)
     .await

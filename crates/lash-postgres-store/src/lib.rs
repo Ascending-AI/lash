@@ -464,8 +464,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `accepted_turn_input_ceded` and `TurnOutcome::Queued` are added. No relation
 // changes. Component-118 catalogs are rejected and recreated.
 // Version 120 (FIG-3589) gives `lash_pending_turn_inputs` the nullable
-// `claim_bound_turn_id`, the aborted direct turn a row's claim is bound to,
-// and `ck_pending_turn_inputs_bound_claim_is_next_turn`. A binding is written
+// `claim_bound_turn_id` and `claim_bound_receipt_input_id`, the aborted direct
+// turn a row's claim is bound to and the input its receipt names, and
+// `ck_pending_turn_inputs_bound_claim_is_next_turn`. A binding is written
 // only at an abort, so a pre-120 build would reclaim a bound row under a new
 // lease generation and fold it into a later turn; component-119 catalogs are
 // rejected and recreated rather than served to such a build.

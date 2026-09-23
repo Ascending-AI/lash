@@ -69,13 +69,14 @@ pub use commit_identity::{
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{
-    EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority, EffectReplayLeaseFacts,
-    EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
-    FenceTimeAuthority, FencedWrite, HeadPublicationVerdict, ProcessLeaseAuthority,
-    ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts, TurnInputSettlementFacts,
-    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability,
-    effect_replay_lease_verdict, fenced_write_applied, head_publication_verdict,
-    process_lease_verdict, queued_work_batch_claimability, require_fenced_write_applied,
+    BoundTurnInputCancel, EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority,
+    EffectReplayLeaseFacts, EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT,
+    FENCING_TRACE_TARGET, FenceTimeAuthority, FencedWrite, HeadPublicationVerdict,
+    ProcessLeaseAuthority, ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts,
+    TurnInputSettlementFacts, WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts,
+    WorkRowClaimability, bound_turn_input_cancel, effect_replay_lease_verdict,
+    fenced_write_applied, head_publication_verdict, process_lease_verdict,
+    queued_work_batch_claimability, require_fenced_write_applied,
     require_releasable_session_execution_lease, require_renewable_session_execution_lease,
     require_settleable_queued_work, require_settleable_turn_input,
     require_single_writer_head_publication, turn_input_claimability,
@@ -1381,8 +1382,12 @@ pub trait TurnInputStore: Send + Sync {
 
     /// Cancel an unclaimed pending user input by id.
     ///
-    /// A row bound to an aborted direct turn is cancellable; the cancel
-    /// returns the bound claim's other rows to the queue (FIG-3589).
+    /// A row bound to an aborted direct turn is cancellable by the input its
+    /// receipt names, which returns the bound claim's other rows to the queue.
+    /// A cancel of another bound row that does not also cover the receipt's
+    /// input is refused as
+    /// [`PendingTurnInputCancelOutcome::TurnBound`](crate::PendingTurnInputCancelOutcome::TurnBound)
+    /// (FIG-3589).
     ///
     /// Provided convenience: the singular form is exactly
     /// [`cancel_pending_turn_inputs`](Self::cancel_pending_turn_inputs) with a
@@ -1475,13 +1480,41 @@ pub trait TurnInputStore: Send + Sync {
     /// that no longer holds anything is a no-op. Only next-turn rows are
     /// bound. A crashed turn never reaches this call, so its claim still lapses
     /// with its generation and a successor recovers it (ADR 0029).
+    ///
+    /// `receipt_input_id` is the input the aborted turn's acceptance receipt
+    /// names; a cancel of any other bound row is refused
+    /// ([`PendingTurnInputCancelOutcome::TurnBound`](crate::PendingTurnInputCancelOutcome::TurnBound)).
+    /// Rows a pending queued run owns are never bound: they lapse to the run.
     async fn bind_turn_input_claim(
         &self,
         _claim: &crate::WorkClaim<crate::runtime::TurnInputClaimData>,
         _turn_id: &crate::TurnId,
+        _receipt_input_id: &crate::InputId,
     ) -> Result<(), StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "bind_turn_input_claim",
+        })
+    }
+
+    /// [`Self::bind_turn_input_claim`] for a turn that does not know its
+    /// drive claim: the drive effect failed after its body claimed rows but
+    /// before its outcome reached the turn (FIG-3589).
+    ///
+    /// Binds the rows that share the claim identity the receipt's row
+    /// `receipt_input_id` carries, provided that claim was taken under lease
+    /// generation `generation`, the generation the failed drive ran under. The
+    /// identity is read and the rows are bound in one transaction, fenced by
+    /// that claim id and token. A receipt row that is unclaimed, or claimed
+    /// under another generation, binds nothing.
+    async fn bind_turn_input_claim_of_receipt(
+        &self,
+        _session_id: &SessionId,
+        _receipt_input_id: &crate::InputId,
+        _generation: u64,
+        _turn_id: &crate::TurnId,
+    ) -> Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "bind_turn_input_claim_of_receipt",
         })
     }
 

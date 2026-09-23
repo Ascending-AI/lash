@@ -492,11 +492,18 @@ impl PendingTurnInputRead {
     }
 
     /// Project an open row whose claim is bound to the aborted direct turn
-    /// `turn_id` (FIG-3589).
-    pub fn turn_bound(input: PendingTurnInput, turn_id: crate::TurnId) -> Self {
+    /// `turn_id`, whose acceptance receipt names `receipt_input_id` (FIG-3589).
+    pub fn turn_bound(
+        input: PendingTurnInput,
+        turn_id: crate::TurnId,
+        receipt_input_id: crate::InputId,
+    ) -> Self {
         Self {
             input,
-            status: PendingTurnInputReadStatus::TurnBound { turn_id },
+            status: PendingTurnInputReadStatus::TurnBound {
+                turn_id,
+                receipt_input_id,
+            },
         }
     }
 }
@@ -526,6 +533,9 @@ pub enum PendingTurnInputReadStatus {
     TurnBound {
         /// The aborted turn the row is bound to.
         turn_id: crate::TurnId,
+        /// The input the aborted turn's acceptance receipt names: the one row
+        /// of its drive a cancel may target.
+        receipt_input_id: crate::InputId,
     },
 }
 
@@ -636,6 +646,16 @@ pub enum PendingTurnInputCancelOutcome {
     },
     AlreadyCompleted(PendingTurnInput),
     AlreadyCancelled(PendingTurnInput),
+    /// Refused: the row belongs to the drive of the aborted direct turn
+    /// `turn_id`, and it is not the input that turn's acceptance receipt names
+    /// (FIG-3589). Cancelling it alone would change the drive set that turn's
+    /// journal replays. Cancel `receipt_input_id` instead, which settles the
+    /// receipt's input and returns this row to the queue.
+    TurnBound {
+        input: PendingTurnInput,
+        turn_id: crate::TurnId,
+        receipt_input_id: crate::InputId,
+    },
     NotFound,
 }
 impl PendingTurnInputCancelOutcome {
@@ -652,7 +672,8 @@ impl PendingTurnInputCancelOutcome {
             Self::Cancelled(input)
             | Self::AlreadyClaimed { input, .. }
             | Self::AlreadyCompleted(input)
-            | Self::AlreadyCancelled(input) => Some(input),
+            | Self::AlreadyCancelled(input)
+            | Self::TurnBound { input, .. } => Some(input),
             Self::NotFound => None,
         }
     }

@@ -130,6 +130,7 @@ table lash_parent_end_plans
   column settled_at_ms bigint nullable
   primary-key (parent_kind, parent_id)
 table lash_pending_turn_inputs
+  column claim_bound_receipt_input_id text nullable
   column claim_bound_turn_id text nullable
   column claim_fencing_token bigint not-null default
   column claim_id text nullable

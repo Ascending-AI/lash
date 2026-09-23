@@ -10,8 +10,8 @@ use super::*;
 /// `submission_digest` columns component 118 (FIG-3544) gives
 /// `lash_pending_turn_inputs`, and the runtime-error and turn-outcome
 /// vocabularies component 119 (FIG-3532) persists. Component 120 (FIG-3589)
-/// gives `lash_pending_turn_inputs` the `claim_bound_turn_id` binding and its
-/// CHECK. No arm targets 120: the current build refuses every predecessor,
+/// gives `lash_pending_turn_inputs` the `claim_bound_turn_id` /
+/// `claim_bound_receipt_input_id` binding and its CHECK. No arm targets 120: the current build refuses every predecessor,
 /// including 119.
 /// Source-shape
 /// declarations remain keyed to this build's catalog for precise older-store
@@ -81,6 +81,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -120,6 +121,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -151,6 +153,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -181,6 +184,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_trigger_mutation_receipts", "owner_kind"),
             ("lash_trigger_mutation_receipts", "owner_id"),
@@ -212,6 +216,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -243,6 +248,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -272,6 +278,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -298,6 +305,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_parent_end_plans", "parent_payload"),
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -334,6 +342,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
             ("lash_runtime_effect_group", "next_commit_seq"),
             ("lash_runtime_effect_group", "lifecycle"),
@@ -364,6 +373,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
         ],
         source_missing_guards: &[],
@@ -379,6 +389,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
         ],
         source_missing_guards: &[],
@@ -394,6 +405,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
         ],
         source_missing_guards: &[],
@@ -409,6 +421,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
         ],
         source_missing_guards: &[],
@@ -427,6 +440,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
         ],
         source_missing_guards: &[],
@@ -446,6 +460,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
         ],
         source_missing_guards: &[],
@@ -470,6 +485,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
         ],
         source_missing_guards: &[],
@@ -478,7 +494,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         introduced_constraints: &[],
         statements: &[],
     }, // A component-117 catalog lacks the FIG-3544 submission columns
-    // component 118 added and the FIG-3589 binding column component 120 adds;
+    // component 118 added and the FIG-3589 binding columns component 120 adds;
     // the row is a refusal boundary that introduces nothing a rewound stamp
     // could be claiming.
     SchemaMigration {
@@ -488,6 +504,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         source_missing_columns: &[
             ("lash_pending_turn_inputs", "submitted_ingress_json"),
             ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
             ("lash_pending_turn_inputs", "submission_digest"),
         ],
         source_missing_guards: &[],
@@ -497,7 +514,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         statements: &[],
     },
     // The immediate predecessor of the retained endpoint 119. A component-118
-    // catalog lacks exactly the FIG-3589 binding column component 120 adds
+    // catalog lacks exactly the FIG-3589 binding columns component 120 adds
     // (component 119 moved no relation); component 120 is destructive, so the
     // row is a refusal boundary that introduces nothing a rewound stamp could
     // be claiming.
@@ -505,7 +522,10 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         from: 118,
         to: 119,
         source_missing_tables: &[],
-        source_missing_columns: &[("lash_pending_turn_inputs", "claim_bound_turn_id")],
+        source_missing_columns: &[
+            ("lash_pending_turn_inputs", "claim_bound_turn_id"),
+            ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
+        ],
         source_missing_guards: &[],
         source_missing_foreign_keys: &[],
         introduced_relations: &[],

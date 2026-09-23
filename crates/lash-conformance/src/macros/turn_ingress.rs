@@ -25,6 +25,7 @@ macro_rules! direct_turn_acceptance_tests {
             (later_direct_turn_never_folds_in_a_bound_input, "direct-turn-bound-later-turn"),
             (cancelling_a_bound_input_returns_its_drive_to_the_queue, "direct-turn-bound-cancel"),
             (journal_less_redrive_retakes_its_bound_drive, "direct-turn-bound-journal-less-redrive"),
+            (lost_drive_outcome_still_binds_its_claimed_input, "direct-turn-bound-lost-drive-outcome"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

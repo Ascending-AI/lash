@@ -67,7 +67,7 @@ fn every_release_statement_clears_the_whole_claim_identity() {
 fn every_turn_input_release_statement_clears_the_binding() {
     // `ck_pending_turn_inputs_bound_claim_is_next_turn` refuses a binding
     // without the claim it binds (FIG-3589), so a turn-input release that
-    // clears the claim and keeps `claim_bound_turn_id` fails at run time.
+    // clears the claim and keeps its binding pair fails at run time.
     let mut releases = 0;
     for statement in statements() {
         let sql = squeezed(statement.neutral());
@@ -75,11 +75,16 @@ fn every_turn_input_release_statement_clears_the_binding() {
             continue;
         }
         releases += 1;
-        assert!(
-            sql.contains("claim_bound_turn_id = NULL"),
-            "`{}` releases a turn-input claim without releasing its binding",
-            statement.name(),
-        );
+        for assignment in [
+            "claim_bound_turn_id = NULL",
+            "claim_bound_receipt_input_id = NULL",
+        ] {
+            assert!(
+                sql.contains(assignment),
+                "`{}` releases a turn-input claim without `{assignment}`",
+                statement.name(),
+            );
+        }
     }
     assert!(
         releases >= 5,

@@ -916,6 +916,7 @@ impl GeneratedRuntimeWorld {
             lash::PendingTurnInputCancelOutcome::AlreadyCancelled(_) => {
                 (false, "already_cancelled")
             }
+            lash::PendingTurnInputCancelOutcome::TurnBound { .. } => (false, "turn_bound"),
             lash::PendingTurnInputCancelOutcome::NotFound => (false, "not_found"),
         };
         Ok(json!({

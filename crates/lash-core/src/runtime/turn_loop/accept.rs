@@ -354,6 +354,7 @@ impl LashRuntime {
             .as_ref()
             .map(SessionExecutionLeaseGuard::fence)
             .expect("a store-backed turn acquires its execution lease before acceptance");
+        let drive_generation = drive_fence.fencing_token;
         let drive = scoped_effect_controller
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
@@ -445,6 +446,18 @@ impl LashRuntime {
                 )));
             }
             Err(error) => {
+                // The drive's body may have claimed rows before its outcome was
+                // lost (a journal finalize fault, say): bind whatever the
+                // accepted row's claim under this generation holds, while the
+                // lease still stands (FIG-3589).
+                self.bind_drive_claim_after_abort(
+                    DriveClaimToBind::HeldUnder {
+                        generation: drive_generation,
+                    },
+                    &accepted.input_id,
+                    &trace_turn_id,
+                )
+                .await;
                 if let Some(lease) = session_execution_lease.as_ref() {
                     let _ = lease.release_if_live().await;
                 }
@@ -488,8 +501,12 @@ impl LashRuntime {
             // The aborted turn keeps its claim and its `Err` names the input:
             // bind the claim to the turn before the lease is released, so no
             // later generation folds the input into another turn (FIG-3589).
-            self.bind_drive_claim_after_abort(&drive_claim, &bound_turn_id)
-                .await;
+            self.bind_drive_claim_after_abort(
+                DriveClaimToBind::Claim(&drive_claim),
+                &acceptance.input_id,
+                &bound_turn_id,
+            )
+            .await;
         }
         let mut run = self
             .settle_session_execution_lease(session_execution_lease.as_ref(), result)

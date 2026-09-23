@@ -455,6 +455,52 @@ pub fn unclaimed_turn_input_is_settleable(state: &str) -> bool {
         .is_some_and(crate::TurnInputStateKind::is_terminal)
 }
 
+/// Which cancels may touch a row bound to an aborted direct turn (FIG-3589).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BoundTurnInputCancel {
+    /// The row carries no binding: the ordinary cancel rules decide.
+    Unbound,
+    /// The row is the input the aborted turn's receipt names. Cancelling it
+    /// settles it and returns the bound claim's other rows to the queue.
+    Receipt,
+    /// The row is another row of the bound drive, and the same cancel also
+    /// covers the receipt's input, which returns the rest of the drive.
+    CoveredByReceipt,
+    /// The row is another row of the bound drive and the cancel does not
+    /// cover the receipt's input: cancelling it alone would change the drive
+    /// set the aborted turn's journal replays, so the cancel is refused.
+    Refused {
+        turn_id: crate::TurnId,
+        receipt_input_id: crate::InputId,
+    },
+}
+
+/// The one verdict for cancelling a row that may be bound to an aborted direct
+/// turn (FIG-3589).
+///
+/// `binding` is the row's `(claim_bound_turn_id, claim_bound_receipt_input_id)`
+/// pair, and `covered` is every input the same cancel operation targets: its
+/// explicit targets, or the whole suffix.
+pub fn bound_turn_input_cancel(
+    input_id: &crate::InputId,
+    binding: Option<(crate::TurnId, crate::InputId)>,
+    covered: &std::collections::BTreeSet<crate::InputId>,
+) -> BoundTurnInputCancel {
+    match binding {
+        None => BoundTurnInputCancel::Unbound,
+        Some((_, receipt_input_id)) if receipt_input_id == *input_id => {
+            BoundTurnInputCancel::Receipt
+        }
+        Some((_, receipt_input_id)) if covered.contains(&receipt_input_id) => {
+            BoundTurnInputCancel::CoveredByReceipt
+        }
+        Some((turn_id, receipt_input_id)) => BoundTurnInputCancel::Refused {
+            turn_id,
+            receipt_input_id,
+        },
+    }
+}
+
 // ---------------------------------------------------------------------------
 // D5 — "is this queued-work claim still mine?"
 // ---------------------------------------------------------------------------

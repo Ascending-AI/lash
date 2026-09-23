@@ -185,7 +185,7 @@ impl AcceptedTurnInputDriveRunner {
                 }
                 // An earlier execution of this same turn drove the row and
                 // aborted, binding it here: this redrive re-takes that set.
-                crate::PendingTurnInputReadStatus::TurnBound { turn_id }
+                crate::PendingTurnInputReadStatus::TurnBound { turn_id, .. }
                     if *turn_id == self.trace.turn_id =>
                 {
                     match self.reclaim_bound_drive().await? {

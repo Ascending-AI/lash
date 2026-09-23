@@ -2037,8 +2037,23 @@ impl lash_core::TurnInputStore for CommitRetryStore {
         &self,
         claim: &lash_core::runtime::TurnInputClaim,
         turn_id: &lash_core::TurnId,
+        receipt_input_id: &lash_core::InputId,
     ) -> Result<(), lash_core::StoreError> {
-        self.inner.bind_turn_input_claim(claim, turn_id).await
+        self.inner
+            .bind_turn_input_claim(claim, turn_id, receipt_input_id)
+            .await
+    }
+
+    async fn bind_turn_input_claim_of_receipt(
+        &self,
+        session_id: &SessionId,
+        receipt_input_id: &lash_core::InputId,
+        generation: u64,
+        turn_id: &lash_core::TurnId,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner
+            .bind_turn_input_claim_of_receipt(session_id, receipt_input_id, generation, turn_id)
+            .await
     }
 
     async fn reclaim_turn_bound_inputs(

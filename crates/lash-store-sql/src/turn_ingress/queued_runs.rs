@@ -32,7 +32,8 @@ crate::statements! {
         cancel_inputs = "UPDATE pending_turn_inputs
             SET state = ?3, claim_id = NULL, claim_owner_id = NULL,
                 claim_owner_incarnation_id = NULL, claim_token = NULL, claim_session_lease_generation = 0,
-                claim_bound_turn_id = NULL
+                claim_bound_turn_id = NULL,
+                claim_bound_receipt_input_id = NULL
             WHERE session_id = ?1 AND {{nonterminal_turn_input_state(state)}}
               AND input_id IN (SELECT member_id FROM queued_run_members WHERE session_id = ?1 AND scope_id = ?2 AND member_kind = 'input')
               AND NOT ({{deferred_next_turn_turn_input_state(state)}} AND input_id IN (

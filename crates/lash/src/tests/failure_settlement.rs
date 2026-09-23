@@ -348,6 +348,7 @@ async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id() -> Result<()> 
         session.durable().pending_turn_inputs().await?[0].status,
         lash_core::PendingTurnInputReadStatus::TurnBound {
             turn_id: lash_core::TurnId::from("redriven-turn"),
+            receipt_input_id: receipt.input_id.clone(),
         },
         "until its redrive, the input is bound to the aborted turn"
     );
@@ -417,6 +418,7 @@ async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input() -> Result<()>
         input_id.clone(),
         lash_core::PendingTurnInputReadStatus::TurnBound {
             turn_id: lash_core::TurnId::from("bound-turn"),
+            receipt_input_id: input_id.clone(),
         },
     )];
     let open = |reads: Vec<crate::PendingTurnInputRead>| {
@@ -505,8 +507,32 @@ async fn cancelling_a_bound_input_returns_the_rest_of_its_drive_to_the_queue() -
         bound.iter().all(|read| read.status
             == lash_core::PendingTurnInputReadStatus::TurnBound {
                 turn_id: lash_core::TurnId::from("absorbing-turn"),
+                receipt_input_id: receipt.input_id.clone(),
             }),
         "the aborted turn's whole drive is bound to it: {bound:?}"
+    );
+
+    // Cancelling the absorbed row alone would change the drive the aborted
+    // turn's journal replays, so it is refused and names the receipt.
+    let refused = session
+        .durable()
+        .cancel_pending_turn_input(&earlier.input_id)
+        .await?;
+    assert!(
+        matches!(
+            &refused,
+            lash_core::PendingTurnInputCancelOutcome::TurnBound {
+                turn_id,
+                receipt_input_id,
+                ..
+            } if turn_id.as_str() == "absorbing-turn" && *receipt_input_id == receipt.input_id
+        ),
+        "a cancel of a bound row other than the receipt's is refused: {refused:?}"
+    );
+    assert_eq!(
+        session.durable().pending_turn_inputs().await?.len(),
+        2,
+        "the refused cancel changed nothing"
     );
 
     let cancelled = session
@@ -536,6 +562,83 @@ async fn cancelling_a_bound_input_returns_the_rest_of_its_drive_to_the_queue() -
         !seen[0].contains(STRANDED_WORDS),
         "the cancelled input is never answered: {}",
         seen[0]
+    );
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    Ok(())
+}
+
+/// FIG-3589: the drive effect's body claimed the input, and then the journal
+/// failed to finalize the drive, so the turn aborts without ever holding its
+/// drive claim. The abort still binds whatever the accepted row's claim under
+/// this lease generation holds, so a later direct turn never folds it in, and
+/// the redrive re-runs its drive, re-takes the bound rows and commits once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drive_whose_outcome_was_lost_still_binds_its_input() -> Result<()> {
+    const SESSION: &str = "direct-drive-finalize-fault";
+    let deployment = SqliteDeployment::open().await;
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let core = deployment.core(
+        counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
+        None,
+    );
+    let session = core.session(SESSION).open().await?;
+    let faults = deployment.effect_host.effect_journal_faults();
+    faults.fail_next(
+        EffectJournalFaultPoint::Finalize,
+        &format!("{SESSION}:drive-lost-turn:accept_turn_input:claim_accepted_turn_input"),
+    );
+
+    let error = session
+        .turn(TurnInput::text(STRANDED_WORDS))
+        .turn_id("drive-lost-turn")
+        .run()
+        .await
+        .expect_err("a drive whose journal cannot finalize aborts the turn");
+    assert!(faults.fired(), "the armed drive finalize fault fired");
+    let receipt = error
+        .turn_input_acceptance()
+        .cloned()
+        .expect("the aborted turn returns its acceptance receipt");
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    let bound = vec![(
+        receipt.input_id.clone(),
+        lash_core::PendingTurnInputReadStatus::TurnBound {
+            turn_id: lash_core::TurnId::from("drive-lost-turn"),
+            receipt_input_id: receipt.input_id.clone(),
+        },
+    )];
+    let open = |reads: Vec<crate::PendingTurnInputRead>| {
+        reads
+            .into_iter()
+            .map(|read| (read.input.input_id, read.status))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        open(session.durable().pending_turn_inputs().await?),
+        bound,
+        "the rows the lost drive claimed are bound to the aborted turn"
+    );
+
+    let drained = format!("{:?}", session.queued_turn().run().await?);
+    assert!(
+        drained.contains("Empty"),
+        "a drain under a new lease generation must not answer it: {drained}"
+    );
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+
+    let redriven = session
+        .turn(TurnInput::text(STRANDED_WORDS))
+        .turn_id("drive-lost-turn")
+        .run()
+        .await?;
+    assert!(redriven.is_success(), "{:?}", redriven.result.outcome);
+    assert_eq!(redriven.result.acceptance.as_ref(), Some(&receipt));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        requests.lock_recover()[0].matches(STRANDED_WORDS).count(),
+        1,
+        "the redrive answers the bound input exactly once"
     );
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
     Ok(())
@@ -575,6 +678,7 @@ async fn a_drain_never_answers_an_aborted_turns_input() -> Result<()> {
         pending[0].status,
         lash_core::PendingTurnInputReadStatus::TurnBound {
             turn_id: lash_core::TurnId::from("drained-turn"),
+            receipt_input_id: input_id.clone(),
         }
     );
     Ok(())

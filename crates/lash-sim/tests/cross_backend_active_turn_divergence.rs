@@ -504,6 +504,7 @@ fn cancel_label(outcome: &PendingTurnInputCancelOutcome) -> String {
         PendingTurnInputCancelOutcome::AlreadyClaimed { .. } => "already_claimed",
         PendingTurnInputCancelOutcome::AlreadyCompleted(_) => "already_completed",
         PendingTurnInputCancelOutcome::AlreadyCancelled(_) => "already_cancelled",
+        PendingTurnInputCancelOutcome::TurnBound { .. } => "turn_bound",
         PendingTurnInputCancelOutcome::NotFound => "not_found",
     }
     .to_string()

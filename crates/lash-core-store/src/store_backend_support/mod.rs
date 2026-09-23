@@ -230,13 +230,14 @@ pub fn terminal_turn_input_states_sql() -> String {
 pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
 /// One verdict function per fencing decision; see [`crate::store::fencing`].
 pub use crate::store::fencing::{
-    EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority, EffectReplayLeaseFacts,
-    EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
-    FenceTimeAuthority, FencedWrite, HeadPublicationVerdict, ProcessLeaseAuthority,
-    ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts, TurnInputSettlementFacts,
-    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability,
-    effect_replay_lease_verdict, fenced_write_applied, head_publication_verdict,
-    process_lease_verdict, queued_work_batch_claimability, require_fenced_write_applied,
+    BoundTurnInputCancel, EFFECT_REPLAY_IN_PROGRESS_STATUS, EffectReplayLeaseAuthority,
+    EffectReplayLeaseFacts, EffectReplayLeaseVerdict, FENCED_WRITE_DISAGREEMENT_EVENT,
+    FENCING_TRACE_TARGET, FenceTimeAuthority, FencedWrite, HeadPublicationVerdict,
+    ProcessLeaseAuthority, ProcessLeaseFacts, ProcessLeaseVerdict, QueuedWorkSettlementFacts,
+    TurnInputSettlementFacts, WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, WorkRowClaimFacts,
+    WorkRowClaimability, bound_turn_input_cancel, effect_replay_lease_verdict,
+    fenced_write_applied, head_publication_verdict, process_lease_verdict,
+    queued_work_batch_claimability, require_fenced_write_applied,
     require_releasable_session_execution_lease, require_renewable_session_execution_lease,
     require_settleable_queued_work, require_settleable_turn_input,
     require_single_writer_head_publication, turn_input_claimability,
