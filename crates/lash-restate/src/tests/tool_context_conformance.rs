@@ -251,11 +251,6 @@ impl ProductionToolCell {
         self.run_once(&mut live, effect_host)
             .await
             .expect_err("the live worker dies at its final commit");
-        let live_state = live
-            .snapshot_execution_state()
-            .await
-            .expect("snapshot live execution state");
-        assert_binds_result_global(live_state.as_ref());
         assert_eq!(
             self.tool_executions.load(Ordering::SeqCst),
             1,
@@ -287,10 +282,10 @@ impl ProductionToolCell {
             .snapshot_execution_state()
             .await
             .expect("snapshot replayed execution state");
-        assert_eq!(
-            replay_state, live_state,
-            "replay re-runs the code cell, so it rebuilds the live pass's interpreter state"
-        );
+        // The live pass never committed, so its resident state was rolled back;
+        // the replay re-runs the cell, so it holds the cell's global. (The
+        // crash-redrive tests below compare it byte for byte to a clean run.)
+        assert_binds_result_global(replay_state.as_ref());
         assert_eq!(
             self.tool_executions.load(Ordering::SeqCst),
             1,
@@ -432,7 +427,17 @@ impl ProductionToolCell {
     /// The execution state of the store's durable head, restored the way a
     /// fresh process restores it: from the head, with no caller-supplied state.
     async fn committed_execution_state(&self) -> Option<lash_core::plugin::HydratedExecutionState> {
-        let mut runtime = Box::pin(
+        let mut runtime = self.runtime_from_head().await;
+        runtime
+            .snapshot_execution_state()
+            .await
+            .expect("snapshot committed execution state")
+    }
+
+    /// A runtime restored from the store's durable head, the way a fresh
+    /// worker restores it: no caller-supplied state.
+    async fn runtime_from_head(&self) -> lash_core::facade_support::LashRuntime {
+        Box::pin(
             lash_core::facade_support::LashRuntime::builder(
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
@@ -449,11 +454,7 @@ impl ProductionToolCell {
             .build(),
         )
         .await
-        .expect("open a runtime on the committed head");
-        runtime
-            .snapshot_execution_state()
-            .await
-            .expect("snapshot committed execution state")
+        .expect("open a runtime on the committed head")
     }
 }
 
