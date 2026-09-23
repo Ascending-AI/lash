@@ -288,9 +288,14 @@ impl RuntimeTurnDriver<'_> {
             turn_input_claim,
             incorporation,
         } = claims;
-        // A replayed checkpoint carries what the opener had incorporated when
-        // it committed; the cells before it are served from the journal and
-        // re-run none of it.
+        // A replayed checkpoint is the authority for everything the turn
+        // incorporated and enqueued before it. The cells before it re-run on
+        // replay (ADR 0103) and re-incorporate the same settlements, which
+        // refills the checkpoint message buffer the live checkpoint drained.
+        // The recorded delivery already carries those messages, so the refill
+        // is discarded here; after a live checkpoint the buffer is already
+        // empty and this drains nothing.
+        self.checkpoint_messages.drain();
         self.opener_state.absorb_ledger(incorporation);
         let delivery = result.map_err(RuntimeEffectControllerError::into_runtime_error)?;
         // The same rule the local execution applied, applied to the journalled

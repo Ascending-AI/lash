@@ -49,6 +49,11 @@ deterministically.
 - Restate keeps `ExecCode` as `DirectLocal`. The journal-row driver refuses a
   grouped `ExecCode`: a group child settles through its row, and this path
   writes none.
+- A re-run cell re-incorporates the settlements it incorporated live, which
+  refills the turn's checkpoint message buffer. A checkpoint served from the
+  journal is the authority for everything enqueued before it, so the turn
+  discards that refill when the checkpoint replays. Without this, a later live
+  checkpoint would deliver the messages a second time.
 - The portable law `effect_controller_code_cell_replays_by_reexecution` runs on
   SQLite, PostgreSQL and Restate. It requires that the cell runs on the live
   pass and again on redrive, and that its nested effect runs once. The RLM
