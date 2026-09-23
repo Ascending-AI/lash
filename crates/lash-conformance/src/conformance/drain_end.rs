@@ -1485,7 +1485,7 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
     // The recovery pass writes the owed end. The worker stays alive while it
     // does: the write runs on its own task, which the worker's shutdown ends.
     let sweep = drain_sweep(&world);
-    sweep
+    let _ = sweep
         .drive_pending_processes()
         .await
         .expect("the parent-end pass runs");
@@ -1501,7 +1501,7 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
         "the owed end writes the ledger row"
     );
 
-    sweep
+    let _ = sweep
         .drive_pending_processes()
         .await
         .expect("the parent-end sweep runs");
