@@ -65,11 +65,30 @@ pub enum ContextError {
     Pipeline(String),
     #[error("context session error: {0}")]
     Session(String),
+    /// A plugin-seam failure the context step ran into, kept whole so a live
+    /// fault inside it keeps its own cause (FIG-3575).
+    #[error(transparent)]
+    Plugin(PluginError),
 }
 
 impl From<PluginError> for ContextError {
     fn from(value: PluginError) -> Self {
-        Self::Session(value.to_string())
+        Self::Plugin(value)
+    }
+}
+
+impl ContextError {
+    /// Settles a context step's failure by its cause (FIG-3575): a plugin
+    /// failure settles as [`PluginError::into_turn_failure`] does, and the
+    /// context step's own pipeline or session refusal is an outcome spelled as
+    /// `refusal`.
+    pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
+        match self {
+            Self::Plugin(error) => error.into_turn_failure(refusal),
+            other @ (Self::Pipeline(_) | Self::Session(_)) => {
+                crate::RuntimeError::new(refusal, other.to_string())
+            }
+        }
     }
 }
 

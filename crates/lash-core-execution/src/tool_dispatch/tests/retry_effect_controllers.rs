@@ -78,6 +78,7 @@ impl crate::RuntimeEffectController for FailingSleepEffectController {
         if matches!(&envelope.command, crate::RuntimeEffectCommand::Sleep { .. }) {
             Err(crate::RuntimeEffectControllerError::foreign(
                 "test_sleep_rejected",
+                crate::TurnFailureCause::Outcome,
                 format!("rejected {}", envelope.command.kind().as_str()),
             ))
         } else {

@@ -1145,6 +1145,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 // lands in `ForeignCode` verbatim (namespace included) and is
                 // never re-parsed into a Lash `RuntimeErrorCode` arm.
                 err.code.namespaced(),
+                crate::TurnFailureCause::Outcome,
                 err.message,
             )),
             crate::Resolution::Timeout => Err(crate::RuntimeEffectControllerError::new(
@@ -1238,6 +1239,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 .ok_or_else(|| {
                     crate::RuntimeEffectControllerError::foreign(
                         "process_work_unavailable",
+                        crate::TurnFailureCause::Outcome,
                         "process execution has no process-work port",
                     )
                 })?,

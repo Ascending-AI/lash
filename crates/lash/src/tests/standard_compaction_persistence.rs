@@ -143,8 +143,11 @@ impl lash_core::RuntimeEffectController for ProjectionReplayController {
         if is_llm {
             let ordinal = self.new_llm_calls.fetch_add(1, Ordering::SeqCst) + 1;
             if ordinal == self.fail_on_new_llm_call {
+                // A crash is a live fault: the drive aborts and the redrive
+                // replays the journal.
                 return Err(lash_core::RuntimeEffectControllerError::foreign(
                     "test_projection_cold_restart",
+                    lash_core::TurnFailureCause::LiveFault,
                     "injected cold restart after the first mid-turn completion",
                 ));
             }

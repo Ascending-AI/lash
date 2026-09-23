@@ -913,6 +913,7 @@ impl crate::RuntimeEffectController for JournalController {
                 *crash_at = None;
                 return Err(crate::RuntimeEffectControllerError::foreign(
                     "conformance_worker_crash",
+                    crate::TurnFailureCause::LiveFault,
                     format!("the worker died at the {} effect", kind.as_str()),
                 ));
             }
@@ -924,6 +925,7 @@ impl crate::RuntimeEffectController for JournalController {
                 *lose_outcome_at = None;
                 return Err(crate::RuntimeEffectControllerError::foreign(
                     "conformance_worker_crash",
+                    crate::TurnFailureCause::LiveFault,
                     format!(
                         "the worker died after the {} effect ran, before its outcome was recorded",
                         kind.as_str()

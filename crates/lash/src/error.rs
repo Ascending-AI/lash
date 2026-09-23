@@ -176,6 +176,29 @@ pub enum EmbedError {
 }
 
 impl EmbedError {
+    /// The acceptance of the direct turn this error aborted (FIG-3575).
+    ///
+    /// A direct turn that aborts after its input was durably accepted names
+    /// the input here. The aborted turn released its lease, so its claim on
+    /// the input no longer holds anything. The host decides the input's fate:
+    /// redrive the same turn id, which replays the aborted turn's journal and
+    /// commits once, or withdraw the input by this receipt with
+    /// [`DurableSession::cancel_pending_turn_input`](crate::DurableSession::cancel_pending_turn_input).
+    /// Until it does, a later drain or direct turn may claim the input.
+    /// FIG-3589 binds the input to the aborted turn, so that only a redrive or
+    /// a cancel by this receipt consumes it.
+    ///
+    /// The receipt also comes back when the admitted turn already committed
+    /// and a later turn of the same run aborted (an agent-frame follow-on
+    /// turn). The input is then settled, and a cancel by the receipt returns
+    /// [`AlreadyCompleted`](lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted).
+    pub fn turn_input_acceptance(&self) -> Option<&lash_core::runtime::TurnInputAcceptanceReceipt> {
+        match self {
+            Self::Runtime(err) => err.turn_input_acceptance.as_deref(),
+            _ => None,
+        }
+    }
+
     /// True only when a typed signal says the failed operation is safe to
     /// retry as-is; `false` means "no typed retryable signal", not "known
     /// permanent" (see [`is_terminal`](Self::is_terminal) for that).
@@ -443,11 +466,29 @@ mod tests {
         assert!(!err.is_terminal(), "{err}");
     }
 
+    /// FIG-3575: a foreign code carries the class its minting host chose. A
+    /// live fault is neither retryable nor terminal; an outcome, and a code
+    /// read back from the wire as a recorded failure, is terminal.
     #[test]
-    fn untyped_runtime_failures_are_neither_retryable_nor_terminal() {
-        let err = runtime_error(RuntimeErrorCode::from_wire_code("plugin_defined_abort"));
-        assert!(!err.is_retryable(), "{err}");
-        assert!(!err.is_terminal(), "{err}");
+    fn foreign_runtime_failures_follow_the_class_their_host_chose() {
+        let live = EmbedError::Runtime(RuntimeError::foreign(
+            "plugin_defined_crash",
+            lash_core::TurnFailureCause::LiveFault,
+            "test",
+        ));
+        assert!(!live.is_retryable(), "{live}");
+        assert!(!live.is_terminal(), "{live}");
+        for err in [
+            EmbedError::Runtime(RuntimeError::foreign(
+                "plugin_defined_abort",
+                lash_core::TurnFailureCause::Outcome,
+                "test",
+            )),
+            runtime_error(RuntimeErrorCode::from_wire_code("plugin_defined_abort")),
+        ] {
+            assert!(!err.is_retryable(), "{err}");
+            assert!(err.is_terminal(), "{err}");
+        }
     }
 
     #[test]

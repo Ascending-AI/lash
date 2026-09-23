@@ -326,6 +326,9 @@ impl LashRuntime {
             .and_then(crate::RuntimeEffectOutcome::into_accepted_turn_input)
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error)?;
         let acceptance = crate::TurnInputAcceptanceReceipt::from(&accepted);
+        // From here the input is durably accepted, so every abort names it: the
+        // host withdraws or redrives the input by this receipt (FIG-3575).
+        let aborted = |err: RuntimeError| err.with_turn_input_acceptance(acceptance.clone());
         crate::trace::emit_trace(
             &self.host.core.tracing.trace_sink,
             &self.host.core.tracing.trace_context,
@@ -424,7 +427,7 @@ impl LashRuntime {
                 if let Some(lease) = session_execution_lease.as_ref() {
                     let _ = lease.release_if_live().await;
                 }
-                return Err(RuntimeError::new(
+                return Err(aborted(RuntimeError::new(
                     RuntimeErrorCode::AcceptedTurnInputCeded,
                     match refusal {
                         crate::AcceptedTurnInputRefusal::HeldByLiveClaim => format!(
@@ -439,13 +442,13 @@ impl LashRuntime {
                             accepted.input_id
                         ),
                     },
-                ));
+                )));
             }
             Err(error) => {
                 if let Some(lease) = session_execution_lease.as_ref() {
                     let _ = lease.release_if_live().await;
                 }
-                return Err(error);
+                return Err(aborted(error));
             }
         };
 
@@ -490,7 +493,8 @@ impl LashRuntime {
         }
         let mut run = self
             .settle_session_execution_lease(session_execution_lease.as_ref(), result)
-            .await?;
+            .await
+            .map_err(aborted)?;
         // Only the physical turn this acceptance admitted carries it. An
         // agent-frame run's follow-on turns were started by the frame switch,
         // not by this admission, and stamping them would report an acceptance

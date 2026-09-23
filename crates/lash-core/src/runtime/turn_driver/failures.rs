@@ -1,33 +1,27 @@
 use super::*;
 
 impl RuntimeTurnDriver<'_> {
-    fn fail_runtime_effect_controller(
+    /// Settle a controller error by its cause (FIG-3575), identically on every
+    /// host: an outcome, including a journaled failure replaying, is recorded
+    /// as a failed turn, and a live fault aborts the invocation with `Err`.
+    pub(super) fn fail_or_abort_runtime_effect_controller(
         machine: &mut TurnMachine,
         err: RuntimeEffectControllerError,
-    ) {
+    ) -> Result<(), RuntimeError> {
+        if err.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+            return Err(err.into_runtime_error());
+        }
+        // A replay divergence keeps its structured evidence on the record.
+        let raw = err
+            .summary
+            .as_ref()
+            .and_then(|summary| serde_json::to_string(summary).ok());
         machine.fail_turn(make_error_event(
             crate::TurnFailureKind::RuntimeEffectController,
             Some(crate::FailureCode::from(&err.code)),
             err.message,
-            None,
+            raw,
         ));
-    }
-
-    pub(super) async fn fail_or_abort_runtime_effect_controller(
-        &self,
-        machine: &mut TurnMachine,
-        err: RuntimeEffectControllerError,
-    ) -> Result<(), RuntimeError> {
-        if self
-            .scoped_effect_controller
-            .controller()
-            .effect_journaling()
-            == crate::EffectJournaling::Journaled
-        {
-            Err(err.into_runtime_error())
-        } else {
-            Self::fail_runtime_effect_controller(machine, err);
-            Ok(())
-        }
+        Ok(())
     }
 }

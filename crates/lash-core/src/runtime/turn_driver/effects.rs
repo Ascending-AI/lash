@@ -266,10 +266,8 @@ impl RuntimeTurnDriver<'_> {
         checkpoint: CheckpointKind,
         event_tx: &mpsc::Sender<RuntimeStreamEvent>,
         cancel: &CancellationToken,
-    ) -> Result<crate::CheckpointDelivery, RuntimeError> {
-        let invocation = self
-            .turn_effect_invocation(machine, id, RuntimeEffectKind::Checkpoint)
-            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+    ) -> Result<crate::CheckpointDelivery, RuntimeEffectControllerError> {
+        let invocation = self.turn_effect_invocation(machine, id, RuntimeEffectKind::Checkpoint)?;
         let (result, claims) = self
             .execute_typed_turn_effect(
                 machine,
@@ -281,8 +279,7 @@ impl RuntimeTurnDriver<'_> {
                 ),
                 RuntimeEffectOutcome::into_checkpoint,
             )
-            .await
-            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+            .await?;
         let crate::runtime::effect::CheckpointClaimSet {
             queued_work_claims,
             turn_input_claim,
@@ -297,7 +294,11 @@ impl RuntimeTurnDriver<'_> {
         // empty and this drains nothing.
         self.checkpoint_messages.drain();
         self.opener_state.absorb_ledger(incorporation);
-        let delivery = result.map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        // A failed checkpoint is part of the checkpoint's own recorded
+        // outcome: the journal holds it, and every redrive replays it. It is
+        // therefore an outcome whatever its code (FIG-3528, FIG-3575), never
+        // an abort a redrive would reproduce forever.
+        let delivery = result.map_err(RuntimeEffectControllerError::into_journaled)?;
         // The same rule the local execution applied, applied to the journalled
         // authority: at a terminal checkpoint, a claim this turn does not
         // already drive is withheld work, not this turn's to settle.
@@ -609,9 +610,7 @@ impl RuntimeTurnDriver<'_> {
                 session_graph: self.session_services.graph_service(),
             })
             .await
-            .map_err(|err| {
-                RuntimeError::new(RuntimeErrorCode::PluginCheckpoint, err.to_string())
-            })?;
+            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint))?;
         committed.extend(applied.messages);
         emit_session_events(event_tx, applied.events).await;
         if let Some(abort) = applied.abort {
@@ -620,6 +619,7 @@ impl RuntimeTurnDriver<'_> {
             // re-parsed into a Lash `RuntimeErrorCode` arm.
             return Err(RuntimeError::foreign(
                 abort.code.namespaced(),
+                crate::TurnFailureCause::Outcome,
                 abort.message,
             ));
         }

@@ -179,6 +179,7 @@ impl RuntimeEffectController for RejectingEffectController {
         }
         Err(RuntimeEffectControllerError::foreign(
             "test_controller_rejected",
+            lash_core::TurnFailureCause::Outcome,
             format!("rejected {}", envelope.command.kind().as_str()),
         ))
     }
@@ -893,6 +894,7 @@ impl RuntimeEffectController for RecordingEffectController {
                 if self.fail_exec_after_local.swap(false, Ordering::SeqCst) {
                     return Err(RuntimeEffectControllerError::foreign(
                         "injected_exec_handoff_failure",
+                        lash_core::TurnFailureCause::LiveFault,
                         "injected code-effect response handoff failure",
                     ));
                 }

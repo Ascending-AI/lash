@@ -417,7 +417,7 @@ impl LashRuntime {
             },
         )
         .await
-        .map_err(|err| RuntimeError::new(RuntimeErrorCode::PluginPrepareTurn, err.to_string()))?;
+        .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
         self.mark_phase_end(RuntimeTurnPhase::BeforeTurnHooks);
         Ok(prepared)
     }

@@ -80,24 +80,19 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
             Ok(None) => {}
+            // A protocol refusal before the model call is an outcome over the
+            // turn's journaled inputs, recorded as a failed turn on every host
+            // (FIG-3575). Only a live fault the hook ran into aborts.
             Err(err) => {
-                let err_string = err.to_string();
-                if self
-                    .scoped_effect_controller
-                    .controller()
-                    .effect_journaling()
-                    == crate::EffectJournaling::Journaled
-                {
-                    return Err(RuntimeError::new(
-                        RuntimeErrorCode::ProtocolBeforeLlmCall,
-                        err_string,
-                    ));
+                let failure = err.into_turn_failure(RuntimeErrorCode::ProtocolBeforeLlmCall);
+                if failure.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+                    return Err(failure);
                 }
                 machine.fail_turn(make_error_event(
                     crate::TurnFailureKind::ProtocolBeforeLlmCall,
                     Some(crate::TurnFailureCode::BeforeLlmCallFailed.into()),
-                    err_string.clone(),
-                    Some(err_string),
+                    failure.message.clone(),
+                    Some(failure.message),
                 ));
                 return Ok(());
             }
@@ -125,8 +120,7 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(result) => result,
             Err(err) => {
-                self.fail_or_abort_runtime_effect_controller(machine, err)
-                    .await?;
+                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
             }
         };
@@ -165,8 +159,7 @@ impl RuntimeTurnDriver<'_> {
                 {
                     Ok(response) => Ok(response),
                     Err(err) => {
-                        self.fail_or_abort_runtime_effect_controller(machine, err)
-                            .await?;
+                        Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                         return Ok(());
                     }
                 }
@@ -325,8 +318,7 @@ impl RuntimeTurnDriver<'_> {
                             .map_err(crate::runtime::runtime_error_from_store_commit)?;
                     }
                 }
-                self.fail_or_abort_runtime_effect_controller(machine, err.into())
-                    .await?;
+                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
             }
         }
         Ok(())
@@ -406,8 +398,7 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(result) => result,
             Err(err) => {
-                self.fail_or_abort_runtime_effect_controller(machine, err)
-                    .await?;
+                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
             }
         };
@@ -434,8 +425,7 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(results) => results,
             Err(err) => {
-                self.fail_or_abort_runtime_effect_controller(machine, err)
-                    .await?;
+                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
             }
         };
@@ -450,14 +440,13 @@ impl RuntimeTurnDriver<'_> {
                     .attachment_source_policy
                     .authorize(&producer, &source)
                 {
-                    self.fail_or_abort_runtime_effect_controller(
+                    Self::fail_or_abort_runtime_effect_controller(
                         machine,
                         crate::RuntimeEffectControllerError::new(
                             crate::RuntimeErrorCode::AttachmentSourcePolicyDenied,
                             err.to_string(),
                         ),
-                    )
-                    .await?;
+                    )?;
                     return Ok(());
                 }
             }
@@ -518,8 +507,7 @@ impl RuntimeTurnDriver<'_> {
                     },
                 )
                 .await;
-                self.fail_or_abort_runtime_effect_controller(machine, err)
-                    .await?;
+                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
             }
         };
@@ -588,13 +576,11 @@ impl RuntimeTurnDriver<'_> {
                             )
                         })?;
                 }
-                let abort_for_error = cancellation_evidence.is_some()
-                    && self
-                        .scoped_effect_controller
-                        .controller()
-                        .effect_journaling()
-                        == crate::EffectJournaling::Journaled;
-                if abort_for_error {
+                // A live fault aborts whether or not a cancel is pending; the
+                // effect loop settles a pending cancel as `Stopped { Cancelled }`
+                // after the abort. Any other failure under a cancel is the
+                // cancel's own consequence (FIG-3575).
+                if err.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
                     return Err(err.into_runtime_error());
                 }
                 if let Some(evidence) = cancellation_evidence {
@@ -603,8 +589,7 @@ impl RuntimeTurnDriver<'_> {
                     }));
                     return Ok(());
                 }
-                self.fail_or_abort_runtime_effect_controller(machine, err)
-                    .await?;
+                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
             }
         };

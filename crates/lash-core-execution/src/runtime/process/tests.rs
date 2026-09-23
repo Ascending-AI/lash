@@ -1183,7 +1183,8 @@ fn artifact_owner_retirement_classifies_by_code_not_message() {
     let retired = artifact_owner_retired_error();
     assert!(artifact_owner_is_permanently_retired(&retired));
     assert!(!retired.is_retryable());
-    assert!(!retired.is_terminal());
+    // A permanent retirement fence is terminal: a redrive meets it again.
+    assert!(retired.is_terminal());
 
     // The destination form of the same fence is the same classification.
     let destination = artifact_destination_owner_retired_error();

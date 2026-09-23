@@ -684,9 +684,11 @@ impl LashRuntime {
 }
 
 impl LashRuntime {
-    /// Dispose of a queued run's error: a terminal error settles the run
-    /// failed, an unclassified one retains ownership for recovery, and a
-    /// retryable one passes through.
+    /// Dispose of a queued run's error by its cause (FIG-3575).
+    ///
+    /// A live fault keeps the run for its retry budget: a retryable one
+    /// passes through, any other stays pending. An outcome settles the run
+    /// failed once; a deterministic failure is never retried.
     async fn retain_or_settle_queued_error(
         &mut self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
@@ -695,29 +697,31 @@ impl LashRuntime {
         anonymous_caller: bool,
         error: RuntimeError,
     ) -> RuntimeError {
-        if error.is_terminal() {
-            if let Err(disposition) = self
-                .settle_failed_queued_run(
-                    store,
-                    lease,
-                    failed_settlement(
-                        run,
-                        anonymous_caller,
-                        error.code.clone(),
-                        error.message.clone(),
-                    ),
-                )
-                .await
-            {
-                return RuntimeError::new(
-                    RuntimeErrorCode::QueuedRunPending,
-                    format!("queued terminal disposition remains pending: {disposition}"),
-                );
+        if error.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+            if error.is_retryable() {
+                return error;
             }
-        } else if !error.is_retryable() {
             return RuntimeError::new(
                 RuntimeErrorCode::QueuedRunPending,
                 format!("queued run remains recoverable: {error}"),
+            );
+        }
+        if let Err(disposition) = self
+            .settle_failed_queued_run(
+                store,
+                lease,
+                failed_settlement(
+                    run,
+                    anonymous_caller,
+                    error.code.clone(),
+                    error.message.clone(),
+                ),
+            )
+            .await
+        {
+            return RuntimeError::new(
+                RuntimeErrorCode::QueuedRunPending,
+                format!("queued terminal disposition remains pending: {disposition}"),
             );
         }
         error

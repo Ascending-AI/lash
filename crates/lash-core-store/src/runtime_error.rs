@@ -8,6 +8,10 @@
 use crate::{RuntimeEffectKind, SessionId};
 use serde::{Deserialize, Serialize};
 
+mod classification;
+pub(crate) use classification::RuntimeErrorClass;
+pub use classification::TurnFailureCause;
+
 /// Stable runtime error code.
 ///
 /// Codes serialize as the same snake_case strings exposed in traces and host
@@ -367,7 +371,10 @@ pub enum RuntimeErrorCode {
     /// Built-in `RuntimeError` constructors use typed variants; open plugin and
     /// effect-controller boundaries use this for host-defined or controller-local
     /// codes. Extensions must namespace codes and avoid built-in `as_str` values.
-    /// Foreign codes are conservatively neither retryable nor terminal.
+    /// The code is a recorded outcome, terminal (FIG-3575). A host that mints
+    /// a live fault under a foreign code says so on the error it builds
+    /// ([`RuntimeError::foreign`], [`RuntimeEffectControllerError::foreign`]);
+    /// the class is not part of the wire spelling.
     #[non_exhaustive]
     ForeignCode(String),
 }
@@ -457,21 +464,6 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
         }
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
     }
-}
-/// The decided retry posture of a [`RuntimeErrorCode`].
-///
-/// `Unclassified` means no retry posture is decided: the code is neither
-/// explicitly safe to retry unchanged nor provably permanent, and durable
-/// hosts may settle it either way. Foreign codes land here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RuntimeErrorClass {
-    /// Retrying the identical operation is explicitly safe.
-    Retryable,
-    /// Retrying cannot succeed without changing input, configuration,
-    /// wiring, or corrupted durable state.
-    Terminal,
-    /// No decided retry posture.
-    Unclassified,
 }
 impl RuntimeErrorCode {
     /// Provides the canonical str view to store, effect-host, and protocol implementors while
@@ -734,211 +726,6 @@ impl RuntimeErrorCode {
         matches!(self, Self::WorkerReplacementAbort)
     }
 
-    /// The decided retry posture of this code.
-    ///
-    /// This is the single classification site: the match is exhaustive, so a
-    /// new variant does not compile until it is deliberately classified.
-    /// [`Self::is_retryable`] and [`Self::is_terminal`] are projections of it.
-    pub(crate) const fn classification(&self) -> RuntimeErrorClass {
-        match self {
-            // A hook failure is an incomplete derivation over an already
-            // durable completion, so redriving phase 2 is the correct recovery
-            // (FIG-1276).
-            Self::RuntimeEffectAssistantResponseHook
-            | Self::RuntimeEffectGroupDrainDeferred
-            | Self::SessionExecutionLaneBusy
-            | Self::TurnInputSettlementSuperseded
-            | Self::QueuedRunPending
-            | Self::StoreCommitContended
-            | Self::CancelStartGateUnavailable
-            | Self::PostgresAwaitEventStore
-            | Self::PostgresEffectJournalRetirement
-            | Self::RestateAwaitEventAwait
-            | Self::RestateAwaitEventCancel
-            | Self::RestateAwaitEventPeek
-            | Self::RestateAwaitEventResolve
-            | Self::RestateAwaitEventRevocationRead
-            | Self::RestateAwaitEventRevoke
-            | Self::RestateAwaitEventSessionUpdate
-            | Self::RestateProcessCancel
-            | Self::RestateProcessIngressSubmit
-            | Self::RestateTurnTerminalAttach
-            | Self::RestateTurnTerminalAttachCeilingElapsed
-            | Self::RuntimePerfStartGateRetry
-            | Self::RuntimeStore
-            | Self::SessionCommandPostDriveRefresh
-            | Self::SessionCommandRefresh
-            | Self::SessionCommandRefreshTools
-            | Self::SqliteAwaitEventStore
-            | Self::SqliteEffectJournalRetirement
-            | Self::TransientCancelWatch
-            | Self::TransientTerminalPublication
-            | Self::TurnControlWaitTimeout
-            | Self::TurnTerminalAwaitTimeout => RuntimeErrorClass::Retryable,
-            Self::AttachmentSourcePolicyDenied
-            | Self::EffectPanicked
-            | Self::MissingExecutionScopeId
-            | Self::ExecutionScopeTurnIdMismatch
-            | Self::ExecutionScopeAdmissionRefused
-            | Self::AcceptedTurnInputCeded
-            | Self::TurnExecutionRequiresReconciledToolSurface
-            | Self::QueuedRunFailed
-            | Self::QueuedRunConfigurationChanged
-            | Self::QueuedWorkRowExceedsContextWindow
-            | Self::StoreCommitNodeBudgetExceeded
-            | Self::StoreCommitByteBudgetExceeded
-            | Self::SessionDeleted
-            | Self::SessionCatalogLookupUnsupported
-            | Self::CheckpointComponentEncodingVersionMismatch
-            | Self::RecordEncodingFailed
-            | Self::MissingProcessExecutionId
-            | Self::DurableEffectLiveProtocolExtension
-            | Self::DurableEffectLivePluginInput
-            | Self::AwaitEventCancelUnsupported
-            | Self::AwaitEventKeySign
-            | Self::AwaitEventUnknownOrRevoked
-            | Self::AwaitEventUnsupported
-            | Self::EffectGroupUnsupported
-            | Self::EffectJournalRetirementUnsupported
-            | Self::EffectScopeRetired
-            | Self::EffectScopeNotQuiescent
-            | Self::EffectGroupLifecyclePinned
-            | Self::AwaitEventScopeNotRetirable
-            | Self::InvalidAwaitEventSessionId
-            | Self::InvalidAwaitEventWaitIdentity
-            | Self::InvalidTurnCancelRequest
-            | Self::HistoricalAgentFrameSwitchUnsupported
-            | Self::AgentFrameSwitchAuthorConflict
-            | Self::LlmProvider
-            | Self::Plugin
-            | Self::PostgresEffectReplayCorruptRow
-            | Self::PostgresEffectReplayDecode
-            | Self::PostgresEffectReplayEncode
-            | Self::PostgresEffectReplayHashConflict
-            | Self::PostgresEffectReplayKeyMissing
-            | Self::PostgresEffectReplayLeaseLost
-            | Self::PostgresEffectReplayMissing
-            | Self::PostgresEffectReplayStore
-            | Self::PostgresAwaitEventDecode
-            | Self::PostgresAwaitEventEncode
-            | Self::PostgresAwaitEventSign
-            | Self::RestateEffectController
-            | Self::ToolIntentReplayKeyFormatCutover
-            | Self::ProcessPanicked
-            | Self::ProcessNotVisible
-            | Self::ProcessAlreadyTerminal
-            | Self::ProcessParentEnded
-            | Self::ProcessCancelConflict
-            | Self::DurableIdentityConflict
-            | Self::ProcessNoLongerRetained
-            | Self::ProcessIncarnationSuperseded
-            | Self::ProcessRegistryUnavailable
-            | Self::ProcessSignalWaitCancelled
-            | Self::ProcessSignalWaitTimeout
-            | Self::WorkerReplacementAbort
-            | Self::RestateEffectHostRequiresHandlerScope
-            | Self::RestateJournaledEffectPoisoned
-            | Self::RestateProcessAwait
-            | Self::RestateProcessJournalIdentityDrift
-            | Self::RestateProcessJournalPayloadIncompatible
-            | Self::RestateServiceUnregistered
-            | Self::RestateProcessAwaitAfterTurnCancel
-            | Self::RestateProcessTurnCancelContextMissing
-            | Self::RestateProcessTerminalEncode
-            | Self::RestateTurnTerminalDecode
-            | Self::RestateTurnTerminalInvalidResolution
-            | Self::RestateTurnCancelScopeMismatch
-            | Self::RestateTurnCancelScopeMissing
-            | Self::RuntimeEffectAttachmentStore
-            | Self::RuntimeEffectEnvelopeCanonicalDecode
-            | Self::RuntimeEffectEnvelopeCanonicalHashInvariant
-            | Self::RuntimeEffectEnvelopeHash
-            | Self::RuntimeEffectEnvelopeVersion
-            | Self::RuntimeEffectGroupAwaitCancelled
-            | Self::RuntimeEffectGroupChildCancelled
-            | Self::RuntimeEffectGroupChildCancelDecided
-            | Self::RuntimeEffectGroupChildAttachExpired
-            | Self::RuntimeEffectGroupShape
-            | Self::AggregateAwaitUnsettled
-            | Self::EffectGroupOpenerBoundExceeded
-            | Self::RuntimeEffectInvocationSubject
-            | Self::RuntimeEffectScopeMismatch
-            | Self::RuntimeEffectLocalExecutorMismatch
-            | Self::RuntimeEffectLocalExecutorUnavailable
-            | Self::RuntimeEffectLocalTaskClosed
-            | Self::RuntimeEffectProcessTaskJoin
-            | Self::RuntimeEffectReplayRequired
-            | Self::RuntimeEffectSleepCancelled
-            | Self::RuntimeEffectTaskJoin
-            | Self::RuntimeEffectToolAttemptCallId
-            | Self::RuntimeEffectToolAttemptCaptureVersion
-            | Self::RuntimeEffectToolAttemptIndex
-            | Self::RuntimeEffectToolChildCancellationAuthority
-            | Self::RuntimeEffectToolChildCompletionRouting
-            | Self::RuntimeEffectToolChildRequestAdmission
-            | Self::RuntimeEffectToolChildRequestCallId
-            | Self::RuntimeEffectToolChildRequestOpener
-            | Self::RuntimeEffectToolChildRequestVersion
-            | Self::RuntimeEffectToolSettlementVersion
-            | Self::RuntimeEffectWrongOutcome
-            | Self::RuntimeStoreCorrupt
-            | Self::SessionCommandClaim
-            | Self::SessionCommandIdempotencyKey
-            | Self::SessionDeleteScopeMismatch
-            | Self::SessionToolRegistry
-            | Self::SqliteAwaitEventDecode
-            | Self::SqliteAwaitEventEncode
-            | Self::SqliteAwaitEventSign
-            | Self::SqliteEffectReplayCorruptRow
-            | Self::SqliteEffectReplayDecode
-            | Self::SqliteEffectReplayEncode
-            | Self::SqliteEffectReplayHashConflict
-            | Self::SqliteEffectReplayKeyMissing
-            | Self::SqliteEffectReplayLeaseLost
-            | Self::SqliteEffectReplayMissing
-            | Self::SqliteEffectReplayStore
-            | Self::ToolCatalogResolutionFailed
-            | Self::ToolCompletionKeyMissingCallId
-            | Self::ToolCompletionKeyProcessLifetime
-            | Self::ToolDeferralNotDeclared
-            | Self::TurnCancelGateDecode
-            | Self::TurnCancelGateEncode
-            | Self::TurnCancelGateInvalidTerminal
-            | Self::TurnControlPeekOutcome
-            | Self::TurnControlUnknownOrRevoked
-            | Self::TurnTerminalDecode
-            | Self::TurnTerminalEncode
-            | Self::TurnTerminalInvalidResolution
-            | Self::TurnTerminalUnknownOrRevoked
-            | Self::TriggerStoreUnavailable => RuntimeErrorClass::Terminal,
-            Self::SessionExecutionLeaseLost
-            | Self::StoreCommitSuperseded
-            | Self::ExecutionStateCaptureFailed
-            | Self::ResidentSessionReloadFailed
-            | Self::StoreCommitFailed
-            | Self::PluginSessionManager
-            | Self::PluginFinalizeTurn
-            | Self::PluginCheckpoint
-            | Self::PluginPrepareTurn
-            | Self::ContextPrepareTurn
-            | Self::ProtocolTurnExtension
-            | Self::ProtocolBeforeLlmCall
-            | Self::TurnStreamJoin
-            | Self::EmptyAgentFrameRun
-            | Self::LiveReplay
-            | Self::PostgresAwaitEventNotify
-            | Self::QueuedWork
-            | Self::RuntimeEffectControllerTaskClosed
-            | Self::SessionHeadRefresh
-            | Self::SqliteAwaitEventNotify
-            | Self::TurnControlWaitCancelled
-            | Self::ArtifactOwnerRetired
-            | Self::ArtifactDestinationOwnerRetired
-            | Self::ArtifactStagingEdgeMissing
-            | Self::ForeignCode(_) => RuntimeErrorClass::Unclassified,
-        }
-    }
-
     /// Whether retrying the identical operation is explicitly safe.
     pub fn is_retryable(&self) -> bool {
         self.classification() == RuntimeErrorClass::Retryable
@@ -1148,8 +935,9 @@ impl RuntimeErrorCode {
     ];
 
     /// Built-in strings are always canonicalized to their dedicated variants;
-    /// only unknown extension strings produce [`Self::ForeignCode`]. This is
-    /// the supported construction path for host-defined codes.
+    /// only unknown extension strings produce [`Self::ForeignCode`], as a
+    /// recorded outcome. A host minting a live fault under its own code builds
+    /// the error with [`RuntimeError::foreign`], which takes its cause class.
     pub fn from_wire_code(code: &str) -> Self {
         match code {
             "attachment_source_policy_denied" => Self::AttachmentSourcePolicyDenied,
@@ -1450,14 +1238,30 @@ pub enum RuntimeErrorCause {
 }
 /// Runtime error for unexpected failures.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct RuntimeError {
     pub code: RuntimeErrorCode,
     pub message: String,
-    /// Structured, content-free evidence for a replay mismatch.
+    /// Structured, content-free evidence for a replay mismatch. Boxed, like
+    /// the acceptance below, so the rare diagnostic does not size every
+    /// runtime error inline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<crate::RuntimeEffectReplayMismatchReport>,
+    pub summary: Option<Box<crate::RuntimeEffectReplayMismatchReport>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<RuntimeErrorCause>,
+    /// The acceptance of the direct turn this error aborted (FIG-3575).
+    ///
+    /// Present when a direct turn aborts after its input was durably
+    /// accepted: the host names the input by this receipt to withdraw it, or
+    /// redrives the same turn. FIG-3589 binds the input to the aborted turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_input_acceptance:
+        Option<Box<crate::turn_input_vocabulary::TurnInputAcceptanceReceipt>>,
+    /// The cause class the minting host chose for a foreign code (FIG-3575).
+    /// Never persisted: read back from the wire, a foreign code is a recorded
+    /// outcome.
+    #[serde(skip)]
+    foreign_cause: Option<TurnFailureCause>,
 }
 impl RuntimeError {
     /// Constructs a `RuntimeError` for effect-host implementors while creating, observing, or
@@ -1468,7 +1272,19 @@ impl RuntimeError {
             message: message.into(),
             summary: None,
             cause: None,
+            turn_input_acceptance: None,
+            foreign_cause: None,
         }
+    }
+
+    /// Attaches the acceptance of the direct turn this error aborted.
+    #[must_use]
+    pub fn with_turn_input_acceptance(
+        mut self,
+        acceptance: crate::turn_input_vocabulary::TurnInputAcceptanceReceipt,
+    ) -> Self {
+        self.turn_input_acceptance = Some(Box::new(acceptance));
+        self
     }
 
     /// Constructs an error carrying a code minted outside the built-in
@@ -1477,8 +1293,14 @@ impl RuntimeError {
     /// [`RuntimeErrorCode::ForeignCode`] verbatim and is never re-parsed into
     /// a built-in arm. First-party producers use [`Self::new`], whose typed
     /// argument makes an unclassified string a compile error.
-    pub fn foreign(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::ForeignCode(code.into()), message)
+    pub fn foreign(
+        code: impl Into<String>,
+        cause: TurnFailureCause,
+        message: impl Into<String>,
+    ) -> Self {
+        let mut error = Self::new(RuntimeErrorCode::ForeignCode(code.into()), message);
+        error.foreign_cause = Some(cause);
+        error
     }
 
     /// Sets the cause carried by a `RuntimeError` for effect-host implementors while creating,
@@ -1503,7 +1325,21 @@ impl RuntimeError {
 
     /// Whether retrying cannot succeed without a host-side change.
     pub fn is_terminal(&self) -> bool {
-        self.cause.is_some() || self.code.is_terminal()
+        self.cause.is_some()
+            || match self.foreign_cause {
+                Some(cause) => cause == TurnFailureCause::Outcome,
+                None => self.code.is_terminal(),
+            }
+    }
+
+    /// The cause class of a turn this error fails (FIG-3575): an outcome
+    /// exactly when the error is terminal.
+    pub fn turn_failure_cause(&self) -> TurnFailureCause {
+        if self.is_terminal() {
+            TurnFailureCause::Outcome
+        } else {
+            TurnFailureCause::LiveFault
+        }
     }
 
     /// Process execution identity is the persisted `process_id`, so a retry
@@ -1577,6 +1413,10 @@ pub struct RuntimeEffectControllerError {
     /// journal's replay boundary, not read back out of the row.
     #[serde(skip)]
     pub journaled: bool,
+    /// The cause class the minting host chose for a foreign code (FIG-3575).
+    /// Never persisted, like `journaled`.
+    #[serde(skip)]
+    foreign_cause: Option<TurnFailureCause>,
 }
 
 impl RuntimeEffectControllerError {
@@ -1588,6 +1428,7 @@ impl RuntimeEffectControllerError {
             summary: None,
             cause: None,
             journaled: false,
+            foreign_cause: None,
         }
     }
 
@@ -1615,8 +1456,14 @@ impl RuntimeEffectControllerError {
     /// Hosts must namespace these codes and must not mint a built-in
     /// [`RuntimeErrorCode`] spelling. First-party producers use [`Self::new`],
     /// whose typed argument makes an unclassified string a compile error.
-    pub fn foreign(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::new(RuntimeErrorCode::ForeignCode(code.into()), message)
+    pub fn foreign(
+        code: impl Into<String>,
+        cause: TurnFailureCause,
+        message: impl Into<String>,
+    ) -> Self {
+        let mut error = Self::new(RuntimeErrorCode::ForeignCode(code.into()), message);
+        error.foreign_cause = Some(cause);
+        error
     }
 
     /// Marks this error as the journaled record of a failed effect — the
@@ -1626,6 +1473,33 @@ impl RuntimeEffectControllerError {
     pub fn into_journaled(mut self) -> Self {
         self.journaled = true;
         self
+    }
+
+    /// Whether retrying cannot succeed without a host-side change: a terminal
+    /// cause, a foreign code its host minted as an outcome, or a terminal
+    /// code.
+    pub fn is_terminal(&self) -> bool {
+        self.cause.is_some()
+            || match self.foreign_cause {
+                Some(cause) => cause == TurnFailureCause::Outcome,
+                None => self.code.is_terminal(),
+            }
+    }
+
+    /// The cause class of a turn this error fails (FIG-3575).
+    ///
+    /// A journaled error is the recorded outcome of its effect whatever its
+    /// code (FIG-3528: journaled outcomes stay on the result surface), so a
+    /// redrive replays it as the same recorded failure instead of aborting on
+    /// it forever. Any other error is an outcome exactly when it is terminal.
+    pub fn turn_failure_cause(&self) -> TurnFailureCause {
+        if self.journaled || self.cause.is_some() {
+            return TurnFailureCause::Outcome;
+        }
+        match self.foreign_cause {
+            Some(cause) => cause,
+            None => self.code.turn_failure_cause(),
+        }
     }
 
     /// Sets the summary carried by a `RuntimeEffectControllerError` for effect-host implementors
@@ -1654,9 +1528,11 @@ impl RuntimeEffectControllerError {
             summary,
             cause,
             journaled: _,
+            foreign_cause,
         } = self;
         let mut runtime = RuntimeError::new(code, message);
-        runtime.summary = summary;
+        runtime.summary = summary.map(Box::new);
+        runtime.foreign_cause = foreign_cause;
         match cause {
             Some(cause) => runtime.with_cause(cause),
             None => runtime,
@@ -1670,9 +1546,10 @@ impl From<RuntimeError> for RuntimeEffectControllerError {
             journal_disposition: EffectErrorJournalDisposition::Terminal,
             code: err.code,
             message: err.message,
-            summary: err.summary,
+            summary: err.summary.map(|summary| *summary),
             cause: err.cause,
             journaled: false,
+            foreign_cause: err.foreign_cause,
         }
     }
 }
@@ -1723,6 +1600,7 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
             summary: None,
             cause,
             journaled: false,
+            foreign_cause: None,
         }
     }
 }

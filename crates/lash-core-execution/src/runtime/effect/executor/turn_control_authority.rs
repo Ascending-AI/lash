@@ -132,10 +132,9 @@ pub fn concrete_turn_cancellation_authority(
 /// Whether a controller journals its effects durably.
 ///
 /// One fixed fact about a controller, read synchronously. A `Journaled`
-/// controller owns turn-control reads through its own journal and aborts the
-/// invocation on a runtime-effect failure so the engine can replay it; a
-/// `Local` controller keeps turn control host-owned and records the failure
-/// on the turn.
+/// controller owns turn-control reads through its own journal; a `Local`
+/// controller keeps turn control host-owned. Turn-failure settlement never
+/// reads it: a failure settles by its cause on every host (FIG-3575).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EffectJournaling {
     Local,

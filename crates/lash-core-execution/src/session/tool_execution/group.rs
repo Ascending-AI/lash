@@ -594,7 +594,16 @@ impl RuntimeExecutionContext<'_> {
                     self.retain_outstanding_group(handle);
                     return Err(error);
                 }
-                (_, Err(error)) => {
+                // A child that refused with a live fault (`ControllerAborted`:
+                // its attempt's journal claim, renew or finalize failed) is a
+                // refusal, not the tool's settlement, even where the group
+                // sealed it as the child's `Failed` terminal. It aborts the
+                // turn as the live fault it is (FIG-3528, FIG-3575); only a
+                // child's recorded outcome stays on the result surface.
+                (_, Err(mut error)) => {
+                    if error.code.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+                        error.journaled = false;
+                    }
                     self.retain_outstanding_group(handle);
                     return Err(error);
                 }

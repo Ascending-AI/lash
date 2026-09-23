@@ -57,6 +57,7 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
             if self.nested_error {
                 ctx.record_nested_effect_error(lash_core::RuntimeEffectControllerError::foreign(
                     "injected_exec_handoff_failure",
+                    lash_core::TurnFailureCause::LiveFault,
                     "injected code-effect response handoff failure",
                 ));
                 return Err(lash_core::SessionError::Protocol(

@@ -13,6 +13,8 @@ mod attempt_atomicity;
 mod checkpoint_commit_delete_race;
 #[path = "commit_size_benchmark.rs"]
 mod commit_size_benchmark;
+#[path = "failure_settlement.rs"]
+mod failure_settlement;
 #[path = "orphaned_tombstone_reclaim.rs"]
 mod orphaned_tombstone_reclaim;
 #[path = "parent_end_payload.rs"]
