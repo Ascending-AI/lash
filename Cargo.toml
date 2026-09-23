@@ -96,8 +96,7 @@ license = "MIT"
 edition = "2024"
 authors = ["Samuel Galanakis"]
 repository = "https://github.com/Ascending-AI/lash"
-homepage = "https://samgalanakis.github.io/lash/"
-documentation = "https://samgalanakis.github.io/lash/"
+homepage = "https://github.com/Ascending-AI/lash"
 readme = "README.md"
 rust-version = "1.90"
 

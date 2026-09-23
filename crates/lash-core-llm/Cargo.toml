@@ -6,7 +6,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 description = "Provider handle, model resolution and LLM call vocabulary for the lash runtime kernel."

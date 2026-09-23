@@ -6,7 +6,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 description = "Sans-IO protocol kernel for the lash agent runtime. Pure types and state machine; no IO or async."

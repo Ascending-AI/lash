@@ -7,7 +7,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 description = "The ECMA-exact TypeScript dialect front-end for the Lash heap VM."
