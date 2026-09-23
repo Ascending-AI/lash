@@ -398,6 +398,11 @@ pub enum RuntimeEffectCommand {
     Process {
         command: Box<ProcessCommand>,
     },
+    /// Run one code cell against the session's interpreter.
+    ///
+    /// Never journaled on any host: replay re-executes the cell, and every
+    /// nested effect the cell issues is journaled and replayed on its own
+    /// replay key (ADR 0103). See [`Self::replays_by_reexecution`].
     ExecCode {
         language: String,
         code: String,
@@ -453,6 +458,20 @@ impl RuntimeEffectCommand {
         Self::Process {
             command: Box::new(command),
         }
+    }
+
+    /// Whether every host answers this command by running the local executor
+    /// again on replay instead of serving a recorded outcome (ADR 0103).
+    ///
+    /// True for [`ExecCode`](Self::ExecCode) only. A code cell's outcome is
+    /// not the whole of its effect: the cell also mutates interpreter globals
+    /// and deferred-resolution records, which the turn's final commit
+    /// snapshots. A recorded `ExecResponse` cannot rebuild that state, so
+    /// replay re-runs the cell deterministically, and the cell's own LLM, tool
+    /// and durable effects answer from their journal rows. Restate maps the
+    /// command to a direct local call; the journal-row hosts skip the claim.
+    pub fn replays_by_reexecution(&self) -> bool {
+        matches!(self, Self::ExecCode { .. })
     }
 
     pub fn kind(&self) -> RuntimeEffectKind {

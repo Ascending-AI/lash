@@ -88,21 +88,12 @@ async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution
     .with_replay_attribution(lash_core_execution::RuntimeReplayAttribution::ToolIntent(
         v1_identity,
     ));
-    let command = lash_core_execution::RuntimeEffectCommand::ExecCode {
-        language: "cutover-witness".to_string(),
-        code: "return 1".to_string(),
+    let command = lash_core_execution::RuntimeEffectCommand::LanguageRuntimeValue {
+        operation: "cutover-witness".to_string(),
     };
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let outcome = || lash_core_execution::RuntimeEffectOutcome::ExecCode {
-        result: Box::new(Ok(lash_core_execution::ExecResponse {
-            observations: Vec::new(),
-            calls: Vec::new(),
-            printed_images: Vec::new(),
-            error: None,
-            duration_ms: 0,
-            degraded_bindings: Vec::new(),
-            terminal_finish: None,
-        })),
+    let outcome = || lash_core_execution::RuntimeEffectOutcome::LanguageRuntimeValue {
+        value: serde_json::Value::Null,
     };
 
     let first_executions = Arc::clone(&executions);
@@ -941,9 +932,8 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
             lash_core_execution::RuntimeAttribution::for_turn("cold-session", "cold-turn", 1, 0),
             "cold-effect",
         ),
-        lash_core_execution::RuntimeEffectCommand::ExecCode {
-            language: "conformance".to_string(),
-            code: "external-effect".to_string(),
+        lash_core_execution::RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "external-effect".to_string(),
         },
     );
     let options = SqliteEffectReplayOptions {
@@ -1008,16 +998,8 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
                 &scope,
                 envelope,
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
-                    Ok(RuntimeEffectOutcome::ExecCode {
-                        result: Box::new(Ok(lash_core_execution::ExecResponse {
-                            observations: Vec::new(),
-                            calls: Vec::new(),
-                            printed_images: Vec::new(),
-                            error: None,
-                            duration_ms: 0,
-                            degraded_bindings: Vec::new(),
-                            terminal_finish: Some(serde_json::json!("recorded")),
-                        })),
+                    Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
+                        value: serde_json::json!("recorded"),
                     })
                 }),
                 None,

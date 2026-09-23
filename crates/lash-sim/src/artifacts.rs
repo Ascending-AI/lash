@@ -614,9 +614,9 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             boundary_kind: "exec_code",
             status: "runtime_effect_controller_backed_with_reviewed_shell_launch_ceiling",
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ExecCode, RuntimeEffectLocalExecutor, RuntimeEffectOutcome::ExecCode, and ExecResponse",
-            model_only_scope: "host shell/kernel process launch remains excluded; generated memory runs and generated SQLite dynamic reruns execute the production runtime effect-controller boundary with scripted no-shell ExecResponse outcomes",
+            model_only_scope: "host shell/kernel process launch remains excluded; generated memory runs and generated SQLite dynamic reruns pass the boundary through the production runtime effect controller with scripted no-shell ExecResponse outcomes. ExecCode replays by re-execution on every host (ADR 0103), so on the SQLite and Postgres controllers this boundary is a direct local-executor call that writes no journal row and is re-run, never served, on replay",
             oracle_id: "sim.oracle.exec-code-observed.v1",
-            artifact_evidence: "exec-code events carry runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, runtime_effect_outcome, exit-code data, and generated SQLite divergence artifacts on mismatch",
+            artifact_evidence: "exec-code events carry runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, runtime_effect_outcome from the local executor on every pass, exit-code data, and generated SQLite divergence artifacts on mismatch",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "process_wake",

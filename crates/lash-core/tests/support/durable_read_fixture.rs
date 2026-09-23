@@ -1045,7 +1045,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             }),
         )
         .await
-        .expect("persist fixture runtime-effect replay row");
+        .expect("run the fixture code cell (ADR 0103: it leaves no journal row)");
 
     let wake_batch = handles
         .runtime
@@ -1767,6 +1767,12 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         "await_event_unknown_or_revoked"
     );
 
+    // ADR 0103: the fixture's completed `exec_code` row was written before
+    // code cells stopped being journaled. It is inert: replaying the same
+    // envelope never serves it and re-runs the cell instead, which is how a
+    // pre-cutover in-flight turn rebuilds its interpreter state on redrive.
+    let reexecuted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reexecuted_by_executor = Arc::clone(&reexecuted);
     let replayed_effect = handles
         .effects
         .scoped(AdmittedScope::turn(SESSION_ID, "durable-read-effect-turn"))
@@ -1774,36 +1780,36 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .controller()
         .execute_effect(
             fixture_effect_envelope(),
-            RuntimeEffectLocalExecutor::unavailable(),
+            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                reexecuted_by_executor.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(RuntimeEffectOutcome::ExecCode {
+                    result: Box::new(Ok(ExecResponse {
+                        observations: Vec::new(),
+                        calls: Vec::new(),
+                        printed_images: Vec::new(),
+                        error: None,
+                        duration_ms: 0,
+                        degraded_bindings: Vec::new(),
+                        terminal_finish: Some(serde_json::json!("re-executed")),
+                    })),
+                })
+            }),
         )
         .await
-        .expect("durable fixture drift: completed runtime effect did not replay");
+        .expect("durable fixture drift: a code cell must re-execute over its pre-cutover row");
+    assert!(
+        reexecuted.load(std::sync::atomic::Ordering::SeqCst),
+        "durable fixture semantic drift: a pre-cutover exec_code row was served instead of re-executing the cell"
+    );
     let RuntimeEffectOutcome::ExecCode { result } = replayed_effect else {
         panic!("durable fixture semantic drift: runtime-effect replay outcome kind changed");
     };
-    let response = result.expect("durable fixture semantic drift: exec effect became an error");
-    assert_eq!(response.observations.len(), 1);
-    assert!(response.calls.is_empty());
-    assert_eq!(response.observations[0].text, "durable read effect");
     assert_eq!(
-        response.observations[0].projection,
-        TextProjectionMetadata {
-            truncated: false,
-            original_chars: 19,
-            projected_chars: 19,
-            original_lines: 1,
-            projected_lines: 1,
-            limit: 50 * 1024,
-            limit_mode: "bytes".to_string(),
-            max_lines: 2_000,
-        },
-        "durable fixture semantic drift: observation projection changed"
-    );
-    assert_eq!(response.duration_ms, 887);
-    assert_eq!(
-        response.terminal_finish,
-        Some(serde_json::json!({"fixture": 887})),
-        "durable fixture semantic drift: runtime-effect replay payload changed"
+        result
+            .expect("durable fixture semantic drift: exec effect became an error")
+            .terminal_finish,
+        Some(serde_json::json!("re-executed")),
+        "durable fixture semantic drift: the re-executed cell's response was replaced by the pre-cutover row"
     );
 }
 

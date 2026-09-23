@@ -118,6 +118,9 @@ SELECT settlement_seq, replay_key, status, outcome_json, error_json
 === effect::replay::ReplayStatements | effect_replay.select_settlement_seq
 SELECT settlement_seq FROM lash_runtime_effect_replay
              WHERE scope_id = $1 AND replay_key = $2
+=== effect::replay::ReplayStatements | effect_replay.delete_ungrouped_by_key
+DELETE FROM lash_runtime_effect_replay
+             WHERE scope_id = $1 AND replay_key = $2 AND group_key IS NULL
 === effect::replay::ReplayStatements | effect_replay.delete_by_session
 DELETE FROM lash_runtime_effect_replay WHERE session_id = $1
 === effect::replay::ReplayStatements | effect_replay.delete_by_scope

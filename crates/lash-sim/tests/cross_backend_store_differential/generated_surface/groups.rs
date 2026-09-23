@@ -358,9 +358,11 @@ pub(super) fn postgres_group_options() -> PostgresEffectReplayOptions {
     }
 }
 
-/// The group a script opens: `children` `ExecCode` children (any command the
-/// driver delegates to the local executor works; `Sleep` is answered by the
-/// driver itself and would never park), `All` wake, declared disposition.
+/// The group a script opens: `children` `LanguageRuntimeValue` children (any
+/// journaled command the driver delegates to the local executor works; `Sleep`
+/// is answered by the driver itself and would never park, and `ExecCode` is
+/// never journaled so it cannot be a group child), `All` wake, declared
+/// disposition.
 #[expect(
     clippy::expect_used,
     reason = "test support: generated group shapes are constructed admitted; a refusal is a harness defect"
@@ -378,9 +380,8 @@ pub(super) fn surface_group(group: u8, children: u8, cancel_losers: bool) -> Run
                     RuntimeAttribution::for_turn(SURFACE_GROUP_SESSION, SURFACE_GROUP_TURN, 1, 0),
                     replay_key,
                 ),
-                RuntimeEffectCommand::ExecCode {
-                    language: "surface-group".to_string(),
-                    code: format!("{key}:{position}"),
+                RuntimeEffectCommand::LanguageRuntimeValue {
+                    operation: format!("surface-group:{key}:{position}"),
                 },
             )
         })

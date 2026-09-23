@@ -102,6 +102,29 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .map_err(effect_sqlite_error)
     }
 
+    async fn discard_reexecuted_row(
+        &self,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let scope_id = scope_id.to_string();
+        let replay_key = replay_key.to_string();
+        self.conn
+            .call(move |connection| {
+                connection
+                    .execute(
+                        effect_sql(Schema::Main)
+                            .replay
+                            .delete_ungrouped_by_key
+                            .sql(),
+                        params![scope_id, replay_key],
+                    )
+                    .map(|_| ())
+            })
+            .await
+            .map_err(effect_sqlite_error)
+    }
+
     /// Writes the terminal and, for a grouped child, contests the group's §4
     /// linearization point — in the normative order (N1, extended by ADR 0099).
     ///

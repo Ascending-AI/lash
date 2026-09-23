@@ -118,6 +118,9 @@ SELECT settlement_seq, replay_key, status, outcome_json, error_json
 === main | effect::replay::ReplayStatements | effect_replay.select_settlement_seq
 SELECT settlement_seq FROM main.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2
+=== main | effect::replay::ReplayStatements | effect_replay.delete_ungrouped_by_key
+DELETE FROM main.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key IS NULL
 === main | effect::replay::ReplayStatements | effect_replay.delete_by_session
 DELETE FROM main.runtime_effect_replay WHERE session_id = ?1
 === main | effect::replay::ReplayStatements | effect_replay.delete_by_scope
@@ -430,6 +433,9 @@ SELECT settlement_seq, replay_key, status, outcome_json, error_json
 === effect_journal | effect::replay::ReplayStatements | effect_replay.select_settlement_seq
 SELECT settlement_seq FROM effect_journal.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.delete_ungrouped_by_key
+DELETE FROM effect_journal.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key IS NULL
 === effect_journal | effect::replay::ReplayStatements | effect_replay.delete_by_session
 DELETE FROM effect_journal.runtime_effect_replay WHERE session_id = ?1
 === effect_journal | effect::replay::ReplayStatements | effect_replay.delete_by_scope
@@ -742,6 +748,9 @@ SELECT settlement_seq, replay_key, status, outcome_json, error_json
 === process_registry | effect::replay::ReplayStatements | effect_replay.select_settlement_seq
 SELECT settlement_seq FROM process_registry.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2
+=== process_registry | effect::replay::ReplayStatements | effect_replay.delete_ungrouped_by_key
+DELETE FROM process_registry.runtime_effect_replay
+             WHERE scope_id = ?1 AND replay_key = ?2 AND group_key IS NULL
 === process_registry | effect::replay::ReplayStatements | effect_replay.delete_by_session
 DELETE FROM process_registry.runtime_effect_replay WHERE session_id = ?1
 === process_registry | effect::replay::ReplayStatements | effect_replay.delete_by_scope

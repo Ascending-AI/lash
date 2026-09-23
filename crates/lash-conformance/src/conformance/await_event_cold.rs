@@ -460,13 +460,13 @@ where
         .expect("a retired scope still binds a controller")
         .controller()
         .execute_effect(
-            super::effect_host::exec_code_conformance_envelope(
+            super::effect_host::journaled_conformance_envelope(
                 &scope,
                 &format!("{prefix}-post-retirement-effect"),
                 "post-retirement-envelope",
             ),
             RuntimeEffectLocalExecutor::testing(|_| async {
-                Ok(super::effect_host::replay_conformance_exec_outcome(
+                Ok(super::effect_host::replay_conformance_value_outcome(
                     "never-admitted",
                 ))
             }),

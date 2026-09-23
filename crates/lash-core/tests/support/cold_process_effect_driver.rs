@@ -82,9 +82,8 @@ fn effect_envelope(
             lash_core::RuntimeAttribution::for_turn(session_id, turn_id, 1, 0),
             replay_key.clone(),
         ),
-        lash_core::RuntimeEffectCommand::ExecCode {
-            language: "conformance".to_string(),
-            code: "external-effect".to_string(),
+        lash_core::RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "external-effect".to_string(),
         },
     )
 }
@@ -100,15 +99,7 @@ fn append_effect_marker(path: &std::path::Path, value: &str) {
 }
 
 fn effect_outcome(marker: &str) -> lash_core::RuntimeEffectOutcome {
-    lash_core::RuntimeEffectOutcome::ExecCode {
-        result: Box::new(Ok(lash_core::ExecResponse {
-            observations: Vec::new(),
-            calls: Vec::new(),
-            printed_images: Vec::new(),
-            error: None,
-            duration_ms: 0,
-            degraded_bindings: Vec::new(),
-            terminal_finish: Some(serde_json::json!(marker)),
-        })),
+    lash_core::RuntimeEffectOutcome::LanguageRuntimeValue {
+        value: serde_json::json!(marker),
     }
 }

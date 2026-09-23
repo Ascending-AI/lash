@@ -207,6 +207,13 @@ lash_conformance::effect_controller_replay_tests!(
                 assert!(runs.iter().any(|name| name.ends_with(":effect-fast")));
             }
             "effect-controller-journaled-replay" => {}
+            "effect-controller-code-cell-reexecution" => {
+                assert!(
+                    runs.iter()
+                        .all(|name| !name.contains("code-cell-reexecution:cell")),
+                    "a code cell is a direct local call, never a recorded run: {runs:?}"
+                );
+            }
             unknown => panic!("unexpected Restate replay conformance law: {unknown}"),
         }
     }

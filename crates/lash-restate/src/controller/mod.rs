@@ -1564,6 +1564,10 @@ pub(crate) fn restate_effect_execution(
                 command,
             }
         }
+        // ADR 0103: the one command that replays by re-execution
+        // (`RuntimeEffectCommand::replays_by_reexecution`) is never recorded;
+        // the direct local call re-runs it on every replay, and the nested
+        // effects it issues journal under their own names.
         command @ RuntimeEffectCommand::ExecCode { .. } => RestateEffectExecution::DirectLocal {
             envelope: RuntimeEffectEnvelope {
                 invocation,
