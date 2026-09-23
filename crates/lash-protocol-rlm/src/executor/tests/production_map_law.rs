@@ -95,6 +95,7 @@ async fn run_cell(source: &str) -> Vec<lash_core::facade_support::TraceRecord> {
     let sink = Arc::new(RecordingSink::default());
     let context =
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+            crate::testing::memory_backend_ports().await,
             Arc::new(BindingRecordingDeferredProvider {
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 observed_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -467,12 +468,11 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         )),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
+        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
         processes,
-        effect_host,
-        process_env_store,
         lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
             session_policy,

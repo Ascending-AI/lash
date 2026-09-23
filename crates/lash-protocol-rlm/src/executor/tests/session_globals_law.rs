@@ -12,8 +12,9 @@
 
 use super::*;
 
-fn context() -> lash_core::RuntimeExecutionContext<'static> {
+async fn context() -> lash_core::RuntimeExecutionContext<'static> {
     lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+        crate::testing::memory_backend_ports().await,
         Arc::new(BindingRecordingDeferredProvider {
             executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             observed_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -32,7 +33,7 @@ fn context() -> lash_core::RuntimeExecutionContext<'static> {
 }
 
 async fn run(state: &mut RlmExecutionState, code: &str) -> lash_core::ExecResponse {
-    run_in(state, context(), code).await
+    run_in(state, context().await, code).await
 }
 
 async fn run_in(
@@ -105,12 +106,11 @@ async fn process_context() -> lash_core::RuntimeExecutionContext<'static> {
         engines: fixture_process_engines(artifact_store, LashlangSurface::default()),
     });
     lash_core::testing::code_execution_context_with_process_dependencies(
+        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
         processes,
-        effect_host,
-        process_env_store,
         lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
             session_policy,

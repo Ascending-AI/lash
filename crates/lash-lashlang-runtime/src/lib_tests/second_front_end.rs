@@ -557,8 +557,7 @@ async fn run_worker(
         lash_core::RuntimeAttribution::none(),
         "process-body",
     );
-    let built = lash_core::testing::TestExecutionContextBuilder::new()
-        .borrowed_effect_controller(scoped.clone())
+    let built = lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone())
         .runtime_parent_invocation(parent)
         .build();
     let plugins = Arc::clone(&built.dispatch.plugins);

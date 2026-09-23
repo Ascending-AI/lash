@@ -179,9 +179,8 @@ async fn run_counted(
         )),
     )
     .expect("valid process scope");
-    let built = lash_core::testing::TestExecutionContextBuilder::new()
-        .borrowed_effect_controller(scoped.clone())
-        .build();
+    let built =
+        lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone()).build();
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
     let registry: Arc<dyn lash_core::ProcessRegistry> =
