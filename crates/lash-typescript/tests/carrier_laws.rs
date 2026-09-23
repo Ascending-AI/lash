@@ -45,21 +45,23 @@ try {
 const doubled = items.map((item) => item * 2);
 finish(doubled);
 "#,
-    // A process literal with a multi-statement loop, and a nested literal.
+    // A const-bound process literal with a multi-statement loop. TypeScript
+    // lifts `const`-bound module-level arrows; an async arrow anywhere else is
+    // a closure, which the lens has no spelling for, so no nested literal can
+    // reach a draft.
     r#"const worker = async (limit: number) => {
   for (const step of [1, 2]) {
     await tools.echo({ value: step });
     await tools.echo({ value: limit });
   }
-  const handle = await processes.start({
-    definition: async () => {
-      await tools.echo({ value: "inner" });
-      return 1;
-    }
-  });
   return 2;
 };
 const started = await processes.start({ definition: worker, args: { limit: 3 } });
+const inner = async () => {
+  await tools.echo({ value: "inner" });
+  return 1;
+};
+const second = await processes.start({ definition: inner });
 finish("started");
 "#,
     // Non-canonically formatted source.
@@ -178,11 +180,18 @@ fn descendants(node: &lashlang::WorkflowNode) -> Vec<&lashlang::WorkflowNode> {
 
 #[test]
 fn l4_draft_and_admitted_projections_agree() {
+    let environment = test_environment();
     for source in CORPUS {
         let draft = workflow_graph_from_source(source).expect("corpus source projects");
+        let admitted_draft =
+            lash_typescript::workflow_graph::workflow_graph_from_source_with_facets(
+                source,
+                Some(&environment),
+            )
+            .expect("corpus source projects with facets");
         let linked = link(source);
         let admitted =
-            lashlang::workflow_graph_from_artifact(&linked.artifact, &TypeScriptStatementText);
+            lash_typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
         assert_eq!(
             process_owners(&draft),
             process_owners(&admitted),
@@ -193,9 +202,37 @@ fn l4_draft_and_admitted_projections_agree() {
             node_ids(&admitted),
             "draft and admitted node ids agree:\n{source}"
         );
+        assert_eq!(draft.source_identity, None, "a draft claims no identity");
         assert_eq!(
-            draft.source_identity, admitted.source_identity,
+            admitted_draft.source_identity,
+            Some(linked.artifact.source_identity()),
+            "an admitted source names its artifact's identity:\n{source}"
+        );
+        assert_eq!(
+            admitted.source_identity, admitted_draft.source_identity,
             "draft and admitted source identity agree:\n{source}"
+        );
+        // Edit/render/reparse/admit reaches a fixed point: the canonical
+        // rendering renders to itself and re-admits to the same module.
+        let rendered = lash_typescript::workflow_graph::workflow_graph_to_source(&draft)
+            .expect("the draft renders");
+        let reprojected = workflow_graph_from_source(&rendered)
+            .unwrap_or_else(|error| panic!("rendered source projects: {error}\n{rendered}"));
+        assert_eq!(
+            node_ids(&draft),
+            node_ids(&reprojected),
+            "fixed point:\n{source}"
+        );
+        let rerendered = lash_typescript::workflow_graph::workflow_graph_to_source(&reprojected)
+            .expect("the reprojection renders");
+        assert_eq!(
+            rendered, rerendered,
+            "rendering is a fixed point:\n{source}"
+        );
+        assert_eq!(
+            link(&rendered).artifact.source_identity(),
+            link(&rerendered).artifact.source_identity(),
+            "re-admitting the fixed point is the same module:\n{source}"
         );
     }
 }

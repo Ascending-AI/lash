@@ -5,10 +5,6 @@ use lash_trace::{
     TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
 };
 
-pub fn trace_lashlang_source_identity(artifact: &lashlang::ModuleArtifact) -> String {
-    artifact.source_identity()
-}
-
 /// The admitted artifact's graph: identity, structure and sites, with no
 /// dialect text (a trace map carries none).
 fn artifact_graph(artifact: &lashlang::ModuleArtifact) -> lashlang::WorkflowGraph {

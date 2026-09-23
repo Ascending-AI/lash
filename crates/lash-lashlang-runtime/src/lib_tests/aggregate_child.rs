@@ -357,7 +357,7 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         subject: lash_trace::TraceRuntimeSubject::Process {
             process_id: lash_core::ProcessId::from("loop-branch"),
         },
-        source_identity: trace_lashlang_source_identity(&output.artifact),
+        source_identity: output.artifact.source_identity(),
         module_ref: output.module_ref.to_string(),
         entry_kind: "main".to_string(),
         entry_ref: None,

@@ -37,6 +37,7 @@ impl Default for RunTiming {
 pub(crate) struct PreparedRun {
     compiled: lash::rlm::lang::CompiledProgram,
     workflow_version: u64,
+    definition: String,
     run_id: String,
 }
 
@@ -66,16 +67,40 @@ impl PreparedRun {
             Some(linked.spans()),
         )
         .context("compile saved workflow process")?;
+        // The overlay binds to the admitted artifact: every node of the saved
+        // graph must be a node of the artifact's own view.
+        let admitted =
+            lash::typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
+        let admitted_ids = admitted
+            .nodes()
+            .map(|node| node.id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        if let Some(node) = graph.nodes().find(|node| !admitted_ids.contains(&node.id)) {
+            return Err(anyhow!(
+                "saved workflow node `{}` is not a node of its admitted artifact",
+                node.id
+            ));
+        }
+        let definition = admitted
+            .source_identity
+            .unwrap_or_else(|| linked.artifact.source_identity());
         Ok(Self {
             compiled,
             workflow_version,
+            definition,
             run_id: uuid::Uuid::new_v4().to_string(),
         })
     }
 
     pub(crate) async fn execute(self, sender: mpsc::Sender<RunEvent>, timing: RunTiming) {
         let host = LanguageTraceHost::new(
-            RunHost::new(sender, self.run_id, self.workflow_version, timing),
+            RunHost::new(
+                sender,
+                self.run_id,
+                self.workflow_version,
+                self.definition,
+                timing,
+            ),
             RunHost::project_language_trace,
         );
         let environment = ExecutionEnvironment::new(&host).process();
@@ -159,6 +184,7 @@ struct RunHost {
     sender: mpsc::Sender<RunEvent>,
     run_id: String,
     workflow_version: u64,
+    definition: String,
     sequence: AtomicU64,
     display: Mutex<DisplayState>,
     pending_delta: Mutex<DisplayDelta>,
@@ -171,12 +197,14 @@ impl RunHost {
         sender: mpsc::Sender<RunEvent>,
         run_id: String,
         workflow_version: u64,
+        definition: String,
         timing: RunTiming,
     ) -> Self {
         Self {
             sender,
             run_id,
             workflow_version,
+            definition,
             sequence: AtomicU64::new(0),
             display: Mutex::new(DisplayState::default()),
             pending_delta: Mutex::new(DisplayDelta::default()),
@@ -191,6 +219,7 @@ impl RunHost {
         let _ = self.sender.try_send(RunEvent {
             run_id: self.run_id.clone(),
             workflow_version: self.workflow_version,
+            definition: self.definition.clone(),
             sequence,
             node_id,
             status,

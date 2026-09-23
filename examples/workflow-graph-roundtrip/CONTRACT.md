@@ -234,7 +234,7 @@ Every SSE frame is named `run_event`; its SSE `id` equals `sequence`:
 ```text
 event: run_event
 id: 7
-data: {"runId":"uuid","workflowVersion":2,"sequence":7,"nodeId":"call:stable-id","status":"succeeded","displayDelta":{"messagesAppended":["Welcome"]},"display":{"messages":["Welcome"],"statuses":{},"lists":{},"lights":{},"progress":0.0}}
+data: {"runId":"uuid","workflowVersion":2,"definition":"<source identity>","sequence":7,"nodeId":"call:stable-id","status":"succeeded","displayDelta":{"messagesAppended":["Welcome"]},"display":{"messages":["Welcome"],"statuses":{},"lists":{},"lights":{},"progress":0.0}}
 ```
 
 The data JSON shape is:
@@ -243,6 +243,7 @@ The data JSON shape is:
 {
   "runId": "fresh UUID per POST",
   "workflowVersion": 2,
+  "definition": "source identity of the admitted artifact",
   "sequence": 7,
   "nodeId": "call:stable-id",
   "status": "started",
@@ -276,7 +277,10 @@ terminal node's `succeeded` event is the final normal event.
 
 Every emitted event carries the runtime site's `nodeId` directly. That id
 refers to a node in the exact saved graph version identified by
-`workflowVersion`; no pairing map or join helper is involved. A preparation
+`workflowVersion`; no pairing map or join helper is involved. `definition` is
+the source identity of the admitted artifact the run executes. The run's
+program and the overlay's node ids come from that one artifact: preparation
+refuses a saved graph whose nodes are not nodes of the artifact's own view. A preparation
 failure before SSE starts is JSON with HTTP `500`; an execution failure is a
 correlated `failed` event before EOF.
 

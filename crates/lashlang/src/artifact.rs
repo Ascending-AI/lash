@@ -211,14 +211,17 @@ impl ModuleArtifact {
         Ok(())
     }
 
-    /// The definition identity a trace and an admitted graph both name.
+    /// The definition identity a trace and an admitted graph both name
+    /// (ADR 0100 R6): a digest of the artifact's span-free program in its
+    /// deterministic JSON encoding, under `lash-workflow-source/v4`. It never
+    /// depends on how a dialect would print the program.
     pub fn source_identity(&self) -> String {
         #[expect(
             clippy::expect_used,
             reason = "`Program` derives `Serialize` over plain data, so encoding it cannot fail"
         )]
-        let encoded = serde_json::to_string(&self.ir).expect("program serializes");
-        lash_sansio::core_support::blake3_domain_hash_hex("lash-workflow-source/v3", encoded)
+        let encoded = serde_json::to_vec(&self.ir).expect("program serializes");
+        lash_sansio::core_support::blake3_domain_hash_hex("lash-workflow-source/v4", encoded)
     }
 
     pub fn process_ref(&self, process_name: &str) -> Option<&ProcessRef> {

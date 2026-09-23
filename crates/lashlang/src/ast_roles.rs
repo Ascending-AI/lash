@@ -47,8 +47,11 @@ pub enum ProcessOrigin {
     Declared,
     /// Lifted by the linker from the inline process literal at `site`, the
     /// literal's path in the program before lifting. The lifted declaration's
-    /// name digests that literal's body and site ([`super::lifted_process_identity`]).
-    Lifted { site: AstPath },
+    /// name digests that literal's body and site
+    /// ([`super::lifted_process_identity`]). Its last `hidden_params`
+    /// parameters are the literal's hidden start arguments, not authored
+    /// parameters.
+    Lifted { site: AstPath, hidden_params: u32 },
 }
 
 impl ProcessOrigin {

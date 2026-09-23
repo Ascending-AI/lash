@@ -1345,7 +1345,6 @@ pub use process::{
     LASHLANG_SEGMENT_STATE_VERSION, TraceLanguageExecutionMapError, lashlang_process_event_types,
     lashlang_process_signal_event_types, lashlang_program_hash, lashlang_type_expr_schema,
     trace_lashlang_main_map, trace_lashlang_process_map, trace_lashlang_process_map_snapshot,
-    trace_lashlang_source_identity,
 };
 pub use typed_output::parse_output_schema;
 

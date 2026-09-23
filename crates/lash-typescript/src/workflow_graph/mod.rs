@@ -47,9 +47,11 @@ pub use printer::{
 ///
 /// The projection itself is `lashlang`'s ([`WorkflowGraphProjector`]); this
 /// dialect contributes the canonical text the node spans address and the text
-/// of opaque statements. Link errors become node diagnostics and never prevent
-/// graph projection. If no environment is supplied, the result is the ordinary
-/// facet-free graph.
+/// of opaque statements. A draft claims no runtime identity: with no
+/// environment its `source_identity` is `None`. With one, the source is also
+/// admitted (linked) against it, and the graph names the identity of the
+/// artifact it admits to; its node ids are that artifact's. Link errors become
+/// node diagnostics and never prevent graph projection.
 pub fn workflow_graph_from_source_with_facets(
     src: &str,
     environment: Option<&LashlangHostEnvironment>,
@@ -59,15 +61,80 @@ pub fn workflow_graph_from_source_with_facets(
     let canonical_program = crate::parse(&canonical)?;
     let analysis =
         environment.map(|environment| analyze_workflow_program(&canonical_program, environment));
-    let mut projector = WorkflowGraphProjector::new(&canonical_program)
-        .with_source_identity(source_identity(&canonical))
-        .with_spans(canonical_program.spans.clone());
+    let admitted = environment.and_then(|environment| {
+        crate::link(src, environment)
+            .ok()
+            .map(|linked| linked.artifact.source_identity())
+    });
+    let mut projector =
+        WorkflowGraphProjector::new(&canonical_program).with_spans(canonical_program.spans.clone());
+    if let Some(identity) = admitted {
+        projector = projector.with_source_identity(identity);
+    }
     if let Some(analysis) = analysis.as_ref() {
         projector = projector.with_analysis(analysis);
     }
     let mut graph = projector.project(&TypeScriptStatementText);
     present_loop_sources(&mut graph);
     Ok(graph)
+}
+
+/// The runnable view of an admitted module artifact: the graph of exactly the
+/// program the artifact executes, carrying its source identity, with spans
+/// addressing the artifact's canonical TypeScript text.
+///
+/// The artifact's program is printed and reparsed, and each canonical span is
+/// carried to the artifact path it describes: a lifted process's body sits
+/// under its literal's site in the text and under its declaration in the
+/// artifact ([`lashlang::ProcessOrigin::Lifted`]). A program with no
+/// TypeScript spelling projects with no spans.
+pub fn workflow_graph_from_artifact(artifact: &lashlang::ModuleArtifact) -> WorkflowGraph {
+    let mut graph = WorkflowGraphProjector::new(&artifact.ir)
+        .with_source_identity(artifact.source_identity())
+        .with_spans(canonical_artifact_spans(artifact).unwrap_or_default())
+        .project(&TypeScriptStatementText);
+    present_loop_sources(&mut graph);
+    graph
+}
+
+fn canonical_artifact_spans(
+    artifact: &lashlang::ModuleArtifact,
+) -> Option<std::collections::BTreeMap<lashlang::AstPath, lashlang::Span>> {
+    let canonical = typescript_program_source(&artifact.ir).ok()?;
+    let draft = crate::parse(&canonical).ok()?;
+    // Deepest site first, so a nested literal maps to its own declaration.
+    let mut sites = artifact
+        .ir
+        .declarations
+        .iter()
+        .enumerate()
+        .filter_map(|(index, declaration)| match declaration {
+            Declaration::Process(ProcessDecl {
+                origin: lashlang::ProcessOrigin::Lifted { site, .. },
+                ..
+            }) if site.root == lashlang::AstRoot::Main => {
+                Some((u32::try_from(index).ok()?, site.steps.clone()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    sites.sort_by_key(|(_, site)| std::cmp::Reverse(site.len()));
+    let spans = draft
+        .spans
+        .into_iter()
+        .map(|(path, span)| {
+            if path.root != lashlang::AstRoot::Main {
+                return (path, span);
+            }
+            let lifted = sites.iter().find_map(|(index, site)| {
+                let rest = path.steps.strip_prefix(site.as_slice())?;
+                let body = rest.strip_prefix(&[0])?;
+                Some(lashlang::AstPath::declaration(*index, body.to_vec()))
+            });
+            (lifted.unwrap_or(path), span)
+        })
+        .collect();
+    Some(spans)
 }
 
 /// Shows a `for .. of` loop's authored source in its container.
@@ -243,11 +310,6 @@ impl WorkflowStatementText for TypeScriptStatementText {
     fn statement_text(&self, statement: &Expr, available: &[String]) -> String {
         statement_text(statement, available)
     }
-}
-
-/// Hashes the draft projection's canonical source.
-fn source_identity(canonical: &str) -> String {
-    lash_sansio::core_support::blake3_domain_hash_hex("lash-workflow-source/v3", canonical)
 }
 
 /// Rebuild the process wrapper around an authored run body.

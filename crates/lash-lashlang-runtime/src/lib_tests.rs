@@ -1039,7 +1039,7 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
         lashlang::workflow_graph_from_artifact(&output.artifact, &lashlang::NoStatementText);
     let trace_map = trace_lashlang_main_map(&output.artifact);
     assert_eq!(
-        trace_lashlang_source_identity(&output.artifact),
+        Some(output.artifact.source_identity()),
         trace_graph.source_identity,
         "the trace integration must retain the projector's source identity"
     );

@@ -33,6 +33,8 @@ use lashlang::{
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessLiteralExpr,
     Program, ResourceRefExpr, StructuralRole, UnaryOp,
 };
+use std::collections::BTreeMap;
+
 use thiserror::Error;
 
 #[cfg(test)]
@@ -65,7 +67,7 @@ type Printed = Result<String, TypeScriptSourceError>;
 pub fn typescript_program_source(program: &Program) -> Printed {
     #[cfg(test)]
     PROGRAM_PRINT_COUNT.with(|count| count.set(count.get() + 1));
-    Printer.program(program)
+    Printer::for_program(program).program(program)
 }
 
 #[cfg(test)]
@@ -87,7 +89,7 @@ pub(super) fn program_print_count() -> usize {
 ///
 /// This is the textual form carried by editable workflow-graph node fields.
 pub fn typescript_expression_source(expression: &Expr) -> Printed {
-    Printer.statement_expression(expression)
+    Printer::PLAIN.statement_expression(expression)
 }
 
 /// Print one statement as canonical TypeScript.
@@ -97,7 +99,7 @@ pub fn typescript_expression_source(expression: &Expr) -> Printed {
 /// opaque node, which owns a whole statement rather than one expression.
 pub fn typescript_statement_source(expression: &Expr, bound: &[String]) -> Printed {
     let mut bound = bound.to_vec();
-    Ok(Printer
+    Ok(Printer::PLAIN
         .statement(expression, 0, &mut bound)?
         .trim_end()
         .to_string())
@@ -105,12 +107,38 @@ pub fn typescript_statement_source(expression: &Expr, bound: &[String]) -> Print
 
 /// Print one assignment target as canonical TypeScript.
 pub fn typescript_assign_target_source(target: &AssignTarget) -> Printed {
-    Printer.assign_target(target)
+    Printer::PLAIN.assign_target(target)
 }
 
-struct Printer;
+/// The printer, with the program's lifted process declarations in view: an
+/// admitted program references a lifted literal by its declaration, and that
+/// reference prints back as the literal it was lifted from.
+struct Printer<'p> {
+    lifted: BTreeMap<&'p str, &'p ProcessDecl>,
+}
 
-impl Printer {
+impl Printer<'static> {
+    const PLAIN: Self = Self {
+        lifted: BTreeMap::new(),
+    };
+}
+
+impl<'p> Printer<'p> {
+    fn for_program(program: &'p Program) -> Self {
+        Self {
+            lifted: program
+                .declarations
+                .iter()
+                .filter_map(|declaration| match declaration {
+                    Declaration::Process(process) if process.origin.is_lifted() => {
+                        Some((process.name.as_str(), process))
+                    }
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
     fn program(&self, program: &Program) -> Printed {
         let mut out = String::new();
         let processes = program
@@ -167,7 +195,9 @@ impl Printer {
         }
 
         for process in &processes {
-            if !emitted_processes.contains(&process.name.to_string()) {
+            // A lifted literal prints wherever the program references it.
+            if !emitted_processes.contains(&process.name.to_string()) && !process.origin.is_lifted()
+            {
                 return Err(TypeScriptSourceError::Unrepresentable {
                     kind: "a process declaration with no binding in the module body",
                 });
@@ -207,8 +237,7 @@ impl Printer {
         let body = process_run_body(process).ok_or(TypeScriptSourceError::Unrepresentable {
             kind: "a process body that is not the lowerer's process wrapper",
         })?;
-        let params = process
-            .params
+        let params = authored_params(process)
             .iter()
             .map(|param| self.identifier("process parameter", param.name.as_str()))
             .collect::<Result<Vec<_>, _>>()?;
@@ -222,8 +251,7 @@ impl Printer {
             self.identifier("process binding", binding)?,
             params.join(", "),
         ));
-        let mut run_bound = process
-            .params
+        let mut run_bound = authored_params(process)
             .iter()
             .map(|param| param.name.to_string())
             .collect::<Vec<_>>();
@@ -476,7 +504,26 @@ impl Printer {
                 self.expression(then_block)?,
                 self.expression(else_block)?
             )),
-            Expr::ProcessRef { process } => self.identifier("process", process.as_str()),
+            Expr::ProcessRef { process } => match self.lifted.get(process.as_str()) {
+                Some(lifted) => {
+                    let body =
+                        process_run_body(lifted).ok_or(TypeScriptSourceError::Unrepresentable {
+                            kind: "a process body that is not the lowerer's wrapper",
+                        })?;
+                    let params = authored_params(lifted);
+                    let printed = params
+                        .iter()
+                        .map(|param| self.identifier("process parameter", param.name.as_str()))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let mut bound = params.iter().map(|param| param.name.to_string()).collect();
+                    Ok(format!(
+                        "async ({}) => {}",
+                        printed.join(", "),
+                        self.block(body, 0, &mut bound)?
+                    ))
+                }
+                None => self.identifier("process", process.as_str()),
+            },
             Expr::ResourceRef(resource) => self.resource_ref(resource),
             Expr::HostDescriptorConstructor { type_name, .. } => {
                 Err(TypeScriptSourceError::UnknownHostDescriptorConstructor {
@@ -842,6 +889,16 @@ impl Printer {
     }
 }
 
+/// A process's authored parameters: a lifted literal's hidden start arguments
+/// are not among them.
+fn authored_params(process: &ProcessDecl) -> &[lashlang::ProcessParam] {
+    let hidden = match &process.origin {
+        lashlang::ProcessOrigin::Lifted { hidden_params, .. } => *hidden_params as usize,
+        lashlang::ProcessOrigin::Declared => 0,
+    };
+    &process.params[..process.params.len().saturating_sub(hidden)]
+}
+
 /// The authored `run` body inside a process-wrapper body.
 pub(super) fn process_run_body(process: &ProcessDecl) -> Option<&Expr> {
     crate::lower::wrapped_run_body(&process.body)
@@ -893,7 +950,7 @@ fn attribute_assignment(
     let Some(parts) = lashlang::AttributeAssignParts::of(expr) else {
         return Ok(None);
     };
-    let printer = Printer;
+    let printer = Printer::PLAIN;
     let object = printer.member_target(parts.object)?;
     let target = match parts.step {
         lashlang::AttributeStep::Field(field) => {

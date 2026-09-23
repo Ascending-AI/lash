@@ -638,6 +638,9 @@ pub enum RunStatus {
 pub struct RunEvent {
     pub run_id: String,
     pub workflow_version: u64,
+    /// The source identity of the admitted artifact the run executes; the
+    /// run overlay's node ids are that artifact's.
+    pub definition: String,
     pub sequence: u64,
     pub node_id: String,
     pub status: RunStatus,

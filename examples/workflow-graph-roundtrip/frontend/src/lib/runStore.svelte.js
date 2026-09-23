@@ -16,6 +16,7 @@ export class RunController {
   running = $state(false);
   runId = $state(null);
   workflowVersion = $state(null);
+  definition = $state(null);
   // nodeId -> 'started' | 'running' | 'waiting' | 'succeeded' | 'failed'
   overlay = $state({});
   activeNodeId = $state(null);
@@ -41,6 +42,7 @@ export class RunController {
     this.reset();
     this.running = true;
     this.runId = null;
+    this.definition = null;
     const controller = new AbortController();
     this.#abort = controller;
 
@@ -70,6 +72,7 @@ export class RunController {
   #apply(ev) {
     this.runId = ev.runId;
     this.workflowVersion = ev.workflowVersion;
+    this.definition = ev.definition;
     this.eventCount += 1;
     if (ev.display) {
       this.display = {

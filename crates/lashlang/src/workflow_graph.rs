@@ -85,18 +85,14 @@ impl std::fmt::Display for WorkflowNodeId {
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct WorkflowGraph {
     pub schema_version: u32,
-    /// Content identity of the projected definition.
-    ///
-    /// The TypeScript projector hashes the canonical source bytes under
-    /// `lash-workflow-source/v3`. The BLAKE3 preimage is the big-endian `u64`
-    /// domain length, the domain bytes, then the canonical source bytes.
-    /// Projection from an IR value uses those same source bytes when the IR can
-    /// be printed and reparsed; otherwise the final preimage component is the
-    /// JSON-serialized [`crate::Program`]. This value identifies definition
-    /// content. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's
-    /// wire shape, `facet_schema_version` identifies optional derived facts,
-    /// and `module_ref` identifies compiled artifact bytes.
-    pub source_identity: String,
+    /// The definition identity of the admitted module artifact this graph
+    /// projects ([`crate::ModuleArtifact::source_identity`]), which the
+    /// module's traces carry too. A draft projected from source that has not
+    /// been admitted claims no runtime identity and carries `None`.
+    /// [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape,
+    /// `facet_schema_version` identifies optional derived facts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facet_schema_version: Option<u32>,
     #[serde(default)]
@@ -513,7 +509,8 @@ pub enum WorkflowGraphDecodeError {
 #[serde(deny_unknown_fields)]
 struct WorkflowGraphWire {
     schema_version: u32,
-    source_identity: String,
+    #[serde(default)]
+    source_identity: Option<String>,
     #[serde(default)]
     facet_schema_version: Option<u32>,
     #[serde(default)]

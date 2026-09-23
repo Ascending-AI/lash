@@ -64,8 +64,12 @@ pub(super) fn write_structural_role(writer: &mut HashWriter, role: &crate::ast::
 pub(super) fn write_process_origin(writer: &mut HashWriter, origin: &crate::ast::ProcessOrigin) {
     match origin {
         crate::ast::ProcessOrigin::Declared => writer.atom("origin-declared"),
-        crate::ast::ProcessOrigin::Lifted { site } => {
+        crate::ast::ProcessOrigin::Lifted {
+            site,
+            hidden_params,
+        } => {
             writer.atom("origin-lifted");
+            writer.u32(*hidden_params);
             match site.root {
                 crate::ast::AstRoot::Main => writer.atom("main"),
                 crate::ast::AstRoot::Declaration(index) => {

@@ -44,7 +44,8 @@ impl WorkflowStatementText for NoStatementText {
     }
 }
 
-/// Projects `program` as a draft graph, before any admission.
+/// Projects `program` as a draft graph, before any admission: it claims no
+/// source identity.
 pub fn workflow_graph_from_program(
     program: &Program,
     text: &dyn WorkflowStatementText,
@@ -66,7 +67,7 @@ pub fn workflow_graph_from_artifact(
 /// A configurable IR projection.
 pub struct WorkflowGraphProjector<'a> {
     program: &'a Program,
-    source_identity: String,
+    source_identity: Option<String>,
     spans: BTreeMap<AstPath, Span>,
     analysis: Option<&'a WorkflowLinkAnalysis>,
 }
@@ -75,15 +76,15 @@ impl<'a> WorkflowGraphProjector<'a> {
     pub fn new(program: &'a Program) -> Self {
         Self {
             program,
-            source_identity: String::new(),
+            source_identity: None,
             spans: BTreeMap::new(),
             analysis: None,
         }
     }
 
-    /// The identity the projected document names.
+    /// The admitted definition identity the projected document names.
     pub fn with_source_identity(mut self, source_identity: String) -> Self {
-        self.source_identity = source_identity;
+        self.source_identity = Some(source_identity);
         self
     }
 
@@ -227,7 +228,10 @@ impl Session<'_, '_> {
             params: literal.params.clone(),
             signals: Vec::new(),
             return_ty: None,
-            origin: ProcessOrigin::Lifted { site },
+            origin: ProcessOrigin::Lifted {
+                site,
+                hidden_params: u32::try_from(literal.hidden_args.len()).unwrap_or(u32::MAX),
+            },
             body: self.project_body(
                 projection.body(),
                 &owner,

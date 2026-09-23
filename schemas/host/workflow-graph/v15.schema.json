@@ -48,6 +48,51 @@
       ],
       "type": "object"
     },
+    "AstPath": {
+      "description": "A node's address in a `Program`: the root it hangs from plus the `Expr::children()` index chain that reaches it.",
+      "properties": {
+        "root": {
+          "$ref": "#/definitions/AstRoot"
+        },
+        "steps": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "type": "object"
+    },
+    "AstRoot": {
+      "description": "Which tree an [`AstPath`] walks down: `Program::main`, or one entry of `Program::declarations`.",
+      "oneOf": [
+        {
+          "enum": [
+            "main"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "declaration": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "declaration"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "BinaryOp": {
       "enum": [
         "Add",
@@ -338,9 +383,20 @@
         },
         {
           "additionalProperties": false,
+          "description": "Iteration: for each element of `iterable`, bind it to `binding`, run `bind` (the generated code that binds the element into the authored names, if the front end needs any), then run `body`. `bind` belongs to the loop itself; only `body` holds the authored statements.",
           "properties": {
             "For": {
               "properties": {
+                "bind": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/definitions/Expr"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "binding": {
                   "type": "string"
                 },
@@ -385,6 +441,31 @@
           },
           "required": [
             "While"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A language-neutral structural role around front-end-generated IR.\n\nA role never changes what runs: it executes, links and types exactly as `expr`. It tells every structural consumer (ownership, the projector, a dialect's printer) what the wrapped shape *is*, so none of them has to infer structure from generated names. [`validate_ast`] refuses a role whose `expr` does not have the role's shape.",
+          "properties": {
+            "Role": {
+              "properties": {
+                "expr": {
+                  "$ref": "#/definitions/Expr"
+                },
+                "role": {
+                  "$ref": "#/definitions/StructuralRole"
+                }
+              },
+              "required": [
+                "expr",
+                "role"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "Role"
           ],
           "type": "object"
         },
@@ -1130,6 +1211,53 @@
       ],
       "type": "object"
     },
+    "ProcessOrigin": {
+      "description": "The origin of a [`super::ProcessDecl`].",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Authored as a module declaration.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "declared"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Lifted by the linker from the inline process literal at `site`, the literal's path in the program before lifting. The lifted declaration's name digests that literal's body and site ([`super::lifted_process_identity`]). Its last `hidden_params` parameters are the literal's hidden start arguments, not authored parameters.",
+          "properties": {
+            "hidden_params": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "lifted"
+              ],
+              "type": "string"
+            },
+            "site": {
+              "$ref": "#/definitions/AstPath"
+            }
+          },
+          "required": [
+            "hidden_params",
+            "kind",
+            "site"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ProcessParam": {
       "properties": {
         "name": {
@@ -1260,6 +1388,95 @@
         "start"
       ],
       "type": "object"
+    },
+    "StructuralRole": {
+      "description": "The structural roles a front end marks its generated IR with.\n\nEach role is language-neutral: it names what a shape does, not the source construct that produced it, and each front end chooses which of its constructs lower to which role.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "An authored nested statement scope. `expr` is a `Block` whose every element is a statement.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "scope"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A statement list closed by a generated completion value. `expr` is a non-empty `Block`; every element but the last is a statement, and the last is the pure completion value the list evaluates to.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "completion"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A member assignment `root.path = value` that pins its reference base before evaluating the value. `expr` is `Block([base = object, (key = index)?, result = value, base.step = result, result])`, where `step` reads `key` when present.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "attribute_assign"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A callback-driven collection transform (`map`, `filter`, ...). `expr` is a `Block` that binds the receiver, then the callback, and evaluates to the transform's result. `operation` is the front end's name for the transform; structure never depends on it.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "collection_transform"
+              ],
+              "type": "string"
+            },
+            "operation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The process failure wrapper around an authored run body. `expr` is `Try { body: Finish(Call { function: run, args }), catch e: Fail(e) }`, where `run` is a `Function` or a builtin call whose first argument is one; the run function's body is the authored process body.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "process_wrapper"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TryExpr": {
       "properties": {
@@ -1568,6 +1785,14 @@
             },
             "name_source": {
               "$ref": "#/definitions/WorkflowNodeNameSource"
+            },
+            "origin": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ProcessOrigin"
+                }
+              ],
+              "description": "Whether the process was declared or lifted from an inline literal."
             },
             "params": {
               "default": [],
@@ -2199,7 +2424,18 @@
         },
         {
           "additionalProperties": false,
+          "description": "An iteration: the IR's element binding, iterable and bind, exactly as the loop runs them. A dialect's printer reads its authored loop header back off these fields.",
           "properties": {
+            "bind": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Expr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "binding": {
               "type": "string"
             },
@@ -2536,14 +2772,16 @@
       "type": "integer"
     },
     "source_identity": {
-      "description": "Content identity of the projected definition.\n\nThe TypeScript projector hashes the canonical source bytes under `lash-workflow-source/v3`. The BLAKE3 preimage is the big-endian `u64` domain length, the domain bytes, then the canonical source bytes. Projection from an IR value uses those same source bytes when the IR can be printed and reparsed; otherwise the final preimage component is the JSON-serialized [`crate::Program`]. This value identifies definition content. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts, and `module_ref` identifies compiled artifact bytes.",
-      "type": "string"
+      "description": "The definition identity of the admitted module artifact this graph projects ([`crate::ModuleArtifact::source_identity`]), which the module's traces carry too. A draft projected from source that has not been admitted claims no runtime identity and carries `None`. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
     "main",
-    "schema_version",
-    "source_identity"
+    "schema_version"
   ],
   "title": "WorkflowGraph",
   "type": "object",

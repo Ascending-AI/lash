@@ -423,7 +423,7 @@ pub async fn run_lashlang_process(
         LashlangProcessTraceIdentity {
             session_id,
             process_id: process_id.clone(),
-            source_identity: trace_lashlang_source_identity(&artifact),
+            source_identity: artifact.source_identity(),
             module_ref: artifact.module_ref.clone(),
             process_ref: input.process_ref.clone(),
             process_name: input.process_name.clone(),
@@ -1329,7 +1329,7 @@ mod trace_map;
 use trace_map::language_event_node_id;
 pub use trace_map::{
     TraceLanguageExecutionMapError, trace_lashlang_main_map, trace_lashlang_process_map,
-    trace_lashlang_process_map_snapshot, trace_lashlang_source_identity,
+    trace_lashlang_process_map_snapshot,
 };
 
 #[path = "process/resource_invocation.rs"]

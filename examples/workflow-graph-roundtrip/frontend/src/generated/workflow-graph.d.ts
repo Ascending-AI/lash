@@ -15,6 +15,10 @@ export type WorkflowDeclaration =
       kind: 'process';
       name: string;
       name_source: WorkflowNodeNameSource;
+      /**
+       * Whether the process was declared or lifted from an inline literal.
+       */
+      origin?: ProcessOrigin;
       params?: ProcessParam[];
       return_ty?: TypeExpr | null;
       signals?: ProcessSignalDecl[];
@@ -138,6 +142,7 @@ export type WorkflowNodeKind =
       then_is_block: boolean;
     }
   | {
+      bind?: Expr | null;
       binding: string;
       body: WorkflowSubgraph;
       container_kind: 'for';
@@ -226,6 +231,7 @@ export type Expr =
     }
   | {
       For: {
+        bind?: Expr | null;
         binding: string;
         body: Expr;
         iterable: Expr;
@@ -236,6 +242,13 @@ export type Expr =
       While: {
         body: Expr;
         condition: Expr;
+        [k: string]: unknown;
+      };
+    }
+  | {
+      Role: {
+        expr: Expr;
+        role: StructuralRole;
         [k: string]: unknown;
       };
     }
@@ -405,6 +418,28 @@ export type ListComprehensionClause =
         [k: string]: unknown;
       };
     };
+/**
+ * The structural roles a front end marks its generated IR with.
+ *
+ * Each role is language-neutral: it names what a shape does, not the source construct that produced it, and each front end chooses which of its constructs lower to which role.
+ */
+export type StructuralRole =
+  | {
+      kind: 'scope';
+    }
+  | {
+      kind: 'completion';
+    }
+  | {
+      kind: 'attribute_assign';
+    }
+  | {
+      kind: 'collection_transform';
+      operation: string;
+    }
+  | {
+      kind: 'process_wrapper';
+    };
 export type UnaryOp = 'Negate' | 'Not';
 export type BinaryOp =
   | 'Add'
@@ -547,6 +582,26 @@ export type WorkflowSlotPathSegment =
   | {
       index: number;
     };
+/**
+ * The origin of a [`super::ProcessDecl`].
+ */
+export type ProcessOrigin =
+  | {
+      kind: 'declared';
+    }
+  | {
+      hidden_params: number;
+      kind: 'lifted';
+      site: AstPath;
+    };
+/**
+ * Which tree an [`AstPath`] walks down: `Program::main`, or one entry of `Program::declarations`.
+ */
+export type AstRoot =
+  | 'main'
+  | {
+      declaration: number;
+    };
 
 /**
  * The single serializable graph document used for editing and run overlays.
@@ -557,11 +612,9 @@ export interface WorkflowGraph {
   main: WorkflowSubgraph;
   schema_version: 15;
   /**
-   * Content identity of the projected definition.
-   *
-   * The TypeScript projector hashes the canonical source bytes under `lash-workflow-source/v3`. The BLAKE3 preimage is the big-endian `u64` domain length, the domain bytes, then the canonical source bytes. Projection from an IR value uses those same source bytes when the IR can be printed and reparsed; otherwise the final preimage component is the JSON-serialized [`crate::Program`]. This value identifies definition content. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts, and `module_ref` identifies compiled artifact bytes.
+   * The definition identity of the admitted module artifact this graph projects ([`crate::ModuleArtifact::source_identity`]), which the module's traces carry too. A draft projected from source that has not been admitted claims no runtime identity and carries `None`. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts.
    */
-  source_identity: string;
+  source_identity?: string | null;
 }
 export interface TypeField {
   name: string;
@@ -695,6 +748,14 @@ export interface WorkflowTypeDiagnostic {
 export interface WorkflowExpectedArgument {
   slot: WorkflowSlotPathSegment[];
   ty: TypeExpr;
+  [k: string]: unknown;
+}
+/**
+ * A node's address in a `Program`: the root it hangs from plus the `Expr::children()` index chain that reaches it.
+ */
+export interface AstPath {
+  root: AstRoot;
+  steps?: number[];
   [k: string]: unknown;
 }
 export interface ProcessSignalDecl {

@@ -73,6 +73,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-workflow-node/v2",
     "lash-workflow-node/v3",
     "lash-workflow-source/v3",
+    "lash-workflow-source/v4",
     "lash.agent-frame-key/v2",
     "lashlang-process-start/v2",
     "lashlang-process-start/v3",
@@ -409,6 +410,9 @@ mod blake3_domain_tests {
         // retired rather than reused.
         "lash-tool-output-spill/v2",
         "lash-workflow-node/v2",
+        // FIG-3571: source identity digests the admitted program, never
+        // printed text, under v4.
+        "lash-workflow-source/v3",
         "lashlang-process-start/v2",
     ];
 
