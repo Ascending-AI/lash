@@ -1,6 +1,6 @@
 //! A file database written by main's per-component constructors opens through
-//! `SqliteDeployment::open(root)` with every persisted binding unchanged
-//! (ADR 0102, FIG-2971): the deployment answers to the same identity its
+//! `SqliteBackend::open(root)` with every persisted binding unchanged
+//! (ADR 0102, FIG-2971): the backend answers to the same identity its
 //! effect host always bound turn control to, so a session's recorded
 //! turn-cancellation binding still matches.
 
@@ -10,10 +10,10 @@ use lash_core_execution::{
     EffectHost as _, ExecutionScope, LeaseOwnerIdentity, SessionId, SessionStoreFactory as _,
 };
 use lash_sqlite_store::{
-    SqliteDatabase, SqliteDeployment, SqliteEffectHost, SqliteSessionStoreFactory,
+    SqliteBackend, SqliteDatabase, SqliteEffectHost, SqliteSessionStoreFactory,
 };
 
-const SESSION: &str = "deployment-binding-compat";
+const SESSION: &str = "backend-binding-compat";
 
 async fn validate_binding(
     store: &Arc<dyn lash_core_execution::RuntimePersistence>,
@@ -37,8 +37,8 @@ async fn validate_binding(
 }
 
 #[tokio::test]
-async fn a_file_database_from_the_component_constructors_opens_as_a_deployment() {
-    let dir = tempfile::tempdir().expect("deployment root");
+async fn a_file_database_from_the_component_constructors_opens_as_a_backend() {
+    let dir = tempfile::tempdir().expect("backend root");
     let request = lash_core_execution::testing::store_fixtures::session_store_request(
         &SessionId::from(SESSION),
         SESSION,
@@ -63,21 +63,21 @@ async fn a_file_database_from_the_component_constructors_opens_as_a_deployment()
         binding
     };
 
-    let deployment = SqliteDeployment::open(dir.path())
+    let backend = SqliteBackend::open(dir.path())
         .await
-        .expect("open the existing root as a deployment");
-    let store = deployment
+        .expect("open the existing root as a backend");
+    let store = backend
         .session_store_factory()
         .open_existing_store(&request)
         .await
         .expect("reopen the session")
         .expect("the session exists");
-    validate_binding(&store, &deployment.effect_host().turn_control_binding_id())
+    validate_binding(&store, &backend.effect_host().turn_control_binding_id())
         .await
         .expect("the existing session activates with no TurnCancelBindingMismatch");
     assert_eq!(
-        lash_core_execution::Deployment::binding_identity(&deployment),
+        lash_core_execution::Backend::binding_identity(&backend),
         recorded_binding,
-        "the deployment answers to the identity the component host persisted"
+        "the backend answers to the identity the component host persisted"
     );
 }

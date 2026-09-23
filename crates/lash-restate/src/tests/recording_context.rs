@@ -943,7 +943,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
 pub(super) async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessRegistry>) {
     let clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
     let registry: Arc<dyn ProcessRegistry> =
-        lash_sqlite_store::SqliteDeployment::memory_with_clock(clock)
+        lash_sqlite_store::SqliteBackend::memory_with_clock(clock)
             .await
             .expect("open corpus process registry")
             .process_registry();

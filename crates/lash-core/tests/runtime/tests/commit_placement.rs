@@ -211,12 +211,12 @@ fn engine_commit_host() -> Arc<dyn lash_core::EffectHost> {
     effect::controller_effect_host(Arc::new(JournaledCommitController::<true>::default()))
 }
 
-/// A SQLite memory deployment's effect host: a store-journaled host that owns
+/// A SQLite memory backend's effect host: a store-journaled host that owns
 /// no commit backpressure.
 async fn store_commit_host() -> Arc<dyn lash_core::EffectHost> {
-    lash_sqlite_store::SqliteDeployment::memory()
+    lash_sqlite_store::SqliteBackend::memory()
         .await
-        .expect("open a memory deployment")
+        .expect("open a memory backend")
         .effect_host()
 }
 

@@ -429,7 +429,7 @@ async fn sqlite_v76_pending_input_database_is_refused_before_replay() {
 }
 
 /// FIG-3578: durable-core schema 78 adds `attachment_blobs`, where a SQLite
-/// deployment keeps its attachment bytes. A pre-78 catalog has no such table,
+/// backend keeps its attachment bytes. A pre-78 catalog has no such table,
 /// and an attachment store over it would fail at its first put, so the whole
 /// database is refused at the version boundary rather than midwifed the table.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

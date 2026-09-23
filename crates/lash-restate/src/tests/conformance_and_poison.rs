@@ -1425,7 +1425,7 @@ where
 
 pub(super) fn process_registry() -> Arc<dyn ProcessRegistry> {
     sync_await(async {
-        lash_sqlite_store::SqliteDeployment::memory()
+        lash_sqlite_store::SqliteBackend::memory()
             .await
             .expect("sqlite registry")
             .process_registry()
@@ -1434,7 +1434,7 @@ pub(super) fn process_registry() -> Arc<dyn ProcessRegistry> {
 
 pub(super) fn continuation_store() -> Arc<dyn lash_core::ProcessContinuationStore> {
     sync_await(async {
-        lash_sqlite_store::SqliteDeployment::memory()
+        lash_sqlite_store::SqliteBackend::memory()
             .await
             .expect("sqlite continuation store")
             .process_registry()
@@ -1446,7 +1446,7 @@ pub(super) fn process_stores() -> (
     Arc<dyn lash_core::ProcessContinuationStore>,
 ) {
     let storage = sync_await(async {
-        lash_sqlite_store::SqliteDeployment::memory()
+        lash_sqlite_store::SqliteBackend::memory()
             .await
             .expect("sqlite process stores")
             .process_registry()

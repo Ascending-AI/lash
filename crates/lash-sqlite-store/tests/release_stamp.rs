@@ -12,13 +12,13 @@ use lash_conformance::{ReleaseStampDeployment, release_stamp_conformance};
 use lash_core_execution::{StoreError, StorePreflight, StoreSchemaStatus};
 use lash_sqlite_store::{SqliteStorePreflight, Store};
 
-struct SqliteDeployment {
+struct SqliteBackend {
     _root: tempfile::TempDir,
     durable_core: PathBuf,
 }
 
 #[async_trait]
-impl ReleaseStampDeployment for SqliteDeployment {
+impl ReleaseStampDeployment for SqliteBackend {
     fn build_release(&self) -> String {
         // The same injection the store crate stamps with: `main` builds carry
         // `0.0.0-dev` and the release workflow stamps the real version, so this
@@ -57,11 +57,11 @@ impl ReleaseStampDeployment for SqliteDeployment {
 async fn sqlite_release_stamp_conformance() {
     let root = tempfile::tempdir().expect("scratch directory");
     let durable_core = root.path().join("durable-core.db");
-    let deployment = SqliteDeployment {
+    let backend = SqliteBackend {
         _root: root,
         durable_core,
     };
-    release_stamp_conformance(&deployment).await;
+    release_stamp_conformance(&backend).await;
 }
 
 /// The refusal at open names the writing release beside the schema integers.

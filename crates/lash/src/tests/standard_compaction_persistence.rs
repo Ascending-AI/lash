@@ -8,7 +8,7 @@ use lash_sansio::SessionId;
 
 /// Fails the `fail_on_llm_call`-th LLM effect of the session before it reaches
 /// the journal — a cold restart mid-turn — and counts the LLM effects the
-/// memory deployment answered, live or from its journal.
+/// memory backend answered, live or from its journal.
 struct ProjectionRedriveLayer {
     llm_effects: AtomicUsize,
     answered_llm_effects: AtomicUsize,
@@ -352,9 +352,9 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
         .into_handle();
     let layer = Arc::new(ProjectionRedriveLayer::failing_on_llm_call(3));
     let effect_host = Arc::new(lash_core::testing::LayeredEffectHost::new(
-        lash_sqlite_store::SqliteDeployment::memory()
+        lash_sqlite_store::SqliteBackend::memory()
             .await
-            .expect("open a memory deployment")
+            .expect("open a memory backend")
             .effect_host(),
         Arc::clone(&layer) as Arc<dyn lash_core::testing::EffectLayer>,
     ));
@@ -402,7 +402,7 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
     drop(core);
 
     // The cold restart reopens the same durable session over the same
-    // deployment journal: the redrive replays what the first drive recorded.
+    // backend journal: the redrive replays what the first drive recorded.
     let reopened_core = build_core(store_factory.clone())?;
     let reopened = reopened_core.session(session_id).open().await?;
     let restored_projection_basis = reopened.read_view().last_prompt_usage().cloned();

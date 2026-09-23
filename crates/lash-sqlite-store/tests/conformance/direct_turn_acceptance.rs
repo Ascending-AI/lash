@@ -10,10 +10,10 @@ use lash_core_execution::SessionStoreFactory as _;
 use lash_core_execution::store::RuntimePersistence;
 
 use super::SUBSTRATE;
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 
-async fn sqlite_direct_turn_store(deployment: &TestDeployment) -> Arc<dyn RuntimePersistence> {
-    deployment
+async fn sqlite_direct_turn_store(backend: &TestBackend) -> Arc<dyn RuntimePersistence> {
+    backend
         .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
@@ -28,7 +28,7 @@ async fn sqlite_direct_turn_store(deployment: &TestDeployment) -> Arc<dyn Runtim
 }
 
 lash_conformance::direct_turn_acceptance_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = sqlite_direct_turn_store(&deployment).await;
-    (deployment, "sqlite", store)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = sqlite_direct_turn_store(&backend).await;
+    (backend, "sqlite", store)
 });

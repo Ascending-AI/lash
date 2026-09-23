@@ -52,7 +52,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
         postgres_table: None,
         parity: Parity::OneBackendOnly {
             side: Backend::SQLite,
-            reason: "SQLite keeps attachment bytes in its catalog; a Postgres deployment takes an external attachment backend at construction (ADR 0102)",
+            reason: "SQLite keeps attachment bytes in its catalog; a Postgres backend takes an external attachment backend at construction (ADR 0102)",
         },
     },
     pair("attachment_condemnations", "lash_attachment_condemnations"),

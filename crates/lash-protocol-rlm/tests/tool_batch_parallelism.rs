@@ -27,7 +27,7 @@ use lash_core::EffectHost;
 /// The RLM protocol plugin, and with it the Lashlang process engine it
 /// contributes.
 ///
-/// `process_lifecycle` is the deployment's honest answer to "can a cell start a
+/// `process_lifecycle` is the backend's honest answer to "can a cell start a
 /// process here", and it differs between the two producers: the cell-bridge
 /// registration runs the law's plain one-turn fixture with no process substrate
 /// at all, while the process-bridge registration stands one up. Declaring it
@@ -85,25 +85,25 @@ mod sqlite_memory {
     use super::*;
 
     lash_conformance::tool_batch_parallelism_tests!({
-        let deployment = lash_sqlite_store::SqliteDeployment::memory()
+        let backend = lash_sqlite_store::SqliteBackend::memory()
             .await
-            .expect("open the memory tool-batch parallelism deployment");
-        let host = deployment.effect_host() as Arc<dyn EffectHost>;
+            .expect("open the memory tool-batch parallelism backend");
+        let host = backend.effect_host() as Arc<dyn EffectHost>;
         (
-            deployment,
+            backend,
             "sqlite-memory",
             Arc::clone(&host),
             vec![
                 lash_conformance::rlm_promise_all_producer(cell_bridge_factories()),
                 // Each scenario opens its own session, so it also opens its
-                // own registry, on a memory deployment of its own.
+                // own registry, on a memory backend of its own.
                 lash_conformance::lashlang_process_aggregate_producer(
                     process_bridge_factories(),
                     Arc::new(|| {
                         sync_await(async {
-                            lash_sqlite_store::SqliteDeployment::memory()
+                            lash_sqlite_store::SqliteBackend::memory()
                                 .await
-                                .expect("open the tool-batch process registry deployment")
+                                .expect("open the tool-batch process registry backend")
                                 .process_registry()
                         }) as Arc<dyn lash_core::ProcessRegistry>
                     }),

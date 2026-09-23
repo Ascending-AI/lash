@@ -10,9 +10,9 @@
 //! business alone.
 //!
 //! [`EffectJournalNotifiers`] is the in-process half every backend shares:
-//! a process-wide table of [`Notify`]s keyed by the journal's deployment
+//! a process-wide table of [`Notify`]s keyed by the journal's backend
 //! identity and the subject, which a backend wakes after each commit that can
-//! change a subject. Two hosts over one deployment in one process share it
+//! change a subject. Two hosts over one backend in one process share it
 //! because they share the identity, never the connection.
 
 use std::collections::HashMap;
@@ -41,7 +41,7 @@ pub enum EffectJournalSubject<'a> {
 pub enum EffectJournalWriters {
     /// Every writer that can change the subject wakes the notifier once its
     /// commit lands, because the journal is private to this process (a SQLite
-    /// memory deployment). A parked driver waits on the notifier and its
+    /// memory backend). A parked driver waits on the notifier and its
     /// clock alone.
     Announced,
     /// A writer in another process can change the subject without waking the
@@ -66,7 +66,7 @@ pub struct EffectJournalWake {
 
 /// The process-wide table of in-process journal notifiers.
 ///
-/// Keyed by the identity of the journal's deployment (`sqlite:<path>`,
+/// Keyed by the identity of the journal's backend (`sqlite:<path>`,
 /// `sqlite-memory:<id>`, `postgres:<digest>`) and then by subject. Entries are
 /// `Weak`: a subject nobody waits on keeps no notifier alive, and the table
 /// sweeps dead entries as it grows. Announcing a subject nobody waits on is a

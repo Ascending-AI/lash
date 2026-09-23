@@ -219,7 +219,7 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["conformance"]
 compile_data = ["//crates/lash-core:queued_claim_atomicity"]
 
-# The SQLite conformance suite runs a second time over memory deployments
+# The SQLite conformance suite runs a second time over memory backends
 # (ADR 0102), from its own test root.
 [[rule]]
 packages = ["lash-internal-sqlite-store"]

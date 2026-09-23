@@ -8,20 +8,20 @@ use lash_sansio::sync::MutexExt;
 use lash_sqlite_store::SqliteDatabase;
 
 use super::Retained;
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 
 /// Corrupt the live checkpoint manifest so the mark phase cannot decode the
 /// root it must follow. The sweep then has a real failure to report, which is
 /// the arm SQLite used to swallow into `GcReport::default()`.
 struct SqliteCorruptRootedManifest {
-    deployment: Arc<Mutex<Option<TestDeployment>>>,
+    backend: Arc<Mutex<Option<TestBackend>>>,
 }
 
 #[async_trait::async_trait]
 impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedManifest {
     async fn break_gc_scope(&self, _session_id: &SessionId) {
         let conn = self
-            .deployment
+            .backend
             .lock_recover()
             .clone()
             .expect("the law makes a factory before breaking it")
@@ -50,16 +50,16 @@ lash_conformance::store_maintenance_tests!({
 
 lash_conformance::store_maintenance_fault_tests!({
     let retained = Retained::default();
-    let deployment = Arc::new(Mutex::new(None));
-    let make_deployment = Arc::clone(&deployment);
+    let backend = Arc::new(Mutex::new(None));
+    let make_backend = Arc::clone(&backend);
     (
         retained.clone(),
         "sqlite",
         move || {
             let opened = retained.open_blocking();
-            *make_deployment.lock_recover() = Some(opened.clone());
+            *make_backend.lock_recover() = Some(opened.clone());
             opened.session_store_factory() as Arc<dyn SessionStoreFactory>
         },
-        Arc::new(SqliteCorruptRootedManifest { deployment }),
+        Arc::new(SqliteCorruptRootedManifest { backend }),
     )
 });

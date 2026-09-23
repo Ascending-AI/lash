@@ -1471,7 +1471,7 @@ pub(super) async fn register_fig811_subscription(
 
 #[tokio::test]
 pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_start_order() {
-    let store = lash_sqlite_store::SqliteDeployment::memory()
+    let store = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open SQLite trigger store")
         .trigger_store();

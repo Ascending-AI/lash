@@ -1,11 +1,11 @@
 lash_conformance::effect_controller_lease_fencing_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let make_deployment = deployment.clone();
-    let steal_deployment = deployment.clone();
-    let expire_deployment = deployment.clone();
-    let fail_deployment = deployment.clone();
-    let stall_deployment = deployment.clone();
-    let heal_deployment = deployment.clone();
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let make_backend = backend.clone();
+    let steal_backend = backend.clone();
+    let expire_backend = backend.clone();
+    let fail_backend = backend.clone();
+    let stall_backend = backend.clone();
+    let heal_backend = backend.clone();
     // A stall is a second connection holding the database write lock, so the
     // controller's renewal waits in SQLite's busy handler until it is lifted.
     type WriteLockHolder = (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>);
@@ -13,12 +13,12 @@ lash_conformance::effect_controller_lease_fencing_tests!({
     let stall_lock = Arc::clone(&write_lock);
     let heal_lock = Arc::clone(&write_lock);
     (
-        deployment,
+        backend,
         lash_conformance::EffectLeaseFencingBackend {
             make_controller: Box::new(move |ttl, clock| {
-                let deployment = make_deployment.clone();
+                let backend = make_backend.clone();
                 Box::pin(async move {
-                    let controller = deployment
+                    let controller = backend
                         .reopen_with(
                             with_lease_timings(
                                 lash_core_execution::facade_support::LeaseTimings::from_ttl(ttl)
@@ -38,10 +38,10 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                 })
             }),
             steal_lease: Box::new(move |replay_key| {
-                let deployment = steal_deployment.clone();
+                let backend = steal_backend.clone();
                 Box::pin(async move {
                     let stolen_until = current_epoch_ms_for_test().saturating_add(10_000);
-                    let conn = deployment.raw(SqliteDatabase::EffectReplay);
+                    let conn = backend.raw(SqliteDatabase::EffectReplay);
                     let changed = conn
                         .execute(
                             "UPDATE runtime_effect_replay
@@ -56,9 +56,9 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                 })
             }),
             expire_lease: Box::new(move |replay_key| {
-                let deployment = expire_deployment.clone();
+                let backend = expire_backend.clone();
                 Box::pin(async move {
-                    let conn = deployment.raw(SqliteDatabase::EffectReplay);
+                    let conn = backend.raw(SqliteDatabase::EffectReplay);
                     let changed = conn
                         .execute(
                             "UPDATE runtime_effect_replay
@@ -74,9 +74,9 @@ lash_conformance::effect_controller_lease_fencing_tests!({
             // under the same lease token while moving its expiry; a takeover
             // changes the token and a finalize changes the status.
             fail_renewals: Box::new(move |replay_key| {
-                let deployment = fail_deployment.clone();
+                let backend = fail_backend.clone();
                 Box::pin(async move {
-                    let conn = deployment.raw(SqliteDatabase::EffectReplay);
+                    let conn = backend.raw(SqliteDatabase::EffectReplay);
                     conn.execute_batch(&format!(
                         "CREATE TRIGGER lash_conformance_fail_effect_renewal
                          BEFORE UPDATE OF lease_expires_at_ms ON runtime_effect_replay
@@ -91,13 +91,13 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                 })
             }),
             stall_renewals: Box::new(move |_replay_key| {
-                let deployment = stall_deployment.clone();
+                let backend = stall_backend.clone();
                 let write_lock = Arc::clone(&stall_lock);
                 Box::pin(async move {
                     let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
                     let (locked_tx, locked_rx) = tokio::sync::oneshot::channel();
                     let holder = std::thread::spawn(move || {
-                        let conn = deployment.raw(SqliteDatabase::EffectReplay);
+                        let conn = backend.raw(SqliteDatabase::EffectReplay);
                         conn.execute_batch("BEGIN IMMEDIATE")
                             .expect("hold the write lock");
                         let _ = locked_tx.send(());
@@ -110,7 +110,7 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                 })
             }),
             heal_renewals: Box::new(move |_replay_key| {
-                let deployment = heal_deployment.clone();
+                let backend = heal_backend.clone();
                 let write_lock = Arc::clone(&heal_lock);
                 Box::pin(async move {
                     let holder = write_lock.lock_recover().take();
@@ -121,7 +121,7 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                             .expect("join the write-lock holder")
                             .expect("write-lock holder exits cleanly");
                     }
-                    let conn = deployment.raw(SqliteDatabase::EffectReplay);
+                    let conn = backend.raw(SqliteDatabase::EffectReplay);
                     conn.execute_batch(
                         "DROP TRIGGER IF EXISTS lash_conformance_fail_effect_renewal;",
                     )

@@ -11,10 +11,10 @@ use lash_core::SessionStoreFactory as _;
 use lash_core::store::RuntimePersistence;
 
 use super::SUBSTRATE;
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 
-async fn sqlite_withheld_input_store(deployment: &TestDeployment) -> Arc<dyn RuntimePersistence> {
-    deployment
+async fn sqlite_withheld_input_store(backend: &TestBackend) -> Arc<dyn RuntimePersistence> {
+    backend
         .session_store_factory()
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
@@ -27,7 +27,7 @@ async fn sqlite_withheld_input_store(deployment: &TestDeployment) -> Arc<dyn Run
 }
 
 lash_conformance::cancelled_turn_withheld_input_tests!({
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = sqlite_withheld_input_store(&deployment).await;
-    (deployment, "sqlite", store)
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = sqlite_withheld_input_store(&backend).await;
+    (backend, "sqlite", store)
 });

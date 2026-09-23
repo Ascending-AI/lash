@@ -3,15 +3,15 @@ use lash_sqlite_store::SqliteDatabase;
 use std::sync::Arc;
 
 use super::SUBSTRATE;
-use crate::deployment_fixture::TestDeployment;
+use crate::backend_fixture::TestBackend;
 #[path = "../../../lash-core/tests/support/queued_claim_atomicity.rs"]
 mod law;
 
 #[tokio::test]
 async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() {
     for entry in law::ENTRIES {
-        let deployment = TestDeployment::open(SUBSTRATE).await;
-        let store = deployment
+        let backend = TestBackend::open(SUBSTRATE).await;
+        let store = backend
             .session_store_factory()
             .create_store(&lash_core_execution::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
@@ -24,7 +24,7 @@ async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() 
             .await
             .unwrap();
         let case = law::prepare(store as Arc<dyn RuntimePersistence>, entry).await;
-        let conn = deployment.raw(SqliteDatabase::DurableCore);
+        let conn = backend.raw(SqliteDatabase::DurableCore);
         let second = case.ids[1].replace('\'', "''");
         conn.execute_batch(&format!("CREATE TRIGGER lose_second_claim BEFORE UPDATE OF claim_token ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
         assert!(
@@ -51,8 +51,8 @@ async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() 
 
 #[tokio::test]
 async fn sqlite_queued_work_claimability_verdict_holds_over_a_displaced_generation() {
-    let deployment = TestDeployment::open(SUBSTRATE).await;
-    let store = deployment
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend
         .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),

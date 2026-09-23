@@ -1,5 +1,5 @@
-//! `LayeredEffectHost` over a SQLite memory deployment (FIG-3580): a layer
-//! observes the seam, and the deployment's journal arbitrates every group.
+//! `LayeredEffectHost` over a SQLite memory backend (FIG-3580): a layer
+//! observes the seam, and the backend's journal arbitrates every group.
 
 use std::sync::{Arc, Mutex};
 
@@ -12,7 +12,7 @@ use lash_core_execution::{
     RuntimeErrorCode,
 };
 use lash_sansio::sync::MutexExt;
-use lash_sqlite_store::SqliteDeployment;
+use lash_sqlite_store::SqliteBackend;
 
 /// Records the name of every seam operation it forwards, and nothing else.
 #[derive(Default)]
@@ -107,23 +107,23 @@ fn group(scope: &ExecutionScope, key: &str, children: usize) -> RuntimeEffectGro
     .expect("a well-formed group")
 }
 
-/// A recording layer over a memory deployment opens a group; the deployment's
+/// A recording layer over a memory backend opens a group; the backend's
 /// journal, not the layer, decides every later answer about it. A second,
-/// unlayered host over the same deployment reopens the group the layered
+/// unlayered host over the same backend reopens the group the layered
 /// controller recorded and is refused a narrower shape under its key, and the
 /// settlements the layered controller reads are the ones the journal ranked.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_layered_group_is_arbitrated_by_the_deployment_journal() {
-    let deployment = SqliteDeployment::memory()
+async fn a_layered_group_is_arbitrated_by_the_backend_journal() {
+    let backend = SqliteBackend::memory()
         .await
-        .expect("open a memory deployment");
-    deployment
+        .expect("open a memory backend");
+    backend
         .effect_host()
         .register_group_executors(Arc::new(EchoChildren))
         .expect("the fresh host takes the resolver");
     let layer = Arc::new(RecordingLayer::default());
     let layered = LayeredEffectHost::new(
-        deployment.effect_host(),
+        backend.effect_host(),
         Arc::clone(&layer) as Arc<dyn EffectLayer>,
     );
     let scope = ExecutionScope::runtime_operation("layered-group");
@@ -138,10 +138,10 @@ async fn a_layered_group_is_arbitrated_by_the_deployment_journal() {
 
     // Another host over the same databases never saw the layer: what it
     // answers comes from the rows the layered open wrote.
-    let unlayered = deployment
+    let unlayered = backend
         .reopen()
         .await
-        .expect("reopen the deployment")
+        .expect("reopen the backend")
         .effect_host();
     unlayered
         .register_group_executors(Arc::new(EchoChildren))
@@ -197,17 +197,17 @@ async fn a_layered_group_is_arbitrated_by_the_deployment_journal() {
     );
 }
 
-/// An effect run through a layered controller is journaled by the deployment:
-/// the layer records it, and a raw host over the same deployment replays the
+/// An effect run through a layered controller is journaled by the backend:
+/// the layer records it, and a raw host over the same backend replays the
 /// recorded outcome instead of running its own executor.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_layered_effect_is_journaled_by_the_deployment() {
-    let deployment = SqliteDeployment::memory()
+async fn a_layered_effect_is_journaled_by_the_backend() {
+    let backend = SqliteBackend::memory()
         .await
-        .expect("open a memory deployment");
+        .expect("open a memory backend");
     let layer = Arc::new(RecordingLayer::default());
     let layered = LayeredEffectHost::new(
-        deployment.effect_host(),
+        backend.effect_host(),
         Arc::clone(&layer) as Arc<dyn EffectLayer>,
     );
     let scope = ExecutionScope::runtime_operation("layered-static");
@@ -235,9 +235,9 @@ async fn a_layered_effect_is_journaled_by_the_deployment() {
         .execute_effect(envelope.clone(), run(1))
         .await
         .expect("the first run executes");
-    // The replay comes from the deployment's journal: a raw host that never
+    // The replay comes from the backend's journal: a raw host that never
     // saw the layer answers with the recorded outcome, not the new executor's.
-    let replayed = deployment
+    let replayed = backend
         .effect_host()
         .scoped(AdmittedScope::runtime_operation("layered-static"))
         .expect("scope binds")
@@ -278,25 +278,25 @@ where
 
 /// The whole shared effect-group host contract, answered through a recording
 /// layer: every host the suite asks for is a layered view of one memory
-/// deployment's journal.
+/// backend's journal.
 mod layered_effect_group_host_laws {
     use super::*;
 
     lash_conformance::effect_group_host_tests!({
-        let deployment = SqliteDeployment::memory()
+        let backend = SqliteBackend::memory()
             .await
-            .expect("open a memory deployment");
+            .expect("open a memory backend");
         let layer = Arc::new(RecordingLayer::default());
-        let hosts = deployment.clone();
+        let hosts = backend.clone();
         (
-            deployment,
+            backend,
             move |executors: Option<Arc<dyn GroupExecutors>>| {
-                let deployment = hosts.clone();
+                let backend = hosts.clone();
                 let host = sync_await(async move {
-                    deployment
+                    backend
                         .reopen()
                         .await
-                        .expect("reopen the deployment")
+                        .expect("reopen the backend")
                         .effect_host()
                 });
                 if let Some(executors) = executors {

@@ -1,11 +1,11 @@
-//! [`SqliteDeployment`]: every persistence port and the effect host of one
+//! [`SqliteBackend`]: every persistence port and the effect host of one
 //! SQLite substrate, from one typed [`SqliteLocation`] (ADR 0102).
 //!
-//! A file deployment keeps its four databases under one root directory; a
-//! memory deployment keeps them as named `memdb` databases pinned by anchor
+//! A file backend keeps its four databases under one root directory; a
+//! memory backend keeps them as named `memdb` databases pinned by anchor
 //! connections. Both run the same store, the same replay driver and the same
 //! locking rules: the location decides only where each database is and what
-//! the deployment is called. Every component is opened once, bound to the
+//! the backend is called. Every component is opened once, bound to the
 //! others by the location rather than by a later path exchange, and handed out
 //! as a shared handle.
 
@@ -22,9 +22,9 @@ use crate::{
     StoreOptions,
 };
 
-/// Construction-time choices for a [`SqliteDeployment`].
+/// Construction-time choices for a [`SqliteBackend`].
 #[derive(Clone, Debug, Default)]
-pub struct SqliteDeploymentOptions {
+pub struct SqliteBackendOptions {
     /// Blob and connection policy for the durable-core catalog.
     pub store: StoreOptions,
     /// Lease timing and drain budget of the effect host.
@@ -33,14 +33,14 @@ pub struct SqliteDeploymentOptions {
     /// deliveries.
     pub wake_delivery: lash_core_execution::WakeDeliveryConfig,
     /// Deterministic transaction faults, installed on every session store the
-    /// deployment's factory opens (FIG-2971: production builds do not compile
+    /// backend's factory opens (FIG-2971: production builds do not compile
     /// the hook).
     #[cfg(feature = "testing")]
     pub fault_injector: Option<crate::testing::SqliteFaultInjector>,
 }
 
-impl SqliteDeploymentOptions {
-    /// The options [`SqliteDeployment::memory`] uses: uncompressed blobs,
+impl SqliteBackendOptions {
+    /// The options [`SqliteBackend::memory`] uses: uncompressed blobs,
     /// since an in-memory catalog spends CPU, not disk, on compression.
     pub fn memory() -> Self {
         Self {
@@ -58,21 +58,21 @@ impl SqliteDeploymentOptions {
 /// process-exec-env store and the attachment store, all bound to one
 /// [`SqliteLocation`] and keyed on its one identity.
 ///
-/// Cloning shares the deployment. A memory deployment's databases live until
-/// the deployment and every handle taken from it have dropped.
+/// Cloning shares the backend. A memory backend's databases live until
+/// the backend and every handle taken from it have dropped.
 #[derive(Clone)]
-pub struct SqliteDeployment {
-    inner: Arc<DeploymentParts>,
+pub struct SqliteBackend {
+    inner: Arc<BackendParts>,
 }
 
-struct DeploymentParts {
+struct BackendParts {
     location: SqliteLocation,
-    /// The deployment's binding identity: the one value every component's
+    /// The backend's binding identity: the one value every component's
     /// identity is taken from, the effect host's turn-control binding
     /// included.
     identity: Arc<str>,
     anchors: Option<Arc<MemoryAnchors>>,
-    options: SqliteDeploymentOptions,
+    options: SqliteBackendOptions,
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<SqliteSessionStoreFactory>,
     effect_host: Arc<SqliteEffectHost>,
@@ -83,34 +83,34 @@ struct DeploymentParts {
     attachment_store: Arc<SqliteAttachmentStore>,
 }
 
-impl SqliteDeployment {
-    /// The file deployment under `root`, created if absent.
+impl SqliteBackend {
+    /// The file backend under `root`, created if absent.
     pub async fn open(root: impl AsRef<Path>) -> tokio_rusqlite::Result<Self> {
         Self::open_with_options_and_clock(
             root,
-            SqliteDeploymentOptions::default(),
+            SqliteBackendOptions::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
         )
         .await
     }
 
-    /// The file deployment under `root` with explicit options and clock.
+    /// The file backend under `root` with explicit options and clock.
     #[expect(
         clippy::disallowed_methods,
-        reason = "a file deployment creates the host-supplied root before naming its databases (FIG-2971)"
+        reason = "a file backend creates the host-supplied root before naming its databases (FIG-2971)"
     )]
     pub async fn open_with_options_and_clock(
         root: impl AsRef<Path>,
-        options: SqliteDeploymentOptions,
+        options: SqliteBackendOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let root = root.as_ref();
-        crate::location::validate_file_database_path(root, "SqliteDeployment")?;
+        crate::location::validate_file_database_path(root, "SqliteBackend")?;
         std::fs::create_dir_all(root).map_err(|error| {
             tokio_rusqlite::Error::Error(rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
                 Some(format!(
-                    "SqliteDeployment could not create its root {}: {error}",
+                    "SqliteBackend could not create its root {}: {error}",
                     root.display()
                 )),
             ))
@@ -121,30 +121,30 @@ impl SqliteDeployment {
         Self::assemble(location, None, options, clock).await
     }
 
-    /// A fresh named in-memory deployment.
+    /// A fresh named in-memory backend.
     ///
     /// Each of its four databases is a `memdb` database, which SQLite caps at
     /// 1 GiB (`SQLITE_MEMDB_DEFAULT_MAXSIZE` in the bundled build); a write
     /// past the cap fails with `SQLITE_FULL`. Attachment bytes live in the
-    /// durable-core database beside the sessions, so a memory deployment's
+    /// durable-core database beside the sessions, so a memory backend's
     /// sessions, checkpoints and attachments share that one gibibyte. A
-    /// workload that needs more belongs on a file deployment.
+    /// workload that needs more belongs on a file backend.
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
         Self::memory_with_options_and_clock(
-            SqliteDeploymentOptions::memory(),
+            SqliteBackendOptions::memory(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
         )
         .await
     }
 
-    /// A fresh named in-memory deployment on `clock`.
+    /// A fresh named in-memory backend on `clock`.
     pub async fn memory_with_clock(clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_options_and_clock(SqliteDeploymentOptions::memory(), clock).await
+        Self::memory_with_options_and_clock(SqliteBackendOptions::memory(), clock).await
     }
 
-    /// A fresh named in-memory deployment with explicit options and clock.
+    /// A fresh named in-memory backend with explicit options and clock.
     pub async fn memory_with_options_and_clock(
-        options: SqliteDeploymentOptions,
+        options: SqliteBackendOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let location = SqliteLocation::fresh_memory();
@@ -152,10 +152,10 @@ impl SqliteDeployment {
         Self::assemble(location, Some(anchors), options, clock).await
     }
 
-    /// Fresh handles on this deployment's databases: every component opened
+    /// Fresh handles on this backend's databases: every component opened
     /// again, over the same location, identity, options and clock — what a
     /// second process over a file root is, and what a second runtime over the
-    /// same memory deployment is.
+    /// same memory backend is.
     pub async fn reopen(&self) -> tokio_rusqlite::Result<Self> {
         self.reopen_with_clock(Arc::clone(&self.inner.clock)).await
     }
@@ -170,7 +170,7 @@ impl SqliteDeployment {
     /// runtime over the same databases, configured differently.
     pub async fn reopen_with_options_and_clock(
         &self,
-        options: SqliteDeploymentOptions,
+        options: SqliteBackendOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::assemble(
@@ -185,12 +185,12 @@ impl SqliteDeployment {
     async fn assemble(
         location: SqliteLocation,
         anchors: Option<Arc<MemoryAnchors>>,
-        options: SqliteDeploymentOptions,
+        options: SqliteBackendOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let identity: Arc<str> = Arc::from(location.identity());
         let database = |database| {
-            DatabaseLocation::in_deployment(&location, &identity, database, anchors.as_ref())
+            DatabaseLocation::in_backend(&location, &identity, database, anchors.as_ref())
         };
         let core = database(SqliteDatabase::DurableCore);
         let registry = database(SqliteDatabase::ProcessRegistry);
@@ -243,7 +243,7 @@ impl SqliteDeployment {
             None => factory,
         };
         Ok(Self {
-            inner: Arc::new(DeploymentParts {
+            inner: Arc::new(BackendParts {
                 identity,
                 location,
                 anchors,
@@ -260,13 +260,13 @@ impl SqliteDeployment {
         })
     }
 
-    /// Where this deployment's databases are.
+    /// Where this backend's databases are.
     pub fn location(&self) -> &SqliteLocation {
         &self.inner.location
     }
 
-    /// The options this deployment was opened with.
-    pub fn options(&self) -> &SqliteDeploymentOptions {
+    /// The options this backend was opened with.
+    pub fn options(&self) -> &SqliteBackendOptions {
         &self.inner.options
     }
 
@@ -282,20 +282,20 @@ impl SqliteDeployment {
         self.inner.location.database_uri(database)
     }
 
-    /// The factory every session of this deployment is created and reopened
+    /// The factory every session of this backend is created and reopened
     /// through, over the durable-core catalog.
     pub fn session_store_factory(&self) -> Arc<SqliteSessionStoreFactory> {
         Arc::clone(&self.inner.session_store_factory)
     }
 
-    /// The host that journals this deployment's effects, with its process
-    /// scope fences kept in the deployment's registry.
+    /// The host that journals this backend's effects, with its process
+    /// scope fences kept in the backend's registry.
     pub fn effect_host(&self) -> Arc<SqliteEffectHost> {
         Arc::clone(&self.inner.effect_host)
     }
 
     /// The process registry, pruning process-owned sessions out of the
-    /// deployment's own catalog.
+    /// backend's own catalog.
     pub fn process_registry(&self) -> Arc<SqliteProcessRegistry> {
         Arc::clone(&self.inner.process_registry)
     }
@@ -322,7 +322,7 @@ impl SqliteDeployment {
         Arc::clone(&self.inner.attachment_store)
     }
 
-    /// A new unbound [`Store`] on this deployment's durable-core catalog, on
+    /// A new unbound [`Store`] on this backend's durable-core catalog, on
     /// a connection of its own.
     pub async fn open_store(&self) -> tokio_rusqlite::Result<Store> {
         Store::open_at(
@@ -337,8 +337,8 @@ impl SqliteDeployment {
         .await
     }
 
-    /// A controller scoped to `scope` over this deployment's effect journal,
-    /// on a replay driver of its own, keyed on this deployment's identity.
+    /// A controller scoped to `scope` over this backend's effect journal,
+    /// on a replay driver of its own, keyed on this backend's identity.
     pub async fn open_effect_controller(
         &self,
         scope: ExecutionScope,
@@ -354,7 +354,7 @@ impl SqliteDeployment {
     }
 
     fn core(&self) -> DatabaseLocation {
-        DatabaseLocation::in_deployment(
+        DatabaseLocation::in_backend(
             &self.inner.location,
             &self.inner.identity,
             SqliteDatabase::DurableCore,
@@ -363,7 +363,7 @@ impl SqliteDeployment {
     }
 }
 
-impl lash_core_execution::Deployment for SqliteDeployment {
+impl lash_core_execution::Backend for SqliteBackend {
     fn binding_identity(&self) -> &str {
         self.identity()
     }
@@ -373,40 +373,40 @@ impl lash_core_execution::Deployment for SqliteDeployment {
     }
 
     fn session_store_factory(&self) -> Arc<dyn lash_core_execution::SessionStoreFactory> {
-        SqliteDeployment::session_store_factory(self)
+        SqliteBackend::session_store_factory(self)
     }
 
     fn effect_host(&self) -> Arc<dyn lash_core_execution::EffectHost> {
-        SqliteDeployment::effect_host(self)
+        SqliteBackend::effect_host(self)
     }
 
     fn process_registry(&self) -> Arc<dyn lash_core_execution::ProcessRegistry> {
-        SqliteDeployment::process_registry(self)
+        SqliteBackend::process_registry(self)
     }
 
     fn trigger_store(&self) -> Arc<dyn lash_core_execution::TriggerStore> {
-        SqliteDeployment::trigger_store(self)
+        SqliteBackend::trigger_store(self)
     }
 
     fn process_definition_registry(
         &self,
     ) -> Arc<dyn lash_core_execution::ProcessDefinitionRegistry> {
-        SqliteDeployment::process_definition_registry(self)
+        SqliteBackend::process_definition_registry(self)
     }
 
     fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
-        SqliteDeployment::process_env_store(self)
+        SqliteBackend::process_env_store(self)
     }
 
     fn attachment_store(&self) -> Arc<dyn lash_core_execution::AttachmentStore> {
-        SqliteDeployment::attachment_store(self)
+        SqliteBackend::attachment_store(self)
     }
 }
 
-impl std::fmt::Debug for SqliteDeployment {
+impl std::fmt::Debug for SqliteBackend {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("SqliteDeployment")
+            .debug_struct("SqliteBackend")
             .field("location", &self.inner.location)
             .finish_non_exhaustive()
     }
@@ -427,17 +427,17 @@ mod tests {
             .expect("read the catalog")
     }
 
-    /// A memory deployment's databases live exactly as long as the deployment
+    /// A memory backend's databases live exactly as long as the backend
     /// or a handle taken from it: data written through one handle is read
     /// through another after the writer is gone, and the databases disappear
     /// once the last handle drops.
     #[tokio::test]
-    async fn a_memory_deployment_lives_until_its_last_handle_drops() {
-        let deployment = SqliteDeployment::memory()
+    async fn a_memory_backend_lives_until_its_last_handle_drops() {
+        let backend = SqliteBackend::memory()
             .await
-            .expect("open the memory deployment");
-        let uri = deployment.database_uri(SqliteDatabase::DurableCore);
-        let factory = deployment.session_store_factory();
+            .expect("open the memory backend");
+        let uri = backend.database_uri(SqliteDatabase::DurableCore);
+        let factory = backend.session_store_factory();
         let request = lash_core_execution::testing::store_fixtures::session_store_request(
             &lash_core_execution::SessionId::from("memory-lifetime"),
             "memory-lifetime",
@@ -449,7 +449,7 @@ mod tests {
                 .expect("create a session"),
         );
         let reopened = lash_core_execution::SessionStoreFactory::open_existing_store(
-            deployment
+            backend
                 .reopen()
                 .await
                 .expect("reopen")
@@ -467,25 +467,25 @@ mod tests {
         assert_eq!(catalog_table_count(&uri), 1, "the catalog is alive");
 
         drop(factory);
-        drop(deployment);
+        drop(backend);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while catalog_table_count(&uri) != 0 {
             assert!(
                 std::time::Instant::now() < deadline,
-                "dropping the deployment and every handle must release its databases"
+                "dropping the backend and every handle must release its databases"
             );
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
 
-    /// A file deployment keeps its four databases under its root and answers
-    /// to its journal's canonical path; a memory deployment answers to its id.
+    /// A file backend keeps its four databases under its root and answers
+    /// to its journal's canonical path; a memory backend answers to its id.
     #[tokio::test]
     async fn each_location_names_its_databases_and_its_identity() {
-        let dir = tempfile::tempdir().expect("deployment root");
-        let file = SqliteDeployment::open(dir.path())
+        let dir = tempfile::tempdir().expect("backend root");
+        let file = SqliteBackend::open(dir.path())
             .await
-            .expect("open the file deployment");
+            .expect("open the file backend");
         let root = crate::location::canonical_path(dir.path());
         assert_eq!(
             file.location(),
@@ -498,7 +498,7 @@ mod tests {
                 root.join(SqliteDatabase::EffectReplay.file_name())
                     .display()
             ),
-            "a file deployment answers to its journal's canonical path"
+            "a file backend answers to its journal's canonical path"
         );
         for database in SqliteDatabase::ALL {
             assert!(
@@ -507,20 +507,20 @@ mod tests {
             );
         }
         assert_eq!(
-            lash_core_execution::Deployment::binding_identity(&file),
+            lash_core_execution::Backend::binding_identity(&file),
             file.identity()
         );
         assert_eq!(
             lash_core_execution::EffectHost::turn_control_binding_id(file.effect_host().as_ref()),
             file.identity(),
-            "the effect host binds turn control to the deployment"
+            "the effect host binds turn control to the backend"
         );
 
-        let memory = SqliteDeployment::memory()
+        let memory = SqliteBackend::memory()
             .await
-            .expect("open the memory deployment");
+            .expect("open the memory backend");
         let SqliteLocation::Memory { id } = memory.location() else {
-            panic!("a memory deployment has a memory location");
+            panic!("a memory backend has a memory location");
         };
         assert_eq!(memory.identity(), format!("sqlite-memory:{id}"));
         assert_eq!(
@@ -529,11 +529,11 @@ mod tests {
         );
         assert_ne!(
             memory.identity(),
-            SqliteDeployment::memory()
+            SqliteBackend::memory()
                 .await
-                .expect("open another memory deployment")
+                .expect("open another memory backend")
                 .identity(),
-            "two memory deployments are two substrates"
+            "two memory backends are two substrates"
         );
     }
 }

@@ -457,7 +457,7 @@ mod tests {
     }
 
     /// Fails the first deferred-resolution effect at `fault`, over a SQLite
-    /// memory deployment whose journal records and replays every effect.
+    /// memory backend whose journal records and replays every effect.
     struct FaultJournalLayer {
         fault: JournalFault,
         faults_remaining: AtomicUsize,
@@ -511,14 +511,14 @@ mod tests {
         }
     }
 
-    /// A fresh SQLite memory deployment's effect host behind a
+    /// A fresh SQLite memory backend's effect host behind a
     /// [`FaultJournalLayer`]: one journal every context built over it shares.
     async fn fault_journal_host(fault: JournalFault) -> Arc<dyn lash_core::EffectHost> {
-        let deployment = lash_sqlite_store::SqliteDeployment::memory()
+        let backend = lash_sqlite_store::SqliteBackend::memory()
             .await
-            .expect("open a memory deployment");
+            .expect("open a memory backend");
         Arc::new(lash_core::testing::LayeredEffectHost::new(
-            deployment.effect_host(),
+            backend.effect_host(),
             Arc::new(FaultJournalLayer {
                 fault,
                 faults_remaining: AtomicUsize::new(usize::from(!matches!(

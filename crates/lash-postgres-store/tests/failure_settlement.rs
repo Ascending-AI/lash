@@ -74,13 +74,13 @@ fn counting_text_provider(
         .into_handle()
 }
 
-struct PostgresDeployment {
+struct PostgresBackend {
     storage: PostgresStorage,
     effect_host: Arc<PostgresEffectHost>,
     _lock: SharedDatabaseLock,
 }
 
-impl PostgresDeployment {
+impl PostgresBackend {
     async fn open() -> Option<Self> {
         let database_url = database_url()?;
         let lock = SharedDatabaseLock::acquire(&database_url).await;
@@ -133,7 +133,7 @@ impl PostgresDeployment {
                 "pg-failure-settlement",
                 "pg-failure-settlement-boot",
             ))
-            .expect("Postgres deployment")
+            .expect("Postgres backend")
     }
 }
 
@@ -166,12 +166,12 @@ fn assert_recorded_before_llm_failure(report: &lash::TurnReport) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_turn()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(deployment) = PostgresDeployment::open().await else {
+    let Some(backend) = PostgresBackend::open().await else {
         return Ok(());
     };
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let protocol = Arc::new(RefusingBeforeLlmCall::default());
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         Some(protocol.clone()),
     );
@@ -193,11 +193,11 @@ async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_attempt()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(deployment) = PostgresDeployment::open().await else {
+    let Some(backend) = PostgresBackend::open().await else {
         return Ok(());
     };
     let protocol = Arc::new(RefusingBeforeLlmCall::default());
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::default(), Arc::default()),
         Some(protocol.clone()),
     );
@@ -234,12 +234,12 @@ async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_atte
 }
 
 async fn abort_direct_turn_with_live_fault(
-    deployment: &PostgresDeployment,
+    backend: &PostgresBackend,
     session: &lash::LashSession,
     session_id: &str,
     turn_id: &str,
 ) -> (lash::EmbedError, lash_core::InputId) {
-    let faults = deployment.effect_host.effect_journal_faults();
+    let faults = backend.effect_host.effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Claim,
         &first_llm_call_key(session_id, turn_id),
@@ -276,18 +276,18 @@ async fn abort_direct_turn_with_live_fault(
 async fn live_fault_on_a_direct_turn_returns_its_receipt_to_withdraw_the_input()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-live-fault";
-    let Some(deployment) = PostgresDeployment::open().await else {
+    let Some(backend) = PostgresBackend::open().await else {
         return Ok(());
     };
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::default(), Arc::clone(&requests)),
         None,
     );
     let session = core.session(SESSION).open().await?;
 
     let (error, input_id) =
-        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "faulted-turn").await;
+        abort_direct_turn_with_live_fault(&backend, &session, SESSION, "faulted-turn").await;
     let cancelled = session
         .durable()
         .cancel_pending_turn_input(&input_id)
@@ -319,11 +319,11 @@ async fn live_fault_on_a_direct_turn_returns_its_receipt_to_withdraw_the_input()
 async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_retry()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-queued-journal-fault";
-    let Some(deployment) = PostgresDeployment::open().await else {
+    let Some(backend) = PostgresBackend::open().await else {
         return Ok(());
     };
     let provider_calls = Arc::new(AtomicUsize::new(0));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         None,
     );
@@ -334,7 +334,7 @@ async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_re
         .id("journal-blip")
         .send()
         .await?;
-    let faults = deployment.effect_host.effect_journal_faults();
+    let faults = backend.effect_host.effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Claim,
         &first_llm_call_key(SESSION, "queued-turn"),
@@ -360,7 +360,7 @@ async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_re
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancellation_still_settles_stopped_cancelled() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(deployment) = PostgresDeployment::open().await else {
+    let Some(backend) = PostgresBackend::open().await else {
         return Ok(());
     };
     let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
@@ -379,7 +379,7 @@ async fn cancellation_still_settles_stopped_cancelled() -> Result<(), Box<dyn st
         })
         .build()
         .into_handle();
-    let core = deployment.core(provider, None);
+    let core = backend.core(provider, None);
     let session = core.session("pg-direct-cancelled").open().await?;
     let cancel = tokio_util::sync::CancellationToken::new();
     let running = tokio::spawn({
@@ -415,18 +415,18 @@ async fn cancellation_still_settles_stopped_cancelled() -> Result<(), Box<dyn st
 async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-live-fault-next-turn";
-    let Some(deployment) = PostgresDeployment::open().await else {
+    let Some(backend) = PostgresBackend::open().await else {
         return Ok(());
     };
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::default(), Arc::clone(&requests)),
         None,
     );
     let session = core.session(SESSION).open().await?;
 
     let (error, input_id) =
-        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "bound-turn").await;
+        abort_direct_turn_with_live_fault(&backend, &session, SESSION, "bound-turn").await;
     let receipt = error
         .turn_input_acceptance()
         .cloned()
@@ -492,19 +492,19 @@ async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input()
 async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-live-fault-redrive";
-    let Some(deployment) = PostgresDeployment::open().await else {
+    let Some(backend) = PostgresBackend::open().await else {
         return Ok(());
     };
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
         None,
     );
     let session = core.session(SESSION).open().await?;
 
     let (error, _) =
-        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "redriven-turn").await;
+        abort_direct_turn_with_live_fault(&backend, &session, SESSION, "redriven-turn").await;
     let receipt = error
         .turn_input_acceptance()
         .cloned()
@@ -541,7 +541,7 @@ async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id()
 async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-crash-reclaim";
-    let Some(deployment) = PostgresDeployment::open().await else {
+    let Some(backend) = PostgresBackend::open().await else {
         return Ok(());
     };
     let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
@@ -571,7 +571,7 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation()
         })
         .build()
         .into_handle();
-    let core = deployment.core(provider, None);
+    let core = backend.core(provider, None);
     let session = core.session(SESSION).open().await?;
     let crashed = tokio::spawn({
         let session = session.clone();
@@ -628,16 +628,16 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation()
 async fn a_drive_whose_outcome_was_lost_still_binds_its_input()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-drive-finalize-fault";
-    let Some(deployment) = PostgresDeployment::open().await else {
+    let Some(backend) = PostgresBackend::open().await else {
         return Ok(());
     };
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = deployment.core(
+    let core = backend.core(
         counting_text_provider(Arc::default(), Arc::clone(&requests)),
         None,
     );
     let session = core.session(SESSION).open().await?;
-    let faults = deployment.effect_host.effect_journal_faults();
+    let faults = backend.effect_host.effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Finalize,
         &format!("{SESSION}:drive-lost-turn:accept_turn_input:claim_accepted_turn_input"),

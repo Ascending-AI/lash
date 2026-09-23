@@ -1,17 +1,17 @@
 use super::*;
 use lash_core::testing::store_fixtures::durable_admission;
 
-/// A fresh SQLite memory deployment's effect host: the one journal a
+/// A fresh SQLite memory backend's effect host: the one journal a
 /// fixture's worker, cell context and process service share.
 pub(super) async fn memory_effect_host() -> Arc<dyn lash_core::EffectHost> {
-    lash_sqlite_store::SqliteDeployment::memory()
+    lash_sqlite_store::SqliteBackend::memory()
         .await
-        .expect("open a memory deployment")
+        .expect("open a memory backend")
         .effect_host()
 }
 
 /// Runs a deferred tool resolution and then fails its journal commit, over a
-/// SQLite memory deployment that journals every other effect.
+/// SQLite memory backend that journals every other effect.
 struct FailingDeferredJournalLayer;
 
 #[async_trait::async_trait]
@@ -38,14 +38,14 @@ impl lash_core::testing::EffectLayer for FailingDeferredJournalLayer {
     }
 }
 
-/// A fresh memory deployment's effect host behind a
+/// A fresh memory backend's effect host behind a
 /// [`FailingDeferredJournalLayer`].
 pub(super) async fn failing_deferred_journal_host() -> Arc<dyn lash_core::EffectHost> {
-    let deployment = lash_sqlite_store::SqliteDeployment::memory()
+    let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
-        .expect("open a memory deployment");
+        .expect("open a memory backend");
     Arc::new(lash_core::testing::LayeredEffectHost::new(
-        deployment.effect_host(),
+        backend.effect_host(),
         Arc::new(FailingDeferredJournalLayer),
     ))
 }

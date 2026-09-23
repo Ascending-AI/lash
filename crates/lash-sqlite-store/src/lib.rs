@@ -118,7 +118,7 @@ fn commit_count_entropy_seed() -> u64 {
     let (high, low) = uuid::Uuid::new_v4().as_u64_pair();
     (high ^ low) & (u64::MAX >> 1)
 }
-mod deployment;
+mod backend;
 mod effect_replay;
 mod forks;
 mod graph;
@@ -149,8 +149,8 @@ mod triggers;
 mod turn_ingress;
 
 pub use attachment_store::SqliteAttachmentStore;
+pub use backend::{SqliteBackend, SqliteBackendOptions};
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
-pub use deployment::{SqliteDeployment, SqliteDeploymentOptions};
 pub use location::SqliteLocation;
 use location::{DatabaseLocation, DatabaseTarget};
 
@@ -202,7 +202,7 @@ pub use triggers::SqliteTriggerStore;
 pub struct Store {
     conn: SqliteConnection,
     /// The durable-core database this store is open on. Held so a store
-    /// opened on a memory deployment keeps its database alive.
+    /// opened on a memory backend keeps its database alive.
     location: DatabaseLocation,
     turn_cancellation_authority: Option<lash_core_execution::TurnCancellationAuthority>,
     turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
@@ -743,7 +743,7 @@ impl SqliteSessionStoreFactory {
         )
     }
 
-    /// The factory over `core` in one deployment, with its registry and
+    /// The factory over `core` in one backend, with its registry and
     /// effect journal already known rather than learned from a later bind.
     pub(crate) fn at(
         core: DatabaseLocation,

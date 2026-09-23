@@ -21,7 +21,7 @@ struct SqliteDatabaseDefinition {
     version: i32,
 }
 
-/// One of the four independently versioned SQLite databases a lash deployment
+/// One of the four independently versioned SQLite databases a lash backend
 /// can hold.
 ///
 /// The variant is the single table for each database's schema SQL, version,
@@ -39,7 +39,7 @@ pub enum SqliteDatabase {
 }
 
 impl SqliteDatabase {
-    /// Every database a deployment holds.
+    /// Every database a backend holds.
     pub(crate) const ALL: [Self; 4] = [
         Self::DurableCore,
         Self::ProcessRegistry,
@@ -47,7 +47,7 @@ impl SqliteDatabase {
         Self::EffectReplay,
     ];
 
-    /// The file this database is kept in under a file deployment's root.
+    /// The file this database is kept in under a file backend's root.
     pub const fn file_name(self) -> &'static str {
         match self {
             Self::DurableCore => crate::DURABLE_CORE_DB_FILE,
@@ -58,7 +58,7 @@ impl SqliteDatabase {
     }
 
     /// The last segment of this database's `memdb` name in a memory
-    /// deployment.
+    /// backend.
     pub(crate) const fn memory_name(self) -> &'static str {
         match self {
             Self::DurableCore => "core",

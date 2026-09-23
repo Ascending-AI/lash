@@ -1,18 +1,18 @@
-//! Where a SQLite deployment's four databases live, and the one identity they
+//! Where a SQLite backend's four databases live, and the one identity they
 //! answer to (ADR 0102).
 //!
-//! A deployment is a directory of four database files or a named in-memory
-//! deployment of four `memdb` databases. [`SqliteLocation`] owns both facts
+//! A backend is a directory of four database files or a named in-memory
+//! backend of four `memdb` databases. [`SqliteLocation`] owns both facts
 //! every component needs from that choice: how to reach each database (a path
 //! or a `file:/lash-<id>/<db>?vfs=memdb` URI) and the identity the turn-control
 //! binding, the settlement notifier and every `ATTACH` are keyed on. No
 //! component formats either on its own.
 //!
 //! A `memdb` database is shared by name across every connection in the
-//! process and disappears with its last connection. A memory deployment
+//! process and disappears with its last connection. A memory backend
 //! therefore pins each database with one idle anchor connection
 //! ([`MemoryAnchors`]), and every component opened on it holds the anchors, so
-//! the data lives exactly as long as the deployment or any handle taken from
+//! the data lives exactly as long as the backend or any handle taken from
 //! it.
 
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::SqliteDatabase;
 
-/// The typed location of one SQLite deployment.
+/// The typed location of one SQLite backend.
 ///
 /// The only way to reach a SQLite database in memory: raw `:memory:` and
 /// `file:` strings are refused by every path-taking constructor.
@@ -28,7 +28,7 @@ use crate::SqliteDatabase;
 pub enum SqliteLocation {
     /// Four database files under a canonical directory.
     File { root: PathBuf },
-    /// Four named `memdb` databases, alive while the deployment is.
+    /// Four named `memdb` databases, alive while the backend is.
     Memory { id: uuid::Uuid },
 }
 
@@ -40,14 +40,14 @@ impl SqliteLocation {
         }
     }
 
-    /// The identity every binding this deployment writes is keyed on:
+    /// The identity every binding this backend writes is keyed on:
     /// `sqlite:<canonical effect-replay.db path>` or `sqlite-memory:<id>`.
     ///
-    /// A file deployment answers to its effect journal's canonical path
+    /// A file backend answers to its effect journal's canonical path
     /// because that is the identity a SQLite effect host has always bound
     /// turn control to (FIG-2971) and sessions have persisted: a file
     /// database written by a host opened on `<root>/effect-replay.db` opens
-    /// through the deployment with every binding unchanged.
+    /// through the backend with every binding unchanged.
     pub fn identity(&self) -> String {
         match self {
             Self::File { root } => format!(
@@ -62,7 +62,7 @@ impl SqliteLocation {
     /// The URI a raw SQLite connection opens `database` through.
     ///
     /// An inspection affordance: every lash component reaches the database
-    /// through the deployment, never through this string.
+    /// through the backend, never through this string.
     pub fn database_uri(&self, database: SqliteDatabase) -> String {
         self.target(database).uri()
     }
@@ -123,7 +123,7 @@ impl DatabaseTarget {
         }
     }
 
-    /// The name this database is identified by among a deployment's
+    /// The name this database is identified by among a backend's
     /// participants: the canonical path of a file, the URI of a `memdb`
     /// database.
     pub(crate) fn canonical_name(&self) -> String {
@@ -134,7 +134,7 @@ impl DatabaseTarget {
     }
 
     /// Whether the database has been created. A memory target is created by
-    /// the deployment that names it and lives as long as any handle does.
+    /// the backend that names it and lives as long as any handle does.
     pub(crate) fn exists(&self) -> bool {
         match self {
             Self::File(path) => path.exists(),
@@ -158,7 +158,7 @@ fn escape_uri_path(path: &str) -> String {
         .replace('#', "%23")
 }
 
-/// One idle connection per `memdb` database of a memory deployment. A
+/// One idle connection per `memdb` database of a memory backend. A
 /// `memdb` database disappears with its last connection; these keep all four
 /// alive until the last handle holding them drops.
 pub(crate) struct MemoryAnchors {
@@ -186,8 +186,8 @@ impl std::fmt::Debug for MemoryAnchors {
     }
 }
 
-/// One database of one deployment, as a component opens it: where it is, the
-/// identity of the deployment it belongs to, and — for a memory deployment —
+/// One database of one backend, as a component opens it: where it is, the
+/// identity of the backend it belongs to, and — for a memory backend —
 /// the anchors that keep it alive while this handle does.
 #[derive(Clone, Debug)]
 pub(crate) struct DatabaseLocation {
@@ -198,9 +198,9 @@ pub(crate) struct DatabaseLocation {
 }
 
 impl DatabaseLocation {
-    /// `database` in `location`, answering to the deployment's `identity`
+    /// `database` in `location`, answering to the backend's `identity`
     /// and pinned by `anchors` when in memory.
-    pub(crate) fn in_deployment(
+    pub(crate) fn in_backend(
         location: &SqliteLocation,
         identity: &Arc<str>,
         database: SqliteDatabase,
@@ -213,9 +213,9 @@ impl DatabaseLocation {
         }
     }
 
-    /// A database file a host opened on its own, outside any deployment: the
+    /// A database file a host opened on its own, outside any backend: the
     /// file is its own location, and its identity is `sqlite:<canonical
-    /// path>`, stable across relative spellings and symlinks. A deployment's
+    /// path>`, stable across relative spellings and symlinks. A backend's
     /// journal file answers to the same string (see
     /// [`SqliteLocation::identity`]).
     pub(crate) fn standalone_file(path: &Path) -> Self {
@@ -237,7 +237,7 @@ impl DatabaseLocation {
 
     /// The binding a durable-core store's own turn-cancellation authority
     /// answers to: `sqlite:<path as opened>` for a file, as every file catalog
-    /// has recorded it, and the deployment's identity in memory.
+    /// has recorded it, and the backend's identity in memory.
     pub(crate) fn store_authority_identity(&self) -> String {
         match &self.target {
             DatabaseTarget::File(path) => format!("sqlite:{}", path.to_string_lossy()),
@@ -262,7 +262,7 @@ pub(crate) fn validate_file_database_path(
                 rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
                 Some(format!(
                     "{component} requires a file-backed database path, got `{rendered}`; \
-                     use SqliteDeployment::memory() for an in-memory deployment"
+                     use SqliteBackend::memory() for an in-memory backend"
                 )),
             ),
         ));
@@ -316,7 +316,7 @@ mod tests {
     fn memory_data_survives_every_non_anchor_connection_and_dies_with_the_anchors() {
         let location = SqliteLocation::fresh_memory();
         let uri = location.database_uri(SqliteDatabase::DurableCore);
-        let anchors = MemoryAnchors::pin(&location).expect("pin memory deployment");
+        let anchors = MemoryAnchors::pin(&location).expect("pin memory backend");
         {
             let writer = rusqlite::Connection::open(&uri).expect("open writer");
             writer

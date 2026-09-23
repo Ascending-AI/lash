@@ -2,7 +2,7 @@
 //! (FIG-2266).
 //!
 //! The laws live in `lash-conformance` so every tier answers one set; this
-//! file supplies the wiring — a host over one deployment's journal built with
+//! file supplies the wiring — a host over one backend's journal built with
 //! the lease window the law asked for, the drain that host hands out over the
 //! same journal, and a fresh process registry per scenario.
 //!
@@ -19,17 +19,17 @@ use lash_conformance::{
 use lash_core_execution::EffectHost;
 
 use super::{Retained, SUBSTRATE, with_lease_timings};
-use crate::deployment_fixture::{TestDeployment, system_clock};
+use crate::backend_fixture::{TestBackend, system_clock};
 
-/// A world over one deployment's journal.
+/// A world over one backend's journal.
 ///
 /// The host is opened *inside* the returned future rather than cloned from an
 /// outer one, because the recovery law calls this factory from the runtime it
 /// is about to destroy: the SQLite connection must belong to that runtime so
 /// it dies with it.
-async fn world(deployment: TestDeployment, spec: ToolChildWorldSpec) -> ToolChildWorld {
+async fn world(backend: TestBackend, spec: ToolChildWorldSpec) -> ToolChildWorld {
     let ttl = Duration::from_millis(spec.lease_ttl_ms);
-    let host = deployment
+    let host = backend
         .reopen_with(
             with_lease_timings(
                 lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
@@ -46,32 +46,28 @@ async fn world(deployment: TestDeployment, spec: ToolChildWorldSpec) -> ToolChil
     }
 }
 
-/// The fixture both catalogues share: one deployment per invocation (the
+/// The fixture both catalogues share: one backend per invocation (the
 /// macro evaluates the block per law), a world factory over its journal, and a
-/// fresh deployment's process registry per scenario.
-fn fixture() -> (
-    (TestDeployment, Retained),
-    &'static str,
-    ToolChildLawFixture,
-) {
-    let deployment = TestDeployment::blocking(SUBSTRATE);
-    let worlds = deployment.clone();
+/// fresh backend's process registry per scenario.
+fn fixture() -> ((TestBackend, Retained), &'static str, ToolChildLawFixture) {
+    let backend = TestBackend::blocking(SUBSTRATE);
+    let worlds = backend.clone();
     let make_world: lash_conformance::ToolChildWorldFactory =
         Arc::new(move |spec: ToolChildWorldSpec| Box::pin(world(worlds.clone(), spec)));
-    // Each scenario opens its own deployment, so a durable registry cannot
+    // Each scenario opens its own backend, so a durable registry cannot
     // carry the previous scenario's rows.
     let retained = Retained::default();
     let registries = retained.clone();
     let make_registry: lash_conformance::ToolChildRegistryFactory = Arc::new(move || {
         let registries = registries.clone();
         Box::pin(async move {
-            let deployment = TestDeployment::open(SUBSTRATE).await;
-            registries.keep(&deployment);
-            deployment.process_registry() as Arc<dyn lash_core_execution::ProcessRegistry>
+            let backend = TestBackend::open(SUBSTRATE).await;
+            registries.keep(&backend);
+            backend.process_registry() as Arc<dyn lash_core_execution::ProcessRegistry>
         })
     });
     (
-        (deployment, retained),
+        (backend, retained),
         "sqlite",
         ToolChildLawFixture {
             make_world,

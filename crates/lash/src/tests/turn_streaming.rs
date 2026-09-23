@@ -557,14 +557,14 @@ impl EffectRecorder {
             .push(serde_json::to_string(outcome).expect("serialize effect outcome"));
     }
 
-    /// A fresh SQLite memory deployment's effect host, with this recorder
+    /// A fresh SQLite memory backend's effect host, with this recorder
     /// layered over every controller it lends.
     async fn effect_host(&self) -> Arc<lash_core::testing::LayeredEffectHost> {
-        let deployment = lash_sqlite_store::SqliteDeployment::memory()
+        let backend = lash_sqlite_store::SqliteBackend::memory()
             .await
-            .expect("open a memory deployment");
+            .expect("open a memory backend");
         Arc::new(lash_core::testing::LayeredEffectHost::new(
-            deployment.effect_host(),
+            backend.effect_host(),
             Arc::new(self.clone()),
         ))
     }

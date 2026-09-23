@@ -203,19 +203,19 @@ async fn a_claim_queued_behind_a_live_lease_parks_under_a_frozen_clock() {
     // on a clock of its own with the same frozen wall face.
     let holder_clock = SteppedClock::new();
     let waiter_clock = FrozenClock::new();
-    let deployment = crate::SqliteDeployment::memory_with_clock(holder_clock)
+    let backend = crate::SqliteBackend::memory_with_clock(holder_clock)
         .await
-        .expect("open the memory deployment");
-    let waiter_deployment = deployment
+        .expect("open the memory backend");
+    let waiter_backend = backend
         .reopen_with_clock(waiter_clock.clone())
         .await
-        .expect("reopen the memory deployment on the waiter's clock");
+        .expect("reopen the memory backend on the waiter's clock");
     let scope = ExecutionScope::turn("frozen-session", "frozen-turn");
-    let holder = deployment
+    let holder = backend
         .open_effect_controller(scope.clone())
         .await
         .expect("open the holder's controller");
-    let waiter = waiter_deployment
+    let waiter = waiter_backend
         .open_effect_controller(scope.clone())
         .await
         .expect("open the waiter's controller");
@@ -264,10 +264,10 @@ async fn a_claim_queued_behind_a_live_lease_parks_under_a_frozen_clock() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_discharge_held_by_the_commit_order_barrier_resumes_when_its_blocker_drains() {
     let clock = SteppedClock::new();
-    let deployment = crate::SqliteDeployment::memory_with_clock(clock.clone())
+    let backend = crate::SqliteBackend::memory_with_clock(clock.clone())
         .await
-        .expect("open the memory deployment");
-    let host = deployment.effect_host();
+        .expect("open the memory backend");
+    let host = backend.effect_host();
     let store = SqliteEffectReplayRowStore {
         conn: SqliteConnection::open(host.journal.target())
             .await
@@ -354,7 +354,7 @@ async fn a_discharge_held_by_the_commit_order_barrier_resumes_when_its_blocker_d
         wake: lash_core_execution::GroupWakePolicy::All,
         loser_disposition: lash_core_execution::LoserPolicy::RunToCompletion,
     }));
-    let controller = deployment
+    let controller = backend
         .open_effect_controller(scope.clone())
         .await
         .expect("open the child's controller");
@@ -422,15 +422,15 @@ async fn a_discharge_held_by_the_commit_order_barrier_resumes_when_its_blocker_d
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_lease_that_expires_on_the_clock_hands_the_queued_claim_the_row() {
     let clock = SteppedClock::new();
-    let deployment = crate::SqliteDeployment::memory_with_clock(clock.clone())
+    let backend = crate::SqliteBackend::memory_with_clock(clock.clone())
         .await
-        .expect("open the memory deployment");
+        .expect("open the memory backend");
     let scope = ExecutionScope::turn("expiry-session", "expiry-turn");
-    let holder = deployment
+    let holder = backend
         .open_effect_controller(scope.clone())
         .await
         .expect("open the holder's controller");
-    let successor = deployment
+    let successor = backend
         .open_effect_controller(scope.clone())
         .await
         .expect("open the successor's controller");
@@ -474,12 +474,12 @@ async fn a_lease_that_expires_on_the_clock_hands_the_queued_claim_the_row() {
 /// on the bounded fallback poll, long before the lease would expire.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_file_journal_notices_a_foreign_process_finalize_on_its_fallback_poll() {
-    let dir = tempfile::tempdir().expect("deployment root");
-    let deployment = crate::SqliteDeployment::open(dir.path())
+    let dir = tempfile::tempdir().expect("backend root");
+    let backend = crate::SqliteBackend::open(dir.path())
         .await
-        .expect("open the file deployment");
+        .expect("open the file backend");
     let scope = ExecutionScope::turn("foreign-session", "foreign-turn");
-    let waiter = deployment
+    let waiter = backend
         .open_effect_controller(scope.clone())
         .await
         .expect("open the waiter's controller");
@@ -592,13 +592,13 @@ fn a_close_time_finalizer_parks_between_its_running_childrens_returns() {
 }
 
 async fn close_with_two_running_children() {
-    let deployment = crate::SqliteDeployment::memory()
+    let backend = crate::SqliteBackend::memory()
         .await
-        .expect("open the memory deployment");
+        .expect("open the memory backend");
     let prefix = format!("close-wait-{}", uuid::Uuid::new_v4().simple());
     let scope = ExecutionScope::runtime_operation(format!("{prefix}-op"));
     let group_key = format!("{prefix}:group:g:0");
-    let controller = deployment
+    let controller = backend
         .open_effect_controller(scope.clone())
         .await
         .expect("open the group's controller");

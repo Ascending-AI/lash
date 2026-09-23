@@ -158,7 +158,7 @@ async fn durable_trigger_store(dir: &std::path::Path) -> Arc<dyn lash_core::Trig
 async fn builder_rebinds_first_party_process_registry_to_runtime_clock() {
     const NOW_MS: u64 = 4_200_000;
     let clock = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
-    let registry = lash_sqlite_store::SqliteDeployment::memory()
+    let registry = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open SQLite process registry with its default clock")
         .process_registry();
