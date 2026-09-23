@@ -380,7 +380,16 @@ IDENTIFIER_RENAME_BASELINES = {
     # two `--` lines inside the SQLite CREATE TABLE body. Comments are inert
     # to SQLite DDL, so the stored catalog is byte-identical and
     # SCHEMA_VERSION stays 70.
-    'crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION': 'sha256:b35533b82dd6a0ebe7b53aecc81628a7c59963690956e906edb44165af19aaf1',
+    # FIG-3397 PR B supersedes this reading: the tool-batch command is deleted,
+    # and with it six RuntimeErrorCode variants no build can raise
+    # (runtime_effect_tool_batch_{call_id,call_replay,empty,id},
+    # tool_batch_missing_result, tool_batch_result_count_mismatch). Deletion
+    # only: every surviving code keeps its wire spelling, and a stored deleted
+    # spelling still decodes verbatim as RuntimeErrorCode::ForeignCode and
+    # re-encodes to the same bytes. No column or CHECK moved, so the stamp
+    # stays (PostgreSQL 116, SQLite 75). Superseded:
+    # sha256:b35533b82dd6a0ebe7b53aecc81628a7c59963690956e906edb44165af19aaf1.
+    'crates/lash-sqlite-store/src/schema.rs:SCHEMA_VERSION': 'sha256:6316b508dd69074999dccc3c4b8ca3f5dd64d254dcd0037d4f56fa44da1a68ee',
 
     # FIG-1102: the workbench include! splice became real modules, so every
     # item in state.rs gained pub(crate) and one line was rewrapped. Serde
@@ -500,7 +509,13 @@ IDENTIFIER_RENAME_BASELINES = {
     # exhaustive destructure explicitly ignores it, and
     # issuing_node_id_does_not_change_tool_batch_identity proves both the raw
     # preimage and rendered v2 identity remain byte-identical.
-    'crates/lash-core-execution/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:d71ea72d3b80d401109b0ca80de601bc31ff61e813392e822257ac1cda7c9644',
+    # FIG-3397 PR B supersedes that reading: ToolBatchOccurrence is renamed
+    # ToolGroupOccurrence (the ordinal is group-key material now), and
+    # tool_invocation_batch_preimage folds the same identity tag under the same
+    # family string, so every batch id is byte-identical and
+    # TOOL_BATCH_FAMILY_VERSION stays 2. Superseded:
+    # sha256:d71ea72d3b80d401109b0ca80de601bc31ff61e813392e822257ac1cda7c9644.
+    'crates/lash-core-execution/src/session/tool_execution.rs:TOOL_BATCH_FAMILY_VERSION': 'sha256:5726d4993280651cf025e3a365a6b395c212bc4b503fffb0e52dec6e89011f82',
     # FIG-2234 fix 4: the generated schema.sql header comment was aligned to
     # component version 64 (bumped in lib.rs by the BLAKE3 cutover without
     # regenerating the artifact header). Comment-only; the executed DDL is
@@ -704,7 +719,16 @@ IDENTIFIER_RENAME_BASELINES = {
     # slimming comments; no schema statement, struct, field, serde attribute,
     # preimage byte expression, tag, or constant value changed, so
     # SCHEMA_VERSION stays 108 and TURN_CHECKPOINT_SCHEMA_VERSION stays 5.
-    'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:2955b2a75bc5f7b21d5d90181e45998022dd1162ee3a0c499b8fc0bba2c47b2e',
+    # FIG-3397 PR B supersedes this reading: the tool-batch command is deleted,
+    # and with it six RuntimeErrorCode variants no build can raise
+    # (runtime_effect_tool_batch_{call_id,call_replay,empty,id},
+    # tool_batch_missing_result, tool_batch_result_count_mismatch). Deletion
+    # only: every surviving code keeps its wire spelling, and a stored deleted
+    # spelling still decodes verbatim as RuntimeErrorCode::ForeignCode and
+    # re-encodes to the same bytes. No column or CHECK moved, so the stamp
+    # stays (PostgreSQL 116, SQLite 75). Superseded:
+    # sha256:2955b2a75bc5f7b21d5d90181e45998022dd1162ee3a0c499b8fc0bba2c47b2e.
+    'crates/lash-postgres-store/src/lib.rs:SCHEMA_VERSION': 'sha256:5b44c05846f0c1d9c7fd96e375d3e6cac38a16a2b07ad2dd96fd6e7d2fe5a472',
     'crates/lash-sansio/src/sansio/machine_state.rs:TURN_CHECKPOINT_SCHEMA_VERSION': 'sha256:c47b1c80a5d170e70556653319621cc219a493ba54bea2ccdee7317fc9f850b9',
     # FIG-3418: the guarded surface moved for two reasons, neither of which
     # reaches a serialized byte. `EffectOpener` gained a `schemars::JsonSchema`

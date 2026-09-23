@@ -39,7 +39,7 @@ crate::tool_child_invocation_tests!({
     )
 });
 
-// The batch-group differential answers on the same substrate.
+// The batch-group law answers on the same substrate.
 crate::tool_batch_group_tests!({
     let host: Arc<dyn crate::EffectHost> = Arc::new(
         crate::NativeEffectHost::with_native_controller(Arc::new(

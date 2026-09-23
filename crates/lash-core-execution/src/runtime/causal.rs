@@ -27,7 +27,7 @@ pub fn turn_effect_invocation(
         turn_id,
         turn_index,
         protocol_iteration,
-        effect_kind,
+        effect_kind.as_str(),
         effect_id,
     );
     RuntimeEffectInvocation::new(
@@ -94,17 +94,60 @@ pub fn turn_phase_effect_invocation(
     )
 }
 
+/// The replay-key segment of a turn's tool-child group invocation.
+///
+/// A group invocation is never an envelope, so it has no
+/// [`RuntimeEffectKind`]; it is key material only. The segment keeps the bytes
+/// the turn's tool calls have been keyed under since before they formed groups:
+/// the group key, every child's `ToolChildRequest` attempt identity and every
+/// attempt envelope hash derive from this key, so renaming the segment would
+/// move each of those hashes for no change in meaning (ADR 0099 §3).
+const TURN_TOOL_GROUP_KEY_SEGMENT: &str = "tool_batch";
+
+/// Invocation a standard-protocol turn opens its tool-child effect group under
+/// (ADR 0099 §3).
+///
+/// The replay key carries the physical turn and protocol iteration, so a
+/// follow-on agent frame whose sansio effect ids restart does not name the
+/// root frame's group.
+#[expect(
+    clippy::expect_used,
+    reason = "the caller's live effect controller admitted this scope"
+)]
+pub fn turn_tool_group_invocation(
+    execution_scope: &ExecutionScope,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    turn_index: usize,
+    protocol_iteration: usize,
+    effect_id: EffectId,
+) -> RuntimeEffectInvocation {
+    let replay_key = turn_effect_replay_key(
+        session_id,
+        turn_id,
+        turn_index,
+        protocol_iteration,
+        TURN_TOOL_GROUP_KEY_SEGMENT,
+        effect_id,
+    );
+    RuntimeEffectInvocation::new(
+        EffectAddress::new(execution_scope.clone(), replay_key)
+            .expect("turn tool group uses the already admitted controller scope"),
+        RuntimeAttribution::for_turn(session_id, turn_id, turn_index, protocol_iteration),
+        effect_id.0.to_string(),
+    )
+}
+
 fn turn_effect_replay_key(
     session_id: &SessionId,
     turn_id: &TurnId,
     turn_index: usize,
     protocol_iteration: usize,
-    kind: RuntimeEffectKind,
+    segment: &str,
     effect_id: EffectId,
 ) -> String {
     format!(
-        "{session_id}:{turn_id}:{turn_index}:{protocol_iteration}:{}:{}",
-        kind.as_str(),
+        "{session_id}:{turn_id}:{turn_index}:{protocol_iteration}:{segment}:{}",
         effect_id.0
     )
 }
@@ -117,7 +160,6 @@ pub fn child_effect_invocation(
     execution_scope: &ExecutionScope,
     parent: &RuntimeInvocation,
     effect_id: impl Into<String>,
-    _kind: RuntimeEffectKind,
     replay_suffix: impl AsRef<str>,
 ) -> RuntimeEffectInvocation {
     let replay_base = parent
@@ -171,7 +213,6 @@ pub fn tool_retry_sleep_invocation(
         execution_scope,
         parent,
         format!("{parent_effect_id}:{tool_name}:attempt:{attempt}:sleep"),
-        RuntimeEffectKind::Sleep,
         format!("{tool_name}:attempt:{attempt}:sleep"),
     )
 }
@@ -194,7 +235,6 @@ pub(crate) fn process_sleep_invocation(
             execution_scope,
             parent,
             format!("{parent_effect_id}:{suffix}"),
-            RuntimeEffectKind::Sleep,
             suffix,
         );
     }
@@ -225,7 +265,6 @@ pub(crate) fn process_await_event_invocation(
             execution_scope,
             parent,
             format!("{parent_effect_id}:{suffix}"),
-            RuntimeEffectKind::AwaitEvent,
             suffix,
         );
     }

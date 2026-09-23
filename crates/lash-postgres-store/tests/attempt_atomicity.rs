@@ -49,16 +49,17 @@ struct CrossingController {
     inner: Arc<dyn lash_core::RuntimeEffectController>,
     signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
     crash_after: Option<CrashAfter>,
-    cancel_after_batch_failure: Option<tokio_util::sync::CancellationToken>,
-    interrupt_after_batch_failure: bool,
-    force_serial: bool,
     fired: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Clone, Copy)]
 enum CrashAfter {
+    /// After the durable `spawn_agent` child start, before its await.
     SpawnAgentStart,
+    /// After the protocol batch's first child attempt (`alpha`) commits.
     FirstProtocolBatchChild,
+    /// After the fault batch's failing child attempt (`fail`) commits.
+    FailingProtocolBatchChild,
 }
 
 /// A PostgreSQL host whose every scoped controller — the turn's and each
@@ -70,7 +71,6 @@ enum CrashAfter {
 struct CrossingEffectHost {
     inner: Arc<dyn EffectHost>,
     crash_after: Option<CrashAfter>,
-    force_serial: bool,
     fired: Arc<std::sync::atomic::AtomicBool>,
     signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
 }
@@ -184,9 +184,6 @@ impl EffectHost for CrossingEffectHost {
                 inner: Arc::new(ScopedControllerAdapter(inner)),
                 signal_frames: Arc::clone(&self.signal_frames),
                 crash_after: self.crash_after,
-                cancel_after_batch_failure: None,
-                interrupt_after_batch_failure: false,
-                force_serial: self.force_serial,
                 fired: Arc::clone(&self.fired),
             }),
             admitted,
@@ -205,9 +202,6 @@ impl EffectHost for CrossingEffectHost {
                 inner: Arc::new(ScopedControllerAdapter(inner)),
                 signal_frames: Arc::clone(&self.signal_frames),
                 crash_after: self.crash_after,
-                cancel_after_batch_failure: None,
-                interrupt_after_batch_failure: false,
-                force_serial: self.force_serial,
                 fired: Arc::clone(&self.fired),
             }),
             admitted,
@@ -238,9 +232,6 @@ impl EffectHost for CrossingEffectHost {
                 inner: Arc::new(ScopedControllerAdapter(inner)),
                 signal_frames: Arc::clone(&self.signal_frames),
                 crash_after: self.crash_after,
-                cancel_after_batch_failure: None,
-                interrupt_after_batch_failure: false,
-                force_serial: self.force_serial,
                 fired: Arc::clone(&self.fired),
             }),
             admitted,
@@ -324,9 +315,6 @@ impl lash_core::AwaitEventResolver for ScopedControllerAdapter {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for ScopedControllerAdapter {
-    fn supports_concurrent_effects(&self) -> bool {
-        self.0.controller().supports_concurrent_effects()
-    }
     fn effect_journaling(&self) -> lash_core::EffectJournaling {
         self.0.controller().effect_journaling()
     }
@@ -478,10 +466,6 @@ impl lash_core::AwaitEventResolver for CrossingController {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for CrossingController {
-    fn supports_concurrent_effects(&self) -> bool {
-        !self.force_serial && self.inner.supports_concurrent_effects()
-    }
-
     fn effect_journaling(&self) -> lash_core::EffectJournaling {
         self.inner.effect_journaling()
     }
@@ -507,15 +491,14 @@ impl lash_core::RuntimeEffectController for CrossingController {
                     if call.tool_name == "fig1293_echo"
                         && call.args.get("value") == Some(&serde_json::json!("alpha"))
             ),
-            None => false,
-        };
-        let cancel_here = self.cancel_after_batch_failure.is_some()
-            && matches!(
+            Some(CrashAfter::FailingProtocolBatchChild) => matches!(
                 &envelope.command,
                 RuntimeEffectCommand::ToolAttempt { call, .. }
                     if call.tool_name == "fig1293_echo"
                         && call.args.get("value") == Some(&serde_json::json!("fail"))
-            );
+            ),
+            None => false,
+        };
         if matches!(
             &envelope.command,
             RuntimeEffectCommand::Process { command }
@@ -527,16 +510,6 @@ impl lash_core::RuntimeEffectController for CrossingController {
                 .push(serde_json::to_vec(&envelope).expect("serialize signal crossing frame"));
         }
         let outcome = self.inner.execute_effect(envelope, local_executor).await;
-        if cancel_here && outcome.is_ok() {
-            self.cancel_after_batch_failure
-                .as_ref()
-                .expect("checked cancellation token")
-                .cancel();
-            if self.interrupt_after_batch_failure && !self.fired.swap(true, Ordering::SeqCst) {
-                std::future::pending::<()>().await;
-                unreachable!("the host task is aborted after the failure commits cancellation")
-            }
-        }
         if crash_here && outcome.is_ok() && !self.fired.swap(true, Ordering::SeqCst) {
             std::future::pending::<()>().await;
             unreachable!("the host task is aborted after the selected child commit")
@@ -582,9 +555,6 @@ impl lash_core::RuntimeEffectController for CrossingController {
                 inner: Arc::new(ScopedControllerAdapter(bound)),
                 signal_frames: Arc::clone(&self.signal_frames),
                 crash_after: self.crash_after,
-                cancel_after_batch_failure: self.cancel_after_batch_failure.clone(),
-                interrupt_after_batch_failure: self.interrupt_after_batch_failure,
-                force_serial: self.force_serial,
                 fired: Arc::clone(&self.fired),
             }),
             admitted,
@@ -722,8 +692,9 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAtParentEnd {
     }
 }
 
-/// Crash between the ToolBatch commit and the turn's own final commit: the
-/// admission phase runs immediately before the commit the turn is redriven for.
+/// Crash between the tool group's settlement and the turn's own final commit:
+/// the admission phase runs immediately before the commit the turn is redriven
+/// for.
 struct PanicBeforeTurnCommit;
 
 impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
@@ -731,7 +702,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
 
     fn end(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
         if phase == lash_core::runtime::RuntimeTurnPhase::EffectLoop {
-            panic!("injected crash after ToolBatch commit and before the turn commit");
+            panic!("injected crash after the tool group settled and before the turn commit");
         }
     }
 
@@ -780,9 +751,6 @@ fn postgres_public_turn_scope(
             inner,
             signal_frames,
             crash_after: None,
-            cancel_after_batch_failure: None,
-            interrupt_after_batch_failure: false,
-            force_serial: false,
             fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }),
         scope,
@@ -1301,7 +1269,6 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
         Arc::new(CrossingEffectHost {
             inner,
             crash_after: None,
-            force_serial: false,
             fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             signal_frames: Arc::clone(&signal_crossing_frames),
         })
@@ -1510,7 +1477,7 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
     let page = std::num::NonZeroUsize::new(16).expect("page bound");
 
     // The crash lands in the exact window recovery exists for: the turn's own
-    // commit is durable, the `Cancel` child the ToolBatch started is registered,
+    // commit is durable, the `Cancel` child the tool call started is registered,
     // and the ledger row that ends the scope was never written.
     assert!(
         registry
@@ -1536,7 +1503,7 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
                     if metadata == &serde_json::json!({"source": "parent-end"})
             )
         })
-        .expect("find the Cancel child the ToolBatch started");
+        .expect("find the Cancel child the tool call started");
     assert!(
         child.cancel_request.is_none(),
         "no cancel is requested while the ledger row is missing"

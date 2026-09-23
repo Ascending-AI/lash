@@ -41,17 +41,16 @@ pub(crate) struct PreparedToolChildLeaf {
     /// This leaf's index in the caller's input vector.
     pub input_index: usize,
     /// The prepared call plus its byte-identical `child:{index}:{call_id}`
-    /// replay suffix, produced by [`crate::PreparedToolBatch::new_with_grants`]
-    /// so a group child's attempt envelopes hash exactly as the batch path's
-    /// did (ADR 0099 §3).
+    /// replay suffix, produced by [`crate::PreparedToolBatch::new_with_grants`];
+    /// the suffix is attempt-identity material, so it is part of every attempt
+    /// envelope's hash (ADR 0099 §3).
     pub call: crate::PreparedToolBatchCall,
     /// The authority the child was admitted under, pinned at formation so a
     /// reopen never re-reads the live catalog.
     pub admission: ToolChildAdmission,
     // Deliberately no `trace_hook`: `ToolChildExecutionTraceHook` is a live
     // callback and cannot ride a retained, journaled `ToolChildRequest`, so
-    // group children run with no hook (the driver passes `None`). The batch
-    // predecessor still honours hooks because its children execute in-process.
+    // group children run with no hook (the driver passes `None`).
 }
 
 /// What [`RuntimeExecutionContext::consume_all_tool_child_settlements`] hands
@@ -79,7 +78,7 @@ impl RuntimeExecutionContext<'_> {
     ///
     /// The occurrence ordinal is carried exactly once: `batch_id` is minted by
     /// `tool_invocation_batch_preimage` under `TOOL_BATCH_FAMILY_VERSION` 2,
-    /// which already folds `ToolBatchOccurrence` into the hash (FIG-3394), so
+    /// which already folds `ToolGroupOccurrence` into the hash (FIG-3394), so
     /// the key has no separate occurrence segment.
     pub(crate) fn tool_child_group_key(&self, batch_id: &str) -> String {
         match self
@@ -524,9 +523,9 @@ impl RuntimeExecutionContext<'_> {
     /// calls hold no grant), consumes it to exhaustion, and returns each leaf's
     /// completed call keyed by its input index.
     ///
-    /// `group_invocation` is minted by the caller — the turn driver passes the
-    /// `RuntimeEffectKind::ToolBatch` invocation it would have executed, so the
-    /// group's durable identity is the effect it replaces (ADR 0099 §3).
+    /// `group_invocation` is minted by the caller — the turn driver passes
+    /// `causal::turn_tool_group_invocation`, whose replay key names the
+    /// physical turn and protocol iteration (ADR 0099 §3).
     /// Formation and infrastructure failures surface as the controller error
     /// the caller maps onto its existing error type; a cancelled turn yields
     /// cancelled completions, not an error.
@@ -629,11 +628,11 @@ mod tests {
         };
         let first_id = deterministic_tool_invocation_batch_id(
             &calls(),
-            crate::session::ToolBatchOccurrence::Opener(1),
+            crate::session::ToolGroupOccurrence::Opener(1),
         );
         let second_id = deterministic_tool_invocation_batch_id(
             &calls(),
-            crate::session::ToolBatchOccurrence::Opener(2),
+            crate::session::ToolGroupOccurrence::Opener(2),
         );
         assert_ne!(
             first_id, second_id,

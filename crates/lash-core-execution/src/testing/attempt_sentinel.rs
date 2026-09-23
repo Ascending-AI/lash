@@ -248,10 +248,6 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.wants_segment_boundary(progress)
     }
 
-    fn supports_concurrent_effects(&self) -> bool {
-        self.inner.supports_concurrent_effects()
-    }
-
     fn effect_journaling(&self) -> crate::EffectJournaling {
         self.inner.effect_journaling()
     }

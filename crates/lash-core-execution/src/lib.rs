@@ -743,6 +743,7 @@ pub use process_registry::{
     InMemoryProcessDefinitionRegistry, ProcessDefinitionExpectation, ProcessDefinitionLifecycle,
     ProcessDefinitionRecord, ProcessDefinitionRegistration, ProcessDefinitionRegistry,
 };
+pub(crate) use runtime::ToolAttemptEffectOutcome;
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AdmittedProcessIdentity, AdmittedScope,
     AdmittedScopeError, ArtifactOwner, AssistantResponseHookEvents, AwaitEventKey,
@@ -803,9 +804,9 @@ pub use runtime::{
     SegmentProgress, SessionDrainOutcome, SessionId, SessionListFilter, SessionRelationKind,
     SessionScope, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
     SessionWorkTarget, SleepSpec, StoreEffectGroupClosing, StoreEffectGroupDrain, StoreRealization,
-    TokenLedgerEntry, ToolAttemptLaunch, ToolCallLaunch, ToolIntentOutcomeSink,
-    ToolIntentPreparation, ToolIntentSubmissionGuard, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TokenLedgerEntry, ToolAttemptLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
+    ToolIntentSubmissionGuard, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
+    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureOwnerBinding, TurnCancelClosureProposal, TurnCancelClosureSettlement,
     TurnCancelDisposition, TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode,
     TurnCancelOriginHint, TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext,
@@ -834,7 +835,6 @@ pub(crate) use runtime::{
     publish_process_execution_env, require_event_replay, settle_started_process_engine_artifacts,
     settle_started_process_execution_env,
 };
-pub(crate) use runtime::{ToolAttemptEffectOutcome, ToolBatchEffectOutcome};
 #[cfg(test)]
 pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;

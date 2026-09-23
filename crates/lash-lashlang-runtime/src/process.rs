@@ -977,7 +977,7 @@ impl LashlangProcessHost<'_> {
             .collect::<Vec<_>>();
         let batch_id = lash_core::session::deterministic_tool_invocation_batch_id(
             &invocations,
-            lash_core::session::ToolBatchOccurrence::Opener(occurrence),
+            lash_core::session::ToolGroupOccurrence::Opener(occurrence),
         );
         if positions.len() > 1 {
             for (position, index) in positions.iter().copied().enumerate() {
@@ -996,7 +996,7 @@ impl LashlangProcessHost<'_> {
             .ctx
             .call_tool_batch(
                 invocations,
-                lash_core::session::ToolBatchOccurrence::Opener(occurrence),
+                lash_core::session::ToolGroupOccurrence::Opener(occurrence),
             )
             .await;
         for ((index, replay_key), reply) in positions

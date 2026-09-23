@@ -12,13 +12,6 @@ impl<'run> RuntimeTurnDriver<'run> {
         }
     }
 
-    pub(super) fn turn_cancel_wait(
-        &self,
-        cancellation: tokio_util::sync::CancellationToken,
-    ) -> crate::runtime::TurnCancelWait {
-        crate::runtime::TurnCancelWait::observing(cancellation, self.turn_cancel_scope())
-    }
-
     pub(super) fn effect_controller_handle(&self) -> RuntimeEffectControllerHandle<'run> {
         RuntimeEffectControllerHandle::borrowed(self.scoped_effect_controller.clone())
     }

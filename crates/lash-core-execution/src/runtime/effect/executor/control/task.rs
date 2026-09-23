@@ -204,7 +204,6 @@ pub(in crate::runtime::effect::executor) struct RemoteLocalExecutionRequest {
 pub struct EffectTaskController {
     requests: mpsc::UnboundedSender<EffectControllerTaskRequest>,
     scope: ExecutionScope,
-    supports_concurrent_effects: bool,
     owns_commit_backpressure: bool,
     effect_journaling: EffectJournaling,
     await_event_authority_binding_id: Option<String>,
@@ -225,7 +224,6 @@ impl EffectTaskController {
         let proxy = Self {
             requests,
             scope: admitted.scope().clone(),
-            supports_concurrent_effects: controller.supports_concurrent_effects(),
             owns_commit_backpressure: controller.owns_commit_backpressure(),
             effect_journaling: controller.effect_journaling(),
             await_event_authority_binding_id: controller.await_event_authority_binding_id(),
@@ -354,10 +352,6 @@ impl AwaitEventResolver for EffectTaskController {
 impl RuntimeEffectController for EffectTaskController {
     fn owns_commit_backpressure(&self) -> bool {
         self.owns_commit_backpressure
-    }
-
-    fn supports_concurrent_effects(&self) -> bool {
-        self.supports_concurrent_effects
     }
 
     fn effect_journaling(&self) -> EffectJournaling {

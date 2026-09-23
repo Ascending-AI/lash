@@ -368,12 +368,13 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
         .expect("turn");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
-    // A batch is a durable group now (FIG-3397): its children execute as
-    // `ToolInvocation` leaves under the opener's host-bound controller rather
-    // than as a `ToolBatch` command on the turn-scoped one.
-    // The `ToolInvocation` child itself runs on the native group substrate,
-    // never through a wrapping double; its attempt crosses the host's.
-    assert_eq!(scoped_recorder.count_kind(RuntimeEffectKind::ToolBatch), 0);
+    // A batch is a durable group (FIG-3397): its children execute as
+    // `ToolInvocation` leaves on the native group substrate, never through the
+    // turn-scoped double; a leaf's attempt crosses the host's controller.
+    assert_eq!(
+        scoped_recorder.count_kind(RuntimeEffectKind::ToolInvocation),
+        0
+    );
     assert_eq!(
         default_recorder.count_kind(RuntimeEffectKind::ToolAttempt),
         1
@@ -483,14 +484,6 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
         envelope: RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        if matches!(&envelope.command, RuntimeEffectCommand::ToolBatch { .. }) {
-            let outcome = local_executor.execute(envelope).await?;
-            self.tool_outcomes
-                .lock_recover()
-                .push(serde_json::to_value(&outcome).expect("serialize tool outcome"));
-            return Ok(outcome);
-        }
-
         match envelope.command {
             RuntimeEffectCommand::PeekAwaitEvent { .. } => {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None })
@@ -789,7 +782,7 @@ fn nested_trigger_batch_orchestrating_tool() -> lash_core::facade_support::Orche
 /// occurrence is dropped before the outer boundary sees it, and the turn's
 /// recorded effects lose an emission that really happened.
 #[tokio::test]
-async fn tool_batch_child_trigger_reaches_the_enclosing_recorded_batch_outcome() {
+async fn tool_batch_child_trigger_reaches_the_enclosing_group_settlement() {
     let controller = CapturingRuntimeReplayController::calling("trigger_batch_tool");
     let mut config = runtime_host_config_with_native_controller(Arc::new(controller.clone()));
     config.providers.provider_resolver =

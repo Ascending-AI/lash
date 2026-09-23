@@ -11,8 +11,7 @@ use lash::durability::{
     BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity, EffectJournalRetirement,
     ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
     RuntimeAwaitEventOptions, RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ToolAttemptLaunch, ToolCallLaunch,
-    TriggerLocalExecution,
+    RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ToolAttemptLaunch, TriggerLocalExecution,
 };
 use lash::messages::{PartAttachment, SessionMessageTreeNode, SharedJsonValue};
 use lash::persistence::{

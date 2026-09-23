@@ -18,21 +18,19 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::sync::{Barrier, mpsc, oneshot};
+use tokio::sync::{Barrier, mpsc};
 use tokio::time::{Duration, timeout};
 
 mod attachment_normalization;
 mod context_source;
 mod directives;
 mod host_effect_ledger;
-mod intent_drain;
 mod internal_activation;
 mod orchestrating;
 mod protocol_version_refusal;
 mod rebind_checklist;
 mod retry_effect_controllers;
 mod retry_turn_cancel_gate;
-mod settlement_order;
 
 use retry_effect_controllers::{FailingSleepEffectController, SleepRecordingEffectController};
 
@@ -151,75 +149,6 @@ struct FixedAttemptIntentTools {
     definition: crate::ToolDefinition,
     intents: crate::ToolIntents,
     calls: Arc<AtomicUsize>,
-}
-
-#[derive(Clone)]
-struct OrderedBatchIntentTools {
-    definitions: Vec<crate::ToolDefinition>,
-    second_attempt_finished: Arc<tokio::sync::Notify>,
-}
-
-#[async_trait::async_trait]
-impl ToolProvider for OrderedBatchIntentTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        manifests(self.definitions.clone())
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        contract_from(self.definitions.clone(), name)
-    }
-
-    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        if call.name() == "intent_batch_first" {
-            self.second_attempt_finished.notified().await;
-        } else {
-            assert_eq!(call.name(), "intent_batch_second");
-            self.second_attempt_finished.notify_one();
-        }
-        let call_id = call
-            .context
-            .tool_call_id()
-            .expect("ordered batch calls carry ids");
-        crate::ToolAttemptOutcome::done(
-            crate::ToolOutcomeDone::ok(json!({"completed": call.name()})),
-            crate::ToolIntents::v3(
-                [0, 1]
-                    .into_iter()
-                    .map(|intent_index| {
-                        let event_type = format!("{call_id}.intent.{intent_index}");
-                        crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                            session_id: SessionId::from("session"),
-                            process_id: ProcessId::from("intent-law-target"),
-                            event_type,
-                            payload: json!({"call_id": call_id, "intent_index": intent_index}),
-                        })
-                    })
-                    .collect(),
-            ),
-        )
-    }
-}
-
-#[derive(Clone)]
-struct BlockingAttemptIntentTools {
-    definition: crate::ToolDefinition,
-    entered: Arc<tokio::sync::Notify>,
-}
-
-#[async_trait::async_trait]
-impl ToolProvider for BlockingAttemptIntentTools {
-    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
-        manifests(vec![self.definition.clone()])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
-        (name == self.definition.name()).then(|| Arc::new(self.definition.contract()))
-    }
-
-    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        self.entered.notify_one();
-        std::future::pending().await
-    }
 }
 
 #[async_trait::async_trait]

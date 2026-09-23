@@ -364,10 +364,6 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
         self.inner.controller().wants_segment_boundary(progress)
     }
 
-    fn supports_concurrent_effects(&self) -> bool {
-        self.inner.controller().supports_concurrent_effects()
-    }
-
     #[expect(
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
@@ -787,25 +783,26 @@ impl SurfaceRunner {
                 let processes = lash_core::testing::effect_backed_process_service(Arc::clone(
                     &self.process_registry,
                 ));
-                let completed = Box::pin(lash_conformance::coordinate_tool_provider_with_services(
-                    controller.clone(),
-                    Arc::clone(&processes),
-                    &SessionId::from(SURFACE_SESSION),
-                    SurfaceIntentProvider::definition(),
-                    Arc::new(SurfaceIntentProvider),
-                    lash_core::PreparedToolCall::from_parts(
-                        "surface-intent-call",
-                        lash_core::ToolId::from("tool:surface_intent_provider"),
-                        "surface_intent_provider",
-                        serde_json::json!({}),
-                        None,
-                        serde_json::Value::Null,
-                    ),
-                ))
-                .await
-                .map_err(|error| {
-                    format!("{} provider/coordinator row failed: {error}", self.name)
-                })?;
+                let (completed, settled) =
+                    Box::pin(lash_conformance::coordinate_tool_provider_with_services(
+                        controller.clone(),
+                        Arc::clone(&processes),
+                        &SessionId::from(SURFACE_SESSION),
+                        SurfaceIntentProvider::definition(),
+                        Arc::new(SurfaceIntentProvider),
+                        lash_core::PreparedToolCall::from_parts(
+                            "surface-intent-call",
+                            lash_core::ToolId::from("tool:surface_intent_provider"),
+                            "surface_intent_provider",
+                            serde_json::json!({}),
+                            None,
+                            serde_json::Value::Null,
+                        ),
+                    ))
+                    .await
+                    .map_err(|error| {
+                        format!("{} provider/coordinator row failed: {error}", self.name)
+                    })?;
                 let intent_outcomes = completed.intent_outcomes.clone();
                 let literal_intent_outcomes = vec![
                     lash_core::ToolIntentExecutionOutcome::Executed {
@@ -857,95 +854,439 @@ impl SurfaceRunner {
                         self.name
                     ));
                 }
-                let observed = serde_json::to_value(RuntimeEffectOutcome::ToolBatch {
-                    launches: vec![lash_core::runtime::ToolCallLaunch::Done {
-                        result: Box::new(completed),
-                    }],
-                    triggers: Vec::new(),
-                    settlement_order: vec![0],
-                })
-                .expect("serialize observed non-empty intent batch");
-                let literal_model_return = serde_json::json!({
-                    "type": "tool_batch",
-                    "launches": [{
-                        "status": "done",
-                        "result": {
-                            "call_id": "surface-intent-call",
-                            "tool_name": "surface_intent_provider",
-                            "args": {},
-                            "output": {"outcome": {
-                                "status": "success",
-                                "payload": {
-                                    "$lash_tool_value": "untrusted_json",
-                                    "value": {"ok": true}
-                                }
-                            }},
-                            "model_return": {
-                                "call_id": "surface-intent-call",
-                                "tool_name": "surface_intent_provider",
-                                "parts": [
-                                    {"type": "text", "text": "{\"ok\":true}"},
-                                    {
-                                        "type": "text",
-                                        "text": "[tool intent start_process #0 executed: {\"__handle__\":\"lash\",\"id\":\"p.1.tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"incarnation\":1,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"status\":\"running\"}]"
-                                    },
-                                    {
-                                        "type": "text",
-                                        "text": "[tool intent start_process #1 executed: {\"__handle__\":\"lash\",\"id\":\"p.2.tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"incarnation\":2,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"status\":\"running\"}]"
-                                    }
-                                ]
-                            },
-                            "duration_ms": 0,
-                            "intent_outcomes": [
+                let observed = serde_json::to_value(&settled)
+                    .expect("serialize observed non-empty intent settlement");
+                // The settlement a group child journals for this terminal
+                // (ADR 0099 §6): the dispatch outcome with its realized intent
+                // outcomes moved into the settlement, which carries them, the
+                // started-process possession and the resolved model return.
+                let literal_settlement = serde_json::json!({
+                    "outcome": {
+                        "attempts": [
+                            {
+                                "duration_ms": 0,
+                                "ordinal": 1,
+                                "outcome": "completed"
+                            }
+                        ],
+                        "captures": [
+                            {
+                                "version": 4
+                            }
+                        ],
+                        "intents": {
+                            "intents": [
                                 {
-                                    "status": "executed",
-                                    "identity": {
-                                        "session_id": "surface-session",
-                                        "execution_scope_id": "surface-turn",
-                                        "tool_call_id": "surface-intent-call",
-                                        "intent_index": 0,
-                                        "minting_emission_replay_key": "tool-batch:surface-intent-call:surface-intent-call:attempt:1",
-                                        "replay_key": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f"
+                                    "intent": {
+                                        "declaration": {
+                                            "disposition": "externally_owned",
+                                            "event_types": [
+                                                {
+                                                    "name": "process.cancel_requested",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.first_started",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.waiting",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.resumed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.external_ref_set",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.abandon_requested",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.caller_departed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.observer_added",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.observer_removed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.subscription_retargeted",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.completed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {
+                                                        "terminal": {
+                                                            "await_output": {
+                                                                "pointer": "/await_output"
+                                                            },
+                                                            "status": "completed"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "name": "process.failed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {
+                                                        "terminal": {
+                                                            "await_output": {
+                                                                "pointer": "/await_output"
+                                                            },
+                                                            "status": "failed"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "name": "process.cancelled",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {
+                                                        "terminal": {
+                                                            "await_output": {
+                                                                "pointer": "/await_output"
+                                                            },
+                                                            "status": "cancelled"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "name": "process.abandoned",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {
+                                                        "terminal": {
+                                                            "await_output": {
+                                                                "pointer": "/await_output"
+                                                            },
+                                                            "status": "abandoned"
+                                                        }
+                                                    }
+                                                }
+                                            ],
+                                            "input": {
+                                                "metadata": {
+                                                    "index": 0,
+                                                    "source": "literal-intent-row"
+                                                },
+                                                "type": "external"
+                                            },
+                                            "lifecycle": {
+                                                "on_parent_end": "cancel",
+                                                "parent": {
+                                                    "kind": "owned",
+                                                    "opener": {
+                                                        "kind": "turn",
+                                                        "session_id": "surface-session",
+                                                        "turn_id": "surface-turn"
+                                                    }
+                                                }
+                                            },
+                                            "originator": {
+                                                "session_id": "surface-session",
+                                                "type": "session"
+                                            }
+                                        },
+                                        "session_id": "surface-session"
                                     },
-                                    "kind": "start_process",
-                                    "result": {
-                                        "__handle__": "lash",
-                                        "id": "p.1.tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
-                                        "process_id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
-                                        "incarnation": 1,
-                                        "kind": "external",
-                                        "status": "running"
-                                    }
+                                    "kind": "start_process"
                                 },
                                 {
-                                    "status": "executed",
-                                    "identity": {
-                                        "session_id": "surface-session",
-                                        "execution_scope_id": "surface-turn",
-                                        "tool_call_id": "surface-intent-call",
-                                        "intent_index": 1,
-                                        "minting_emission_replay_key": "tool-batch:surface-intent-call:surface-intent-call:attempt:1",
-                                        "replay_key": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397"
+                                    "intent": {
+                                        "declaration": {
+                                            "disposition": "externally_owned",
+                                            "event_types": [
+                                                {
+                                                    "name": "process.cancel_requested",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.first_started",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.waiting",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.resumed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.external_ref_set",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.abandon_requested",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.caller_departed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.observer_added",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.observer_removed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.subscription_retargeted",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {}
+                                                },
+                                                {
+                                                    "name": "process.completed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {
+                                                        "terminal": {
+                                                            "await_output": {
+                                                                "pointer": "/await_output"
+                                                            },
+                                                            "status": "completed"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "name": "process.failed",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {
+                                                        "terminal": {
+                                                            "await_output": {
+                                                                "pointer": "/await_output"
+                                                            },
+                                                            "status": "failed"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "name": "process.cancelled",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {
+                                                        "terminal": {
+                                                            "await_output": {
+                                                                "pointer": "/await_output"
+                                                            },
+                                                            "status": "cancelled"
+                                                        }
+                                                    }
+                                                },
+                                                {
+                                                    "name": "process.abandoned",
+                                                    "payload_schema": {
+                                                        "schema": {}
+                                                    },
+                                                    "semantics": {
+                                                        "terminal": {
+                                                            "await_output": {
+                                                                "pointer": "/await_output"
+                                                            },
+                                                            "status": "abandoned"
+                                                        }
+                                                    }
+                                                }
+                                            ],
+                                            "input": {
+                                                "metadata": {
+                                                    "index": 1,
+                                                    "source": "literal-intent-row"
+                                                },
+                                                "type": "external"
+                                            },
+                                            "lifecycle": {
+                                                "on_parent_end": "cancel",
+                                                "parent": {
+                                                    "kind": "owned",
+                                                    "opener": {
+                                                        "kind": "turn",
+                                                        "session_id": "surface-session",
+                                                        "turn_id": "surface-turn"
+                                                    }
+                                                }
+                                            },
+                                            "originator": {
+                                                "session_id": "surface-session",
+                                                "type": "session"
+                                            }
+                                        },
+                                        "session_id": "surface-session"
                                     },
-                                    "kind": "start_process",
-                                    "result": {
-                                        "__handle__": "lash",
-                                        "id": "p.2.tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
-                                        "process_id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
-                                        "incarnation": 2,
-                                        "kind": "external",
-                                        "status": "running"
-                                    }
+                                    "kind": "start_process"
                                 }
                             ],
-                            "replay": null
+                            "protocol_version": 3
+                        },
+                        "record": {
+                            "args": {},
+                            "call_id": "surface-intent-call",
+                            "duration_ms": 0,
+                            "output": {
+                                "outcome": {
+                                    "payload": {
+                                        "$lash_tool_value": "untrusted_json",
+                                        "value": {
+                                            "ok": true
+                                        }
+                                    },
+                                    "status": "success"
+                                }
+                            },
+                            "tool": "surface_intent_provider"
                         }
-                    }],
-                    "settlement_order": [0]
+                    },
+                    "settlement": {
+                        "intent_outcomes": [
+                            {
+                                "identity": {
+                                    "execution_scope_id": "surface-turn",
+                                    "intent_index": 0,
+                                    "minting_emission_replay_key": "tool-batch:surface-intent-call:surface-intent-call:attempt:1",
+                                    "replay_key": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
+                                    "session_id": "surface-session",
+                                    "tool_call_id": "surface-intent-call"
+                                },
+                                "kind": "start_process",
+                                "result": {
+                                    "__handle__": "lash",
+                                    "id": "p.1.tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
+                                    "incarnation": 1,
+                                    "kind": "external",
+                                    "process_id": "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
+                                    "status": "running"
+                                },
+                                "status": "executed"
+                            },
+                            {
+                                "identity": {
+                                    "execution_scope_id": "surface-turn",
+                                    "intent_index": 1,
+                                    "minting_emission_replay_key": "tool-batch:surface-intent-call:surface-intent-call:attempt:1",
+                                    "replay_key": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
+                                    "session_id": "surface-session",
+                                    "tool_call_id": "surface-intent-call"
+                                },
+                                "kind": "start_process",
+                                "result": {
+                                    "__handle__": "lash",
+                                    "id": "p.2.tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
+                                    "incarnation": 2,
+                                    "kind": "external",
+                                    "process_id": "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397",
+                                    "status": "running"
+                                },
+                                "status": "executed"
+                            }
+                        ],
+                        "model_return": {
+                            "call_id": "surface-intent-call",
+                            "parts": [
+                                {
+                                    "text": "{\"ok\":true}",
+                                    "type": "text"
+                                },
+                                {
+                                    "text": "[tool intent start_process #0 executed: {\"__handle__\":\"lash\",\"id\":\"p.1.tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"incarnation\":1,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f\",\"status\":\"running\"}]",
+                                    "type": "text"
+                                },
+                                {
+                                    "text": "[tool intent start_process #1 executed: {\"__handle__\":\"lash\",\"id\":\"p.2.tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"incarnation\":2,\"kind\":\"external\",\"process_id\":\"tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397\",\"status\":\"running\"}]",
+                                    "type": "text"
+                                }
+                            ],
+                            "tool_name": "surface_intent_provider"
+                        },
+                        "possession": [
+                            "tool-intent:v2:blake3:32ea5ca081ab578194a6d210ecdf6e71c1ddcbae1b53001de32028ebeebe594f",
+                            "tool-intent:v2:blake3:03cdeb1bb968e557d64e8f9718c2e7f34bf844071e614cd573224babd6c35397"
+                        ],
+                        "version": 5
+                    },
+                    "type": "tool_invocation"
                 });
-                if observed != literal_model_return {
+                if observed != literal_settlement {
                     return Err(format!(
-                        "{} non-empty intent batch differed from its literal per-tier oracle: {observed:#?}",
+                        "{} non-empty intent settlement differed from its literal per-tier oracle: {observed}",
                         self.name
                     ));
                 }

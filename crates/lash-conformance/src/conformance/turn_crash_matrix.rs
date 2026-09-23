@@ -251,16 +251,15 @@ enum ProviderOperation {
 
 /// Effect calls are identified from the real envelope command.
 ///
-/// `GroupChild` is a scalar or batch envelope that arrived carrying group
+/// `GroupChild` is a tool-attempt envelope that arrived carrying group
 /// membership — the same command under a different authority, which is the
-/// state a batch/attempt-only vocabulary cannot name (FIG-3429). The group
+/// state an attempt-only vocabulary cannot name (FIG-3429). The group
 /// lifecycle calls are seam operations of their own: an open is where retained
 /// membership is written, a settlement is where a journaled rank is consumed,
 /// and a close is where the caller releases its losers.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 enum EffectOperation {
-    ToolBatch { name: String },
     ToolAttempt { name: String },
     GroupChild { name: String },
     GroupOpen { children: usize },

@@ -10,7 +10,7 @@ use crate::llm::types::{
     AttachmentSource, LlmEventSender, LlmMessage, LlmOutputSpec, LlmProviderTraceSender,
     LlmToolChoice, LlmToolSpec,
 };
-use crate::sansio::{CompletedToolCall, ExecutionEnvironmentSync, LlmCallError};
+use crate::sansio::{ExecutionEnvironmentSync, LlmCallError};
 use crate::tool_dispatch::ToolTriggerEffectOutcome;
 use crate::{
     AttachmentCreateMeta, CausalRef, CheckpointDelivery, EffectAddress, ExecResponse,
@@ -311,34 +311,6 @@ fn validate_effect_command(
     if let RuntimeEffectCommand::ToolInvocation { request } = command {
         request.validate()?;
     }
-    if let RuntimeEffectCommand::ToolBatch { batch } = command {
-        if batch.batch_id.trim().is_empty() {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectToolBatchId,
-                "runtime effect tool batch id must be non-empty",
-            ));
-        }
-        if batch.calls.is_empty() {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectToolBatchEmpty,
-                "runtime effect tool batch must contain at least one prepared call",
-            ));
-        }
-        for (index, call) in batch.calls.iter().enumerate() {
-            if call.call.call_id.trim().is_empty() {
-                return Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectToolBatchCallId,
-                    format!("runtime effect tool batch call {index} has an empty call id"),
-                ));
-            }
-            if call.replay_suffix.trim().is_empty() {
-                return Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectToolBatchCallReplay,
-                    format!("runtime effect tool batch call {index} has an empty replay suffix"),
-                ));
-            }
-        }
-    }
     Ok(())
 }
 
@@ -385,18 +357,13 @@ pub enum RuntimeEffectCommand {
         attempt: u32,
         max_attempts: u32,
     },
-    ToolBatch {
-        batch: crate::PreparedToolBatch,
-    },
     /// One tool child of a durable effect group, at invocation level
     /// (ADR 0099 §2, §3).
     ///
-    /// Neither sibling tool command names this.
-    /// [`ToolAttempt`](Self::ToolAttempt) is the atomic body of a single
-    /// attempt — the thing that runs inside a recorded body — so it cannot
-    /// carry retry, which is a second attempt with a second envelope hash.
-    /// [`ToolBatch`](Self::ToolBatch) is the whole batch, the composition a
-    /// group replaces. The payload is the request that reconstructs the child
+    /// [`ToolAttempt`](Self::ToolAttempt) does not name this: it is the atomic
+    /// body of a single attempt — the thing that runs inside a recorded body —
+    /// so it cannot carry retry, which is a second attempt with a second
+    /// envelope hash. The payload is the request that reconstructs the child
     /// from the journal alone, which is what makes an accepted group's
     /// membership recoverable (W1, W2).
     ///
@@ -484,7 +451,6 @@ impl RuntimeEffectCommand {
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
-            Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,
             Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
             Self::IncorporateGroupSettlements { .. } => {
                 RuntimeEffectKind::IncorporateGroupSettlements
@@ -943,35 +909,6 @@ pub struct ToolInvocationEffectOutcome {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ToolBatchEffectOutcome {
-    pub launches: Vec<ToolCallLaunch>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triggers: Vec<ToolTriggerEffectOutcome>,
-    /// Input indices in the order the batch's leaves settled.
-    ///
-    /// Required, and deliberately without a serde default: an aggregate that
-    /// must reject with its first *settled* rejection cannot tell a defaulted
-    /// input order from a real one, so a journal entry written before this
-    /// field existed is refused rather than silently replayed as input order.
-    pub settlement_order: Vec<usize>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum ToolCallLaunch {
-    Done {
-        result: Box<CompletedToolCall>,
-    },
-    Pending {
-        // Boxed for the same reason `Done` boxes its payload: the canonical
-        // `ExecutionScope` inside the key dominates this enum's size.
-        key: Box<crate::AwaitEventKey>,
-        pending: crate::PendingCompletion,
-        duration_ms: u64,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolAttemptLaunch {
     Done {
@@ -979,7 +916,8 @@ pub enum ToolAttemptLaunch {
         intents: crate::ToolIntents,
     },
     Pending {
-        // See `ToolCallLaunch::Pending`.
+        // Boxed: the canonical `ExecutionScope` inside the key dominates this
+        // enum's size.
         key: Box<crate::AwaitEventKey>,
         pending: crate::PendingCompletion,
         duration_ms: u64,
@@ -1058,23 +996,13 @@ pub enum RuntimeEffectOutcome {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capture: Option<Box<ToolAttemptCapture>>,
     },
-    ToolBatch {
-        launches: Vec<ToolCallLaunch>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        triggers: Vec<ToolTriggerEffectOutcome>,
-        /// Input indices in the order the leaves settled. Required and never
-        /// defaulted: see [`ToolBatchEffectOutcome::settlement_order`].
-        settlement_order: Vec<usize>,
-    },
     /// What one tool child of a durable effect group settled on
     /// (ADR 0099 §2, §6, §13).
     ///
     /// The counterpart of
-    /// [`ToolInvocation`](RuntimeEffectCommand::ToolInvocation), and the reason
-    /// it is neither of the sibling tool outcomes.
-    /// [`ToolAttempt`](Self::ToolAttempt) is one attempt's atomic body, so it
-    /// cannot express a child that retried; [`ToolBatch`](Self::ToolBatch) is
-    /// the whole batch, which is the composition a group replaces.
+    /// [`ToolInvocation`](RuntimeEffectCommand::ToolInvocation), and not a
+    /// [`ToolAttempt`](Self::ToolAttempt): that is one attempt's atomic body,
+    /// so it cannot express a child that retried.
     ///
     /// `outcome` is exactly the terminal the per-leaf coordinator produced;
     /// `settlement` is the child's complete semantic record, including the
@@ -1394,26 +1322,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_tool_batch_effect(
-        self,
-    ) -> Result<ToolBatchEffectOutcome, RuntimeEffectControllerError> {
-        match self {
-            Self::ToolBatch {
-                launches,
-                triggers,
-                settlement_order,
-            } => Ok(ToolBatchEffectOutcome {
-                launches,
-                triggers,
-                settlement_order,
-            }),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::ToolBatch,
-                other.kind(),
-            )),
-        }
-    }
-
     /// Extracts the process outcome for effect-host implementors while executing or replaying a
     /// runtime effect.
     pub fn into_process(self) -> Result<ProcessEffectOutcome, RuntimeEffectControllerError> {
@@ -1540,7 +1448,6 @@ impl RuntimeEffectOutcome {
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
-            Self::ToolBatch { .. } => RuntimeEffectKind::ToolBatch,
             Self::ToolInvocation { .. } => RuntimeEffectKind::ToolInvocation,
             Self::IncorporateGroupSettlements { .. } => {
                 RuntimeEffectKind::IncorporateGroupSettlements
@@ -1619,10 +1526,6 @@ mod rejection_tests {
             attempt,
             max_attempts,
         }
-    }
-
-    fn batch() -> crate::PreparedToolBatch {
-        crate::PreparedToolBatch::new("batch", vec![prepared_call("call")])
     }
 
     fn assert_rejected(
@@ -1733,49 +1636,5 @@ mod rejection_tests {
                 "runtime_effect_tool_attempt_index",
             );
         }
-    }
-
-    #[test]
-    fn rejects_empty_tool_batch_id() {
-        let mut value = batch();
-        value.batch_id = " ".into();
-        assert_rejected(
-            invocation(RuntimeEffectKind::ToolBatch),
-            RuntimeEffectCommand::ToolBatch { batch: value },
-            "runtime_effect_tool_batch_id",
-        );
-    }
-
-    #[test]
-    fn rejects_empty_tool_batch() {
-        let mut value = batch();
-        value.calls.clear();
-        assert_rejected(
-            invocation(RuntimeEffectKind::ToolBatch),
-            RuntimeEffectCommand::ToolBatch { batch: value },
-            "runtime_effect_tool_batch_empty",
-        );
-    }
-
-    #[test]
-    fn rejects_empty_tool_batch_child_call_id() {
-        let mut value = batch();
-        value.calls[0].call.call_id = " ".to_string();
-        assert_rejected(
-            invocation(RuntimeEffectKind::ToolBatch),
-            RuntimeEffectCommand::ToolBatch { batch: value },
-            "runtime_effect_tool_batch_call_id",
-        );
-    }
-
-    #[test]
-    fn rejects_empty_tool_batch_child_replay_suffix() {
-        let mut value = batch();
-        value.calls[0].replay_suffix = " ".to_string();
-        assert_rejected(
-            invocation(RuntimeEffectKind::ToolBatch),
-            RuntimeEffectCommand::ToolBatch { batch: value },
-            "runtime_effect_tool_batch_call_replay",
-        );
     }
 }

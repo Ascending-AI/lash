@@ -387,7 +387,7 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
                 )
                 .with_execution_grant(grant),
             ],
-            crate::session::ToolBatchOccurrence::Opener(1),
+            crate::session::ToolGroupOccurrence::Opener(1),
         )
         .await;
     let batch_attempts = attempts.load(Ordering::SeqCst) - scalar_attempts;
@@ -424,7 +424,7 @@ async fn deferred_leaves_settle_in_completion_order_not_launch_order() {
                     serde_json::json!({}),
                 ),
             ],
-            crate::session::ToolBatchOccurrence::Opener(1),
+            crate::session::ToolGroupOccurrence::Opener(1),
         )
         .await;
 
@@ -497,7 +497,7 @@ async fn a_later_leaf_settles_while_an_earlier_leaf_holds_its_drain_slot() {
                     serde_json::json!({}),
                 ),
             ],
-            crate::session::ToolBatchOccurrence::Opener(1),
+            crate::session::ToolGroupOccurrence::Opener(1),
         )
         .await;
 
@@ -542,7 +542,7 @@ async fn completion_order_follows_the_delays_in_both_directions() {
                     serde_json::json!({}),
                 ),
             ],
-            crate::session::ToolBatchOccurrence::Opener(1),
+            crate::session::ToolGroupOccurrence::Opener(1),
         )
         .await;
 
@@ -748,7 +748,7 @@ async fn mixed_batch(
         vec![process_call, tool_call]
     };
     let replies = context
-        .call_tool_batch(calls, crate::session::ToolBatchOccurrence::Opener(1))
+        .call_tool_batch(calls, crate::session::ToolGroupOccurrence::Opener(1))
         .await;
     terminal.abort();
     replies

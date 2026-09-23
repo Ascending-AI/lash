@@ -375,23 +375,6 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
         let driver = self.replay_driver();
         let scope = self.execution_scope();
         envelope.invocation.validate_execution_scope(scope)?;
-        let is_tool_batch = matches!(envelope.command, RuntimeEffectCommand::ToolBatch { .. });
-        if is_tool_batch
-            && store_replay_capabilities(self).tool_batch_redrive == ToolBatchRedrive::ChildrenFirst
-        {
-            // Re-enter the coordinator on redrive so each child command is
-            // reconstructed and crosses its own key-addressed journal row.
-            // The aggregate remains durable: after the child drain settles,
-            // the ordinary driver records (or validates) the ToolBatch outcome.
-            let settled = local_executor.execute(envelope.clone()).await;
-            return Box::pin(driver.execute_effect(
-                scope,
-                envelope,
-                RuntimeEffectLocalExecutor::testing(move |_| async move { settled }),
-                self.group_child_binding(),
-            ))
-            .await;
-        }
         Box::pin(driver.execute_effect(scope, envelope, local_executor, self.group_child_binding()))
             .await
     }

@@ -132,8 +132,8 @@ impl RestateEffectControllerOptions {
     ///
     /// # Enabling or disabling this is a drain-only config change
     ///
-    /// Effects that must run outside the run closure - a durable process command
-    /// and a tool batch - journal their budget verdict in a slot of their own
+    /// An effect that must run outside the run closure - a durable process
+    /// command - journals its budget verdict in a slot of its own
     /// ahead of the effect, so that a redrive honours the recorded give-up
     /// instead of running the effect again. That slot exists only while a budget
     /// is configured, so turning the budget on or off changes the journal's slot
@@ -715,10 +715,6 @@ where
         true
     }
 
-    fn supports_concurrent_effects(&self) -> bool {
-        false
-    }
-
     async fn open_effect_group(
         &self,
         group: RuntimeEffectGroup,
@@ -1104,14 +1100,6 @@ where
             RestateEffectExecution::DirectLocal { envelope } => {
                 local_executor.execute(envelope).await
             }
-            RestateEffectExecution::DurableToolBatch { envelope } => {
-                let run_envelope = envelope.clone();
-                self.record_eager_effect(
-                    &envelope,
-                    Box::pin(async move { local_executor.execute(run_envelope).await }),
-                )
-                .await
-            }
             RestateEffectExecution::Timer { invocation, spec } => {
                 let RuntimeSleepOptions {
                     cancellation,
@@ -1488,9 +1476,6 @@ pub(crate) enum RestateEffectExecution {
     DirectLocal {
         envelope: RuntimeEffectEnvelope,
     },
-    DurableToolBatch {
-        envelope: RuntimeEffectEnvelope,
-    },
     Timer {
         invocation: RuntimeEffectInvocation,
         /// The journaled sleep intent. The Restate SDK wait duration is derived
@@ -1519,9 +1504,9 @@ impl RestateEffectExecution {
             | Self::Timer { invocation, .. }
             | Self::AwaitEvent { invocation, .. }
             | Self::PeekAwaitEvent { invocation, .. } => invocation,
-            Self::DirectLocal { envelope }
-            | Self::DurableToolBatch { envelope }
-            | Self::JournaledRun { envelope } => &envelope.invocation,
+            Self::DirectLocal { envelope } | Self::JournaledRun { envelope } => {
+                &envelope.invocation
+            }
         }
     }
 }
@@ -1577,15 +1562,6 @@ pub(crate) fn restate_effect_execution(
             RestateEffectExecution::DirectProcess {
                 invocation,
                 command,
-            }
-        }
-        command @ RuntimeEffectCommand::ToolBatch { .. } => {
-            RestateEffectExecution::DurableToolBatch {
-                envelope: RuntimeEffectEnvelope {
-                    invocation,
-                    command,
-                    group,
-                },
             }
         }
         command @ RuntimeEffectCommand::ExecCode { .. } => RestateEffectExecution::DirectLocal {

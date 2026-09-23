@@ -2,7 +2,7 @@ use super::execution_context::RuntimeExecutionContext;
 use crate::tool_dispatch::{
     ToolAttemptEffectIdentity, ToolCallLaunch, ToolDispatchOutcome, ToolPreparationOutcome,
     coordinate_tool_invocation, prepare_granted_tool_call_with_context,
-    prepare_tool_call_with_context, schedule_tool_batch,
+    prepare_tool_call_with_context,
 };
 use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
@@ -33,7 +33,7 @@ const TOOL_BATCH_FAMILY_VERSION: u8 = 2;
 /// continuation, so the ordinal is stable across a replay and keeps counting
 /// across a park and a process segment handover.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolBatchOccurrence {
+pub enum ToolGroupOccurrence {
     /// The ordinal the opener minted for this aggregate, counting from 1.
     Opener(u64),
     /// An opener that keeps no occurrence counter of its own: a provider or
@@ -46,7 +46,7 @@ pub enum ToolBatchOccurrence {
     Uncounted,
 }
 
-impl ToolBatchOccurrence {
+impl ToolGroupOccurrence {
     fn identity_tag(self) -> u64 {
         match self {
             Self::Opener(ordinal) => ordinal,
@@ -212,8 +212,8 @@ mod tests {
     #[test]
     fn deterministic_batch_identity_is_stable_and_content_addressed() {
         let calls = vec![invocation("a", 1), invocation("b", 2)];
-        let first = deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1));
-        let retry = deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1));
+        let first = deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1));
+        let retry = deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1));
         assert_eq!(first, retry);
         assert_eq!(
             first,
@@ -222,7 +222,7 @@ mod tests {
         assert_eq!(
             hex(&tool_invocation_batch_preimage(
                 &calls,
-                ToolBatchOccurrence::Opener(1)
+                ToolGroupOccurrence::Opener(1)
             )),
             "6c6173682d737461626c652d6964656e746974790202000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d6261746368000000000000000100000000000000020000000000000001610000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a317d000000000000000001620000000000000009746f6f6c3a74657374000000000000000b7b2276616c7565223a327d00"
         );
@@ -231,11 +231,11 @@ mod tests {
         let reordered = vec![invocation("b", 2), invocation("a", 1)];
         assert_ne!(
             first,
-            deterministic_tool_invocation_batch_id(&changed_args, ToolBatchOccurrence::Opener(1))
+            deterministic_tool_invocation_batch_id(&changed_args, ToolGroupOccurrence::Opener(1))
         );
         assert_ne!(
             first,
-            deterministic_tool_invocation_batch_id(&reordered, ToolBatchOccurrence::Opener(1))
+            deterministic_tool_invocation_batch_id(&reordered, ToolGroupOccurrence::Opener(1))
         );
     }
 
@@ -245,13 +245,13 @@ mod tests {
         let attributed = vec![invocation("a", 1).with_issuing_language_node_id("node:issuer")];
 
         assert_eq!(
-            tool_invocation_batch_preimage(&plain, ToolBatchOccurrence::Opener(1)),
-            tool_invocation_batch_preimage(&attributed, ToolBatchOccurrence::Opener(1)),
+            tool_invocation_batch_preimage(&plain, ToolGroupOccurrence::Opener(1)),
+            tool_invocation_batch_preimage(&attributed, ToolGroupOccurrence::Opener(1)),
             "trace attribution must not enter the durable tool-batch preimage"
         );
         assert_eq!(
-            deterministic_tool_invocation_batch_id(&plain, ToolBatchOccurrence::Opener(1)),
-            deterministic_tool_invocation_batch_id(&attributed, ToolBatchOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&plain, ToolGroupOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&attributed, ToolGroupOccurrence::Opener(1)),
         );
     }
 
@@ -264,7 +264,7 @@ mod tests {
             .map(|occurrence| {
                 deterministic_tool_invocation_batch_id(
                     &calls,
-                    ToolBatchOccurrence::Opener(occurrence),
+                    ToolGroupOccurrence::Opener(occurrence),
                 )
             })
             .collect::<std::collections::BTreeSet<_>>();
@@ -279,8 +279,8 @@ mod tests {
             "no occurrence may re-mint the v1 identity of the same calls"
         );
         assert_ne!(
-            deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Uncounted),
-            deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Uncounted),
+            deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1)),
             "an uncounted opener must not collide with a counted first reach"
         );
     }
@@ -307,12 +307,12 @@ mod tests {
         assert_eq!(
             hex(&tool_invocation_batch_preimage(
                 &calls,
-                ToolBatchOccurrence::Opener(1)
+                ToolGroupOccurrence::Opener(1)
             )),
             "6c6173682d737461626c652d6964656e746974790202000000000000001a6c6173682e746f6f6c2d696e766f636174696f6e2d626174636800000000000000010000000000000001000000000000000a6772616e740063616c6c000000000000000c746f6f6c3a6772616e746564000000000000000e7b2276616c7565223a747275657d01000000000000000c746f6f6c3a6772616e74656401000000000000000c706c7567696e00726f75746500000000000000147b22726f757465223a5b22cebb222c302e305d7d"
         );
         assert_eq!(
-            deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1)),
             "tool-batch:v2:blake3:e945970a262115423bccbf2462bef53df3fd8301dc07122dd23a11a027b5552f"
         );
 
@@ -334,8 +334,8 @@ mod tests {
             .with_execution_grant(without_source),
         ];
         assert_ne!(
-            deterministic_tool_invocation_batch_id(&calls, ToolBatchOccurrence::Opener(1)),
-            deterministic_tool_invocation_batch_id(&without_source, ToolBatchOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&calls, ToolGroupOccurrence::Opener(1)),
+            deterministic_tool_invocation_batch_id(&without_source, ToolGroupOccurrence::Opener(1)),
             "grant source presence must occupy a distinct option arm"
         );
     }
@@ -415,19 +415,6 @@ pub struct CompletedProtocolToolCall {
     pub record: ToolCallRecord,
 }
 
-fn cancelled_runtime_tool_call_launch(
-    call_id: String,
-    tool_name: String,
-    args: serde_json::Value,
-    replay: Option<crate::llm::types::ProviderReplayMeta>,
-) -> crate::runtime::ToolCallLaunch {
-    crate::runtime::ToolCallLaunch::Done {
-        result: Box::new(cancelled_completed_tool_call(
-            call_id, tool_name, args, replay,
-        )),
-    }
-}
-
 fn cancelled_completed_tool_call(
     call_id: String,
     tool_name: String,
@@ -461,7 +448,7 @@ fn cancelled_completed_tool_call(
 /// exhaustively ignored below. Retired tags remain burned.
 fn tool_invocation_batch_preimage(
     calls: &[ToolInvocation],
-    occurrence: ToolBatchOccurrence,
+    occurrence: ToolGroupOccurrence,
 ) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.tool-invocation-batch",
@@ -512,18 +499,13 @@ fn tool_invocation_batch_preimage(
 
 pub fn deterministic_tool_invocation_batch_id(
     calls: &[ToolInvocation],
-    occurrence: ToolBatchOccurrence,
+    occurrence: ToolGroupOccurrence,
 ) -> String {
     crate::stable_identity::rendered_hash(
         "tool-batch",
         TOOL_BATCH_FAMILY_VERSION,
         &tool_invocation_batch_preimage(calls, occurrence),
     )
-}
-
-struct CoordinatedToolLaunch {
-    launch: crate::runtime::ToolCallLaunch,
-    triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
 }
 
 /// Whether a reported settlement order is an ordering of the batch's own
@@ -978,7 +960,6 @@ impl RuntimeExecutionContext<'_> {
             self.dispatch.effect_controller.scoped().execution_scope(),
             parent,
             format!("{parent_effect_id}:{replay_suffix}"),
-            crate::RuntimeEffectKind::AwaitEvent,
             replay_suffix,
         );
         // Arm before parking, never after: the resolver the call named is what
@@ -1301,13 +1282,11 @@ impl RuntimeExecutionContext<'_> {
                             parent: parent_invocation.clone(),
                         },
                         turn_cancel_wait.as_ref(),
-                        None,
                         intent_trace_hook,
                         |completion_key| {
-                            crate::RuntimeEffectLocalExecutor::tool_batch(
+                            crate::RuntimeEffectLocalExecutor::tool_attempt(
                                 self.clone(),
                                 trace_hooks.clone(),
-                                HashMap::new(),
                                 completion_key,
                             )
                         },

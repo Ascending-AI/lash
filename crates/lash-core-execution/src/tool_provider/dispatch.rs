@@ -40,7 +40,7 @@ impl<'run> ToolDispatchClient<'run> {
         // replies only; settlement order matters where Promise.all selects.
         runtime
             .with_batch_parent_call_id(self.context.tool_call_id.clone())
-            .call_tool_batch(calls, crate::session::ToolBatchOccurrence::Uncounted)
+            .call_tool_batch(calls, crate::session::ToolGroupOccurrence::Uncounted)
             .await
             .replies
     }

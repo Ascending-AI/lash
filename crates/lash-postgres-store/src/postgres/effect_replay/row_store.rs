@@ -21,7 +21,6 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     fn capabilities(&self) -> EffectReplayCapabilities {
         EffectReplayCapabilities {
             completion_keys: CompletionKeys::Issued,
-            tool_batch_redrive: ToolBatchRedrive::ChildrenFirst,
         }
     }
 

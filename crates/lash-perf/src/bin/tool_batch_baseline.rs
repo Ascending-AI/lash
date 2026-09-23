@@ -20,8 +20,9 @@
 //!   workflow whose handler runs the same measured turn through
 //!   `RestateRuntimeEffectController`, registers it on the deployment at
 //!   `--restate-admin-url`, and counts the invocation's `sys_journal` entries.
-//!   Restate is serial today — `supports_concurrent_effects()` is hardcoded
-//!   false — so its numbers record a serial baseline, not a defect.
+//!   Before FIG-3397 Restate ran a batch serially (the since-deleted
+//!   `supports_concurrent_effects()` was hardcoded false), so its pre-cutover
+//!   numbers record a serial baseline, not a defect.
 
 #![allow(
     deprecated,

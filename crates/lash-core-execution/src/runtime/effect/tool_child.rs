@@ -12,16 +12,13 @@
 //! It stops holding for a **tool** child. ADR 0099 §2 makes a tool child a
 //! replayable *invocation driver*: retry, completion-key derivation, deferred
 //! await and the orchestrating lane are coordination that runs at handler
-//! level, and only the atomic attempt runs inside a recorded body. Neither tool
-//! command the journal has names that.
-//! [`ToolAttempt`](super::envelope::RuntimeEffectCommand::ToolAttempt) is the
-//! atomic body itself — one attempt of one call, the thing that goes inside
-//! `ctx.run` — so a driver expressed as a `ToolAttempt` could not retry, because
-//! a second attempt is a second envelope with a second hash.
-//! [`ToolBatch`](super::envelope::RuntimeEffectCommand::ToolBatch) is the whole
-//! batch, every leaf at once, which is the composition a group replaces. A tool
-//! group child is neither, so it has nothing to name, and a group whose child
-//! cannot be named cannot be retained (§3) or recovered (W1, W2).
+//! level, and only the atomic attempt runs inside a recorded body.
+//! [`ToolAttempt`](super::envelope::RuntimeEffectCommand::ToolAttempt) does not
+//! name that: it is the atomic body itself — one attempt of one call, the thing
+//! that goes inside `ctx.run` — so a driver expressed as a `ToolAttempt` could
+//! not retry, because a second attempt is a second envelope with a second hash.
+//! A group whose child cannot be named cannot be retained (§3) or recovered
+//! (W1, W2).
 //!
 //! [`ToolChildRequest`] is that name, and it is deliberately **one** durable
 //! shape rather than two. §3's list — input, replay identity, admitted grant,
@@ -79,12 +76,9 @@
 //! the host installs, exactly as much deployment wiring as the tool
 //! implementation behind it.
 //!
-//! `intent_drain_slot` is **deliberately absent**. It is an `IntentDrainGuard`,
-//! the in-process source-order gate, and ADR 0099 §5 replaces it with a durable
-//! per-group final-commit order: "The in-process gate discharges from `Drop` …
-//! which is right for a process-local future and **wrong** if copied into
-//! durable recovery." Carrying it would durably record the device the ADR
-//! removes. Its durable replacement is FIG-3409's.
+//! No drain-order slot rides here. ADR 0099 §5 orders sibling drains by a
+//! durable per-group final-commit order recorded at the §4 commit, not by any
+//! fact the request could carry.
 //!
 //! `checkpoint_messages` and `trigger_outcomes` are child-local buffers. What a
 //! child accumulates in them rides its *settlement*, which is FIG-3411's (§6,
@@ -408,8 +402,8 @@ impl ToolChildScope {
 /// See the module documentation for the three groups: deployment wiring (the
 /// registries, services, sender, clock and `attachment_source_policy`), live
 /// state (`turn_context`, and `RuntimeExecutionContext` generally), and facts
-/// that belong to a sibling ticket (`intent_drain_slot` to FIG-3409, the
-/// child-local checkpoint and trigger buffers to FIG-3411).
+/// that belong to a sibling ticket (the child-local checkpoint and trigger
+/// buffers to FIG-3411).
 ///
 /// **No child invocation id.** Retaining the dispatched invocation's id across
 /// handover is ADR 0099 §8 and belongs to FIG-3411. W2 — a crash after dispatch

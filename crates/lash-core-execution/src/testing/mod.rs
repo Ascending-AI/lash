@@ -957,6 +957,12 @@ fn frozen_tool_coordinator_clock_wall_clock_faces_agree() {
 /// Execute one opted-in provider through the production attempt coordinator,
 /// intent drain, and model-return projection against supplied durable services.
 ///
+/// Returns the completed call and the
+/// [`ToolInvocation`](crate::RuntimeEffectOutcome::ToolInvocation) settlement a
+/// group child journals for the same terminal: the dispatch outcome with its
+/// realized intent outcomes moved into the settlement, which carries the
+/// resolved model return (ADR 0099 §6).
+///
 /// This is public for **conformance-suite embedders** that compare the same
 /// provider and intent contract across durable backends.
 pub async fn coordinate_tool_provider_with_services(
@@ -966,7 +972,13 @@ pub async fn coordinate_tool_provider_with_services(
     definition: crate::ToolDefinition,
     provider: Arc<dyn crate::ToolProvider>,
     call: crate::PreparedToolCall,
-) -> Result<crate::sansio::CompletedToolCall, String> {
+) -> Result<
+    (
+        crate::sansio::CompletedToolCall,
+        crate::RuntimeEffectOutcome,
+    ),
+    String,
+> {
     let parent_invocation = crate::RuntimeInvocation::effect(
         crate::EffectAddress::new(
             scoped_effect_controller.execution_scope().clone(),
@@ -1010,7 +1022,6 @@ pub async fn coordinate_tool_provider_with_services(
             replay_suffix: call.call_id.clone(),
         },
         &turn_cancel_wait,
-        None,
         None,
         |completion_key| {
             crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
@@ -1063,16 +1074,27 @@ pub async fn coordinate_tool_provider_with_services(
             .iter()
             .map(|intent| crate::ModelToolReturnPart::text(intent.model_addendum())),
     );
-    Ok(crate::sansio::CompletedToolCall {
-        call_id: call.call_id,
-        tool_name: outcome.record.tool,
-        args: outcome.record.args,
-        output: outcome.record.output,
-        model_return,
-        duration_ms: outcome.record.duration_ms,
-        intent_outcomes: outcome.intent_outcomes,
-        replay: call.replay,
-    })
+    let mut journaled = outcome.clone();
+    let settlement =
+        crate::runtime::effect::ToolSettlement::from_dispatch(&journaled, model_return.clone());
+    journaled.intent_outcomes.clear();
+    let settled = crate::RuntimeEffectOutcome::ToolInvocation {
+        outcome: Box::new(journaled),
+        settlement: Box::new(settlement),
+    };
+    Ok((
+        crate::sansio::CompletedToolCall {
+            call_id: call.call_id,
+            tool_name: outcome.record.tool,
+            args: outcome.record.args,
+            output: outcome.record.output,
+            model_return,
+            duration_ms: outcome.record.duration_ms,
+            intent_outcomes: outcome.intent_outcomes,
+            replay: call.replay,
+        },
+        settled,
+    ))
 }
 
 /// Execute a recorded tool-intent drain through the production process-command

@@ -137,7 +137,7 @@ impl<'run> OrchestrationContext<'run> {
             return Box::pin(
                 runtime
                     .with_batch_parent_call_id(self.context.tool_call_id.clone())
-                    .call_tool_batch(calls, crate::session::ToolBatchOccurrence::Uncounted),
+                    .call_tool_batch(calls, crate::session::ToolGroupOccurrence::Uncounted),
             )
             .await
             .replies;
@@ -346,7 +346,7 @@ async fn coordinate_nested_tool_batch<'run>(
                         .build();
 
                     // An orchestrating registration runs its body inline — it
-                    // declares no attempt frame (`execute_prepared_tool_batch_child`
+                    // declares no attempt frame (a group child's invocation driver
                     // routes it the same way), so a journaled attempt for it would
                     // park on a completion nobody resolves. A granted call names
                     // leaf authority by construction and cannot be orchestrating.
@@ -388,10 +388,6 @@ async fn coordinate_nested_tool_batch<'run>(
                             parent: parent_invocation,
                         },
                         &turn_cancel_wait,
-                        // §5's drain gate is a batch aggregate's; a body-driven
-                        // batch has no aggregate frame, so each call drains its
-                        // own intents.
-                        None,
                         call.child_execution_trace_hook.clone(),
                         move |completion_key| {
                             crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(

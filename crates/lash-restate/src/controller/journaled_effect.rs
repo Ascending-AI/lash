@@ -75,7 +75,7 @@ where
     /// has no such protection - it would run before its journal slot is ever
     /// consulted - and the give-up verdict depends on the configured budget, so
     /// a budget increase between attempts would let the replay execute the
-    /// process command or tool batch and then discard the result for the
+    /// process command and then discard the result for the
     /// replayed poison entry.
     ///
     /// So the verdict is journaled unconditionally, in its own slot ahead of the
@@ -162,7 +162,7 @@ where
         .await
     }
 
-    /// Execute an eager effect (process command or tool batch) through the
+    /// Execute an eager effect (a durable process command) through the
     /// five-step journaling protocol: canonicalise envelope -> journaled
     /// budget give-up gate -> run work -> record effect -> validate recorded
     /// envelope against reconstructed.

@@ -850,14 +850,6 @@ impl RuntimeEffectController for RecordingEffectController {
                     ))
                     .await
             }
-            RuntimeEffectCommand::ToolBatch { batch } => {
-                local_executor
-                    .execute(RuntimeEffectEnvelope::new(
-                        envelope.invocation,
-                        RuntimeEffectCommand::ToolBatch { batch },
-                    ))
-                    .await
-            }
             RuntimeEffectCommand::AssistantResponseHooks { response } => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(

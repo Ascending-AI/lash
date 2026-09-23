@@ -829,7 +829,7 @@ pub mod durability {
         EffectJournalRetirement, EffectRetirementGate, ProcessLocalExecution,
         ProcessOutcomeObserver, ProcessTurnCancellation, RuntimeAwaitEventOptions,
         RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution, RuntimeSleepOptions,
-        RuntimeSubject, SegmentProgress, ToolAttemptLaunch, ToolCallLaunch, TriggerLocalExecution,
+        RuntimeSubject, SegmentProgress, ToolAttemptLaunch, TriggerLocalExecution,
     };
     pub use lash_core::{
         EffectHost, TurnCancellationAuthority, facade_support::LeaseTimings,

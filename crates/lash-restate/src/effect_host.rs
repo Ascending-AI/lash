@@ -573,10 +573,6 @@ impl RuntimeEffectController for FencedRestateController {
         self.controller.owns_commit_backpressure()
     }
 
-    fn supports_concurrent_effects(&self) -> bool {
-        self.controller.supports_concurrent_effects()
-    }
-
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,
@@ -1034,10 +1030,6 @@ impl RestateEffectHostController {
 impl RuntimeEffectController for RestateEffectHostController {
     fn owns_commit_backpressure(&self) -> bool {
         true
-    }
-
-    fn supports_concurrent_effects(&self) -> bool {
-        false
     }
 
     /// Register this host's envelope→executor resolver, once.
