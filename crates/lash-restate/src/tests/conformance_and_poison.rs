@@ -242,30 +242,86 @@ lash_conformance::durable_queued_drain_wait_resolver_tests!({
     )
 });
 
-lash_conformance::signal_intent_tests!({
-    let context = Arc::new(RecordingContext::default());
-    let effect_host: Arc<dyn EffectHost> =
-        Arc::new(RestateRuntimeEffectController::new_for_test(context));
-    let registry =
-        Arc::new(lash_core::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
-    let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-        serde_json::json!({"signal": "observed"}),
-    ));
-    let (process_work, wait_transport) =
-        conformance_restate_process_work(Arc::clone(&registry), terminal);
-    let verify_transport = Arc::clone(&wait_transport);
-    (
-        wait_transport,
-        "restate-public-signal-intent",
-        effect_host,
-        registry,
-        process_work,
-        move || async move {
-            verify_transport
-                .assert_reattached_to(&ProcessId::from("restate-public-signal-intent-target"));
-        },
-    )
-});
+// The turn runs inside a live handler: its tool call opens a real Restate
+// effect group whose child runs in the endpoint's dispatch invocation, which
+// the recording contexts cannot serve (FIG-3397).
+lash_conformance::turn_runner_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let registry =
+            Arc::new(lash_core::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
+        let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+            serde_json::json!({"signal": "observed"}),
+        ));
+        let (process_work, wait_transport) =
+            conformance_restate_process_work(Arc::clone(&registry), terminal);
+        let verify_transport = Arc::clone(&wait_transport);
+        // Restate state outlives a run: a fixed prefix would reopen the last
+        // run's retired group and replay its settlement instead of running
+        // the tool, so each run names its own session, turn and target.
+        let prefix: &'static str = Box::leak(
+            format!("restate-public-signal-intent-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        let target = ProcessId::from(format!("{prefix}-target"));
+        (
+            (harness, wait_transport),
+            prefix,
+            effect_host,
+            registry,
+            process_work,
+            turn_runner,
+            // Only the signal law waits on a process terminal through the
+            // attach transport; the turn-cancel laws never touch it.
+            move |law: &'static str| async move {
+                if law == "public_signal_intent_wakes_parked_process" {
+                    verify_transport.assert_reattached_to(&target);
+                }
+            },
+        )
+    }
+);
+
+// FIG-1293's migrated tools on the live endpoint: the turn runs in a probe
+// handler, `spawn_agent`'s child session runs in the endpoint's
+// LashProcessWorkflow on the law's worker, and the crash is a failed handler
+// attempt that Restate redelivers.
+lash_conformance::migrated_tools_redrive_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let registry = harness.process_registry();
+        // Restate state outlives a run: a fixed prefix would reopen the last
+        // run's workflows and groups, so each run names its own.
+        let prefix: &'static str =
+            Box::leak(format!("restate-migrated-tools-{}", harness.run_nonce()).into_boxed_str());
+        let orchestration: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
+            Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+            Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
+                lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                    lash_subagents::StaticCapability::new(
+                        "default",
+                        lash_core::facade_support::SessionSpec::inherit(),
+                    ),
+                )),
+            ))),
+        ];
+        (
+            harness,
+            prefix,
+            effect_host,
+            registry,
+            turn_runner,
+            orchestration,
+        )
+    }
+);
 
 lash_conformance::wake_delivery_ordering_tests!({
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
@@ -335,12 +391,21 @@ lash_conformance::wake_delivery_crash_tests!({
     )
 });
 
-lash_conformance::turn_crash_matrix_tests!({
+/// The Restate crash-matrix fixture: the tempdir guard, a SQLite state
+/// carrier per scenario, and the recording-context invocation factories.
+type RestateCrashFixture = (
+    tempfile::TempDir,
+    Box<dyn Fn(&str) -> Arc<dyn lash_core::RuntimePersistence>>,
+    fn(&str) -> lash_conformance::ConformanceInvocation,
+    fn(&str, ExecutionScope) -> lash_conformance::ConformanceInvocation,
+);
+
+fn restate_turn_crash_fixture() -> RestateCrashFixture {
     let dir = tempfile::tempdir().expect("Restate turn-crash conformance tempdir");
     let root = dir.path().to_path_buf();
     (
         dir,
-        move |scenario: &str| {
+        Box::new(move |scenario: &str| {
             let path = root.join(format!("restate-turn-crash-{scenario}.db"));
             sync_await(async move {
                 Arc::new(
@@ -349,13 +414,25 @@ lash_conformance::turn_crash_matrix_tests!({
                         .expect("open Restate turn-crash SQLite state carrier"),
                 ) as Arc<dyn lash_core::RuntimePersistence>
             })
-        },
+        }),
         crash_redrive_conformance_invocation,
         // The Restate recording controller has no SQLite/Postgres effect
         // journal: only the tool-attempt error-return placement runs here.
         |scenario: &str, _scope: ExecutionScope| crash_redrive_conformance_invocation(scenario),
     )
-});
+}
+
+lash_conformance::turn_crash_trace_tests!({ restate_turn_crash_fixture() });
+
+// The crash-and-recover laws drive a turn whose tool call opens an effect
+// group, which the recording context cannot host; they move to the live
+// harness under FIG-3561.
+lash_conformance::turn_crash_recovery_tests!(
+    #[ignore = "parked: needs the live Restate harness for effect groups (FIG-3561)"]
+    {
+        restate_turn_crash_fixture()
+    }
+);
 
 lash_conformance::effect_group_host_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]

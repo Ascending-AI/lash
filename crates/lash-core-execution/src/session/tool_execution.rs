@@ -76,16 +76,19 @@ impl ToolCallAuthorization {
         }
     }
 
-    fn tool_name(
+    /// The manifest this call is authorized under: the catalog's answer for a
+    /// catalog call, the grant's carried manifest for a granted one. Kept whole
+    /// rather than reduced to a name because group formation retains it as the
+    /// child's admission (ADR 0099 §3).
+    fn resolve_manifest(
         &self,
         dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>,
-    ) -> Option<String> {
+    ) -> Option<crate::ToolManifest> {
         match self {
             Self::Catalog(tool_id) => {
                 crate::tool_dispatch::resolve_callable_manifest_by_id(dispatch, tool_id)
-                    .map(|manifest| manifest.name)
             }
-            Self::Granted(grant) => Some(grant.manifest().name.clone()),
+            Self::Granted(grant) => Some(grant.manifest().clone()),
         }
     }
 
@@ -578,9 +581,14 @@ impl ToolBatchReplies {
 
 #[path = "tool_execution/batch.rs"]
 mod batch;
+mod group;
 #[cfg(test)]
 #[path = "tool_execution/turn_cancel_gate_tests.rs"]
 mod turn_cancel_gate_tests;
+
+#[cfg(test)]
+#[path = "tool_execution/scalar_presentation_tests.rs"]
+mod scalar_presentation_tests;
 
 impl RuntimeExecutionContext<'_> {
     async fn emit_tool_call_started(
@@ -1183,7 +1191,7 @@ impl RuntimeExecutionContext<'_> {
         child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     ) -> CompletedProtocolToolCall {
         let tool_correlation_id = tool_activity_id(&call_id);
-        let Some(name) = authorization.tool_name(self.dispatch.as_ref()) else {
+        let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
             let tool_id = authorization.tool_id();
             let outcome = ToolDispatchOutcome {
                 record: ToolCallRecord {
@@ -1207,15 +1215,20 @@ impl RuntimeExecutionContext<'_> {
                 .complete_undispatched_tool_call(call_id, replay, outcome)
                 .await;
         };
-        self.emit_tool_call_started(&call_id, &name, args.clone(), tool_correlation_id.clone())
-            .await;
+        self.emit_tool_call_started(
+            &call_id,
+            &manifest.name,
+            args.clone(),
+            tool_correlation_id.clone(),
+        )
+        .await;
 
         let parent_invocation = parent_invocation.or_else(|| self.parent_invocation.clone());
         let mut dispatch = (*self.dispatch).clone();
         dispatch.parent_invocation = parent_invocation.clone();
         let pending = crate::sansio::PendingToolCall {
             call_id: call_id.clone(),
-            tool_name: name,
+            tool_name: manifest.name.clone(),
             args,
             replay: replay.clone(),
         };

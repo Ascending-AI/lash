@@ -13,7 +13,7 @@ struct RecordedProjectionLlm {
 }
 
 struct ProjectionReplayController {
-    native: lash_core::facade_support::NativeRuntimeEffectController,
+    native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
     authority_id: std::sync::OnceLock<String>,
     first_llm: StdMutex<Option<RecordedProjectionLlm>>,
     replay_next_llm: std::sync::atomic::AtomicBool,
@@ -171,33 +171,45 @@ impl lash_core::RuntimeEffectController for ProjectionReplayController {
 
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported(
-            "ProjectionReplayController",
-        ))
+        self.native.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
+        self.native.register_group_executors(executors)
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported(
-            "ProjectionReplayController",
-        ))
+        self.native.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "ProjectionReplayController",
-        ))
+        self.native.close_effect_group(handle, disposition).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> std::result::Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
     }
 
     async fn commit_group_child_final(
@@ -518,8 +530,11 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
         .into_handle();
     let controller = Arc::new(ProjectionReplayController::failing_on_new_llm_call(3));
     let effect_host = Arc::new(
-        crate::durability::NativeEffectHost::new(Arc::clone(&controller) as Arc<_>)
-            .allow_process_lifetime_completion_keys(),
+        crate::durability::NativeEffectHost::with_controller_sharing_native_groups(
+            Arc::clone(&controller) as Arc<_>,
+            &controller.native,
+        )
+        .allow_process_lifetime_completion_keys(),
     );
     controller
         .authority_id

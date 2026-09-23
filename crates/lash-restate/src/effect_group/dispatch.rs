@@ -451,6 +451,75 @@ impl EffectGroupDispatch {
             return record_child_settlement(controller.context(), &request, outcome).await;
         }
 
+        if matches!(
+            request.envelope.command,
+            RuntimeEffectCommand::Sleep { .. } | RuntimeEffectCommand::AwaitEvent { .. }
+        ) {
+            // A timer or durable-wait child is this invocation's own durable
+            // wait (FIG-3397): a `ctx` timer or the Restate durable-wait
+            // promise, journaled on the child's invocation — never a
+            // wall-clock wait inside a recorded `ctx.run` body (ADR 0042).
+            // The resolver answers wait *options*; the ctx-bound controller
+            // is what reads them. The group index fenced the retained member
+            // at open and this invocation is that member, so the wait runs as
+            // a plain effect on the child's own journal rather than
+            // re-carrying the membership the controller's command arms refuse.
+            let Some(executor) = self.executors.executor_for(&request.envelope) else {
+                return Err(std::io::Error::other(format!(
+                    "no executor currently routes effect group {} child {}; retry on a carrying deployment",
+                    request.group_key, request.position
+                ))
+                .into());
+            };
+            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
+            let envelope = RuntimeEffectEnvelope {
+                group: None,
+                ..request.envelope.clone()
+            };
+            let wait_key = match &envelope.command {
+                RuntimeEffectCommand::AwaitEvent { key } => Some(key.clone()),
+                _ => None,
+            };
+            let outcome = {
+                let wait = lash_core::RuntimeEffectController::execute_effect(
+                    &controller,
+                    envelope,
+                    executor,
+                );
+                tokio::pin!(wait);
+                tokio::select! {
+                    biased;
+                    cancel = &mut cancel_watch => {
+                        cancel.map_err(|error| std::io::Error::other(format!(
+                            "observe effect-group child cancellation: {error}"
+                        )))?;
+                        EffectGroupChildRunOutcome::Cancelled
+                    }
+                    outcome = &mut wait => EffectGroupChildRunOutcome::Completed { outcome },
+                }
+            };
+            // A cancel-decided wait child releases its own promise: dropping
+            // the wait never resolves it, so the release arm writes the
+            // cancellation terminal, the same release the native and store
+            // tiers write (ADR 0099 §12). An already-resolved promise answers
+            // the same way, so the release is idempotent across a replay.
+            if let (EffectGroupChildRunOutcome::Cancelled, Some(key)) = (&outcome, &wait_key) {
+                lash_core::AwaitEventResolver::resolve_await_event(
+                    &controller,
+                    key,
+                    lash_core::Resolution::Cancelled,
+                )
+                .await
+                .map_err(|error| {
+                    std::io::Error::other(format!(
+                        "release the cancelled wait child of effect group {} position {}: {error}",
+                        request.group_key, request.position
+                    ))
+                })?;
+            }
+            return record_child_settlement(controller.context(), &request, outcome).await;
+        }
+
         let cancellation = tokio_util::sync::CancellationToken::new();
         let run_cancellation = cancellation.clone();
         let envelope = request.envelope.clone();

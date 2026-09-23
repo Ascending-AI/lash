@@ -20,11 +20,7 @@ async fn sqlite_drain_end_host(effects_db: &std::path::Path) -> Arc<dyn EffectHo
     let host = SqliteEffectHost::open(effects_db)
         .await
         .expect("open the effect host");
-    host.register_group_executors(
-        lash_conformance::RecordingExecutors::settling() as Arc<dyn lash_core::GroupExecutors>
-    )
-    .expect("a fresh host has no resolver yet");
-    Arc::new(host)
+    lash_conformance::install_drain_end_executors(Arc::new(host))
 }
 
 async fn sqlite_drain_end_world(dir: &std::path::Path) -> DrainEndWorld {

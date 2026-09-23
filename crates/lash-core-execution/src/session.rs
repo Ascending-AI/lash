@@ -563,6 +563,7 @@ impl Session {
             session_id: SessionId::from(session_id.to_string()),
             agent_frame_id,
             event_tx,
+            turn_activity_tx: None,
             checkpoint_messages,
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.services.attachment_store),

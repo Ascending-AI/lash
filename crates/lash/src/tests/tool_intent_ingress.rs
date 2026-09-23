@@ -518,8 +518,24 @@ impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
 
 #[derive(Default)]
 struct KeyJournalController {
-    inner: lash_core::facade_support::NativeRuntimeEffectController,
+    inner: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
     recorded: std::sync::Mutex<std::collections::HashMap<String, lash_core::RuntimeEffectOutcome>>,
+    /// A native host over `inner`, lending the group-child-bound controllers
+    /// and tool-child executor registration this one-type facade cannot mint
+    /// itself (the group substrate is `inner`'s).
+    group_host: std::sync::OnceLock<Arc<lash_core::facade_support::NativeEffectHost>>,
+}
+
+impl KeyJournalController {
+    fn group_host(&self) -> &Arc<lash_core::facade_support::NativeEffectHost> {
+        self.group_host.get_or_init(|| {
+            Arc::new(
+                lash_core::facade_support::NativeEffectHost::with_native_controller(Arc::clone(
+                    &self.inner,
+                )),
+            )
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -596,6 +612,34 @@ impl lash_core::EffectHost for KeyJournalController {
     ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         lash_core::ScopedEffectController::borrowed(self, scope)
     }
+
+    fn scoped_static(
+        &self,
+        scope: lash_core::AdmittedScope,
+    ) -> std::result::Result<
+        Option<lash_core::ScopedEffectController<'static>>,
+        lash_core::RuntimeError,
+    > {
+        self.group_host().scoped_static(scope)
+    }
+
+    fn scoped_for_group_child(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> std::result::Result<
+        Option<lash_core::ScopedEffectController<'static>>,
+        lash_core::RuntimeError,
+    > {
+        self.group_host().scoped_for_group_child(admitted, binding)
+    }
+
+    fn install_tool_child_host(
+        &self,
+        candidate: Arc<lash_core::facade_support::ToolChildHost>,
+    ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
+        self.group_host().install_tool_child_host(candidate)
+    }
 }
 
 #[async_trait::async_trait]
@@ -620,12 +664,7 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
         {
             return Ok(recorded);
         }
-        let outcome = lash_core::RuntimeEffectController::execute_effect(
-            &self.inner,
-            envelope,
-            local_executor,
-        )
-        .await?;
+        let outcome = self.inner.execute_effect(envelope, local_executor).await?;
         self.recorded
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -635,49 +674,89 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
 
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported("KeyJournalController"))
+        self.inner.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported("KeyJournalController"))
+        self.inner.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported("KeyJournalController"))
+        self.inner.close_effect_group(handle, disposition).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> std::result::Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
     }
 
     async fn commit_group_child_final(
         &self,
-        _commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
     ) -> std::result::Result<
         lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
         lash_core::RuntimeEffectControllerError,
     > {
-        Ok(
-            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped,
-        )
+        self.inner.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> std::result::Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
     }
 }
 
 #[derive(Default)]
 struct AdmissionCrashController {
-    inner: lash_core::facade_support::NativeRuntimeEffectController,
+    inner: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+    /// See `KeyJournalController::group_host`.
+    group_host: std::sync::OnceLock<Arc<lash_core::facade_support::NativeEffectHost>>,
     admitted: tokio::sync::Notify,
     admission: std::sync::Mutex<Option<MockEffectAdmission>>,
     realizations: std::sync::atomic::AtomicUsize,
     recorded: std::sync::Mutex<Option<lash_core::RuntimeEffectOutcome>>,
+}
+
+impl AdmissionCrashController {
+    fn group_host(&self) -> &Arc<lash_core::facade_support::NativeEffectHost> {
+        self.group_host.get_or_init(|| {
+            Arc::new(
+                lash_core::facade_support::NativeEffectHost::with_native_controller(Arc::clone(
+                    &self.inner,
+                )),
+            )
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -722,6 +801,34 @@ impl lash_core::EffectHost for AdmissionCrashController {
         scope: lash_core::AdmittedScope,
     ) -> std::result::Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         lash_core::ScopedEffectController::borrowed(self, scope)
+    }
+
+    fn scoped_static(
+        &self,
+        scope: lash_core::AdmittedScope,
+    ) -> std::result::Result<
+        Option<lash_core::ScopedEffectController<'static>>,
+        lash_core::RuntimeError,
+    > {
+        self.group_host().scoped_static(scope)
+    }
+
+    fn scoped_for_group_child(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> std::result::Result<
+        Option<lash_core::ScopedEffectController<'static>>,
+        lash_core::RuntimeError,
+    > {
+        self.group_host().scoped_for_group_child(admitted, binding)
+    }
+
+    fn install_tool_child_host(
+        &self,
+        candidate: Arc<lash_core::facade_support::ToolChildHost>,
+    ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
+        self.group_host().install_tool_child_host(candidate)
     }
 }
 
@@ -781,12 +888,7 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
         }
         self.realizations
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let outcome = lash_core::RuntimeEffectController::execute_effect(
-            &self.inner,
-            envelope,
-            local_executor,
-        )
-        .await?;
+        let outcome = self.inner.execute_effect(envelope, local_executor).await?;
         *self
             .recorded
             .lock()
@@ -796,33 +898,45 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
 
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported(
-            "AdmissionCrashController",
-        ))
+        self.inner.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported(
-            "AdmissionCrashController",
-        ))
+        self.inner.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "AdmissionCrashController",
-        ))
+        self.inner.close_effect_group(handle, disposition).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> std::result::Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
     }
 
     async fn commit_group_child_final(

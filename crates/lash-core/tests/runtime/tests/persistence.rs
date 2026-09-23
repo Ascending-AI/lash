@@ -133,7 +133,8 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
         .run_turn_assembled(
             TurnInput::text("use the tool, then answer"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("multi-call-usage-overflow"),
             ),
@@ -506,7 +507,11 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
                 turn_context: lash_core::TurnContext::default(),
             },
             cancel,
-            named_turn_scope(&SessionId::from("root"), &TurnId::from("cancel-tool-turn")),
+            host_turn_scope(
+                &runtime.host.core,
+                &SessionId::from("root"),
+                &TurnId::from("cancel-tool-turn"),
+            ),
         )
         .await;
     let elapsed = start.elapsed();
@@ -587,7 +592,8 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("terminal-tool-finish-turn"),
                 ),
@@ -687,7 +693,8 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("terminal-tool-fail-turn"),
                 ),
@@ -765,7 +772,8 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("streamed-tool-call-turn"),
             ),

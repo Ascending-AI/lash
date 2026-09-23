@@ -385,15 +385,42 @@ pub(super) fn timer_trigger_resources() -> lashlang::LashlangHostCatalog {
     resources
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(super) struct CapturingTriggerEffectController {
     envelopes: Arc<std::sync::Mutex<Vec<lash_core::RuntimeEffectEnvelope>>>,
+    inner: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+    host: Arc<std::sync::OnceLock<Arc<dyn lash_core::EffectHost>>>,
+}
+
+impl Default for CapturingTriggerEffectController {
+    fn default() -> Self {
+        Self {
+            envelopes: Arc::default(),
+            inner: Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+            host: Arc::new(std::sync::OnceLock::new()),
+        }
+    }
 }
 
 impl lash_core::AwaitEventResolver for CapturingTriggerEffectController {}
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for CapturingTriggerEffectController {
+    fn shared_effect_host(&self) -> Option<Arc<dyn lash_core::EffectHost>> {
+        Some(Arc::clone(self.host.get_or_init(|| {
+            Arc::new(
+                lash_core::facade_support::NativeEffectHost::with_controller_sharing_native_groups(
+                    Arc::new(Self {
+                        envelopes: Arc::clone(&self.envelopes),
+                        inner: Arc::clone(&self.inner),
+                        host: Arc::new(std::sync::OnceLock::new()),
+                    }),
+                    &self.inner,
+                ),
+            ) as Arc<dyn lash_core::EffectHost>
+        })))
+    }
+
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
@@ -415,43 +442,75 @@ impl lash_core::RuntimeEffectController for CapturingTriggerEffectController {
 
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "CapturingTriggerEffectController",
-        ))
+        self.inner.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.inner.native_effect_groups_substrate()
+    }
+
+    fn group_child_scoped_controller(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner.group_child_scoped_controller(admitted, binding)
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "CapturingTriggerEffectController",
-        ))
+        self.inner.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "CapturingTriggerEffectController",
-        ))
+        self.inner.close_effect_group(handle, disposition).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner.read_group_settlement(group_key, rank).await
     }
 
     async fn commit_group_child_final(
         &self,
-        _commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
     ) -> Result<
         lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
         lash_core::RuntimeEffectControllerError,
     > {
-        Ok(
-            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped,
-        )
+        self.inner.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
     }
 }
 

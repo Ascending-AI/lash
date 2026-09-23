@@ -955,14 +955,15 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         .run_turn_assembled(
             lash_core::TurnInput::text("run durable follow-on work"),
             tokio_util::sync::CancellationToken::new(),
-            lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-                lash_core::AdmittedScope::turn(
-                    "standard-protocol-scenario",
-                    "standard-protocol-turn",
-                ),
-            )
-            .expect("Standard scenario turn scope"),
+            // ADR 0099: the turn's scope must come from the runtime's own
+            // effect host — the driver publishes the live opener and the
+            // child resolver there, so a foreign controller leaves group
+            // children unroutable.
+            lash_core::testing::runtime_helpers::host_turn_scope(
+                &runtime.host.core,
+                &SessionId::from("standard-protocol-scenario"),
+                &TurnId::from("standard-protocol-turn"),
+            ),
         )
         .await
         .expect("run Standard intent turn");

@@ -45,9 +45,10 @@ async fn world(path: PathBuf, spec: ToolChildWorldSpec) -> ToolChildWorld {
     }
 }
 
-// The durable SQLite tier answers the tool-child invocation contract
-// (FIG-2266).
-lash_conformance::tool_child_invocation_tests!({
+/// The fixture both catalogues share: one tempdir per invocation (the macro
+/// evaluates the block per law), a world factory over a fixed database file,
+/// and a fresh process registry per scenario.
+fn fixture() -> (tempfile::TempDir, &'static str, ToolChildLawFixture) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("tool-child-effects.db");
     let make_world: lash_conformance::ToolChildWorldFactory =
@@ -80,4 +81,11 @@ lash_conformance::tool_child_invocation_tests!({
             deferrable_routing: ToolChildDeferrableRouting::Durable,
         },
     )
-});
+}
+
+// The durable SQLite tier answers the tool-child invocation contract
+// (FIG-2266).
+lash_conformance::tool_child_invocation_tests!({ fixture() });
+
+// The batch-group differential answers on the same substrate (FIG-3397).
+lash_conformance::tool_batch_group_tests!({ fixture() });

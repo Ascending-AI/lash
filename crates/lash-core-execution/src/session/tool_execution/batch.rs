@@ -8,6 +8,8 @@
 
 use super::*;
 
+use super::group::PreparedToolChildLeaf;
+
 impl RuntimeExecutionContext<'_> {
     #[expect(
         clippy::expect_used,
@@ -315,7 +317,220 @@ impl RuntimeExecutionContext<'_> {
 
     /// Executes a source-ordered tool batch for code-executor implementors and returns replies in
     /// the same order even though individual calls may run concurrently.
+    ///
+    /// The batch opens as a durable effect group of `ToolInvocation` children
+    /// (ADR 0099 §3); replies stay input-ordered, but `settlement_order` is the
+    /// group's durable final-commit order, not source order (§5).
     pub async fn call_tool_batch(
+        &self,
+        calls: Vec<ToolInvocation>,
+        occurrence: crate::session::ToolBatchOccurrence,
+    ) -> ToolBatchReplies {
+        if calls.is_empty() {
+            return ToolBatchReplies::default();
+        }
+
+        let batch_id = deterministic_tool_invocation_batch_id(&calls, occurrence);
+        let mut replies = vec![None; calls.len()];
+        // A failed batch reports an empty settlement order by construction: downstream
+        // settlement-selecting aggregates treat the order as evidence of what settled.
+        // Replies already completed during preparation are preserved.
+        let fail_batch =
+            |reason: String, replies: &mut Vec<Option<ToolInvocationReply>>| -> ToolBatchReplies {
+                let error = serde_json::json!(format!("tool batch failed: {reason}"));
+                ToolBatchReplies {
+                    replies: replies
+                        .iter_mut()
+                        .map(|reply| {
+                            reply
+                                .take()
+                                .unwrap_or_else(|| ToolInvocationReply::error(error.clone()))
+                        })
+                        .collect(),
+                    settlement_order: Vec::new(),
+                }
+            };
+        let mut prepared_entries = Vec::new();
+        // A call that finishes while being prepared has already settled by the
+        // time the concurrent batch starts, so it leads the settlement order.
+        let mut settled_during_preparation = Vec::new();
+
+        for (index, mut call) in calls.into_iter().enumerate() {
+            let context = call
+                .issuing_language_node_id
+                .clone()
+                .map(|node_id| self.clone().with_issuing_language_node_id(node_id))
+                .unwrap_or_else(|| self.clone());
+            let authorization = ToolCallAuthorization::from_invocation(&mut call);
+            let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
+                let outcome = ToolDispatchOutcome {
+                    record: ToolCallRecord {
+                        call_id: Some(call.id.clone()),
+                        tool: call.tool_id.to_string(),
+                        args: call.args,
+                        output: ToolCallOutput::failure(ToolFailure::runtime(
+                            ToolFailureClass::Unavailable,
+                            "tool_unavailable",
+                            format!("Tool id `{}` is unavailable in this session", call.tool_id),
+                        )),
+                        duration_ms: 0,
+                    },
+                    attempts: Vec::new(),
+                    intents: crate::ToolIntents::default(),
+                    intent_outcomes: Vec::new(),
+                    captures: Vec::new(),
+                    triggers: Vec::new(),
+                };
+                let completed = context
+                    .complete_undispatched_tool_call(call.id, None, outcome)
+                    .await;
+                replies[index] = Some(
+                    ToolInvocationReply::from_output(completed.completed.output)
+                        .with_record(completed.record),
+                );
+                settled_during_preparation.push(index);
+                continue;
+            };
+            let pending = crate::sansio::PendingToolCall {
+                call_id: call.id.clone(),
+                tool_name: manifest.name.clone(),
+                args: call.args,
+                replay: None,
+            };
+            let preparation = authorization
+                .prepare(self.dispatch.as_ref(), pending, call.id.clone())
+                .await;
+            match preparation {
+                ToolPreparationOutcome::Prepared(prepared) => {
+                    prepared_entries.push((
+                        index,
+                        *prepared,
+                        authorization,
+                        call.child_execution_trace_hook,
+                        manifest,
+                    ));
+                }
+                ToolPreparationOutcome::Completed(outcome) => {
+                    let completed = context
+                        .complete_undispatched_tool_call(call.id, None, *outcome)
+                        .await;
+                    replies[index] = Some(
+                        ToolInvocationReply::from_output(completed.completed.output)
+                            .with_record(completed.record),
+                    );
+                    settled_during_preparation.push(index);
+                }
+            }
+        }
+        let mut settlement_order = settled_during_preparation;
+
+        if !prepared_entries.is_empty() {
+            // ADR 0099: the batch opens as a durable effect group of
+            // `ToolInvocation` children and the consumer observes settlement
+            // rank — durable final-commit order — rather than a source-ordered
+            // launch vector (§5).
+            let group_invocation = self.tool_batch_invocation(&batch_id);
+            let batch = crate::PreparedToolBatch::new_with_grants(
+                batch_id.clone(),
+                prepared_entries
+                    .iter()
+                    .map(|(_, prepared, authorization, _, _)| {
+                        (prepared.clone(), authorization.execution_grant().cloned())
+                    })
+                    .collect(),
+            );
+            let mut leaves = Vec::with_capacity(prepared_entries.len());
+            for ((index, _, authorization, _, manifest), call) in
+                prepared_entries.iter().zip(batch.calls)
+            {
+                let admission = match authorization {
+                    ToolCallAuthorization::Granted(grant) => {
+                        crate::runtime::effect::ToolChildAdmission::Granted {
+                            grant: grant.clone(),
+                        }
+                    }
+                    ToolCallAuthorization::Catalog(_) => {
+                        crate::runtime::effect::ToolChildAdmission::Catalog {
+                            manifest: Box::new(manifest.clone()),
+                        }
+                    }
+                };
+                leaves.push(PreparedToolChildLeaf {
+                    input_index: *index,
+                    call,
+                    admission,
+                });
+            }
+            let handle = match self
+                .open_tool_child_group(group_invocation, &batch_id, &leaves)
+                .await
+            {
+                Ok(handle) => handle,
+                Err(error) => return fail_batch(error.to_string(), &mut replies),
+            };
+            let mut settled = match self
+                .consume_all_tool_child_settlements(handle, &leaves)
+                .await
+            {
+                Ok(settled) => settled,
+                Err(error) => return fail_batch(error.to_string(), &mut replies),
+            };
+            // The group reports settlement in child positions; the caller
+            // counts in original call positions. Dropping an out-of-range
+            // position and back-filling the gap would turn any malformed order
+            // into a clean-looking input-order permutation, which is exactly
+            // the rejection selection this field exists to prevent — the
+            // defect would be repaired into invisibility instead of failing
+            // closed.
+            if let Err(reason) =
+                validate_batch_settlement_order(&settled.settlement_positions, leaves.len())
+            {
+                return fail_batch(reason, &mut replies);
+            }
+            settlement_order.extend(
+                settled
+                    .settlement_positions
+                    .iter()
+                    .map(|position| leaves[*position].input_index),
+            );
+            for (position, leaf) in leaves.iter().enumerate() {
+                let Some(completed) = settled.settled[position].take() else {
+                    return fail_batch(
+                        format!("tool-child group left position {position} unfilled"),
+                        &mut replies,
+                    );
+                };
+                replies[leaf.input_index] = Some(
+                    ToolInvocationReply::from_output(completed.completed.output)
+                        .with_record(completed.record),
+                );
+            }
+        }
+
+        #[expect(
+            clippy::expect_used,
+            reason = "the loop above writes every index of `replies` exactly once before it is drained here"
+        )]
+        let replies = replies
+            .into_iter()
+            .map(|reply| reply.expect("every batch reply slot should be filled"))
+            .collect::<Vec<_>>();
+        ToolBatchReplies {
+            replies,
+            settlement_order,
+        }
+    }
+
+    /// The pre-group batch consumer: the same preparation, dispatched through
+    /// one recorded `RuntimeEffectCommand::ToolBatch` effect whose local
+    /// executor runs the leaves under source-order intent serialization.
+    ///
+    /// Retained only as the differential law's predecessor — the conformance
+    /// `tool-batch-group-differential` law runs the same calls through both
+    /// paths and asserts the replies agree. PR B deletes it together with the
+    /// `ToolBatch` command; no production caller reaches it (ADR 0099 §5).
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn call_tool_batch_via_batch_effect(
         &self,
         calls: Vec<ToolInvocation>,
         occurrence: crate::session::ToolBatchOccurrence,
@@ -364,7 +579,7 @@ impl RuntimeExecutionContext<'_> {
                 .map(|node_id| self.clone().with_issuing_language_node_id(node_id))
                 .unwrap_or_else(|| self.clone());
             let authorization = ToolCallAuthorization::from_invocation(&mut call);
-            let Some(tool_name) = authorization.tool_name(self.dispatch.as_ref()) else {
+            let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
                 let outcome = ToolDispatchOutcome {
                     record: ToolCallRecord {
                         call_id: Some(call.id.clone()),
@@ -395,7 +610,7 @@ impl RuntimeExecutionContext<'_> {
             };
             let pending = crate::sansio::PendingToolCall {
                 call_id: call.id.clone(),
-                tool_name,
+                tool_name: manifest.name.clone(),
                 args: call.args,
                 replay: None,
             };
@@ -662,6 +877,7 @@ mod tests {
             .expect("plugin session");
         let attachment_store = Arc::new(crate::SessionAttachmentStore::in_memory());
         let host = Arc::new(crate::testing::MockSessionManager::default());
+        let controller = Arc::new(crate::NativeRuntimeEffectController::default());
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
             plugins,
             tools: Arc::new(GrantedLeafTool),
@@ -676,9 +892,13 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::NativeRuntimeEffectController::default(),
-            )),
+            effect_controller: crate::runtime::RuntimeEffectControllerHandle::Shared {
+                controller: controller.clone(),
+                admitted: crate::AdmittedScope::turn(
+                    SessionId::from("granted-call-session"),
+                    crate::TurnId::from("test-turn"),
+                ),
+            },
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -690,6 +910,7 @@ mod tests {
             session_id: SessionId::from("granted-call-session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             event_tx,
+            turn_activity_tx: None,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&attachment_store),
@@ -697,18 +918,31 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
         };
-        (
-            crate::RuntimeExecutionContext::new(
-                SessionId::from("granted-call-session"),
-                Arc::new(dispatch),
-                Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
-                attachment_store,
-                Arc::new(crate::ChronologicalProjection::default()),
-                None,
-                crate::TurnContext::default(),
-            ),
-            executions,
-        )
+        let process_env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
+            Arc::new(crate::InMemoryProcessExecutionEnvStore::new());
+        let dispatch = Arc::new(dispatch);
+        let effect_host: Arc<dyn crate::EffectHost> = Arc::new(
+            crate::runtime::NativeEffectHost::with_native_controller(controller),
+        );
+        let wiring =
+            crate::testing::wire_test_tool_children(&dispatch, &process_env_store, &effect_host);
+        let mut context = crate::RuntimeExecutionContext::new(
+            SessionId::from("granted-call-session"),
+            dispatch,
+            process_env_store,
+            attachment_store,
+            Arc::new(crate::ChronologicalProjection::default()),
+            None,
+            crate::TurnContext::default(),
+        );
+        context = context.with_tool_child_host(effect_host);
+        if let Some((guard, issuer)) = wiring {
+            context = context.with_live_opener_guard(Arc::new(guard));
+            if let Some(issuer) = issuer {
+                context = context.with_tool_child_completion_issuer(issuer);
+            }
+        }
+        (context, executions)
     }
 
     fn granted_call() -> crate::ToolExecutionGrant {
@@ -1172,6 +1406,7 @@ mod tests {
             session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             event_tx,
+            turn_activity_tx: None,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&attachment_store),
@@ -1197,7 +1432,7 @@ mod tests {
         ));
         let context = batch_failure_context(Arc::clone(&controller));
         let replies = context
-            .call_tool_batch(
+            .call_tool_batch_via_batch_effect(
                 vec![ToolInvocation::new(
                     "call",
                     crate::ToolId::from("tool:batch_failure"),
@@ -1233,7 +1468,7 @@ mod tests {
             BatchFailureResponse::MalformedSettlementOrder,
         )));
         let replies = context
-            .call_tool_batch(
+            .call_tool_batch_via_batch_effect(
                 vec![ToolInvocation::new(
                     "call",
                     crate::ToolId::from("tool:batch_failure"),
@@ -1259,7 +1494,7 @@ mod tests {
             BatchFailureResponse::EffectDecodeError,
         )));
         let replies = context
-            .call_tool_batch(
+            .call_tool_batch_via_batch_effect(
                 vec![ToolInvocation::new(
                     "call",
                     crate::ToolId::from("tool:batch_failure"),

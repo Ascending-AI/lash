@@ -54,6 +54,7 @@ fn live_context() -> LiveOpenerContext {
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").expect("frame id"),
         event_tx,
+        turn_activity_tx: None,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),

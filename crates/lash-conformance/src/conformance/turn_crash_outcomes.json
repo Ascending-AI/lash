@@ -66,13 +66,13 @@
     "effect_executions_l1": 1
   },
   {
-    "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_batch", "name": "trace_effect"}}, "placement": "boundary"},
-    "outcome": "The batch has not executed; the successor executes its external tool effect once.",
+    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_open", "children": 1}}, "placement": "boundary"},
+    "outcome": "The group was not opened; the successor opens it and executes the child's external effect once.",
     "effect_executions_l1": 1
   },
   {
-    "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_batch", "name": "trace_effect"}}, "placement": "inside_call"},
-    "outcome": "The completed batch result was lost before runtime progress; the receipt-less level-1 controller re-executes the external effect.",
+    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_open", "children": 1}}, "placement": "inside_call"},
+    "outcome": "The completed group-open result was lost before runtime progress; the receipt-less level-1 controller re-executes the external effect.",
     "effect_executions_l1": 2
   },
   {
@@ -89,6 +89,26 @@
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "inside_call"},
     "outcome": "The controller call returned but runtime progress was not durable; the receipt-less level-1 controller re-executes the external effect.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "boundary"},
+    "outcome": "The settlement wait never ran; the child's effect already executed and the receipt-less level-1 recovery re-executes it.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "inside_call"},
+    "outcome": "The settlement read returned but its result was lost; the receipt-less level-1 recovery re-executes the child's external effect.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_close"}}, "placement": "boundary"},
+    "outcome": "The group settled but was never closed; the receipt-less level-1 recovery re-executes the child's external effect.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_close"}}, "placement": "inside_call"},
+    "outcome": "The close result was lost; the receipt-less level-1 recovery re-executes the settled child's external effect.",
     "effect_executions_l1": 2
   },
   {

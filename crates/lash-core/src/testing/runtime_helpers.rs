@@ -51,12 +51,31 @@ pub fn default_state() -> RuntimeSessionState {
     state
 }
 
+/// Stand-alone scoped controller backed by a wired `NativeEffectHost` (group
+/// executors registered), not a bare controller: turns driven through this
+/// scope now open effect groups for their tool calls, and a group open against
+/// a controller with no registered `GroupExecutors` resolver is refused
+/// (`EffectGroupUnsupported`, ADR 0099 §3). The scoped controller holds the
+/// host `Arc` so the `ToolChildHost`'s weak `EffectHost` stays live.
+///
+/// `process_env_store` must be the store the turn's execution context
+/// publishes recorded envs into: group children resolve `execution_env`
+/// against it and never invent an environment (ADR 0099 §3).
+pub fn native_scope_with_process_env_store(
+    admitted: crate::AdmittedScope,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+) -> crate::ScopedEffectController<'static> {
+    let host = Arc::new(crate::NativeEffectHost::default());
+    let effect_host: Arc<dyn crate::EffectHost> = host.clone();
+    effect_host.install_tool_child_host(crate::ToolChildHost::new(&effect_host, process_env_store));
+    crate::ScopedEffectController::shared(host, admitted).expect("native execution scope")
+}
+
 pub fn native_scope(admitted: crate::AdmittedScope) -> crate::ScopedEffectController<'static> {
-    crate::ScopedEffectController::shared(
-        Arc::new(crate::NativeRuntimeEffectController::default()),
+    native_scope_with_process_env_store(
         admitted,
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
     )
-    .expect("native execution scope")
 }
 
 /// Process-scoped native controller pinned to the incarnation a test
@@ -69,6 +88,82 @@ pub fn native_process_scope(
         process_id,
         crate::ProcessIncarnation::from_registration_sequence(1),
     )))
+}
+
+/// `native_process_scope` variant naming the process-env store the turn's
+/// execution context publishes into, so group children resolve their recorded
+/// envs (ADR 0099 §3).
+pub fn native_process_scope_with_process_env_store(
+    process_id: impl Into<ProcessId>,
+    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+) -> crate::ScopedEffectController<'static> {
+    native_scope_with_process_env_store(
+        crate::AdmittedScope::process(crate::ProcessRef::new(
+            process_id,
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        )),
+        process_env_store,
+    )
+}
+
+/// Admits `admitted` on a runtime host's own effect host.
+///
+/// A turn-driving test must bind its scope to the host the turn runs on: the
+/// driver publishes the live opener to that host's `ToolChildHost` registry,
+/// the execution context publishes recorded envs to that host's env store,
+/// and group children resolve both through the executors registered on the
+/// admitted controller — a scope minted on a foreign controller (the bare
+/// `native_scope` family) leaves every child unroutable (ADR 0099 §2, §3).
+/// `scoped_static` returns `None` for hosts that lend no `'static` controller
+/// (a Restate `ctx`-bound one); there the caller's own bound controller is the
+/// scope and this helper does not apply.
+pub fn host_admitted_scope(
+    config: &crate::RuntimeHostConfig,
+    admitted: crate::AdmittedScope,
+) -> crate::ScopedEffectController<'static> {
+    config
+        .control
+        .effect_host
+        .scoped_static(admitted)
+        .expect("effect host scoped_static")
+        .expect("effect host lends a 'static controller for this scope")
+}
+
+/// `host_admitted_scope` for a turn scope.
+pub fn host_turn_scope(
+    config: &crate::RuntimeHostConfig,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+) -> crate::ScopedEffectController<'static> {
+    host_admitted_scope(config, crate::AdmittedScope::turn(session_id, turn_id))
+}
+
+/// `host_admitted_scope` for a queued-work drain scope.
+pub fn host_queued_scope(
+    config: &crate::RuntimeHostConfig,
+    session_id: &SessionId,
+    drain_id: &TurnId,
+) -> crate::ScopedEffectController<'static> {
+    host_admitted_scope(
+        config,
+        crate::AdmittedScope::queue_drain(session_id, drain_id.as_str()),
+    )
+}
+
+/// `host_admitted_scope` for the process scope a test registry's first
+/// registration mints (registration sequence 1), standing in for the worker's
+/// admission step.
+pub fn host_process_scope(
+    config: &crate::RuntimeHostConfig,
+    process_id: impl Into<ProcessId>,
+) -> crate::ScopedEffectController<'static> {
+    host_admitted_scope(
+        config,
+        crate::AdmittedScope::process(crate::ProcessRef::new(
+            process_id,
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        )),
+    )
 }
 
 pub fn named_turn_scope(

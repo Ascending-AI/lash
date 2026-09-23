@@ -175,6 +175,19 @@ fn is_commit_seam(operation: &TurnSeamOperation) -> bool {
     )
 }
 
+/// Whether the seam op dispatches new effect work. The failed child's own
+/// group settles and closes after its attempt errors: consuming that
+/// settlement and releasing the group is how the error reaches the turn, the
+/// group-path twin of a batch returning its failed reply (FIG-3397), not a
+/// dispatch.
+fn is_dispatch_seam(operation: &TurnSeamOperation) -> bool {
+    matches!(operation, TurnSeamOperation::Effect(_))
+        && !matches!(
+            operation,
+            TurnSeamOperation::Effect(EffectOperation::GroupSettle | EffectOperation::GroupClose)
+        )
+}
+
 /// Sweep every error-return placement through one scripted turn per backend
 /// and hold the fail-stop oracle on each (FIG-3524).
 ///
@@ -277,10 +290,7 @@ async fn run_error_return_case<F>(
     let continued = &trace[error_index + 1..];
     let observation = FailStopObservation {
         durable_commits: continued.iter().filter(|op| is_commit_seam(op)).count(),
-        tool_dispatches: continued
-            .iter()
-            .filter(|op| matches!(op, TurnSeamOperation::Effect(_)))
-            .count(),
+        tool_dispatches: continued.iter().filter(|op| is_dispatch_seam(op)).count(),
         provider_requests: continued
             .iter()
             .filter(|op| matches!(op, TurnSeamOperation::Provider(_)))

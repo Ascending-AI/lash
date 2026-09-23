@@ -146,7 +146,7 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
 }
 use crate::llm::types::LlmStreamEvent;
 use crate::runtime::tests::helpers::{
-    EmptyTools, MockCall, mock_provider, named_turn_scope, native_process_scope,
+    EmptyTools, MockCall, host_process_scope, host_turn_scope, mock_provider,
     runtime_with_plugins_and_tools_and_host,
 };
 use std::sync::Arc;
@@ -286,7 +286,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
             foreign_create_request,
             crate::TurnInput::text("must not run"),
             native_execution_write_authority(foreign_process_id.clone()),
-            native_process_scope(&foreign_process_id),
+            host_process_scope(&runtime.host.core, &foreign_process_id),
             foreign_cancellation,
         )
         .await
@@ -338,7 +338,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
         create_request.clone(),
         crate::TurnInput::text("park the child turn"),
         native_execution_write_authority(process_id.clone()),
-        native_process_scope(&process_id),
+        host_process_scope(&runtime.host.core, &process_id),
         cancellation.clone(),
     ));
     tokio::select! {
@@ -431,7 +431,8 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
         .run_turn_assembled(
             crate::TurnInput::text("follow up after cancellation"),
             tokio_util::sync::CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &child_session_id,
                 &crate::TurnId::from(follow_up_turn_id.as_str()),
             ),
@@ -447,7 +448,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
             create_request,
             crate::TurnInput::text("replayed cancelled child turn"),
             native_execution_write_authority(process_id.clone()),
-            native_process_scope(&process_id),
+            host_process_scope(&runtime.host.core, &process_id),
             cancellation,
         )
         .await
@@ -480,8 +481,9 @@ async fn cancelled_mid_turn_subagent_retains_durable_rows() {
 /// TTL so a crashed attempt's claim dies quickly.
 struct ParkedSessionTurn {
     // The parent runtime whose services run the child process; it must
-    // stay alive for the fixture's whole span.
-    _runtime: crate::runtime::LashRuntime,
+    // stay alive for the fixture's whole span, and its host core binds the
+    // process scope.
+    runtime: crate::runtime::LashRuntime,
     services: Arc<crate::runtime::RuntimeSessionServices>,
     factory: crate::InMemorySessionStoreFactory,
     process_id: ProcessId,
@@ -555,7 +557,7 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
         crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     );
     ParkedSessionTurn {
-        _runtime: runtime,
+        runtime,
         services,
         factory,
         process_id,
@@ -574,6 +576,7 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
 async fn failed_final_child_commit_cancellation_stays_recoverable() {
     let fixture = Box::pin(parked_session_turn("commit-failure")).await;
     let ParkedSessionTurn {
+        runtime,
         services,
         factory,
         process_id,
@@ -589,7 +592,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
         create_request.clone(),
         crate::TurnInput::text("park the child turn"),
         native_execution_write_authority(process_id.clone()),
-        native_process_scope(&process_id),
+        host_process_scope(&runtime.host.core, &process_id),
         cancellation.clone(),
     ));
     tokio::select! {
@@ -625,7 +628,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
             create_request,
             crate::TurnInput::text("park the child turn"),
             native_execution_write_authority(process_id.clone()),
-            native_process_scope(&process_id),
+            host_process_scope(&runtime.host.core, &process_id),
             replay_cancellation,
         )
         .await
@@ -670,6 +673,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
 async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     let fixture = Box::pin(parked_session_turn("crash-redelivery")).await;
     let ParkedSessionTurn {
+        runtime,
         services,
         factory,
         process_id,
@@ -685,7 +689,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
         create_request.clone(),
         crate::TurnInput::text("park the child turn"),
         native_execution_write_authority(process_id.clone()),
-        native_process_scope(&process_id),
+        host_process_scope(&runtime.host.core, &process_id),
         cancellation.clone(),
     ));
     tokio::select! {
@@ -711,7 +715,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
             create_request,
             crate::TurnInput::text("park the child turn"),
             native_execution_write_authority(process_id.clone()),
-            native_process_scope(&process_id),
+            host_process_scope(&runtime.host.core, &process_id),
             replay_cancellation,
         )
         .await
@@ -828,7 +832,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
             create_request,
             crate::TurnInput::text("panic"),
             native_execution_write_authority(process_id.clone()),
-            native_process_scope(&process_id),
+            host_process_scope(&runtime.host.core, &process_id),
             tokio_util::sync::CancellationToken::new(),
         )
         .await;
@@ -844,7 +848,8 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
         .run_turn_assembled(
             crate::TurnInput::text("continue parent"),
             tokio_util::sync::CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from(runtime.session_id()),
                 &crate::TurnId::from("parent-after-child-panic"),
             ),
@@ -918,7 +923,7 @@ async fn spawned_child_runtime_does_not_outlive_the_process_run() {
             create_request,
             crate::TurnInput::text("run"),
             native_execution_write_authority(process_id.clone()),
-            native_process_scope(&process_id),
+            host_process_scope(&runtime.host.core, &process_id),
             tokio_util::sync::CancellationToken::new(),
         )
         .await
@@ -1026,7 +1031,7 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
             create_request,
             crate::TurnInput::text("run on redelivery"),
             native_execution_write_authority(process_id.clone()),
-            native_process_scope(&process_id),
+            host_process_scope(&runtime.host.core, &process_id),
             tokio_util::sync::CancellationToken::new(),
         )
         .await
@@ -1131,7 +1136,7 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
             create_request,
             crate::TurnInput::text("run on redelivery"),
             native_execution_write_authority(process_id.clone()),
-            native_process_scope(&process_id),
+            host_process_scope(&runtime.host.core, &process_id),
             tokio_util::sync::CancellationToken::new(),
         )
         .await
@@ -1218,7 +1223,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
             predecessor_request,
             crate::TurnInput::text("run"),
             native_execution_write_authority(process_id.clone()),
-            native_process_scope(&process_id),
+            host_process_scope(&runtime.host.core, &process_id),
             tokio_util::sync::CancellationToken::new(),
         )
         .await
@@ -1357,7 +1362,7 @@ async fn cancelled_session_turn_reacquires_budget_one_permit() {
                     request,
                     crate::TurnInput::text("park"),
                     native_execution_write_authority("permit-process"),
-                    native_process_scope("permit-process"),
+                    host_process_scope(&runtime.host.core, "permit-process"),
                     cancellation.clone(),
                 ));
                 tokio::select! {

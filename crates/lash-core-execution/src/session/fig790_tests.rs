@@ -492,6 +492,7 @@ fn fig790_process_await_context(
         session_id: SessionId::from("fig790-session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
+        turn_activity_tx: None,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&attachment_store),

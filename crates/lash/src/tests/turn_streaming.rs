@@ -373,7 +373,7 @@ struct DurableEffectInvocation {
 #[derive(Default)]
 struct RecordingDurableEffectController {
     invocations: StdMutex<Vec<DurableEffectInvocation>>,
-    native: lash_core::facade_support::NativeRuntimeEffectController,
+    native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
 }
 
 impl RecordingDurableEffectController {
@@ -452,45 +452,69 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
 
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingDurableEffectController",
-        ))
+        self.native.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
+        self.native.register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.native.native_effect_groups_substrate()
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingDurableEffectController",
-        ))
+        self.native.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingDurableEffectController",
-        ))
+        self.native.close_effect_group(handle, disposition).await
     }
 
     async fn commit_group_child_final(
         &self,
-        _commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
     ) -> std::result::Result<
         lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
         lash_core::RuntimeEffectControllerError,
     > {
-        Ok(
-            lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped,
-        )
+        self.native.commit_group_child_final(commit).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> std::result::Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> std::result::Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.native
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
     }
 }
 
@@ -498,7 +522,7 @@ impl lash_core::RuntimeEffectController for RecordingDurableEffectController {
 struct RecordingNativeEffectController {
     invocations: StdMutex<Vec<DurableEffectInvocation>>,
     persisted_outcomes: StdMutex<Vec<String>>,
-    native: lash_core::facade_support::NativeRuntimeEffectController,
+    native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
 }
 
 impl RecordingNativeEffectController {
@@ -602,33 +626,38 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
 
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> std::result::Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingNativeEffectController",
-        ))
+        self.native.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
+        self.native.register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.native.native_effect_groups_substrate()
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> std::result::Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError>
     {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingNativeEffectController",
-        ))
+        self.native.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RecordingNativeEffectController",
-        ))
+        self.native.close_effect_group(handle, disposition).await
     }
 
     async fn commit_group_child_final(
@@ -639,6 +668,17 @@ impl lash_core::RuntimeEffectController for RecordingNativeEffectController {
         lash_core::RuntimeEffectControllerError,
     > {
         self.native.commit_group_child_final(commit).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> std::result::Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
     }
 
     async fn group_child_drain_blocked(
@@ -710,6 +750,12 @@ impl lash_core::ProcessExecutionEnvStore for DurableInMemoryProcessEnvStore {
 struct DurableNoopEffectHost {
     selected_scopes: StdMutex<Vec<lash_core::ExecutionScope>>,
     controller: Arc<RecordingDurableEffectController>,
+    /// The installed `ToolChildHost` this host owns: it must live here because
+    /// a child's recorded cancellation
+    /// authority is derived from *this* host's `turn_control_binding_id` (the
+    /// recorder's durable-journaled authority) and the child-run check
+    /// re-derives it from the host the executors route through.
+    tool_children: std::sync::OnceLock<Arc<lash_core::facade_support::ToolChildHost>>,
 }
 
 impl DurableNoopEffectHost {
@@ -823,6 +869,39 @@ impl lash_core::EffectHost for DurableNoopEffectHost {
         lash_core::RuntimeError,
     > {
         Ok(Some(self.scoped_for(scope)?))
+    }
+
+    fn scoped_for_group_child(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        _binding: lash_core::GroupChildBinding,
+    ) -> std::result::Result<
+        Option<lash_core::ScopedEffectController<'static>>,
+        lash_core::RuntimeError,
+    > {
+        // The child must be bound to the recorder, not a native-bound
+        // controller: formation recorded a durable cancellation authority
+        // (the recorder reports DurableJournaled), and a Local participant
+        // bound controller would make that recorded authority unhonourable.
+        // The recorder forwards every group operation to the same native
+        // substrate the group opened on.
+        Ok(Some(ScopedEffectController::shared(
+            Arc::clone(&self.controller) as Arc<dyn lash_core::RuntimeEffectController>,
+            admitted,
+        )?))
+    }
+
+    fn install_tool_child_host(
+        &self,
+        candidate: Arc<lash_core::facade_support::ToolChildHost>,
+    ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
+        let installed = self.tool_children.get_or_init(|| candidate);
+        lash_core::RuntimeEffectController::register_group_executors(
+            self.controller.as_ref(),
+            Arc::clone(installed) as Arc<dyn lash_core::GroupExecutors>,
+        )
+        .ok()?;
+        Some(Arc::clone(installed))
     }
 }
 

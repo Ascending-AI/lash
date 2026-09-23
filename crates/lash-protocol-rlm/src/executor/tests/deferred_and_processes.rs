@@ -1,12 +1,36 @@
 use super::*;
 use lash_core::testing::store_fixtures::durable_admission;
 
-pub(super) struct FailingDeferredJournalController;
+#[derive(Clone)]
+pub(super) struct FailingDeferredJournalController {
+    inner: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+    host: Arc<std::sync::OnceLock<Arc<dyn lash_core::EffectHost>>>,
+}
+
+impl Default for FailingDeferredJournalController {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+            host: Arc::new(std::sync::OnceLock::new()),
+        }
+    }
+}
 
 impl lash_core::AwaitEventResolver for FailingDeferredJournalController {}
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for FailingDeferredJournalController {
+    fn shared_effect_host(&self) -> Option<Arc<dyn lash_core::EffectHost>> {
+        Some(Arc::clone(self.host.get_or_init(|| {
+            Arc::new(
+                lash_core::facade_support::NativeEffectHost::with_controller_sharing_native_groups(
+                    Arc::new(self.clone()),
+                    &self.inner,
+                ),
+            ) as Arc<dyn lash_core::EffectHost>
+        })))
+    }
+
     async fn execute_effect(
         &self,
         envelope: lash_core::RuntimeEffectEnvelope,
@@ -107,6 +131,21 @@ impl lash_core::RuntimeEffectController for FaultingSqliteDeferredController {
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
         self.inner.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
+    }
+
+    fn group_child_scoped_controller(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner.group_child_scoped_controller(admitted, binding)
     }
 
     async fn await_next_settlement(
@@ -630,7 +669,7 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
         let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
             Arc::clone(&provider),
             lash_core::ToolCatalog::default(),
-            Arc::new(FailingDeferredJournalController),
+            Arc::new(FailingDeferredJournalController::default()),
             lash_core::testing::exec_code_invocation(
                 "deferred-journal-failure",
                 "turn-1",

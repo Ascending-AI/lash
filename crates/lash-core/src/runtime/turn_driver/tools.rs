@@ -95,7 +95,8 @@ impl RuntimeTurnDriver<'_> {
                 )
             })?
             .with_turn_event_sender(turn_event_tx.clone())
-            .with_tracing(self.execution_tracing(machine.protocol_iteration()));
+            .with_tracing(self.execution_tracing(machine.protocol_iteration()))
+            .with_cancellation_token(cancel.clone());
         let call_count = calls.len();
         let mut results = vec![None; call_count];
         let mut prepared_entries = Vec::new();
@@ -117,83 +118,24 @@ impl RuntimeTurnDriver<'_> {
         }
 
         if !prepared_entries.is_empty() {
-            let parent_invocation =
+            // ADR 0099: the batch opens as a durable effect group of
+            // `ToolInvocation` children under the invocation the `ToolBatch`
+            // effect would have claimed; a deferred leaf parks inside its own
+            // child driver, so no `ToolCallLaunch::Pending` reaches here.
+            let group_invocation =
                 self.turn_effect_invocation(machine, id, RuntimeEffectKind::ToolBatch)?;
-            let batch = crate::PreparedToolBatch::new(
-                id.0.to_string(),
-                prepared_entries
-                    .iter()
-                    .map(|(_, prepared)| prepared.clone())
-                    .collect(),
-            );
-            let mut outcome = self
-                .execute_typed_turn_effect(
-                    machine,
-                    event_tx,
-                    cancel,
-                    RuntimeEffectEnvelope::new(
-                        parent_invocation,
-                        RuntimeEffectCommand::ToolBatch { batch },
-                    ),
-                    RuntimeEffectOutcome::into_tool_batch_effect,
-                )
+            // The group's identity is the invocation it replaces, not the
+            // sansio effect id alone: effect ids restart in every agent frame,
+            // while the admitted scope stays the root turn's, so a follow-on
+            // frame's first tool call would otherwise name the root frame's
+            // group and reopen its settlements. The invocation's replay key
+            // carries the physical turn and protocol iteration.
+            let batch_id = group_invocation.replay_key().to_string();
+            let completions = prepare_context
+                .execute_prepared_tool_group(&batch_id, group_invocation, prepared_entries)
                 .await?;
-            // Trigger occurrences emitted inside the batch were drained into
-            // the recorded outcome; restore them so an enclosing effect
-            // boundary still observes them, on the local run and on replay.
-            prepare_context.restore_tool_trigger_outcomes(std::mem::take(&mut outcome.triggers));
-            if outcome.launches.len() != prepared_entries.len() {
-                return Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::ToolBatchResultCountMismatch,
-                    format!(
-                        "tool batch returned {} launches for {} prepared calls",
-                        outcome.launches.len(),
-                        prepared_entries.len()
-                    ),
-                ));
-            }
-            for ((source_index, prepared), launch) in
-                prepared_entries.into_iter().zip(outcome.launches)
-            {
-                let call_id = prepared.call_id.clone();
-                let replay = prepared.replay.clone();
-                match launch {
-                    crate::runtime::ToolCallLaunch::Done { result } => {
-                        results[source_index] = Some(*result);
-                    }
-                    crate::runtime::ToolCallLaunch::Pending {
-                        key,
-                        pending,
-                        duration_ms,
-                    } => {
-                        let resolution = self
-                            .await_pending_tool_completion(
-                                machine, id, &call_id, *key, &pending, event_tx, cancel,
-                            )
-                            .await?;
-                        let dispatch_outcome = prepare_context
-                            .pending_completion_dispatch_outcome(
-                                &call_id,
-                                prepared.tool_name.clone(),
-                                prepared.args.clone(),
-                                resolution,
-                                pending.resolved_by.as_ref(),
-                                duration_ms,
-                                Vec::new(),
-                                Vec::new(),
-                                Vec::new(),
-                            )
-                            .await;
-                        let completed = prepare_context
-                            .complete_tool_call(call_id.clone(), replay, dispatch_outcome)
-                            .await
-                            .completed;
-                        // `complete_tool_call` owns both trace and activity
-                        // completion reporting, including replayed pending
-                        // batch outcomes. Sending here would duplicate activity.
-                        results[source_index] = Some(completed);
-                    }
-                }
+            for (source_index, completed) in completions {
+                results[source_index] = Some(completed.completed);
             }
         }
         drop(prepare_context);
@@ -280,6 +222,10 @@ impl RuntimeTurnDriver<'_> {
         })
     }
 
+    // Unused on the group path — a deferred leaf parks inside its own child
+    // driver and no `ToolCallLaunch::Pending` reaches the turn driver — but
+    // retained until PR B removes the batch machinery that shares it.
+    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     async fn await_pending_tool_completion(
         &mut self,

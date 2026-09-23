@@ -111,6 +111,13 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier {
         self.inner.open_effect_group(group).await
     }
 
+    fn register_group_executors(
+        &self,
+        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,
@@ -377,6 +384,7 @@ fn tool_context_with_provider<'run>(
         session_id: SessionId::from(SESSION.to_string()),
         agent_frame_id: lash_core::FrameNodeId::new("test-frame").unwrap(),
         event_tx,
+        turn_activity_tx: None,
         checkpoint_messages: lash_core::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: lash_core::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory()),
@@ -1221,6 +1229,13 @@ impl lash_core::RuntimeEffectController for OrdinalJournaledTier {
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
         self.inner.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
     }
 
     async fn await_next_settlement(

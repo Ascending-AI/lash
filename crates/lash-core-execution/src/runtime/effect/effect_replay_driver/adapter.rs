@@ -423,6 +423,46 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
         .await
     }
 
+    /// A scoped store controller shares the driver's resolver table: a host
+    /// that is a thin projection over this controller (rather than a
+    /// [`StoreReplayHost`]) registers executors here, and the registration
+    /// must reach the same driver the controller's group methods read.
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn super::super::group_drain::GroupExecutors>,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        self.replay_driver().register_group_executors(executors)
+    }
+
+    /// The bound-child twin of the host's `scoped_for_group_child`, minted on
+    /// the controller for hosts that are thin projections over it: same
+    /// driver, same scope, the binding the admission fence arbitrates under
+    /// (FIG-3470).
+    fn group_child_scoped_controller(
+        &self,
+        admitted: AdmittedScope,
+        binding: crate::GroupChildBinding,
+    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
+        admitted.scope().validate()?;
+        let authority_binding_id = StoreReplayAdapter::await_event_authority_binding_id(self)
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    crate::RuntimeErrorCode::EffectGroupUnsupported,
+                    "a store replay controller without a turn-control authority id \
+                 cannot mint a bound group-child controller",
+                )
+            })?;
+        Ok(Some(ScopedEffectController::shared(
+            Arc::new(ScopedStoreReplayController {
+                driver: Arc::clone(self.replay_driver()),
+                scope: admitted.scope().clone(),
+                authority_binding_id,
+                binding: Some(binding),
+            }),
+            admitted,
+        )?))
+    }
+
     async fn close_effect_group(
         &self,
         handle: crate::EffectGroupHandle,

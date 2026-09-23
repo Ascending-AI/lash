@@ -46,10 +46,14 @@
 //! The law stands all four up when a producer declares a registry, and a
 //! producer that issues its batch from the turn pays none of it.
 //!
-//! Restate is deliberately not registered: it is serial today
-//! (`RestateRuntimeEffectController::supports_concurrent_effects` is a
-//! hardcoded `false`), and its registration lands red-first with the FIG-3397
-//! cutover. There is no expected-failure mechanism here and none may be added.
+//! The *turn* runs where the tier runs turns, through the tier's
+//! [`crate::ConformanceTurnRunner`]: in process on the host itself; a
+//! handler-bound tier hands in a runner that drives the turn inside a live
+//! handler. Restate is not registered yet: its direct batches overlap as
+//! effect groups of child invocations (FIG-3397), but an orchestrating relay's
+//! nested batch still runs its leaves on the relay child's own invocation
+//! journal, which cannot overlap them. There is no expected-failure mechanism
+//! here and none may be added.
 
 use crate::admit;
 use std::collections::BTreeMap;
@@ -842,9 +846,14 @@ struct ScenarioWorld {
     process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
 async fn run_scenario(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
     producer: &ToolBatchProducer,
     plan: &ToolBatchPlan,
     gated: bool,
@@ -860,16 +869,40 @@ async fn run_scenario(
         "{prefix}-{}-{}-{schedule}",
         producer.label, plan.scenario
     ));
-    run_scenario_on_session(
-        session_id,
-        effect_host,
-        None,
-        producer,
-        plan,
-        gated,
-        dependencies,
-    )
-    .await
+    // The turn runs where the tier runs turns: the runner supplies the
+    // controller admitted for the scenario's turn — the host's own in process,
+    // a handler-bound one on Restate — and the observations come back over a
+    // channel because the job owns everything it drives.
+    let admitted = admit(crate::ExecutionScope::turn(
+        &session_id,
+        tool_batch_turn_id(&session_id),
+    ));
+    let (observed_tx, observed_rx) = tokio::sync::oneshot::channel();
+    let producer = producer.clone();
+    let plan = plan.clone();
+    runner
+        .run_turn(
+            admitted,
+            Box::new(move |turn_controller| {
+                Box::pin(async move {
+                    let observed = run_scenario_on_session(
+                        session_id,
+                        effect_host,
+                        Some(turn_controller),
+                        &producer,
+                        &plan,
+                        gated,
+                        dependencies,
+                    )
+                    .await;
+                    let _ = observed_tx.send(observed);
+                })
+            }),
+        )
+        .await;
+    observed_rx
+        .await
+        .expect("the tier's turn runner ran the scenario's turn")
 }
 
 /// The `run_scenario` body with the session and turn controller chosen by the
@@ -1043,11 +1076,17 @@ async fn drive_turn(
             }
         })
         .build();
-    let mut host = crate::RuntimeHostConfig::in_memory(
+    // Constructed on the tier's host rather than `in_memory` with the field
+    // overwritten: `RuntimeHostConfig::new` installs the tool-child resolver
+    // on the effect host it is given, and a later `control.effect_host` swap
+    // would leave the resolver registered on the discarded host.
+    let mut host = crate::RuntimeHostConfig::new(
+        Arc::clone(&world.effect_host),
+        Arc::new(crate::InMemoryAttachmentStore::new()),
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
-    host.control.effect_host = Arc::clone(&world.effect_host);
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let mut policy = crate::testing::mock_session_policy();
@@ -1364,6 +1403,7 @@ fn assert_activation_shape(context: &str, plan: &ToolBatchPlan, observed: &Scena
 pub async fn tool_batch_cross_tier_parallelism(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
     producer: ToolBatchProducer,
 ) {
     let context = format!("{prefix}/{}", producer.label);
@@ -1380,6 +1420,7 @@ pub async fn tool_batch_cross_tier_parallelism(
         let observed = run_scenario(
             prefix,
             Arc::clone(&effect_host),
+            &runner,
             &producer,
             &plan,
             true,
@@ -1404,6 +1445,7 @@ pub async fn tool_batch_cross_tier_parallelism(
         run_scenario(
             prefix,
             Arc::clone(&effect_host),
+            &runner,
             &producer,
             &reverse,
             true,
@@ -1456,6 +1498,7 @@ pub async fn tool_batch_cross_tier_parallelism(
         let observed = run_scenario(
             prefix,
             Arc::clone(&effect_host),
+            &runner,
             &producer,
             &routes,
             true,
@@ -1482,6 +1525,7 @@ pub async fn tool_batch_cross_tier_parallelism(
     let concurrent = run_scenario(
         prefix,
         Arc::clone(&effect_host),
+        &runner,
         &producer,
         &differential,
         true,
@@ -1491,6 +1535,7 @@ pub async fn tool_batch_cross_tier_parallelism(
     let serial_safe = run_scenario(
         prefix,
         Arc::clone(&effect_host),
+        &runner,
         &producer,
         &differential,
         false,

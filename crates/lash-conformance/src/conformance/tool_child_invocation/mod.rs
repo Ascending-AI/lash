@@ -93,6 +93,10 @@ const LEAF_SPEND_CANCEL: &str = "tool:law_spend_cancel";
 /// The leaf the commit-boundary laws run: returns a terminal that declares a
 /// process start and an event, so the §5 drain is observable intent writes.
 const LEAF_COMMIT: &str = "tool:law_commit";
+/// The leaf the batch-group differential law calls for a tool rejection: its
+/// body always returns an error, so the reply carries a failed output both
+/// paths must reproduce identically.
+const LEAF_FAIL: &str = "tool:law_fail";
 /// The leaf the admission-fence law's orchestrating child calls nested: like
 /// `law_commit` it gates on `held` and declares intent writes, plus a
 /// process-definition registration — the journaled CAS write FIG-3470 routes
@@ -347,6 +351,7 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
         LEAF_BILLED,
         LEAF_SPEND_CANCEL,
         LEAF_COMMIT,
+        LEAF_FAIL,
         LEAF_FENCE,
         LEAF_BIG,
     ]
@@ -690,6 +695,9 @@ impl crate::ToolProvider for LawLeafProvider {
                     .into();
                 }
                 crate::ToolOutcome::cancelled("the attempt cancelled after spending").into()
+            }
+            name if name == LEAF_FAIL.trim_start_matches("tool:") => {
+                crate::ToolOutcome::err_fmt("the fail leaf always errors").into()
             }
             other => {
                 crate::ToolOutcome::err_fmt(format!("the law has no leaf named {other}")).into()
@@ -1944,6 +1952,7 @@ async fn until_claims_lapse(world: &ToolChildWorld, group_key: &str) {
 // =============================================================================
 
 mod admission_fence;
+mod batch_group;
 mod capture;
 mod commit_boundary;
 mod driver;
@@ -1952,9 +1961,11 @@ mod incarnation;
 mod incorporation;
 mod presentation;
 mod recovery;
+mod siblings;
 mod usage;
 
 pub use admission_fence::*;
+pub use batch_group::*;
 pub use capture::*;
 pub use commit_boundary::*;
 pub use driver::*;
@@ -1963,4 +1974,5 @@ pub use incarnation::*;
 pub use incorporation::*;
 pub use presentation::*;
 pub use recovery::*;
+pub use siblings::*;
 pub use usage::*;

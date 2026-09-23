@@ -8,9 +8,7 @@ use crate::runtime_support::effect_controller_doubles as controller_doubles;
 pub(crate) use crate::runtime_support::effect_controller_doubles::*;
 pub(crate) use crate::runtime_support::effect_recording_authority::*;
 pub(in crate::runtime::tests) use controller_doubles::RejectingEffectController;
-use controller_doubles::{
-    SerialOnlyEffectController, StrictReplayJournal, WrongOutcomeEffectController,
-};
+use controller_doubles::{StrictReplayJournal, WrongOutcomeEffectController};
 use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_core::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, LlmToolChoice,
@@ -309,7 +307,10 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
     }
 
     let default_recorder = RecordingEffectController::default();
-    let scoped_recorder = RecordingEffectController::default();
+    // The scoped double shares the host-side recorder's substrate: group opens
+    // land there, where the host's tool-child resolver was registered.
+    let scoped_recorder =
+        RecordingEffectController::sharing_group_substrate(default_recorder.native.clone());
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -367,15 +368,20 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
         .expect("turn");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
-    assert_eq!(scoped_recorder.count_kind(RuntimeEffectKind::ToolBatch), 1);
+    // A batch is a durable group now (FIG-3397): its children execute as
+    // `ToolInvocation` leaves under the opener's host-bound controller rather
+    // than as a `ToolBatch` command on the turn-scoped one.
+    // The `ToolInvocation` child itself runs on the native group substrate,
+    // never through a wrapping double; its attempt crosses the host's.
+    assert_eq!(scoped_recorder.count_kind(RuntimeEffectKind::ToolBatch), 0);
     assert_eq!(
-        scoped_recorder.count_kind(RuntimeEffectKind::ToolAttempt),
+        default_recorder.count_kind(RuntimeEffectKind::ToolAttempt),
         1
     );
     assert_eq!(scoped_recorder.count_kind(RuntimeEffectKind::Direct), 0);
     assert_eq!(default_recorder.count_kind(RuntimeEffectKind::Direct), 0);
     assert!(
-        scoped_recorder
+        default_recorder
             .envelopes()
             .iter()
             .filter(|envelope| envelope.contains("tool_attempt"))
@@ -556,6 +562,15 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
                     ))
                     .await
             }
+            // The consumer journals its incorporated prefix and each child its
+            // recorded presentation; this double runs both locally, as the
+            // shared recording double does.
+            command @ (RuntimeEffectCommand::IncorporateGroupSettlements { .. }
+            | RuntimeEffectCommand::PresentToolResult { .. }) => {
+                local_executor
+                    .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
+                    .await
+            }
             other => Err(RuntimeEffectControllerError::foreign(
                 "unexpected_effect",
                 format!("unexpected effect {}", other.kind().as_str()),
@@ -565,31 +580,53 @@ impl RuntimeEffectController for CapturingRuntimeReplayController {
 
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "CapturingRuntimeReplayController",
-        ))
+        self.native.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.native.register_group_executors(executors)
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "CapturingRuntimeReplayController",
-        ))
+        // A group child is a `ToolInvocation` the native substrate runs
+        // itself, so its recorded outcome is captured where the consumer
+        // reads it: the settlement's `triggers` is where a child's drained
+        // emissions are journaled (ADR 0099 §6).
+        let settlement = self.native.await_next_settlement(handle, cancel).await?;
+        if let Ok(outcome @ RuntimeEffectOutcome::ToolInvocation { .. }) = &settlement.outcome {
+            self.tool_outcomes
+                .lock_recover()
+                .push(serde_json::to_value(outcome).expect("serialize tool outcome"));
+        }
+        Ok(settlement)
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "CapturingRuntimeReplayController",
-        ))
+        self.native.close_effect_group(handle, disposition).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
     }
 
     async fn commit_group_child_final(
@@ -745,11 +782,12 @@ fn nested_trigger_batch_orchestrating_tool() -> lash_core::facade_support::Orche
     unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
 }
 
-/// A trigger emitted inside a nested tool batch must reach the outer recorded
-/// batch outcome: the inner batch drains its own trigger buffer into its
-/// outcome, and the consumer restores it into the enclosing buffer. Without the
-/// restore the occurrence is dropped before the outer boundary sees it, and the
-/// turn's recorded effects lose an emission that really happened.
+/// A trigger emitted inside a nested tool batch must reach the enclosing
+/// effect's recorded outcome: the inner group's consumer restores each child's
+/// journaled trigger receipts into the enclosing buffer (ADR 0099 §6), and the
+/// enclosing leaf's settlement carries them. Without the restore the
+/// occurrence is dropped before the outer boundary sees it, and the turn's
+/// recorded effects lose an emission that really happened.
 #[tokio::test]
 async fn tool_batch_child_trigger_reaches_the_enclosing_recorded_batch_outcome() {
     let controller = CapturingRuntimeReplayController::calling("trigger_batch_tool");
@@ -823,23 +861,23 @@ async fn tool_batch_child_trigger_reaches_the_enclosing_recorded_batch_outcome()
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     let tool_outcomes = controller.tool_outcomes();
-    assert_eq!(
-        tool_outcomes.len(),
-        2,
-        "the nested batch and the turn's batch are both recorded"
-    );
-    let outer = tool_outcomes.last().expect("outer batch outcome");
-    assert_eq!(outer["type"], "tool_batch");
-    let outer_triggers = outer["triggers"]
+    let enclosing = tool_outcomes
+        .iter()
+        .find(|outcome| {
+            outcome["type"] == "tool_invocation"
+                && outcome["outcome"]["record"]["tool"] == "trigger_batch_tool"
+        })
+        .expect("the enclosing orchestrating leaf's recorded outcome");
+    let enclosing_triggers = enclosing["settlement"]["triggers"]
         .as_array()
-        .expect("outer batch trigger outcomes");
+        .expect("enclosing settlement trigger outcomes");
     assert_eq!(
-        outer_triggers.len(),
+        enclosing_triggers.len(),
         2,
-        "the nested emissions must reach the enclosing recorded batch outcome"
+        "the nested emissions must reach the enclosing effect's recorded settlement"
     );
     assert_eq!(
-        outer_triggers[0]["source_type"],
+        enclosing_triggers[0]["source_type"],
         serde_json::json!("ui.button.pressed")
     );
     assert_eq!(
@@ -935,25 +973,27 @@ async fn runtime_owned_tool_trigger_redrive_reemits_reserved_start_without_appen
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     let tool_outcomes = controller.tool_outcomes();
     assert_eq!(tool_outcomes.len(), 1);
-    assert_eq!(tool_outcomes[0]["type"], "tool_batch");
+    // The leaf is a `ToolInvocation` group child now (FIG-3397): its journaled
+    // trigger receipts ride in the recorded settlement (ADR 0099 §6).
+    assert_eq!(tool_outcomes[0]["type"], "tool_invocation");
+    let triggers = tool_outcomes[0]["settlement"]["triggers"]
+        .as_array()
+        .expect("tool trigger outcomes in the settlement record");
     assert_eq!(
-        tool_outcomes[0]["triggers"]
-            .as_array()
-            .expect("tool trigger outcomes")
-            .len(),
+        triggers.len(),
         2,
         "the tool attempt must retain both the first emission and its redrive"
     );
     assert_eq!(
-        tool_outcomes[0]["triggers"][0]["source_type"],
+        triggers[0]["source_type"],
         serde_json::json!("ui.button.pressed")
     );
     assert_eq!(
-        tool_outcomes[0]["triggers"][0]["payload"],
+        triggers[0]["payload"],
         serde_json::json!({ "pressed": true })
     );
     assert!(
-        tool_outcomes[0]["triggers"][0]["occurrence_id"]
+        triggers[0]["occurrence_id"]
             .as_str()
             .is_some_and(|value| !value.is_empty())
     );
@@ -1069,7 +1109,10 @@ async fn scoped_retry_sleep_records_turn_and_parent_tool_identity() {
             attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }),
         transport,
-        EmbeddedRuntimeHost::new(test_runtime_host_config()),
+        // The host shares the scoped recorder's group substrate: the turn's
+        // tool group opens there, where the host's tool-child resolver is
+        // registered (FIG-3397).
+        host_with_effect_recorder(recorder.clone()),
     )
     .await;
 
@@ -1166,7 +1209,9 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
         .expect("turn");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
-    assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolBatch), 1);
+    // The batch is a durable group of `ToolInvocation` children now
+    // (FIG-3397). The children run on the native group substrate, not through
+    // this wrapping double; each leaf's attempt crosses it as before.
     assert_eq!(recorder.count_kind(RuntimeEffectKind::ToolAttempt), 2);
     let tool_keys = recorder
         .records()
@@ -1185,88 +1230,24 @@ async fn tool_attempt_effect_crosses_controller_per_child_attempt_and_runs_local
             .iter()
             .any(|key| key.contains("child:1:call-2:attempt:1"))
     );
+    // No single envelope names both calls now: each leaf is its own
+    // `ToolInvocation` group child (FIG-3397).
     assert!(
         recorder
             .envelopes()
             .iter()
-            .any(|envelope| envelope.contains("call-1") && envelope.contains("call-2"))
+            .any(|envelope| envelope.contains("call-1"))
+    );
+    assert!(
+        recorder
+            .envelopes()
+            .iter()
+            .any(|envelope| envelope.contains("call-2"))
     );
     assert!(
         turn.tool_calls
             .iter()
             .any(|record| record.tool == "echo_tool" && record.output.is_success())
-    );
-}
-
-#[tokio::test]
-async fn tool_batch_serializes_child_attempts_when_controller_disallows_concurrency() {
-    let controller = SerialOnlyEffectController::default();
-    let transport = mock_provider(vec![
-        MockCall {
-            stream_events: Vec::new(),
-            response: Ok(LlmResponse {
-                parts: vec![
-                    LlmOutputPart::ToolCall {
-                        call_id: "call-1".to_string(),
-                        tool_name: "echo_tool".to_string(),
-                        input_json: serde_json::json!({"value": "hi"}).to_string(),
-                        replay: None,
-                    },
-                    LlmOutputPart::ToolCall {
-                        call_id: "call-2".to_string(),
-                        tool_name: "echo_tool".to_string(),
-                        input_json: serde_json::json!({"value": "there"}).to_string(),
-                        replay: None,
-                    },
-                ],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            }),
-        },
-        MockCall {
-            stream_events: Vec::new(),
-            response: Ok(LlmResponse {
-                parts: vec![LlmOutputPart::Text {
-                    text: "finished".to_string(),
-                    response_meta: None,
-                }],
-                response_metadata: Default::default(),
-                ..LlmResponse::default()
-            }),
-        },
-    ]);
-    let mut runtime = runtime_with_plugins_and_tools_and_host(
-        Vec::new(),
-        Arc::new(EchoTool),
-        transport,
-        EmbeddedRuntimeHost::new(test_runtime_host_config()),
-    )
-    .await;
-
-    let turn = runtime
-        .run_turn_assembled(
-            TurnInput {
-                items: vec![InputItem::Text {
-                    text: "use the tool".to_string(),
-                }],
-                protocol_turn_options: None,
-                trace_turn_id: None,
-                protocol_extension: None,
-                turn_context: lash_core::TurnContext::default(),
-            },
-            CancellationToken::new(),
-            scoped_test_turn(&controller, &TurnId::from("serial-tool-batch-effects")),
-        )
-        .await
-        .expect("turn");
-
-    assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
-    assert_eq!(controller.count_kind(RuntimeEffectKind::ToolBatch), 1);
-    assert_eq!(controller.count_kind(RuntimeEffectKind::ToolAttempt), 2);
-    assert_eq!(
-        controller.max_in_flight_tool_attempts(),
-        1,
-        "controllers that cannot accept concurrent effects must not receive overlapping child attempts"
     );
 }
 

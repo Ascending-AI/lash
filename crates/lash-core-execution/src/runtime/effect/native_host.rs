@@ -113,13 +113,51 @@ impl Drop for LiveScopeGuard {
 impl NativeEffectHost {
     /// A host over a foreign controller: its quiescence gate counts only what
     /// the host itself admitted, because that controller's groups are not
-    /// visible to it.
+    /// visible to it. When the erased controller is — or delegates every group
+    /// operation to — a native one, its substrate answer recovers the shared
+    /// group table so bound-child admission is arbitrated against the state
+    /// the group actually wrote.
     pub fn new(controller: Arc<dyn RuntimeEffectController>) -> Self {
+        let groups_admin = controller
+            .native_effect_groups_substrate()
+            .and_then(|substrate| {
+                substrate
+                    .downcast::<super::executor::NativeEffectGroups>()
+                    .ok()
+            });
         Self {
             turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
             controller,
             await_event_admin: None,
-            groups_admin: None,
+            groups_admin,
+            allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
+                false,
+            )),
+            live: Arc::new(ScopeLiveness::default()),
+            tool_children: Arc::new(std::sync::OnceLock::new()),
+        }
+    }
+
+    /// A host whose scoped controllers are `controller` but whose group
+    /// substrate is `native`'s: bound-child admission is arbitrated through
+    /// `native`'s group state and group-executor resolvers register on it,
+    /// exactly as [`with_native_controller`](Self::with_native_controller)
+    /// wires them.
+    ///
+    /// Testing only: honest exactly when `controller` forwards every group
+    /// operation to `native`, as a recording double wrapping it does — a
+    /// controller that answered groups itself would be arbitrated by state it
+    /// never wrote.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_controller_sharing_native_groups(
+        controller: Arc<dyn RuntimeEffectController>,
+        native: &Arc<NativeRuntimeEffectController>,
+    ) -> Self {
+        Self {
+            turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
+            controller,
+            await_event_admin: Some(native.await_event_registry()),
+            groups_admin: Some(native.groups()),
             allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),
@@ -643,6 +681,13 @@ impl RuntimeEffectController for FencedNativeController {
         Ok(handle)
     }
 
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.host
+            .groups_admin
+            .clone()
+            .map(|groups| groups as Arc<dyn std::any::Any + Send + Sync>)
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut EffectGroupHandle,
@@ -727,6 +772,12 @@ impl RuntimeEffectController for NativeEffectHost {
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         self.controller.open_effect_group(group).await
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.groups_admin
+            .clone()
+            .map(|groups| groups as Arc<dyn std::any::Any + Send + Sync>)
     }
 
     async fn await_next_settlement(

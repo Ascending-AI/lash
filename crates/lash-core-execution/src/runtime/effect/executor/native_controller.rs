@@ -221,6 +221,10 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         self.groups.register_executors(executors)
     }
 
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        Some(Arc::clone(&self.groups) as Arc<dyn std::any::Any + Send + Sync>)
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -293,7 +297,7 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         group.validate_execution_scope(group.invocation().execution_scope())?;
         let executors = self.groups.registered_executors()?;
-        NativeEffectGroups::open(&self.groups, &executors, group)
+        NativeEffectGroups::open(&self.groups, &executors, group, self)
     }
 
     async fn await_next_settlement(
@@ -855,6 +859,7 @@ impl NativeEffectGroups {
         groups: &Arc<Self>,
         executors: &Arc<dyn GroupExecutors>,
         group: RuntimeEffectGroup,
+        controller: &NativeRuntimeEffectController,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         let handle = EffectGroupHandle::new(&group);
         // The registration the open is happening under — the live
@@ -909,7 +914,7 @@ impl NativeEffectGroups {
             open.insert(group.group_key().to_string(), Arc::clone(&state));
             state
         };
-        Self::dispatch(groups, &state, group, resolved);
+        Self::dispatch(groups, &state, group, resolved, controller);
         Ok(handle)
     }
 
@@ -922,6 +927,7 @@ impl NativeEffectGroups {
         state: &Arc<NativeEffectGroup>,
         group: RuntimeEffectGroup,
         executors: Vec<RuntimeEffectLocalExecutor<'static>>,
+        controller: &NativeRuntimeEffectController,
     ) {
         let group_key = Arc::<str>::from(group.group_key());
         for (position, (child, executor)) in
@@ -935,9 +941,25 @@ impl NativeEffectGroups {
             // Registered before the task exists, so a fast-finishing child
             // cannot remove a position that was never inserted.
             state.state.lock_recover().running.insert(position);
+            let controller = controller.clone();
+            // The wait a cancellable `AwaitEvent` child is parked on: dropping
+            // the execution future never polls the waiter's own release arm,
+            // so the cancel arm below resolves the promise itself — the same
+            // release the store tier's `execute_effect_cancellable` writes
+            // (ADR 0099 §12, FIG-3411).
+            let cancel_wait_key = match &child.command {
+                RuntimeEffectCommand::AwaitEvent { key } => Some(key.clone()),
+                _ => None,
+            };
             let child_task = tracing::Instrument::instrument(
-                async move {
-                    let execution = executor.execute(child);
+                lash_core_ids::execution_permit::inherit_process_execution_permit(async move {
+                    // Dispatch through `execute_effect`, not the executor
+                    // directly: some resolved executors are wait *options* an
+                    // `execute` refuses (an `AwaitEvent` child), and this arm
+                    // is where the tier reads them against its registry — the
+                    // same shape `execute_effect_cancellable` gives the store
+                    // tiers.
+                    let execution = controller.execute_effect(child, executor);
                     tokio::pin!(execution);
                     let outcome = tokio::select! {
                         biased;
@@ -952,6 +974,11 @@ impl NativeEffectGroups {
                             if committed {
                                 execution.await
                             } else {
+                                if let Some(key) = &cancel_wait_key {
+                                    let _ = controller
+                                        .resolve_await_event(key, crate::Resolution::Cancelled)
+                                        .await;
+                                }
                                 Err(child_cancelled_error(&group_key, position))
                             }
                         }
@@ -966,10 +993,16 @@ impl NativeEffectGroups {
                         inner.decided_at.remove(&position);
                     }
                     state.task_finished.notify_waiters();
-                },
+                }),
                 tracing::Span::current(),
             );
-            task_owner.tasks.lock_recover().spawn(child_task);
+            // A child runs on its own task but inside its opener's process
+            // execution permit, exactly as a batch leaf did: a nested process
+            // await releases and reacquires the same permit rather than a
+            // second slot the worker never granted.
+            task_owner.tasks.lock_recover().spawn(
+                lash_core_ids::execution_permit::inherit_process_execution_permit(child_task),
+            );
         }
     }
 

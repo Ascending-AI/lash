@@ -29,11 +29,7 @@ fn postgres_drain_end_host(storage: &PostgresStorage) -> Arc<dyn EffectHost> {
             drain_budget: Default::default(),
         },
     );
-    host.register_group_executors(
-        lash_conformance::RecordingExecutors::settling() as Arc<dyn lash_core::GroupExecutors>
-    )
-    .expect("a freshly connected host has no resolver yet");
-    Arc::new(host)
+    lash_conformance::install_drain_end_executors(Arc::new(host))
 }
 
 async fn postgres_drain_end_world(storage: PostgresStorage) -> DrainEndWorld {

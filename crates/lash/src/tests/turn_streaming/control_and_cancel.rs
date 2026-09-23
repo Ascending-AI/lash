@@ -1508,7 +1508,7 @@ pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Re
     let output = session
         .turn(TurnInput::text("use tool"))
         .advanced()
-        .collect_with_scope(live.as_ref(), turn_scope(&session.session_id()))
+        .collect_with_scope(live.as_ref(), turn_scope(&core, &session.session_id()))
         .await?;
 
     assert!(matches!(

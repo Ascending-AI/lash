@@ -26,6 +26,7 @@ use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::http_server::HttpServer;
 use restate_sdk::serde::Json;
 
+use super::live_turn_probe::ConformanceTurnProbe as _;
 use crate::durable_wait::arm_wait_registration_witness;
 use crate::effect_group::{
     EffectGroupChildRequest, admit_wait_request, arm_admission_witness, decode_wait_resolution,
@@ -81,6 +82,79 @@ impl RestateProcessRunner for ToolChildProcessRunner {
         _request: RestateProcessCancelRequest,
     ) -> Result<(), lash_core::PluginError> {
         Ok(())
+    }
+}
+
+/// The endpoint's process runner for the turn-driving laws: a law that runs
+/// real process segments (a `spawn_agent` child session) installs its own
+/// [`DurableProcessWorker`](lash_core_worker::DurableProcessWorker) here,
+/// which is what a deployment's `RestateCoreProcessRunner` serves; until one
+/// is installed the endpoint answers as [`ToolChildProcessRunner`] does.
+#[derive(Default)]
+pub(super) struct LawProcessRunner {
+    installed: Mutex<Option<crate::RestateCoreProcessRunner>>,
+}
+
+impl LawProcessRunner {
+    pub(super) fn install(&self, worker: lash_core_worker::DurableProcessWorker) {
+        *self
+            .installed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(crate::RestateCoreProcessRunner::new(worker));
+    }
+
+    fn installed(&self) -> Option<crate::RestateCoreProcessRunner> {
+        self.installed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl RestateProcessRunner for LawProcessRunner {
+    async fn run_process_segment(
+        &self,
+        registration: lash_core::ProcessRegistration,
+        execution_context: lash_core::ProcessExecutionContext,
+        scoped_effect_controller: lash_core::ScopedEffectController<'_>,
+        handover: Option<lash_core::SegmentHandover>,
+        cancellation: CancellationToken,
+    ) -> Result<lash_core::ProcessRunOutcome, lash_core::PluginError> {
+        match self.installed() {
+            Some(runner) => {
+                Box::pin(runner.run_process_segment(
+                    registration,
+                    execution_context,
+                    scoped_effect_controller,
+                    handover,
+                    cancellation,
+                ))
+                .await
+            }
+            None => {
+                ToolChildProcessRunner
+                    .run_process_segment(
+                        registration,
+                        execution_context,
+                        scoped_effect_controller,
+                        handover,
+                        cancellation,
+                    )
+                    .await
+            }
+        }
+    }
+
+    async fn request_process_cancel(
+        &self,
+        request: RestateProcessCancelRequest,
+    ) -> Result<(), lash_core::PluginError> {
+        match self.installed() {
+            Some(runner) => runner.request_process_cancel(request).await,
+            None => ToolChildProcessRunner.request_process_cancel(request).await,
+        }
     }
 }
 
@@ -235,6 +309,7 @@ pub(super) struct LiveConformanceHarness {
     host: Arc<RestateEffectHost>,
     executors: Arc<ConformanceExecutors>,
     process_registry: Arc<lash_core::TestLocalProcessRegistry>,
+    process_runner: Arc<LawProcessRunner>,
     shutdown_tx: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     server: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -283,11 +358,13 @@ impl LiveConformanceHarness {
             RestateEffectGroupRetryPolicy::infinite(),
         );
         let process_registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let process_runner = Arc::new(LawProcessRunner::default());
         let listener = tokio::net::TcpListener::bind(bind_addr)
             .await
             .expect("bind Restate effect-group endpoint");
         let mut endpoint = Endpoint::builder()
             .bind(ScopeLivenessProbeImpl.serve())
+            .bind(super::live_turn_probe::ConformanceTurnProbeImpl.serve())
             .bind(services.index)
             .bind(services.payload)
             .bind(services.dispatch)
@@ -297,7 +374,7 @@ impl LiveConformanceHarness {
             endpoint = endpoint
                 .bind(
                     LashProcessWorkflowImpl::new_for_test(
-                        Arc::new(ToolChildProcessRunner),
+                        Arc::clone(&process_runner),
                         Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
                         Arc::clone(&process_registry)
                             as Arc<dyn lash_core::ProcessContinuationStore>,
@@ -333,6 +410,7 @@ impl LiveConformanceHarness {
             host,
             executors,
             process_registry,
+            process_runner,
             shutdown_tx: tokio::sync::Mutex::new(Some(shutdown_tx)),
             server: tokio::sync::Mutex::new(Some(server)),
         }
@@ -367,6 +445,36 @@ impl LiveConformanceHarness {
             }),
             deferrable_routing: lash_conformance::ToolChildDeferrableRouting::Durable,
         }
+    }
+
+    /// The endpoint's own host, for a law that builds a runtime on it: the
+    /// runtime installs its `ToolChildHost` here, which is the resolver the
+    /// endpoint's dispatch invocations route tool children through.
+    pub(super) fn endpoint_host(&self) -> Arc<dyn lash_core::EffectHost> {
+        Arc::clone(&self.host) as Arc<dyn lash_core::EffectHost>
+    }
+
+    /// A per-run discriminator for law identities: the Restate server's
+    /// state outlives a test run, so a fixed session or group key would
+    /// reopen the previous run's retired state.
+    pub(super) fn run_nonce(&self) -> u128 {
+        nonce()
+    }
+
+    /// Runs a law's turn inside a `ConformanceTurnProbe` handler on this
+    /// endpoint.
+    pub(super) fn turn_runner(&self) -> Arc<dyn lash_conformance::ConformanceTurnRunner> {
+        super::live_turn_probe::LiveTurnRunner::shared(
+            self.ingress_url.clone(),
+            Arc::clone(&self.process_runner),
+        )
+    }
+
+    /// The registry the endpoint's `LashProcessWorkflow` writes terminals
+    /// into: a law whose processes run on the endpoint must register and
+    /// observe them here.
+    pub(super) fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
+        Arc::clone(&self.process_registry) as Arc<dyn lash_core::ProcessRegistry>
     }
 
     pub(super) fn effect_host_factory(

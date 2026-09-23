@@ -502,6 +502,39 @@ recipe = "deferred-e2e"
         )
 
 
+class ParkedEntryTests(unittest.TestCase):
+    KEY = ("crates/x/src/tests.rs", "x::tests", "demo_tests")
+
+    def test_a_parked_entry_names_its_ticket_and_reason(self) -> None:
+        entry = {"recipe": "parked", "ticket": "FIG-1", "reason": "why"}
+        self.assertEqual(MODULE.parked_entry_errors(self.KEY, entry), [])
+
+    def test_a_parked_entry_without_ticket_or_reason_is_refused(self) -> None:
+        errors = MODULE.parked_entry_errors(self.KEY, {"recipe": "parked"})
+        self.assertEqual(len(errors), 2)
+        errors = MODULE.parked_entry_errors(
+            self.KEY, {"recipe": "parked", "ticket": "someday", "reason": "why"}
+        )
+        self.assertEqual(len(errors), 1)
+
+    def test_the_real_parked_restate_laws_are_skipped_by_name(self) -> None:
+        skips = MODULE.parked_skips("lash_restate", MODULE.load_macros())
+        self.assertEqual(
+            skips,
+            [
+                "--skip",
+                "tests::conformance_and_poison::turn_crash_matrix_error_return_fail_stop",
+                "--skip",
+                "tests::conformance_and_poison::turn_crash_matrix_level_1",
+            ],
+        )
+        self.assertEqual(MODULE.parked_skips("no_such_crate", MODULE.load_macros()), [])
+
+    def test_a_live_entry_may_not_carry_a_ticket(self) -> None:
+        entry = {"recipe": "effect-group-conformance-e2e", "ticket": "FIG-1"}
+        self.assertEqual(len(MODULE.parked_entry_errors(self.KEY, entry)), 1)
+
+
 class RealTreeTests(unittest.TestCase):
     """The real macros.rs keeps its delegation invariants under the census."""
 
@@ -598,7 +631,7 @@ class RealTreeTests(unittest.TestCase):
         errors: list[str] = []
         manifest_set = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
-        self.assertEqual(len(manifest_set), 4)
+        self.assertEqual(len(manifest_set), 7)
         self.assertIn(
             (
                 "crates/lash-restate/src/tests/conformance_and_poison.rs",
@@ -608,8 +641,8 @@ class RealTreeTests(unittest.TestCase):
             manifest_set,
         )
 
-    def test_the_real_deferred_recipe_owes_all_four_suites(self) -> None:
-        """A receipts file covering all four manifest suites passes, and
+    def test_the_real_deferred_recipe_owes_every_manifest_suite(self) -> None:
+        """A receipts file covering all six manifest suites passes, and
         dropping one suite's rows fails naming that suite's laws -- the
         entries share one file and claimant, so this pins the deferred
         claim resolving each entry to its own real invocation."""
@@ -621,7 +654,7 @@ class RealTreeTests(unittest.TestCase):
             "effect-group-conformance-e2e", index
         )
         self.assertIsNone(error)
-        self.assertEqual(len(invocations), 4)
+        self.assertEqual(len(invocations), 6)
         expected = MODULE.expected_from_invocations(invocations, macros)
         observed: dict[str, Counter] = {
             claimant: Counter(pairs) for claimant, pairs in expected.items()
@@ -672,6 +705,10 @@ class DeferredWiringTests(unittest.TestCase):
 
     def test_each_entry_is_wired(self) -> None:
         for entry in self.entries:
+            if entry["recipe"] == MODULE.PARKED_RECIPE:
+                # A parked entry runs nowhere by construction; its ticket and
+                # reason are checked by manifest_check.
+                continue
             with self.subTest(entry=entry):
                 recipe = entry["recipe"]
                 body = recipe_block(self.justfile, recipe)

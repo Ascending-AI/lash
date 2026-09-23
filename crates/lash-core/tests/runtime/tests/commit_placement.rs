@@ -64,6 +64,13 @@ impl<const ENGINE: bool> lash_core::RuntimeEffectController for JournaledCommitC
         self.native.open_effect_group(group).await
     }
 
+    fn register_group_executors(
+        &self,
+        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.native.register_group_executors(executors)
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,
@@ -130,9 +137,9 @@ async fn assert_commit_placement(
     let host = match controller.effect_journaling() {
         lash_core::EffectJournaling::Local => {
             let mut config = test_runtime_host_config();
-            config.control.effect_host = Arc::new(
+            config = config.with_effect_host(Arc::new(
                 lash_core::facade_support::NativeEffectHost::new(controller.clone()),
-            );
+            ));
             EmbeddedRuntimeHost::new(config)
         }
         lash_core::EffectJournaling::Journaled => journal_replay_host(controller.clone()),

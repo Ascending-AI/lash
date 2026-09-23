@@ -5,6 +5,7 @@
 
 use lash_core::SessionId;
 use lash_core::TurnId;
+use lash_core::testing::runtime_helpers::host_turn_scope;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -64,6 +65,13 @@ impl RuntimeEffectController for RecordingEffectController {
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
         self.inner.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
     }
 
     async fn await_next_settlement(
@@ -485,14 +493,6 @@ fn text_response(text: &str) -> LlmResponse {
     }
 }
 
-fn turn_scope(session_id: &SessionId, turn_id: &TurnId) -> ScopedEffectController<'static> {
-    ScopedEffectController::shared(
-        Arc::new(NativeRuntimeEffectController::default()),
-        AdmittedScope::turn(session_id, turn_id),
-    )
-    .expect("turn scope")
-}
-
 fn recording_turn_scope(
     controller: Arc<RecordingEffectController>,
     session_id: &SessionId,
@@ -595,7 +595,8 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         .run_turn_assembled(
             TurnInput::text("call the tool"),
             CancellationToken::new(),
-            turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("tool-panic-session"),
                 &TurnId::from("tool-panic-turn"),
             ),
@@ -615,7 +616,8 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         .run_turn_assembled(
             TurnInput::text("continue"),
             CancellationToken::new(),
-            turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("tool-panic-session"),
                 &TurnId::from("after-tool-panic"),
             ),
@@ -656,7 +658,8 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         .run_turn_assembled(
             TurnInput::text("panic provider"),
             CancellationToken::new(),
-            turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("provider-panic-session"),
                 &TurnId::from("provider-panic-turn"),
             ),
@@ -687,7 +690,8 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
         .run_turn_assembled(
             TurnInput::text("continue"),
             CancellationToken::new(),
-            turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("provider-panic-session"),
                 &TurnId::from("after-provider-panic"),
             ),
@@ -814,7 +818,8 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
     let panic = std::panic::AssertUnwindSafe(runtime.run_turn_assembled(
         TurnInput::text("panic provider loudly"),
         CancellationToken::new(),
-        turn_scope(
+        host_turn_scope(
+            &runtime.host.core,
             &SessionId::from("loud-provider-panic-session"),
             &TurnId::from("loud-provider-panic-turn"),
         ),

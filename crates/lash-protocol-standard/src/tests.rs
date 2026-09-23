@@ -1,7 +1,7 @@
 use super::*;
 use lash_core::{
-    AttachmentId, AttachmentSource, AttachmentTypeMetadata, MediaType, ToolCallOutput, ToolValue,
-    facade_support::AttachmentRef, facade_support::ModelToolReturn,
+    AttachmentId, AttachmentSource, AttachmentTypeMetadata, EffectHost as _, MediaType,
+    ToolCallOutput, ToolValue, facade_support::AttachmentRef, facade_support::ModelToolReturn,
 };
 use lash_sansio::sync::MutexExt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -348,7 +348,13 @@ type RecordedEffectFrame = (lash_core::RuntimeEffectKind, Option<String>);
 
 #[derive(Clone, Default)]
 pub(super) struct CountingEffectController {
-    frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
+    pub(super) frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
+    pub(super) group_opens: Arc<AtomicUsize>,
+    /// The native controller group operations forward to: a tool batch is
+    /// a durable effect group now, so a test double that refuses groups
+    /// leaves every batch unrouted. Shared with the runtime's effect host
+    /// so group opens and group-child admission see the same group map.
+    pub(super) native: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
 }
 
 impl CountingEffectController {
@@ -358,6 +364,10 @@ impl CountingEffectController {
             .iter()
             .filter(|(candidate, _)| *candidate == kind)
             .count()
+    }
+
+    fn group_open_count(&self) -> usize {
+        self.group_opens.load(Ordering::SeqCst)
     }
 
     fn tool_attempt_names(&self) -> Vec<String> {
@@ -504,43 +514,526 @@ impl lash_core::RuntimeEffectController for CountingEffectController {
 
     async fn open_effect_group(
         &self,
-        _group: lash_core::RuntimeEffectGroup,
+        group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "CountingEffectController",
-        ))
+        self.group_opens.fetch_add(1, Ordering::SeqCst);
+        self.native.open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.native.register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.native.native_effect_groups_substrate()
     }
 
     async fn await_next_settlement(
         &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
     ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "CountingEffectController",
-        ))
+        self.native.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
         &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "CountingEffectController",
-        ))
+        self.native.close_effect_group(handle, disposition).await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.native.read_group_settlement(group_key, rank).await
+    }
+
+    fn group_child_scoped_controller(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        let Some(inner) = self
+            .native
+            .group_child_scoped_controller(admitted.clone(), binding)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(lash_core::ScopedEffectController::shared(
+            Arc::new(CountingBoundController {
+                frames: Arc::clone(&self.frames),
+                inner,
+            }),
+            admitted,
+        )?))
     }
 
     async fn commit_group_child_final(
         &self,
-        _commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
     ) -> Result<
         lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
         lash_core::RuntimeEffectControllerError,
     > {
-        Ok(
-                lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped,
-            )
+        self.native.commit_group_child_final(commit).await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.native
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
+}
+
+/// A group child's bound controller wrapped in the same frame counter the
+/// turn scope uses. Under the group shape a batch's attempts journal through
+/// the child's controller — minted by the host, not the turn's scoped
+/// controller — so without this wrap `count(ToolAttempt)` would see nothing
+/// the children ran (FIG-3397).
+struct CountingBoundController {
+    frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
+    inner: lash_core::ScopedEffectController<'static>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::AwaitEventResolver for CountingBoundController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.controller().await_event_authority_binding_id()
+    }
+
+    async fn acquire_queued_lane(
+        &self,
+        lane: Arc<dyn lash_core::QueuedLaneProbe>,
+        cancel: lash_core::CancellationToken,
+    ) -> Result<lash_core::QueuedLaneAcquisition, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .acquire_queued_lane(lane, cancel)
+            .await
+    }
+
+    async fn wait_out_crashed_lane_holder(
+        &self,
+        lane: Arc<dyn lash_core::QueuedLaneProbe>,
+        cancel: lash_core::CancellationToken,
+    ) -> Result<lash_core::QueuedLaneAcquisition, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .wait_out_crashed_lane_holder(lane, cancel)
+            .await
+    }
+
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.inner.controller().await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .resolve_await_event(key, resolution)
+            .await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.inner.controller().peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: lash_core::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .await_await_event(key, cancel, deadline)
+            .await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &lash_core::SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .revoke_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &lash_core::SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .cancel_await_events_for_session(session_id)
+            .await
+    }
+
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .retire_await_events_for_scope(scope)
+            .await
+    }
+
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<bool, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .retire_await_events_for_scope_if_quiescent(scope)
+            .await
+    }
+
+    async fn reinstate_await_event_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .reinstate_await_event_scope(scope)
+            .await
+    }
+
+    async fn await_event_scope_is_retired(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<bool, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .await_event_scope_is_retired(scope)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::RuntimeEffectController for CountingBoundController {
+    fn effect_journaling(&self) -> lash_core::EffectJournaling {
+        self.inner.controller().effect_journaling()
+    }
+
+    async fn execute_effect(
+        &self,
+        envelope: lash_core::RuntimeEffectEnvelope,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
+        let name = match &envelope.command {
+            lash_core::RuntimeEffectCommand::ToolAttempt { call, .. } => {
+                Some(call.tool_name.clone())
+            }
+            _ => None,
+        };
+        self.frames
+            .lock_recover()
+            .push((envelope.command.kind(), name));
+        self.inner
+            .controller()
+            .execute_effect(envelope, local_executor)
+            .await
+    }
+
+    async fn open_effect_group(
+        &self,
+        group: lash_core::RuntimeEffectGroup,
+    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+        self.inner.controller().open_effect_group(group).await
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.controller().register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.inner.controller().native_effect_groups_substrate()
+    }
+
+    async fn await_next_settlement(
+        &self,
+        handle: &mut lash_core::EffectGroupHandle,
+        cancel: lash_core::CancellationToken,
+    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .controller()
+            .await_next_settlement(handle, cancel)
+            .await
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner
+            .controller()
+            .read_group_settlement(group_key, rank)
+            .await
+    }
+
+    async fn close_effect_group(
+        &self,
+        handle: lash_core::EffectGroupHandle,
+        disposition: lash_core::LoserPolicy,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .controller()
+            .close_effect_group(handle, disposition)
+            .await
+    }
+
+    fn group_child_scoped_controller(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .group_child_scoped_controller(admitted, binding)
+    }
+
+    async fn commit_group_child_final(
+        &self,
+        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+    ) -> Result<
+        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner
+            .controller()
+            .commit_group_child_final(commit)
+            .await
+    }
+
+    async fn group_child_drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        self.inner
+            .controller()
+            .group_child_drain_blocked(group_key, commit_seq)
+            .await
+    }
+}
+
+/// An effect host that delegates to the native host but mints
+/// counting-wrapped controllers for group children, so the test's frame log
+/// sees the attempts children journal under their own bound controllers
+/// (FIG-3397).
+struct CountingEffectHost {
+    inner: lash_core::facade_support::NativeEffectHost,
+    frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::AwaitEventResolver for CountingEffectHost {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .await_event_resolver()
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.inner
+            .await_event_resolver()
+            .await_event_key(scope, wait)
+            .await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.inner
+            .await_event_resolver()
+            .resolve_await_event(key, resolution)
+            .await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.inner
+            .await_event_resolver()
+            .peek_await_event(key)
+            .await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: lash_core::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.inner
+            .await_event_resolver()
+            .await_await_event(key, cancel, deadline)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::EffectHost for CountingEffectHost {
+    fn turn_control_binding_id(&self) -> String {
+        self.inner.turn_control_binding_id()
+    }
+
+    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
+        self
+    }
+
+    async fn list_outstanding_await_event_keys(
+        &self,
+        session_id: &lash_core::SessionId,
+    ) -> Result<Vec<lash_core::AwaitEventKey>, lash_core::RuntimeError> {
+        self.inner
+            .list_outstanding_await_event_keys(session_id)
+            .await
+    }
+
+    fn scoped<'run>(
+        &'run self,
+        scope: lash_core::AdmittedScope,
+    ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
+        self.inner.scoped(scope)
+    }
+
+    fn scoped_static(
+        &self,
+        scope: lash_core::AdmittedScope,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner.scoped_static(scope)
+    }
+
+    fn scoped_for_group_child(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        let Some(inner) = self
+            .inner
+            .scoped_for_group_child(admitted.clone(), binding)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(lash_core::ScopedEffectController::shared(
+            Arc::new(CountingBoundController {
+                frames: Arc::clone(&self.frames),
+                inner,
+            }),
+            admitted,
+        )?))
+    }
+
+    fn effect_group_closing(
+        &self,
+    ) -> Option<Arc<dyn lash_core::runtime::effect::StoreEffectGroupClosing>> {
+        self.inner.effect_group_closing()
+    }
+
+    fn install_tool_child_host(
+        &self,
+        candidate: Arc<lash_core::facade_support::ToolChildHost>,
+    ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
+        self.inner.install_tool_child_host(candidate)
+    }
+
+    async fn prepare_tool_intent(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        intent: lash_core::ToolIntent,
+    ) -> Result<lash_core::ToolIntentPreparation, lash_core::RuntimeError> {
+        self.inner.prepare_tool_intent(sink, identity, intent).await
+    }
+
+    async fn record_tool_intent_outcome(
+        &self,
+        sink: &dyn lash_core::ToolIntentOutcomeSink,
+        identity: &lash_core::ToolIntentIdentity,
+        submitted: lash_core::ToolIntent,
+        outcome: lash_core::ToolIntentExecutionOutcome,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner
+            .record_tool_intent_outcome(sink, identity, submitted, outcome)
+            .await
+    }
+
+    async fn retire_effect_journal(
+        &self,
+        retirement: lash_core::runtime::effect::EffectJournalRetirement,
+    ) -> Result<usize, lash_core::RuntimeError> {
+        self.inner.retire_effect_journal(retirement).await
+    }
+
+    async fn reinstate_effect_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.reinstate_effect_scope(scope).await
     }
 }
 
@@ -658,7 +1151,23 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
     let provider_handle = lash_core::facade_support::ProviderHandle::new(
         lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
     );
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    // The counting double and the host's effect host share one native
+    // controller: group opens land there, and group-child admission under
+    // the tool-child host (installed by RuntimeHostConfig::new) reads the
+    // same controller's group map. The host is counting-wrapped so the
+    // attempts a group child journals under its own bound controller land on
+    // the same frame log the turn-scope counter reads.
+    let native = Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default());
+    let frames: Arc<std::sync::Mutex<Vec<RecordedEffectFrame>>> = Default::default();
+    let mut host = lash_core::facade_support::RuntimeHostConfig::new(
+        Arc::new(CountingEffectHost {
+            inner: lash_core::facade_support::NativeEffectHost::with_native_controller(Arc::clone(
+                &native,
+            )),
+            frames: Arc::clone(&frames),
+        }),
+        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new()),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
@@ -670,7 +1179,10 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
             DurableMemoryAttachmentStore::default(),
         )),
     );
-    host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
+    // Through the builder, not a field write: the installed tool-child host
+    // resolves a child's recorded `execution_env` against the same store and
+    // must hear about the swap.
+    host = host.with_process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()));
     let started = Arc::new(AtomicUsize::new(0));
     let internal_executed = Arc::new(AtomicUsize::new(0));
     let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
@@ -702,7 +1214,11 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
         // failing. The budget is well above the iterations the scenario needs.
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
     };
-    let controller = CountingEffectController::default();
+    let controller = CountingEffectController {
+        frames,
+        native,
+        ..Default::default()
+    };
     let scoped_controller = lash_core::ScopedEffectController::shared(
         Arc::new(controller.clone()),
         lash_core::AdmittedScope::turn("standard-batch-session", "turn-1"),
@@ -749,7 +1265,11 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
         "a batch child must not cross normal admission into an Internal provider"
     );
     assert!(saw_batch_result.load(Ordering::SeqCst));
-    assert_eq!(controller.count(lash_core::RuntimeEffectKind::ToolBatch), 2);
+    assert_eq!(
+        controller.group_open_count(),
+        1,
+        "each batch is a durable effect group now (FIG-3397)"
+    );
     assert_eq!(
         controller.count(lash_core::RuntimeEffectKind::ToolAttempt),
         2,

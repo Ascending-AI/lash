@@ -25,11 +25,11 @@
 //!   pins ADR 0062 deviation 15 — v1 has no fail-fast cancellation of an
 //!   in-flight batch leaf, so a rejected `Promise.all` settles at the pace of
 //!   its slowest leaf while rejecting with its first-settled reason.
-//! * [`sqlite_terminal_leaves_settle_in_source_order`] pins the head-of-line
-//!   behaviour that limits first-settled selection in the first place: the
-//!   batch's intent-drain slot is taken in source order by *every* terminal
-//!   attempt, so among leaves that neither park nor fail in preparation, the
-//!   settlement order is the source order and nothing else is reachable.
+//! * [`sqlite_a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf`]
+//!   pins ADR 0099 §5's settlement semantics: group children commit in durable
+//!   commit order, so a held source-first leaf does not block a later sibling's
+//!   terminal and the first-settled selection reports the later leaf's
+//!   rejection.
 //! * [`the_standalone_list_batch_still_selects_the_first_written_rejection`]
 //!   pins the compile-time list-batch path, which passes `false` for
 //!   `first_settled_rejection` and therefore selects in written order.
@@ -160,13 +160,28 @@ impl OracleTheatre {
     }
 
     async fn await_started(&self, id: &str) {
-        assert!(self.wait(&format!("started:{id}")).await, "{id} never ran");
+        assert!(
+            self.wait(&format!("started:{id}")).await,
+            "{id} never ran; started so far: {:?}",
+            self.started()
+        );
     }
 
     async fn await_settled(&self, id: &str) {
         assert!(
             self.wait(&format!("settled:{id}")).await,
             "{id} never settled"
+        );
+    }
+
+    /// Waits until the batch's consumer has consumed `count` settlements. The
+    /// `settled:{id}` latch is raised by the presentation step, which a group
+    /// child runs before its final commit takes a rank, so only consumption
+    /// proves where in the commit order a leaf landed.
+    async fn await_consumed(&self, count: usize) {
+        assert!(
+            self.wait(&format!("consumed:{count}")).await,
+            "the consumer never consumed {count} settlement(s)"
         );
     }
 
@@ -224,14 +239,15 @@ impl OracleTheatre {
     }
 }
 
-/// The turn's activity sink, used only to count completed tool calls. The
-/// stream is drained after the batch returns, so nothing here can be part of a
-/// rendezvous.
+/// The turn's activity sink: it counts completed tool calls, which the group
+/// consumer emits as it consumes settlements in commit order, and raises
+/// `consumed:{n}` once the n-th settlement has been consumed.
 #[async_trait]
 impl TurnActivitySink for OracleTheatre {
     async fn emit(&self, activity: TurnActivity) {
         if matches!(activity.event, TurnEvent::ToolCallCompleted { .. }) {
-            self.completed_calls.fetch_add(1, Ordering::SeqCst);
+            let consumed = self.completed_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            self.raise(&format!("consumed:{consumed}"));
         }
     }
 }
@@ -820,6 +836,9 @@ async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -
             .settle_deferred(&driven.core, first, OracleTheatre::rejection(first))
             .await?;
         driven.theatre.await_settled(first).await;
+        // The held leaf cannot commit, so the first consumed settlement is
+        // the parked leaf's: its rank precedes the held leaf's by construction.
+        driven.theatre.await_consumed(1).await;
         driven.theatre.release(second);
         let run = driven.finish().await?;
 
@@ -845,20 +864,20 @@ async fn promise_all_reports_the_first_settled_rejection(tier: &JournaledTier) -
     Ok(())
 }
 
-/// Two *terminal* leaves settle in source order, whatever their attempts did.
+/// A terminal leaf settles ahead of a held source-earlier leaf.
 ///
-/// `settle_terminal_attempt` takes the batch's intent-drain slot in source
-/// order (`tool_dispatch/attempt_coordinator.rs`), and that wait is
-/// unconditional — a leaf declaring no intents waits for its turn just the
-/// same. So a batch of ordinary, non-parking leaves can only ever report the
-/// input-order rejection, and `Promise.all`'s first-settled selection is
-/// reachable only when an earlier leaf parks (which discharges its slot on the
-/// pending return) or fails in preparation.
+/// Under ADR 0099 §5 the batch is a durable effect group: a child commits its
+/// final record and settles in commit order, not source order, so the held
+/// source-first leaf no longer blocks a later sibling's terminal. The second
+/// leaf's rejection is therefore the settlement the aggregate's first-settled
+/// selection reports.
 ///
-/// That is head-of-line behaviour, and FIG-3397 states it as a case of its own.
-/// Pinning it here is what stops the landing from reading the passing case
-/// above as evidence that any batch selects by completion time.
-async fn terminal_leaves_settle_in_source_order(tier: &JournaledTier) -> Result<()> {
+/// This is the inversion of the old head-of-line law: the pre-group batch
+/// path serialized terminal settlement behind each source-earlier leaf's
+/// intent-drain slot, and this same cell reported `step first rejected`.
+async fn a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(
+    tier: &JournaledTier,
+) -> Result<()> {
     let driven = drive_cells(
         tier,
         "aggregate-oracle-head-of-line",
@@ -871,29 +890,61 @@ async fn terminal_leaves_settle_in_source_order(tier: &JournaledTier) -> Result<
     )
     .await?;
 
-    // The second leaf's attempt has run and rejected, yet nothing has settled:
-    // its terminal settlement is behind the held leaf's drain slot.
+    // A batch whose group never dispatched fails the turn instead of parking
+    // on a leaf; report that outcome rather than timing out on the rendezvous.
+    let mut probe = tokio::time::interval(std::time::Duration::from_millis(50));
+    let deadline = tokio::time::Instant::now() + RENDEZVOUS_BUDGET;
+    while tokio::time::Instant::now() < deadline {
+        probe.tick().await;
+        if driven.theatre.started().len() == 2 {
+            break;
+        }
+        if driven.turn.is_finished() {
+            let run = driven.finish().await?;
+            panic!(
+                "{}: the turn finished with no leaf ever started; started: {:?}, \
+                 final value: {:?}, provider requests: {:?}",
+                tier.name,
+                run.theatre.started(),
+                run.final_value(),
+                run.requests
+            );
+        }
+    }
+
+    // Both leaves' attempts have run; the held source-first leaf no longer
+    // blocks the later terminal leaf's settlement.
     driven.theatre.await_started("second").await;
     driven.theatre.await_started("first").await;
     assert!(
-        driven.theatre.settled().is_empty(),
-        "{}: a terminal leaf cannot settle ahead of an unfinished source-earlier leaf, saw {:?}",
+        !driven.turn.is_finished(),
+        "{}: the turn must still be parked on the held leaf",
+        tier.name
+    );
+    driven.theatre.await_settled("second").await;
+    assert_eq!(
+        driven.theatre.settled(),
+        vec!["second"],
+        "{}: a terminal leaf settles ahead of an unfinished source-earlier leaf, saw {:?}",
         tier.name,
         driven.theatre.settled()
     );
+    // Consumed, not merely presented: the later leaf's rank is fixed before
+    // the held leaf can commit.
+    driven.theatre.await_consumed(1).await;
 
     driven.theatre.release("first");
     let run = driven.finish().await?;
 
     assert_eq!(
         run.theatre.settled(),
-        vec!["first", "second"],
-        "{}: terminal leaves settle in source order",
+        vec!["second", "first"],
+        "{}: settlement order is the group's commit order, not source order",
         tier.name
     );
     assert!(
-        reason(&run).contains("step first rejected"),
-        "{}: the source-first rejection is the reported one, got {}",
+        reason(&run).contains("step second rejected"),
+        "{}: the first-settled rejection is the reported one, got {}",
         tier.name,
         reason(&run)
     );
@@ -981,6 +1032,7 @@ async fn a_rejected_aggregate_still_waits_for_every_leaf(tier: &JournaledTier) -
          leaf is still in flight",
         tier.name
     );
+    driven.theatre.await_consumed(1).await;
 
     driven.theatre.release("held");
     let run = driven.finish().await?;
@@ -1163,8 +1215,8 @@ async fn sqlite_promise_all_reports_the_first_settled_rejection() -> Result<()> 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_terminal_leaves_settle_in_source_order() -> Result<()> {
-    terminal_leaves_settle_in_source_order(&sqlite()).await
+async fn sqlite_a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf() -> Result<()> {
+    a_terminal_leaf_settles_ahead_of_a_held_source_first_leaf(&sqlite()).await
 }
 
 #[tokio::test]

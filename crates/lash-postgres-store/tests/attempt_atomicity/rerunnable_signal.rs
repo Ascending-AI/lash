@@ -69,7 +69,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
     let model_calls = Arc::new(AtomicUsize::new(0));
     let effect_host = Arc::new(storage.effect_host());
     let mut runtime = public_signal_runtime(
-        effect_host,
+        effect_host.clone(),
         Arc::clone(&registry),
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
@@ -81,7 +81,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
             public_runtime_input(),
             lash_core::facade_support::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
-                postgres_public_turn_scope(&storage, Arc::new(Mutex::new(Vec::new()))),
+                postgres_public_turn_scope(effect_host.as_ref(), Arc::new(Mutex::new(Vec::new()))),
             ),
         )
         .await

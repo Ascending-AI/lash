@@ -286,19 +286,47 @@ impl<'run> RuntimeExecutionContext<'run> {
         let invocation = self.language_runtime_invocation(&effect_id);
         let scoped = self.dispatch.effect_controller.scoped();
         let controller = scoped.controller();
-        let read_group_key = group_key.clone();
+        // Read the prefix's settlements before the record, on the live run
+        // and on every replay alike. A settled rank is immutable, so these
+        // reads return the same thing each time; issuing them inside the
+        // local executor instead would issue them only on the live run, and a
+        // host whose journal is positional (Restate) would find the replay
+        // taking a different command path from the run it replays.
+        let mut prefix = std::collections::BTreeMap::new();
+        for rank in (already + 1)..=through_rank {
+            let settlement = controller
+                .read_group_settlement(&group_key, rank)
+                .await?
+                .ok_or_else(|| {
+                    RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                        format!(
+                            "effect group {group_key} rank {rank} was inside the consumed \
+                             prefix but has no recorded settlement"
+                        ),
+                    )
+                })?;
+            prefix.insert(rank, settlement);
+        }
+        let read_prefix = prefix
+            .iter()
+            .map(
+                |(rank, settlement)| crate::runtime::effect::IncorporatedGroupRank {
+                    rank: *rank,
+                    child_replay_key: settlement.child_replay_key.clone(),
+                },
+            )
+            .collect::<Vec<_>>();
         let local_executor =
             crate::RuntimeEffectLocalExecutor::language_runtime_value_with(move |envelope| {
-                let group_key = read_group_key;
+                let incorporated = read_prefix.clone();
                 async move {
                     crate::runtime::effect::refuse_unhonored_group_membership(
                         envelope.group.as_deref(),
                         "group settlement incorporation",
                     )?;
-                    let crate::RuntimeEffectCommand::IncorporateGroupSettlements {
-                        through_rank,
-                        ..
-                    } = envelope.command
+                    let crate::RuntimeEffectCommand::IncorporateGroupSettlements { .. } =
+                        envelope.command
                     else {
                         return Err(RuntimeEffectControllerError::new(
                             crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
@@ -308,25 +336,6 @@ impl<'run> RuntimeExecutionContext<'run> {
                             ),
                         ));
                     };
-                    let mut incorporated = Vec::new();
-                    for rank in (already + 1)..=through_rank {
-                        let settlement = controller
-                            .read_group_settlement(&group_key, rank)
-                            .await?
-                            .ok_or_else(|| {
-                                RuntimeEffectControllerError::new(
-                                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                                    format!(
-                                        "effect group {group_key} rank {rank} was inside the \
-                                         consumed prefix but has no recorded settlement"
-                                    ),
-                                )
-                            })?;
-                        incorporated.push(crate::runtime::effect::IncorporatedGroupRank {
-                            rank,
-                            child_replay_key: settlement.child_replay_key,
-                        });
-                    }
                     Ok(crate::RuntimeEffectOutcome::IncorporateGroupSettlements { incorporated })
                 }
             });
@@ -345,22 +354,20 @@ impl<'run> RuntimeExecutionContext<'run> {
         // Live and replay converge here: the recorded outcome names exactly
         // the ranks to apply, so the live run and every replay incorporate
         // the same prefix — a settlement that landed after the record is not
-        // in `incorporated` and is never read.
+        // in `incorporated` and is never applied.
         let incorporated = outcome.into_incorporate_group_settlements()?;
         for entry in &incorporated {
-            let settlement = controller
-                .read_group_settlement(&group_key, entry.rank)
-                .await?
-                .ok_or_else(|| {
-                    RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                        format!(
-                            "effect group {group_key} rank {} was recorded as incorporated but \
-                             no longer has a settlement",
-                            entry.rank
-                        ),
-                    )
-                })?;
+            let settlement = prefix.remove(&entry.rank).ok_or_else(|| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                    format!(
+                        "effect group {group_key} rank {} was recorded as incorporated \
+                         outside the prefix {}..={through_rank} this record covers",
+                        entry.rank,
+                        already + 1
+                    ),
+                )
+            })?;
             let source = SettlementSource::GroupRank {
                 group_key: group_key.clone(),
                 rank: entry.rank,

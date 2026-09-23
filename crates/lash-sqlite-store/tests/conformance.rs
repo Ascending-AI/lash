@@ -104,6 +104,8 @@ mod claim_atomicity;
 mod lineage;
 #[path = "conformance/turn_cancel_closure.rs"]
 mod turn_cancel_closure;
+#[path = "conformance/turn_runner.rs"]
+mod turn_runner;
 
 use lash_sansio::sync::MutexExt;
 use std::future::Future;
@@ -1768,40 +1770,12 @@ lash_conformance::tool_batch_parallelism_tests!({
     (
         dir,
         "sqlite",
-        host,
+        Arc::clone(&host),
         // The producers this crate reaches. `Promise.all` on the RLM bridge and
         // the Lashlang aggregate on the process bridge register the same law
         // from the crates that own them.
         vec![lash_conformance::parallel_model_tool_calls_producer()],
-    )
-});
-
-lash_conformance::signal_intent_tests!({
-    let dir = tempfile::tempdir().expect("tempdir");
-    let effect_host = Arc::new(
-        SqliteEffectHost::open(&dir.path().join("signal-intent-effects.db"))
-            .await
-            .expect("open SQLite signal-intent effect host"),
-    ) as Arc<dyn EffectHost>;
-    let registry = Arc::new(
-        SqliteProcessRegistry::open(
-            &dir.path().join("signal-intent-processes.db"),
-            dir.path().join("signal-intent-sessions"),
-        )
-        .await
-        .expect("open SQLite signal-intent process registry"),
-    ) as Arc<dyn ProcessRegistry>;
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
-        &registry,
-    )));
-    (
-        dir,
-        "sqlite-public-signal-intent",
-        effect_host,
-        registry,
-        process_work,
-        // The SQLite host owns no post-wake journal assertion beyond the shared check.
-        || async {},
+        lash_conformance::HostTurnRunner::shared(host),
     )
 });
 

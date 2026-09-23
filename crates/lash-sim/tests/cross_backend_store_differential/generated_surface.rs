@@ -394,6 +394,27 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
         self.inner.controller().open_effect_group(group).await
     }
 
+    fn register_group_executors(
+        &self,
+        executors: Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+        self.inner.controller().register_group_executors(executors)
+    }
+
+    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        self.inner.controller().native_effect_groups_substrate()
+    }
+
+    fn group_child_scoped_controller(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner
+            .controller()
+            .group_child_scoped_controller(admitted, binding)
+    }
+
     async fn await_next_settlement(
         &self,
         handle: &mut lash_core::EffectGroupHandle,
@@ -415,6 +436,21 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
             .close_effect_group(handle, disposition)
             .await
     }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<
+        Option<lash_core::runtime::effect::RankedGroupSettlement>,
+        lash_core::RuntimeEffectControllerError,
+    > {
+        self.inner
+            .controller()
+            .read_group_settlement(group_key, rank)
+            .await
+    }
+
     async fn commit_group_child_final(
         &self,
         commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
@@ -462,6 +498,7 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
             operations.push(SurfaceOperation::RuntimeOperationRecord { key: 0 });
             operations.push(SurfaceOperation::RuntimeOperationRecord { key: 1 });
         }
+
         if index == 5 {
             operations.push(SurfaceOperation::TriggerDisable { key: 0 });
         }

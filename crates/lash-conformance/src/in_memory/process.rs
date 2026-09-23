@@ -54,14 +54,9 @@ crate::drain_end_tests!({
                     .await
                     .expect("create the in-memory drain-end session store");
                 let controller = Arc::new(crate::NativeRuntimeEffectController::default());
-                controller
-                    .register_group_executors(
-                        crate::RecordingExecutors::settling() as Arc<dyn crate::GroupExecutors>
-                    )
-                    .expect("a fresh controller has no resolver yet");
-                let effect_host: Arc<dyn crate::EffectHost> = Arc::new(
+                let effect_host = crate::install_drain_end_executors(Arc::new(
                     crate::NativeEffectHost::with_native_controller(Arc::clone(&controller)),
-                );
+                ));
                 let group_host: Option<Arc<dyn crate::EffectHost>> = Some(Arc::new(
                     crate::NativeEffectHost::with_native_controller(controller),
                 ));

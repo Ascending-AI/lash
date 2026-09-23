@@ -456,21 +456,28 @@ mod tests {
         AfterDurableRecord,
     }
 
+    #[derive(Clone)]
     struct FaultJournalController {
         fault: JournalFault,
-        faults_remaining: AtomicUsize,
-        outcomes: Mutex<BTreeMap<String, lash_core::RuntimeEffectOutcome>>,
+        faults_remaining: std::sync::Arc<AtomicUsize>,
+        outcomes: std::sync::Arc<Mutex<BTreeMap<String, lash_core::RuntimeEffectOutcome>>>,
+        inner: std::sync::Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+        host: std::sync::Arc<std::sync::OnceLock<std::sync::Arc<dyn lash_core::EffectHost>>>,
     }
 
     impl FaultJournalController {
         fn new(fault: JournalFault) -> Self {
             Self {
                 fault,
-                faults_remaining: AtomicUsize::new(usize::from(!matches!(
+                faults_remaining: std::sync::Arc::new(AtomicUsize::new(usize::from(!matches!(
                     fault,
                     JournalFault::None
-                ))),
-                outcomes: Mutex::new(BTreeMap::new()),
+                )))),
+                outcomes: std::sync::Arc::new(Mutex::new(BTreeMap::new())),
+                inner: std::sync::Arc::new(
+                    lash_core::facade_support::NativeRuntimeEffectController::default(),
+                ),
+                host: std::sync::Arc::new(std::sync::OnceLock::new()),
             }
         }
     }
@@ -479,6 +486,17 @@ mod tests {
 
     #[async_trait]
     impl lash_core::RuntimeEffectController for FaultJournalController {
+        fn shared_effect_host(&self) -> Option<std::sync::Arc<dyn lash_core::EffectHost>> {
+            Some(std::sync::Arc::clone(self.host.get_or_init(|| {
+                std::sync::Arc::new(
+                    lash_core::facade_support::NativeEffectHost::with_controller_sharing_native_groups(
+                        std::sync::Arc::new(self.clone()),
+                        &self.inner,
+                    ),
+                ) as std::sync::Arc<dyn lash_core::EffectHost>
+            })))
+        }
+
         async fn execute_effect(
             &self,
             envelope: lash_core::RuntimeEffectEnvelope,
@@ -522,43 +540,63 @@ mod tests {
 
         async fn open_effect_group(
             &self,
-            _group: lash_core::RuntimeEffectGroup,
+            group: lash_core::RuntimeEffectGroup,
         ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-            Err(lash_core::effect_groups_unsupported(
-                "FaultJournalController",
-            ))
+            self.inner.open_effect_group(group).await
+        }
+
+        async fn read_group_settlement(
+            &self,
+            group_key: &str,
+            rank: u64,
+        ) -> Result<
+            Option<lash_core::runtime::effect::RankedGroupSettlement>,
+            lash_core::RuntimeEffectControllerError,
+        > {
+            self.inner.read_group_settlement(group_key, rank).await
+        }
+
+        fn register_group_executors(
+            &self,
+            executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+        ) -> Result<(), lash_core::RuntimeEffectControllerError> {
+            self.inner.register_group_executors(executors)
         }
 
         async fn await_next_settlement(
             &self,
-            _handle: &mut lash_core::EffectGroupHandle,
-            _cancel: lash_core::CancellationToken,
+            handle: &mut lash_core::EffectGroupHandle,
+            cancel: lash_core::CancellationToken,
         ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-            Err(lash_core::effect_groups_unsupported(
-                "FaultJournalController",
-            ))
+            self.inner.await_next_settlement(handle, cancel).await
         }
 
         async fn close_effect_group(
             &self,
-            _handle: lash_core::EffectGroupHandle,
-            _disposition: lash_core::LoserPolicy,
+            handle: lash_core::EffectGroupHandle,
+            disposition: lash_core::LoserPolicy,
         ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-            Err(lash_core::effect_groups_unsupported(
-                "FaultJournalController",
-            ))
+            self.inner.close_effect_group(handle, disposition).await
         }
 
         async fn commit_group_child_final(
             &self,
-            _commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+            commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
         ) -> Result<
             lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
             lash_core::RuntimeEffectControllerError,
         > {
-            Ok(
-                lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Ungrouped,
-            )
+            self.inner.commit_group_child_final(commit).await
+        }
+
+        async fn group_child_drain_blocked(
+            &self,
+            group_key: &str,
+            commit_seq: u64,
+        ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+            self.inner
+                .group_child_drain_blocked(group_key, commit_seq)
+                .await
         }
     }
 

@@ -69,12 +69,28 @@ impl<'run> RuntimeTurnDriver<'run> {
             )
             .map(|context| {
                 self.register_live_opener(context.dispatch(), stream_event_tx);
-                context
+                let context = context
                     .with_turn_cancel_scope(self.turn_cancel_scope())
                     .with_engine_child_max_attempts(
                         self.host.core.control.engine_child_max_attempts,
                     )
-                    .with_turn_phase_probe(self.turn_phase_probe.clone())
+                    .with_turn_phase_probe(self.turn_phase_probe.clone());
+                // The issuer is read from the installed tool-child host
+                // rather than `control.effect_host`: a bound session re-binds
+                // the latter to the store's turn-control authority while the
+                // children keep resolving on the host this issuer names
+                // (ADR 0099 §14).
+                match self
+                    .host
+                    .core
+                    .control
+                    .tool_children
+                    .as_ref()
+                    .and_then(|host| host.tool_child_completion_issuer())
+                {
+                    Some(issuer) => context.with_tool_child_completion_issuer(issuer),
+                    None => context,
+                }
             })
     }
 
@@ -130,12 +146,14 @@ impl<'run> RuntimeTurnDriver<'run> {
             return;
         };
         let (child_event_tx, mut child_event_rx) = mpsc::channel::<SessionStreamEvent>(64);
+        let (child_activity_tx, mut child_activity_rx) = mpsc::channel::<crate::TurnActivity>(64);
         let context = crate::facade_support::LiveOpenerContext::capture_with_event_sender(
             dispatch.as_ref(),
             lent_controller,
             child_event_tx,
             self.cooperative_cancel.clone(),
-        );
+        )
+        .with_turn_activity_sender(child_activity_tx);
         let (registration, ended) = tool_children.openers().register(opener, context);
         let stream_event_tx = stream_event_tx.clone();
         crate::task::spawn(async move {
@@ -149,6 +167,12 @@ impl<'run> RuntimeTurnDriver<'run> {
                     event = child_event_rx.recv() => {
                         let Some(event) = event else { break };
                         send_session_event(&stream_event_tx, event).await;
+                    }
+                    activity = child_activity_rx.recv() => {
+                        let Some(activity) = activity else { break };
+                        let _ = stream_event_tx
+                            .send(RuntimeStreamEvent::Turn(activity))
+                            .await;
                     }
                 }
             }

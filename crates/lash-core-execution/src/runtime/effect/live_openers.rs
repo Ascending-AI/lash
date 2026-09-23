@@ -178,6 +178,25 @@ impl LiveOpenerContext {
         }
     }
 
+    /// Lends the turn's `TurnActivity` channel to the captured dispatch.
+    ///
+    /// Same per-phase-sender reasoning as the event sender
+    /// [`Self::capture_with_event_sender`] replaces: the channel lent here is
+    /// the registration-owned one the opener's forwarder feeds, so a child's
+    /// nested calls surface their `ToolCallStarted`/`ToolCallCompleted`
+    /// activities on the turn stream after the phase that opened them has
+    /// ended.
+    #[must_use]
+    pub fn with_turn_activity_sender(
+        mut self,
+        turn_activity_tx: tokio::sync::mpsc::Sender<crate::TurnActivity>,
+    ) -> Self {
+        if let Some(dispatch) = Arc::get_mut(&mut self.dispatch) {
+            dispatch.turn_activity_tx = Some(turn_activity_tx);
+        }
+        self
+    }
+
     /// The opener's dispatch context, for the driver to rebind against one
     /// child's recorded request.
     #[must_use]

@@ -55,7 +55,7 @@ lash_conformance::tool_batch_parallelism_tests!({
     (
         database_lock,
         "postgres",
-        host,
+        Arc::clone(&host),
         // Every producer this tier reaches: the turn's own parallel model tool
         // calls, `Promise.all` on the RLM cell bridge, and the same aggregate
         // on the process bridge.
@@ -72,6 +72,7 @@ lash_conformance::tool_batch_parallelism_tests!({
                 }),
             ),
         ],
+        lash_conformance::HostTurnRunner::shared(host),
     )
 });
 
@@ -264,5 +265,93 @@ lash_conformance::effect_group_runtime_retirement_tests!({
                 "in-flight scope is not fenced"
             );
         },
+    )
+});
+
+/// The turn-driving laws' fixture: a reset database's effect host and process
+/// registry, a native process-work substrate over that registry, and a runner
+/// that scopes each turn on the same host.
+type PostgresTurnRunnerFixture = (
+    SharedDatabaseLock,
+    &'static str,
+    Arc<dyn EffectHost>,
+    Arc<dyn ProcessRegistry>,
+    Arc<dyn lash_core::ProcessWorkSubstrate>,
+    Arc<dyn lash_conformance::ConformanceTurnRunner>,
+    fn(&'static str) -> std::future::Ready<()>,
+);
+
+async fn postgres_turn_runner_fixture() -> Option<PostgresTurnRunnerFixture> {
+    let (database_lock, storage) = storage().await?;
+    reset(storage.pool()).await;
+    let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(Arc::clone(
+        &registry,
+    ))) as Arc<dyn lash_core::ProcessWorkSubstrate>;
+    let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
+    Some((
+        database_lock,
+        "postgres-turn-runner",
+        host,
+        registry,
+        process_work,
+        runner,
+        // The Postgres host owns no post-law assertion beyond the shared checks.
+        |_law| std::future::ready(()),
+    ))
+}
+
+lash_conformance::turn_runner_tests!({
+    let Some(fixture) = postgres_turn_runner_fixture().await else {
+        eprintln!(
+            "skipping Postgres turn-runner conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    fixture
+});
+
+lash_conformance::tool_child_turn_cancel_tests!({
+    let Some(fixture) = postgres_turn_runner_fixture().await else {
+        eprintln!(
+            "skipping Postgres tool-child turn-cancel conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    fixture
+});
+
+// The orchestration plugins sit above lash-conformance, so the tier supplies
+// them to the FIG-1293 migrated-tools law.
+lash_conformance::migrated_tools_redrive_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres migrated-tools conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&host));
+    let orchestration: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
+        Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+        Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
+            lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                lash_subagents::StaticCapability::new(
+                    "default",
+                    lash_core::facade_support::SessionSpec::inherit(),
+                ),
+            )),
+        ))),
+    ];
+    (
+        database_lock,
+        "postgres-migrated-tools",
+        host,
+        registry,
+        runner,
+        orchestration,
     )
 });
