@@ -1536,8 +1536,9 @@ pub async fn pending_turn_input_duplicate_input_id(store: Arc<dyn RuntimePersist
         )
         .await
         .expect("enqueue first pending input");
-    // A draft reusing a stored `input_id` is refused, whatever content or
-    // session it carries: the SQL schemas declare the column globally UNIQUE.
+    // A draft reusing a stored `input_id` with different content, or from
+    // another session, is refused: the SQL schemas declare the column
+    // globally UNIQUE.
     let changed = store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&SessionId::from("root"), "changed")
@@ -1555,17 +1556,19 @@ pub async fn pending_turn_input_duplicate_input_id(store: Arc<dyn RuntimePersist
         ),
         "the refusal is the typed id-conflict error, got {changed:?}"
     );
+    // An identical same-session re-submission is the same admission re-run:
+    // it returns the stored row and files nothing. Only lash's own journaled
+    // turn acceptance provisions explicit ids (ADR 0069 §6, FIG-3513), so this
+    // is how a re-run acceptance body finds the row its first run wrote.
     let identical = store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&SessionId::from("root"), "first")
                 .with_input_id("dup:input"),
         )
         .await
-        .expect_err("an identical replay still names a taken input_id");
-    assert!(
-        matches!(identical, StoreError::PendingTurnInputIdConflict { .. }),
-        "input_id uniqueness is not an adoption channel, got {identical:?}"
-    );
+        .expect("an identical same-session re-submission adopts the stored row");
+    assert_eq!(identical.input_id, first.input_id);
+    assert_eq!(identical.enqueue_seq, first.enqueue_seq);
     let cross_session = store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&SessionId::from("other"), "other")

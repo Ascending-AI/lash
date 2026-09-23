@@ -35,6 +35,14 @@ lash_store_sql::statements! {
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2";
 
+        /// The session and immutable submission digest of the row that already
+        /// holds input id `?1`, in any session: a
+        /// provisioned id is unique across the store, so the enqueue that
+        /// provisioned it adopts the row or refuses a foreign one.
+        select_session_by_input_id = "SELECT session_id, submission_digest
+             FROM pending_turn_inputs
+             WHERE input_id = ?1";
+
         /// The facts the settlement verdict consults about input `?2` of
         /// session `?1`.
         ///

@@ -13,6 +13,27 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
+/// The input id a journaled turn acceptance provisions before its body runs
+/// (ADR 0069 §6).
+///
+/// It is a function of the acceptance effect's address alone, so every
+/// execution of the same acceptance, including one re-run because the first
+/// one's outcome was never recorded, names the same row, and the store adopts
+/// that row instead of admitting a second one. The address is session-scoped
+/// and collision-free ([`crate::EffectAddress::graph_key`]), which keeps the id
+/// unique across sessions. Format: `ti:<blake3-hex>`, the shape every other
+/// pending turn-input id has.
+#[must_use]
+pub fn provisioned_turn_input_id(acceptance: &crate::EffectAddress) -> String {
+    format!(
+        "ti:{}",
+        crate::stable_hash::blake3_hex(
+            "lash-accepted-turn-input/v1",
+            acceptance.graph_key().as_bytes(),
+        )
+    )
+}
+
 /// Mint a newly created pending turn-input ID from explicit deterministic facts.
 ///
 /// The stable format is `ti:<blake3-hex>`, where the digest input remains the
@@ -345,6 +366,35 @@ impl PendingTurnInputDraft {
             TURN_INPUT_SUBMISSION_FAMILY_VERSION,
             &preimage,
         ))
+    }
+
+    /// Adopt the row a provisioned `input_id` already names, for turn-input
+    /// store implementors enqueueing a draft that carries its own id.
+    ///
+    /// A provisioned id names one admission (ADR 0069 §6): a submission whose
+    /// digest equals the stored row's immutable
+    /// [`submission_digest`](Self::submission_digest), in the same session, is
+    /// the same admission re-run and returns the existing row, whatever its
+    /// lifecycle state; a different digest, or the same id in another session,
+    /// is a typed
+    /// [`StoreError::PendingTurnInputIdConflict`](crate::store::StoreError::PendingTurnInputIdConflict).
+    pub fn adopt_provisioned_row(
+        &self,
+        existing: PendingTurnInput,
+        existing_submission_digest: &str,
+    ) -> Result<PendingTurnInput, crate::store::StoreError> {
+        let digest = self.submission_digest().map_err(|err| {
+            crate::store::StoreError::Backend(format!(
+                "failed to digest pending turn input submission: {err}"
+            ))
+        })?;
+        if existing.session_id != self.session_id || digest != existing_submission_digest {
+            return Err(crate::store::StoreError::PendingTurnInputIdConflict {
+                session_id: self.session_id.clone(),
+                input_id: existing.input_id,
+            });
+        }
+        Ok(existing)
     }
 }
 

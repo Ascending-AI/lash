@@ -157,14 +157,22 @@ impl LashRuntime {
     ///   the call drives nothing and succeeds with one turn whose outcome is
     ///   [`TurnOutcome::Queued`](crate::TurnOutcome::Queued), carrying the
     ///   acceptance and the number of inputs ahead; the queued-work drain
-    ///   answers it in order. Retrying would admit it twice.
+    ///   answers it in order. Retrying under a new turn id would admit it
+    ///   twice; retrying under the same turn id names the same admission.
     /// * **Live per-turn context stays with this caller.** `protocol_extension`
     ///   and live `TurnContext` plugin inputs are process-local and cannot be
     ///   persisted, so a worker that recovers this accepted row drives its
     ///   durable projection.
-    /// * **No new idempotency machinery.** A retry after an unacknowledged
-    ///   crash is a new turn; a caller that needs at-most-once submission names
-    ///   its own `source_key` through [`enqueue_turn_input`](Self::enqueue_turn_input).
+    /// * **One turn id, one admission.** The accepted input's id is derived
+    ///   from the turn's acceptance address (ADR 0069 §6), so re-running the
+    ///   same turn id, whether a durable engine's redrive or a host retry,
+    ///   names the same row: identical words adopt it, and different words are
+    ///   refused as `durable_identity_conflict`. On the native tier a turn id
+    ///   reused after its turn completed therefore cedes
+    ///   (`accepted_turn_input_ceded`) instead of admitting a second turn. A
+    ///   retry under a fresh turn id is a new turn; a caller that needs
+    ///   at-most-once submission across turn ids names its own `source_key`
+    ///   through [`enqueue_turn_input`](Self::enqueue_turn_input).
     ///
     /// A store-less runtime has no store to accept into and drives `input`
     /// directly; it is the one configuration with no durable ingress at all.
@@ -245,9 +253,9 @@ impl LashRuntime {
                 .await;
         };
 
-        // The row is minted exactly as a queued admission is — no source key and
-        // no derived identity — so direct ingress inherits the queue's identity
-        // semantics rather than introducing a second, turn-shaped one.
+        // The row carries no source key, like a queued admission; its input id
+        // is provisioned from the acceptance address below so every run of this
+        // acceptance names the same row (ADR 0069 §6).
         let trace_turn_id = input
             .trace_turn_id
             .clone()
@@ -292,11 +300,22 @@ impl LashRuntime {
                 crate::RuntimeEffectEnvelope::new(
                     acceptance_invocation.clone(),
                     crate::RuntimeEffectCommand::AcceptTurnInput {
-                        draft: Box::new(crate::PendingTurnInputDraft::new(
-                            self.state.session_id.clone(),
-                            crate::TurnInputIngress::next_turn(),
-                            input.durable_projection(),
-                        )),
+                        // The id is provisioned from the acceptance address
+                        // before the body runs, so a body re-run because its
+                        // outcome was never recorded names the row the first
+                        // run wrote and the store adopts it (ADR 0069 §6).
+                        draft: Box::new(
+                            crate::PendingTurnInputDraft::new(
+                                self.state.session_id.clone(),
+                                crate::TurnInputIngress::next_turn(),
+                                input.durable_projection(),
+                            )
+                            .with_input_id(
+                                super::turn_input_ingress::provisioned_turn_input_id(
+                                    acceptance_invocation.address(),
+                                ),
+                            ),
+                        ),
                     },
                 ),
                 crate::RuntimeEffectLocalExecutor::turn_acceptance(

@@ -351,6 +351,11 @@ and any un-journaled work since its last commit point. The durable record is
 never duplicated: two drivers may execute, but only one commits, because the head
 CAS admits exactly one.
 
+That holds for admission too. The acceptance's input id is provisioned from its
+effect address before the acceptance body runs, so a body re-run because its
+outcome was never recorded names the row the first run wrote, and the store
+adopts it instead of admitting the same words a second time (FIG-3513).
+
 **Why it is not closed.** Closing it means proving a remote process is not
 running, and lease-based systems do not offer that proof. etcd states plainly
 that lease-based mutual exclusion cannot guarantee a previous holder has stopped

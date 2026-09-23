@@ -7,7 +7,10 @@ use std::sync::Arc;
 
 use lash_sansio::SessionId;
 
-use super::{EffectOperation, SeamControl, TurnSeamOperation, turn_control_resolution_operation};
+use super::{
+    CrashPlacement, EffectOperation, SeamControl, TurnSeamOperation,
+    turn_control_resolution_operation,
+};
 use crate::{
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
@@ -134,6 +137,9 @@ impl RuntimeEffectController for SeamEffectController {
                 },
                 true,
             )),
+            crate::RuntimeEffectCommand::AcceptTurnInput { .. } => {
+                Some((EffectOperation::AcceptTurnInput, true))
+            }
             _ => None,
         };
         let Some((operation, counts_external_execution)) = operation else {
@@ -173,11 +179,24 @@ impl RuntimeEffectController for SeamEffectController {
                 .await;
         }
         let executions = Arc::clone(&self.executions);
+        let control = self.control.clone();
+        let wrapped_operation = operation.clone();
         let wrapped = RuntimeEffectLocalExecutor::testing(move |envelope| {
             let executions = Arc::clone(&executions);
             async move {
                 executions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                executor.execute(envelope).await
+                let outcome = executor.execute(envelope).await;
+                // A tool marks its own external effect; an acceptance's
+                // external effect is the store write its executor just made.
+                if wrapped_operation == TurnSeamOperation::Effect(EffectOperation::AcceptTurnInput)
+                    && control.matches(
+                        &wrapped_operation,
+                        CrashPlacement::AfterExternalEffectBeforeOutcome,
+                    )
+                {
+                    control.stop_here().await;
+                }
+                outcome
             }
         });
         self.control

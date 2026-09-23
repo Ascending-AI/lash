@@ -19,6 +19,7 @@ macro_rules! direct_turn_acceptance_tests {
             (uncommitted_redrive_cedes_when_a_drain_answered_its_rows, "direct-turn-redrive-after-drain"),
             (drive_effect_refusal_is_journaled, "direct-turn-refused-drive"),
             (queued_direct_turn_input_is_answered_in_order_by_the_drain, "direct-turn-queued-input"),
+            (accept_turn_input_redrive_after_store_commit_admits_one_row, "direct-turn-acceptance-lost-outcome"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

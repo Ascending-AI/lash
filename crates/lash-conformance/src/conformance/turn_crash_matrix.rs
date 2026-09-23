@@ -90,6 +90,7 @@ use crate::{
 };
 
 mod cold_process;
+mod direct_acceptance;
 mod error_return;
 mod expectations;
 mod held_turn_input;
@@ -104,6 +105,7 @@ pub use cold_process::{
     cold_process_durable_recovery_expectation, cold_process_real_turn_driver,
     cold_process_turn_cancel_actions, cold_process_turn_expectations, cold_process_turn_scope,
 };
+pub use direct_acceptance::direct_turn_acceptance_crash_after_store_commit_admits_one_row;
 use error_return::{ErrorReturnPlacement, ErrorReturnRuling, ErrorReturnRulingEntry};
 pub use error_return::{
     FailStopObservation, FailStopViolation, fail_stop_violations,
@@ -260,11 +262,22 @@ enum ProviderOperation {
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 enum EffectOperation {
-    ToolAttempt { name: String },
-    GroupChild { name: String },
-    GroupOpen { children: usize },
+    ToolAttempt {
+        name: String,
+    },
+    GroupChild {
+        name: String,
+    },
+    GroupOpen {
+        children: usize,
+    },
     GroupSettle,
     GroupClose,
+    /// A direct turn's journaled acceptance write (ADR 0069 §6). The reference
+    /// turn is a drain and never accepts; the direct-turn acceptance scenario
+    /// ([`direct_turn_acceptance_crash_after_store_commit_admits_one_row`])
+    /// crashes here.
+    AcceptTurnInput,
 }
 
 /// Crash placement relative to the matched semantic operation.
