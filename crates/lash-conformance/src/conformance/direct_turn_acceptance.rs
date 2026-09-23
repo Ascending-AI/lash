@@ -780,23 +780,23 @@ pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
 // Journaled initial drive set (ADR 0069 §6, FIG-3532)
 // ---------------------------------------------------------------------------
 
-/// A journal-owning effect controller: the first execution of an effect runs
-/// the native local executor and records its outcome under the effect's replay
-/// key, and every later execution of the same key returns the recorded outcome
-/// without running anything — what a durable engine does on replay.
+/// A journal-owning layer over the in-process effect host: the first
+/// execution of an effect runs through the host and records its outcome under
+/// the effect's replay key, and every later execution of the same key returns
+/// the recorded outcome without running anything — what a durable engine does
+/// on replay.
 ///
 /// `crash_at` simulates a worker dying at an effect: the next effect of that
 /// kind fails before it runs and is never journaled, so the redrive executes
 /// it for real.
 #[derive(Default)]
-struct JournalController {
-    native: crate::NativeRuntimeEffectController,
+struct JournalLayer {
     outcomes: std::sync::Mutex<std::collections::HashMap<String, crate::RuntimeEffectOutcome>>,
     crash_at: std::sync::Mutex<Option<crate::RuntimeEffectKind>>,
     lose_outcome_at: std::sync::Mutex<Option<crate::RuntimeEffectKind>>,
 }
 
-impl JournalController {
+impl JournalLayer {
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
     fn crash_at_next(&self, kind: crate::RuntimeEffectKind) {
         *self.crash_at.lock().expect("crash lock") = Some(kind);
@@ -825,78 +825,11 @@ impl JournalController {
 }
 
 #[async_trait::async_trait]
-impl crate::AwaitEventResolver for JournalController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(format!("conformance-journal-controller:{:p}", self))
-    }
-
-    async fn prepare_completion_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
-        self.native
-            .prepare_completion_key(scope, wait, may_defer)
-            .await
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        resolution: crate::Resolution,
-    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
-        self.native.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<crate::Resolution, crate::RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.native
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.native
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::RuntimeEffectController for JournalController {
+impl crate::testing::EffectLayer for JournalLayer {
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
     async fn execute_effect(
         &self,
+        inner: &dyn crate::RuntimeEffectController,
         envelope: crate::RuntimeEffectEnvelope,
         local_executor: crate::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
@@ -918,7 +851,7 @@ impl crate::RuntimeEffectController for JournalController {
                 ));
             }
         }
-        let outcome = self.native.execute_effect(envelope, local_executor).await?;
+        let outcome = inner.execute_effect(envelope, local_executor).await?;
         {
             let mut lose_outcome_at = self.lose_outcome_at.lock().expect("lose-outcome lock");
             if *lose_outcome_at == Some(kind) {
@@ -938,29 +871,6 @@ impl crate::RuntimeEffectController for JournalController {
             .expect("journal lock")
             .insert(effect_id, outcome.clone());
         Ok(outcome)
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
-        self.native.open_effect_group(group).await
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut crate::EffectGroupHandle,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
-        self.native.await_next_settlement(handle, cancel).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: crate::EffectGroupHandle,
-        disposition: crate::LoserPolicy,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        self.native.close_effect_group(handle, disposition).await
     }
 }
 
@@ -1024,17 +934,19 @@ impl crate::store::RuntimePersistenceDecorator for RedriveStore {
 /// redrive, the way a durable engine's handler keeps its journal across
 /// worker incarnations.
 struct Journal {
-    controller: Arc<JournalController>,
+    controller: Arc<JournalLayer>,
     effect_host: Arc<dyn crate::EffectHost>,
     batching: crate::QueuedWorkBatchingConfig,
 }
 
 impl Journal {
     fn new() -> Self {
-        let controller = Arc::new(JournalController::default());
-        let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::new(
-            Arc::clone(&controller) as Arc<dyn crate::RuntimeEffectController>,
-        ));
+        let controller = Arc::new(JournalLayer::default());
+        let effect_host: Arc<dyn crate::EffectHost> =
+            Arc::new(crate::testing::LayeredEffectHost::new(
+                Arc::new(crate::NativeEffectHost::default()),
+                Arc::clone(&controller) as Arc<dyn crate::testing::EffectLayer>,
+            ));
         Self {
             controller,
             effect_host,

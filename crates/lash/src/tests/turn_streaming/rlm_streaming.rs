@@ -553,8 +553,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
             })
             .build()
             .into_handle();
-        let recorder = Arc::new(RecordingNativeEffectController::default());
-        let effect_controller: Arc<dyn lash_core::RuntimeEffectController> = recorder.clone();
+        let recorder = EffectRecorder::default();
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(
             lash_core::TurnBudget::Unbounded,
             rlm_factory(),
@@ -569,9 +568,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
             lash_core::facade_support::InMemorySessionStoreFactory::new(),
         ))
         .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .effect_host(Arc::new(lash_core::facade_support::NativeEffectHost::new(
-            effect_controller,
-        )))
+        .effect_host(recorder.effect_host().await)
         .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-abort-late-events").open().await?;
 

@@ -233,28 +233,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
-    /// Shares a foreign controller whose group operations are forwarded to
-    /// `native` (a recording or fault-injection double wrapping it): the
-    /// context's children route through a host that answers scoped effects
-    /// with `controller` but arbitrates bound-child admission on `native`'s
-    /// group substrate (ADR 0099 §4), which is the only shape under which a
-    /// group it opened can honestly run a child.
-    pub fn shared_effect_controller_with_native_groups(
-        mut self,
-        effect_controller: Arc<dyn crate::RuntimeEffectController>,
-        native: Arc<crate::runtime::NativeRuntimeEffectController>,
-    ) -> Self {
-        self.native_controller = None;
-        self.effect_host = Some(Arc::new(
-            crate::runtime::NativeEffectHost::with_controller_sharing_native_groups(
-                Arc::clone(&effect_controller),
-                &native,
-            ),
-        ));
-        self.effect_controller = TestEffectController::Shared(effect_controller);
-        self
-    }
-
     pub fn borrowed_effect_controller(
         mut self,
         effect_controller: crate::ScopedEffectController<'run>,
@@ -399,20 +377,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
                     )
                 })
         };
-        // A foreign controller double that forwards effect-group operations
-        // to an inner substrate needs a host over that same substrate so
-        // bound-child admission sees the groups it opened.
-        let effect_host = self
-            .effect_host
-            .clone()
-            .or_else(|| match &self.effect_controller {
-                TestEffectController::Shared(controller) => {
-                    controller.as_ref().shared_effect_host()
-                }
-                TestEffectController::Borrowed(controller) => {
-                    controller.controller().shared_effect_host()
-                }
-            });
+        let effect_host = self.effect_host;
         let effect_controller = match self.effect_controller {
             TestEffectController::Shared(effect_controller) => {
                 // The admitted pair must match the scope the installed parent

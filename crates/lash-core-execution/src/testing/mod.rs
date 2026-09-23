@@ -38,6 +38,8 @@ pub mod sansio_transcript;
 pub mod tool_fixtures;
 mod trigger_context;
 
+/// A recording or fault layer over any effect host (FIG-3580).
+pub use crate::runtime::effect::{EffectLayer, LayeredEffectHost};
 pub use execution_context_builder::*;
 pub use tool_fixtures::{FIXTURE_ECHO_TOOL, FixtureTools, fixture_echo_definition};
 pub use trigger_context::*;
@@ -725,7 +727,7 @@ pub fn code_execution_context_with_process_dependencies(
     tool_catalog: crate::ToolCatalog,
     trigger_router: Option<crate::TriggerRouter>,
     processes: Arc<dyn crate::ProcessService>,
-    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    effect_host: Arc<dyn crate::EffectHost>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
 ) -> crate::RuntimeExecutionContext<'static> {
@@ -734,7 +736,7 @@ pub fn code_execution_context_with_process_dependencies(
         .tool_catalog(tool_catalog)
         .trigger_router(trigger_router)
         .processes(processes)
-        .shared_effect_controller(effect_controller)
+        .effect_host(effect_host)
         .process_env_store(process_env_store)
         .execution_env_spec(execution_env_spec)
         .build()
@@ -805,14 +807,14 @@ pub fn code_execution_context_with_invocation(
         .into_runtime()
 }
 
-/// Build an empty code-execution context with a caller-supplied effect
-/// controller and stable parent invocation.
-pub fn code_execution_context_with_effect_controller_and_invocation(
-    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+/// Build an empty code-execution context whose effects run through a
+/// caller-supplied effect host, under a stable parent invocation.
+pub fn code_execution_context_with_effect_host_and_invocation(
+    effect_host: Arc<dyn crate::EffectHost>,
     invocation: crate::RuntimeInvocation,
 ) -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new()
-        .shared_effect_controller(effect_controller)
+        .effect_host(effect_host)
         .runtime_parent_invocation(invocation)
         .build()
         .into_runtime()
@@ -835,16 +837,16 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
 
 /// Build a concrete code-execution context with caller-supplied tool and
 /// effect hosts plus the stable parent invocation.
-pub fn code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
+pub fn code_execution_context_with_tool_provider_catalog_effect_host_and_invocation(
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
-    effect_controller: Arc<dyn crate::RuntimeEffectController>,
+    effect_host: Arc<dyn crate::EffectHost>,
     invocation: crate::RuntimeInvocation,
 ) -> crate::RuntimeExecutionContext<'static> {
     TestExecutionContextBuilder::new()
         .provider(provider)
         .tool_catalog(tool_catalog)
-        .shared_effect_controller(effect_controller)
+        .effect_host(effect_host)
         .runtime_parent_invocation(invocation)
         .build()
         .into_runtime()

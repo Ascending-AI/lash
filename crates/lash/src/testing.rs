@@ -21,6 +21,10 @@ pub use lash_core::testing::run_tool_granted;
 /// under — the same live-source route `session.admin().tools().add_provider`
 /// takes, for host tests that exercise source routing without a live session.
 pub use lash_core::testing::tool_registry_with_live_provider;
+/// A recording or fault layer over any effect host: the host lends its inner
+/// host's scoped controllers with the layer in front of their seam operations,
+/// and every group and journal operation stays the inner host's.
+pub use lash_core::testing::{EffectLayer, LayeredEffectHost};
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
     mock_tool_context, mock_tool_context_with_execution_binding, test_code_protocol_factories,
@@ -33,12 +37,11 @@ pub use lash_core::testing::{
 pub use lash_core::testing::{
     cancelled_code_execution_context, code_execution_context,
     code_execution_context_cancelling_after_yield, code_execution_context_for_process,
-    code_execution_context_with_effect_controller_and_invocation,
-    code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
-    code_execution_context_with_tool_catalog,
+    code_execution_context_with_effect_host_and_invocation, code_execution_context_with_invocation,
+    code_execution_context_with_process_dependencies, code_execution_context_with_tool_catalog,
     code_execution_context_with_tool_provider_and_catalog,
     code_execution_context_with_tool_provider_catalog_and_invocation,
-    code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation,
+    code_execution_context_with_tool_provider_catalog_effect_host_and_invocation,
     code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
     exec_code_invocation,
 };

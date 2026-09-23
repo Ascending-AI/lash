@@ -22,7 +22,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::{EffectHost, RuntimeEffectController};
+use lash_core::EffectHost;
 
 /// The RLM protocol plugin, and with it the Lashlang process engine it
 /// contributes.
@@ -81,31 +81,31 @@ where
     .expect("runtime thread")
 }
 
-mod native {
+mod sqlite_memory {
     use super::*;
 
     lash_conformance::tool_batch_parallelism_tests!({
-        // The deferred route parks on a completion key, which the native host
-        // issues only for an embedding that accepts that such a key dies with
-        // the process. A single-process conformance run is that embedding.
-        let host: Arc<dyn EffectHost> = Arc::new(
-            lash_core::facade_support::NativeEffectHost::new(Arc::new(
-                lash_core::facade_support::NativeRuntimeEffectController::default(),
-            )
-                as Arc<dyn RuntimeEffectController>)
-            .allow_process_lifetime_completion_keys(),
-        );
+        let deployment = lash_sqlite_store::SqliteDeployment::memory()
+            .await
+            .expect("open the memory tool-batch parallelism deployment");
+        let host = deployment.effect_host() as Arc<dyn EffectHost>;
         (
-            (),
-            "native",
+            deployment,
+            "sqlite-memory",
             Arc::clone(&host),
             vec![
                 lash_conformance::rlm_promise_all_producer(cell_bridge_factories()),
+                // Each scenario opens its own session, so it also opens its
+                // own registry, on a memory deployment of its own.
                 lash_conformance::lashlang_process_aggregate_producer(
                     process_bridge_factories(),
                     Arc::new(|| {
-                        Arc::new(lash_core::TestLocalProcessRegistry::default())
-                            as Arc<dyn lash_core::ProcessRegistry>
+                        sync_await(async {
+                            lash_sqlite_store::SqliteDeployment::memory()
+                                .await
+                                .expect("open the tool-batch process registry deployment")
+                                .process_registry()
+                        }) as Arc<dyn lash_core::ProcessRegistry>
                     }),
                 ),
             ],

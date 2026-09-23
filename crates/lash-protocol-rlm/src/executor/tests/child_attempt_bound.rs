@@ -112,14 +112,11 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
         let surface = surface.clone();
         let session_policy = session_policy.clone();
         async move {
-            let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-                lash_core::facade_support::NativeRuntimeEffectController::default()
-                    .allow_process_lifetime_completion_keys(),
-            );
+            let effect_host = memory_effect_host().await;
             let processes: Arc<dyn lash_core::ProcessService> =
                 Arc::new(TypeScriptSignalProcessService {
                     registry: registry.clone(),
-                    controller: controller.clone(),
+                    effect_host: Arc::clone(&effect_host),
                     originator_override: None,
                     env_store: Arc::clone(&process_env_store),
                     engines: fixture_process_engines(published.clone(), surface.clone()),
@@ -130,7 +127,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
                     process_control_tool_catalog(),
                     None,
                     processes,
-                    controller,
+                    effect_host,
                     process_env_store,
                     lash_core::ProcessExecutionEnvSpec::new(
                         lash_core::PluginOptions::default(),
@@ -235,10 +232,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-        lash_core::facade_support::NativeRuntimeEffectController::default()
-            .allow_process_lifetime_completion_keys(),
-    );
+    let effect_host = memory_effect_host().await;
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -252,10 +246,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::new(
-            lash_core::facade_support::NativeEffectHost::new(controller.clone())
-                .allow_process_lifetime_completion_keys(),
-        ),
+        Arc::clone(&effect_host),
         Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
         process_env_store.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -287,7 +278,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
     .expect("valid test native substrate config");
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
-        controller: controller.clone(),
+        effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
         engines: fixture_process_engines(published.clone(), surface.clone()),
@@ -298,7 +289,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
             process_control_tool_catalog(),
             None,
             processes,
-            controller,
+            effect_host,
             process_env_store,
             lash_core::ProcessExecutionEnvSpec::new(
                 lash_core::PluginOptions::default(),

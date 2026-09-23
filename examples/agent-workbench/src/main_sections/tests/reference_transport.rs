@@ -42,21 +42,17 @@ use super::*;
 use lash::SessionId;
 use lash::TurnId;
 use lash::direct::{LlmStreamEvent, StreamBlockIdentity};
-use lash::durability::{CanonicalRuntimeEffectEnvelope, NativeEffectHost};
 use lash::provider::{
     GenerationRetryGuarantee, LlmRequest, LlmTransportError, ProviderFailureKind, ProviderOptions,
     ProviderReliability, TransportRetryVerdict,
 };
 use lash::runtime::{
-    AwaitEventResolver, EffectGroupHandle, EffectJournaling, ExecutionScope, GroupSettlement,
-    LoserPolicy, NativeRuntimeEffectController, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, effect_groups_unsupported,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 use lash_remote_protocol::{RemoteSessionObservationEventPayload, RemoteTurnEvent};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
 
 /// Mirrors `MAX_APPLIED_EVENT_IDS` in `lash::recoverable_chat`: the dedupe
 /// window is bounded because an honest client only needs to absorb redelivery
@@ -631,188 +627,58 @@ fn redrive_provider(
     (provider, calls)
 }
 
-/// The journaled half of a recovery re-drive: every effect a turn makes —
-/// input admission included — is journaled under its replay key, and the
-/// `fail_on_new_llm_call`-th *new* provider call aborts the invocation the way
-/// a crashed workflow runner abandons one — `Journaled`, so the turn
-/// never reaches a terminal commit.
-///
-/// The recovery drive under the same turn id replays each journaled effect
-/// instead of re-executing it — the provider is never re-bought and the
+/// A crash layer over a SQLite effect host: the
+/// `fail_on_llm_call`-th LLM effect dies before it reaches the journal, the
+/// way a crashed workflow invocation leaves a turn mid-flight with its journal
+/// intact. The recovery drive under the same turn id replays each journaled
+/// effect instead of re-executing it — the provider is never re-bought and the
 /// already-admitted input is never re-applied — then resumes executing where
-/// the journal ends. A replayed envelope that diverges from the journaled
-/// canonical form is a hard mismatch. This is the same shape as
-/// `ProjectionReplayController` in `crates/lash/src/tests/rolling_history_persistence.rs`.
-struct JournaledRedriveController {
-    native: NativeRuntimeEffectController,
-    authority_id: std::sync::OnceLock<String>,
-    journaled: Mutex<BTreeMap<String, (CanonicalRuntimeEffectEnvelope, RuntimeEffectOutcome)>>,
-    new_llm_calls: AtomicUsize,
-    replayed_llm_calls: AtomicUsize,
-    mismatched_replays: AtomicUsize,
-    fail_on_new_llm_call: usize,
+/// the journal ends; the deployment's journal refuses a replayed envelope that
+/// diverges from the recorded one.
+struct RedriveCrashLayer {
+    llm_effects: AtomicUsize,
+    answered_llm_effects: AtomicUsize,
+    fail_on_llm_call: usize,
 }
 
-impl JournaledRedriveController {
-    fn failing_on_new_llm_call(ordinal: usize) -> Self {
+impl RedriveCrashLayer {
+    fn failing_on_llm_call(ordinal: usize) -> Self {
         Self {
-            native: NativeRuntimeEffectController::default(),
-            authority_id: std::sync::OnceLock::new(),
-            journaled: Mutex::new(BTreeMap::new()),
-            new_llm_calls: AtomicUsize::new(0),
-            replayed_llm_calls: AtomicUsize::new(0),
-            mismatched_replays: AtomicUsize::new(0),
-            fail_on_new_llm_call: ordinal,
+            llm_effects: AtomicUsize::new(0),
+            answered_llm_effects: AtomicUsize::new(0),
+            fail_on_llm_call: ordinal,
         }
     }
 
-    /// The durable binding the host minted for this controller — journaled
-    /// turn control refuses to pair a journal with the wrong authority.
-    fn bind_authority(&self, binding_id: String) {
-        self.authority_id
-            .set(binding_id)
-            .expect("the controller's authority binding is initialized once");
-    }
-
-    fn replayed_llm_calls(&self) -> usize {
-        self.replayed_llm_calls.load(Ordering::SeqCst)
-    }
-
-    fn mismatched_replays(&self) -> usize {
-        self.mismatched_replays.load(Ordering::SeqCst)
+    /// LLM effects the journal answered, live or replayed.
+    fn answered_llm_effects(&self) -> usize {
+        self.answered_llm_effects.load(Ordering::SeqCst)
     }
 }
 
 #[async_trait::async_trait]
-impl AwaitEventResolver for JournaledRedriveController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.authority_id.get().cloned()
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: lash::AwaitEventWaitIdentity,
-    ) -> Result<lash::AwaitEventKey, RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash::AwaitEventKey,
-        resolution: lash::Resolution,
-    ) -> Result<lash::ResolveOutcome, RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &lash::AwaitEventKey,
-    ) -> Result<Option<lash::Resolution>, RuntimeError> {
-        self.native.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash::AwaitEventKey,
-        cancel: lash::CancellationToken,
-        deadline: Option<Instant>,
-    ) -> Result<lash::Resolution, RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.native
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.native
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for JournaledRedriveController {
-    fn effect_journaling(&self) -> EffectJournaling {
-        EffectJournaling::Journaled
-    }
-
+impl lash::testing::EffectLayer for RedriveCrashLayer {
     async fn execute_effect(
         &self,
+        inner: &dyn RuntimeEffectController,
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        // A peek has no journaled side effect to replay — the unresolved
-        // answer is deterministic.
-        if matches!(
-            &envelope.command,
-            RuntimeEffectCommand::PeekAwaitEvent { .. }
-        ) {
-            return Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
+        if !matches!(&envelope.command, RuntimeEffectCommand::LlmCall { .. }) {
+            return inner.execute_effect(envelope, local_executor).await;
         }
-        let replay_key = envelope.invocation.replay_key().to_string();
-        let canonical = envelope.canonical_form()?;
-        if let Some((recorded, outcome)) = self.journaled.lock_recover().get(&replay_key).cloned() {
-            if recorded.hash() != canonical.hash() {
-                self.mismatched_replays.fetch_add(1, Ordering::SeqCst);
-                return Err(RuntimeEffectControllerError::foreign(
-                    "reference_transport_replay_mismatch",
-                    lash::runtime::TurnFailureCause::LiveFault,
-                    "a re-driven effect diverged from its journaled envelope",
-                ));
-            }
-            if matches!(&envelope.command, RuntimeEffectCommand::LlmCall { .. }) {
-                self.replayed_llm_calls.fetch_add(1, Ordering::SeqCst);
-            }
-            return Ok(outcome);
-        }
-        if matches!(&envelope.command, RuntimeEffectCommand::LlmCall { .. })
-            && self.new_llm_calls.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_on_new_llm_call
-        {
-            // A crash is a live fault: the drive aborts with its journal intact.
+        if self.llm_effects.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_on_llm_call {
             return Err(RuntimeEffectControllerError::foreign(
                 "reference_transport_drive_crashed",
+                // A crash is a live fault: the drive aborts and the redrive
+                // replays the journal.
                 lash::runtime::TurnFailureCause::LiveFault,
                 "injected crash: the drive dies mid-turn with its journal intact",
             ));
         }
-        let outcome = local_executor.execute(envelope).await?;
-        self.journaled
-            .lock_recover()
-            .insert(replay_key, (canonical, outcome.clone()));
+        let outcome = inner.execute_effect(envelope, local_executor).await?;
+        self.answered_llm_effects.fetch_add(1, Ordering::SeqCst);
         Ok(outcome)
-    }
-
-    async fn open_effect_group(
-        &self,
-        _group: RuntimeEffectGroup,
-    ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        Err(effect_groups_unsupported("JournaledRedriveController"))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut EffectGroupHandle,
-        _cancel: lash::CancellationToken,
-    ) -> Result<GroupSettlement, RuntimeEffectControllerError> {
-        Err(effect_groups_unsupported("JournaledRedriveController"))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: EffectGroupHandle,
-        _disposition: LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        Err(effect_groups_unsupported("JournaledRedriveController"))
     }
 }
 
@@ -1155,13 +1021,17 @@ async fn a_redriven_turn_keeps_its_output_identity() {
     const REDRIVEN_ANSWER: &str = "answer from the recovery re-drive";
     const DRAINED_ANSWER: &str = "answer from the queued drain";
     let data_dir = tempfile::tempdir().expect("reference transport tempdir");
-    let controller = Arc::new(JournaledRedriveController::failing_on_new_llm_call(2));
-    let effect_host = Arc::new(
-        NativeEffectHost::new(Arc::clone(&controller) as Arc<dyn RuntimeEffectController>)
-            .allow_process_lifetime_completion_keys(),
-    );
-    controller.bind_authority(lash::durability::EffectHost::turn_control_binding_id(
-        effect_host.as_ref(),
+    // The fixture's sessions and process registry are SQLite files under
+    // `data_dir`, so the journal is one too: the host fences process scopes in
+    // the registry file it attaches.
+    let layer = Arc::new(RedriveCrashLayer::failing_on_llm_call(2));
+    let effect_host = Arc::new(lash::testing::LayeredEffectHost::new(
+        Arc::new(
+            lash_sqlite_store::SqliteEffectHost::open(&data_dir.path().join("effects.db"))
+                .await
+                .expect("open the durable effect host"),
+        ),
+        Arc::clone(&layer) as Arc<dyn lash::testing::EffectLayer>,
     ));
     let (provider, provider_calls) =
         redrive_provider(CRASHED_PARTIAL, &[REDRIVEN_ANSWER, DRAINED_ANSWER]);
@@ -1251,14 +1121,9 @@ async fn a_redriven_turn_keeps_its_output_identity() {
         "the re-drive replays the journaled call instead of re-buying it"
     );
     assert_eq!(
-        controller.replayed_llm_calls(),
+        layer.answered_llm_effects() - provider_calls.load(Ordering::SeqCst),
         1,
         "the journaled call must replay on the recovery drive"
-    );
-    assert_eq!(
-        controller.mismatched_replays(),
-        0,
-        "every replayed call must match its journaled envelope"
     );
     assert_eq!(
         transport.output_keys(),

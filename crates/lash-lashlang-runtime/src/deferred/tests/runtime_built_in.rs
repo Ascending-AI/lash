@@ -24,7 +24,7 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
         batches: Mutex::new(Vec::new()),
     });
     let shared: SharedDeferredToolResolver = resolver.clone();
-    let controller = Arc::new(FaultJournalController::new(JournalFault::None));
+    let effect_host = fault_journal_host(JournalFault::None).await;
     // await triggers.list({})?
     // await web.fetch({})?
     let program = b::program(vec![
@@ -36,10 +36,10 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
         ..LashlangSurface::default()
     };
     let mut first_record = DeferredResolutionRecord::default();
-    let first_ctx = link_context_with_controller(
+    let first_ctx = link_context_with_host(
         &mut first_record,
         "exec-code:built-in-and-deferred",
-        controller.clone(),
+        effect_host.clone(),
     );
 
     let effective = resolve_and_build_deferred_environment(
@@ -77,10 +77,10 @@ async fn runtime_built_in_survives_empty_deferred_resolution_and_premerge_maskin
     let changed_surface = surface_with_shared_fetch_modules(&["web"]);
     let catalog = incompatible_shared_fetch_catalog();
     let mut replayed_record = DeferredResolutionRecord::default();
-    let replay_ctx = link_context_with_controller(
+    let replay_ctx = link_context_with_host(
         &mut replayed_record,
         "exec-code:built-in-and-deferred",
-        controller,
+        effect_host,
     );
 
     let replayed = resolve_and_build_deferred_environment(
@@ -136,10 +136,10 @@ async fn retained_negative_masks_duplicate_catalog_claimants_before_live_validat
     ]);
 
     let mut retained = DeferredResolutionRecord::default();
-    let retained_ctx = link_context_with_controller(
+    let retained_ctx = link_context_with_host(
         &mut retained,
         "exec-code:retained-negative",
-        Arc::new(FaultJournalController::new(JournalFault::None)),
+        fault_journal_host(JournalFault::None).await,
     );
     retained
         .resolutions
@@ -166,10 +166,10 @@ async fn retained_negative_masks_duplicate_catalog_claimants_before_live_validat
     ));
 
     let mut fresh = DeferredResolutionRecord::default();
-    let fresh_ctx = link_context_with_controller(
+    let fresh_ctx = link_context_with_host(
         &mut fresh,
         "exec-code:fresh-duplicate",
-        Arc::new(FaultJournalController::new(JournalFault::None)),
+        fault_journal_host(JournalFault::None).await,
     );
     let error = resolve_and_build_deferred_environment(
         &program,

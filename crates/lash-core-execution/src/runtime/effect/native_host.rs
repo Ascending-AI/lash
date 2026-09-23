@@ -138,34 +138,6 @@ impl NativeEffectHost {
         }
     }
 
-    /// A host whose scoped controllers are `controller` but whose group
-    /// substrate is `native`'s: bound-child admission is arbitrated through
-    /// `native`'s group state and group-executor resolvers register on it,
-    /// exactly as [`with_native_controller`](Self::with_native_controller)
-    /// wires them.
-    ///
-    /// Testing only: honest exactly when `controller` forwards every group
-    /// operation to `native`, as a recording double wrapping it does — a
-    /// controller that answered groups itself would be arbitrated by state it
-    /// never wrote.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn with_controller_sharing_native_groups(
-        controller: Arc<dyn RuntimeEffectController>,
-        native: &Arc<NativeRuntimeEffectController>,
-    ) -> Self {
-        Self {
-            turn_control_binding_id: Arc::from(format!("native-process:{}", uuid::Uuid::new_v4())),
-            controller,
-            await_event_admin: Some(native.await_event_registry()),
-            groups_admin: Some(native.groups()),
-            allow_process_lifetime_completion_keys: Arc::new(std::sync::atomic::AtomicBool::new(
-                false,
-            )),
-            live: Arc::new(ScopeLiveness::default()),
-            tool_children: Arc::new(std::sync::OnceLock::new()),
-        }
-    }
-
     /// A host over the built-in native controller, wired with both admin
     /// handles so a quiescent-gated retirement can count this controller's
     /// unsettled group children alongside the host's own admissions (ADR 0099

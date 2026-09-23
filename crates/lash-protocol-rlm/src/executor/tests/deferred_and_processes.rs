@@ -1,38 +1,24 @@
 use super::*;
 use lash_core::testing::store_fixtures::durable_admission;
 
-#[derive(Clone)]
-pub(super) struct FailingDeferredJournalController {
-    inner: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
-    host: Arc<std::sync::OnceLock<Arc<dyn lash_core::EffectHost>>>,
+/// A fresh SQLite memory deployment's effect host: the one journal a
+/// fixture's worker, cell context and process service share.
+pub(super) async fn memory_effect_host() -> Arc<dyn lash_core::EffectHost> {
+    lash_sqlite_store::SqliteDeployment::memory()
+        .await
+        .expect("open a memory deployment")
+        .effect_host()
 }
 
-impl Default for FailingDeferredJournalController {
-    fn default() -> Self {
-        Self {
-            inner: Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-            host: Arc::new(std::sync::OnceLock::new()),
-        }
-    }
-}
-
-impl lash_core::AwaitEventResolver for FailingDeferredJournalController {}
+/// Runs a deferred tool resolution and then fails its journal commit, over a
+/// SQLite memory deployment that journals every other effect.
+struct FailingDeferredJournalLayer;
 
 #[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for FailingDeferredJournalController {
-    fn shared_effect_host(&self) -> Option<Arc<dyn lash_core::EffectHost>> {
-        Some(Arc::clone(self.host.get_or_init(|| {
-            Arc::new(
-                lash_core::facade_support::NativeEffectHost::with_controller_sharing_native_groups(
-                    Arc::new(self.clone()),
-                    &self.inner,
-                ),
-            ) as Arc<dyn lash_core::EffectHost>
-        })))
-    }
-
+impl lash_core::testing::EffectLayer for FailingDeferredJournalLayer {
     async fn execute_effect(
         &self,
+        inner: &dyn lash_core::RuntimeEffectController,
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
@@ -47,38 +33,21 @@ impl lash_core::RuntimeEffectController for FailingDeferredJournalController {
                 "injected deferred journal commit failure",
             ))
         } else {
-            local_executor.execute(envelope).await
+            inner.execute_effect(envelope, local_executor).await
         }
     }
+}
 
-    async fn open_effect_group(
-        &self,
-        _group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "FailingDeferredJournalController",
-        ))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "FailingDeferredJournalController",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "FailingDeferredJournalController",
-        ))
-    }
+/// A fresh memory deployment's effect host behind a
+/// [`FailingDeferredJournalLayer`].
+pub(super) async fn failing_deferred_journal_host() -> Arc<dyn lash_core::EffectHost> {
+    let deployment = lash_sqlite_store::SqliteDeployment::memory()
+        .await
+        .expect("open a memory deployment");
+    Arc::new(lash_core::testing::LayeredEffectHost::new(
+        deployment.effect_host(),
+        Arc::new(FailingDeferredJournalLayer),
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -666,10 +635,10 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
                 observed_bindings: Default::default(),
                 enumerations: Default::default(),
             });
-        let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_effect_controller_and_invocation(
+        let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_effect_host_and_invocation(
             Arc::clone(&provider),
             lash_core::ToolCatalog::default(),
-            Arc::new(FailingDeferredJournalController::default()),
+            failing_deferred_journal_host().await,
             lash_core::testing::exec_code_invocation(
                 "deferred-journal-failure",
                 "turn-1",
@@ -1594,7 +1563,7 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
 #[derive(Clone)]
 pub(super) struct TypeScriptSignalProcessService {
     pub(super) registry: Arc<lash_core::TestLocalProcessRegistry>,
-    pub(super) controller: Arc<dyn lash_core::RuntimeEffectController>,
+    pub(super) effect_host: Arc<dyn lash_core::EffectHost>,
     pub(super) originator_override: Option<lash_core::ProcessOriginator>,
     /// Where a recorded start publishes the execution env its registration
     /// then references. FIG-2999: `processes.start` is a declaring leaf tool,
@@ -2065,7 +2034,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         )
         .await?;
         let key = self
-            .controller
+            .effect_host
             .await_event_key(
                 &lash_core::ExecutionScope::process(process_id),
                 lash_core::AwaitEventWaitIdentity::process_signal(
@@ -2080,7 +2049,7 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         // fixture asserts the delivery rather than performing it: a second
         // resolution must report the terminal the program will observe.
         let resolved = self
-            .controller
+            .effect_host
             .resolve_await_event(&key, lash_core::Resolution::Ok(event.payload.clone()))
             .await
             .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
@@ -2114,10 +2083,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-        lash_core::facade_support::NativeRuntimeEffectController::default()
-            .allow_process_lifetime_completion_keys(),
-    );
+    let effect_host = memory_effect_host().await;
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -2131,10 +2097,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::new(
-            lash_core::facade_support::NativeEffectHost::new(controller.clone())
-                .allow_process_lifetime_completion_keys(),
-        ),
+        Arc::clone(&effect_host),
         Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
         process_env_store.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -2166,7 +2129,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
     .expect("valid test native substrate config");
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
-        controller: controller.clone(),
+        effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
@@ -2176,7 +2139,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         process_control_tool_catalog(),
         None,
         processes,
-        controller,
+        effect_host,
         process_env_store,
         lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
@@ -2268,10 +2231,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-        lash_core::facade_support::NativeRuntimeEffectController::default()
-            .allow_process_lifetime_completion_keys(),
-    );
+    let effect_host = memory_effect_host().await;
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -2285,10 +2245,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::new(
-            lash_core::facade_support::NativeEffectHost::new(controller.clone())
-                .allow_process_lifetime_completion_keys(),
-        ),
+        Arc::clone(&effect_host),
         Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
         process_env_store.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -2320,7 +2277,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
     .expect("valid test native substrate config");
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
-        controller: controller.clone(),
+        effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
@@ -2330,7 +2287,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         process_control_tool_catalog(),
         None,
         processes,
-        controller,
+        effect_host,
         process_env_store,
         lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
@@ -2407,10 +2364,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let controller: Arc<dyn lash_core::RuntimeEffectController> = Arc::new(
-        lash_core::facade_support::NativeRuntimeEffectController::default()
-            .allow_process_lifetime_completion_keys(),
-    );
+    let effect_host = memory_effect_host().await;
     let inspected = Arc::new(std::sync::Mutex::new(None));
     let tool_provider = Arc::new(TypeScriptProcessInspectionToolProvider {
         inspected_process_id: Arc::clone(&inspected),
@@ -2431,10 +2385,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::new(
-            lash_core::facade_support::NativeEffectHost::new(controller.clone())
-                .allow_process_lifetime_completion_keys(),
-        ),
+        Arc::clone(&effect_host),
         Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
         process_env_store.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
@@ -2466,7 +2417,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
     .expect("valid test native substrate config");
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
         registry: registry.clone(),
-        controller: controller.clone(),
+        effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
@@ -2476,7 +2427,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         tool_catalog,
         None,
         processes,
-        controller,
+        effect_host,
         process_env_store,
         lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
