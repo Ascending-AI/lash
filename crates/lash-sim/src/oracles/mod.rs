@@ -189,6 +189,7 @@ use standard_contracts::*;
 pub const RUN_ONLY_ORACLES: &[&str] = &[
     LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE,
     crate::content_oracle::DURABLE_CONTENT_ORACLE,
+    crate::content_oracle::FAILED_ATTEMPT_USAGE_ORACLE,
 ];
 
 /// Evaluate every generated-workload oracle whose evidence is carried by a
