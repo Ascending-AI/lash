@@ -20,6 +20,7 @@ use crate::{
 /// Reserved BLAKE3 domains used by workspace hash owners. Entries are
 /// append-only so a retired domain cannot be silently reused.
 const BLAKE3_DOMAINS: &[&str] = &[
+    "lash-accepted-turn-input/v1",
     "lash-append-request/v2",
     "lash-attachment/v2",
     "lash-blob/v2",

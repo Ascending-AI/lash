@@ -60,6 +60,27 @@ lash_store_sql::statements! {
                     claim_owner_id, claim_owner_incarnation_id,
                     claim_token, claim_session_lease_generation, submission_digest";
 
+        /// Enqueue input `?2` under the id its draft provisioned, or hand back
+        /// the row that id already names.
+        ///
+        /// The same READ COMMITTED reasoning as the source-key form: the
+        /// conflict clause detects a concurrent re-run of the same admission,
+        /// and the no-op `DO UPDATE` makes `RETURNING` hand back the existing
+        /// row, whose session and immutable submission digest the caller then
+        /// checks. A new row records its submitted ingress and digest exactly
+        /// as `insert_new` does.
+        insert_or_adopt_by_input_id = "INSERT INTO pending_turn_inputs (
+                 enqueue_seq, input_id, session_id, source_key, ingress_json, state,
+                 input_json, submitted_ingress_json, submission_digest, enqueued_at_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?5, ?9, ?8)
+             ON CONFLICT (input_id) DO UPDATE
+                 SET input_id = pending_turn_inputs.input_id
+             RETURNING enqueue_seq, input_id, session_id, source_key, ingress_json,
+                    state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
+                    claim_owner_id, claim_owner_incarnation_id,
+                    claim_token, claim_session_lease_generation, submission_digest";
+
         /// Input `?2` of session `?1`, locked for the caller's transaction.
         select_by_id_for_update = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
                     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,

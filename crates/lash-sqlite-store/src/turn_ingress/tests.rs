@@ -80,6 +80,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs.delete_by_session.sql(),
         sql.pending_inputs_sqlite.insert_new.sql(),
         sql.pending_inputs_sqlite.select_id_by_source_key.sql(),
+        sql.pending_inputs_sqlite.select_session_by_input_id.sql(),
         sql.pending_inputs_sqlite.settlement_facts.sql(),
         sql.pending_inputs_sqlite.select_suffix.sql(),
         sql.pending_inputs_sqlite.select_active_turn_claims.sql(),

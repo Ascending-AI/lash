@@ -556,6 +556,33 @@ impl TurnInputStore for PostgresSessionStore {
                 });
             }
             input
+        } else if draft.input_id.is_some() {
+            let row = sqlx::query(
+                crate::turn_ingress::turn_ingress_sql()
+                    .pending_inputs_postgres
+                    .insert_or_adopt_by_input_id
+                    .sql(),
+            )
+            .bind(enqueue_seq)
+            .bind(&input_id)
+            .bind(draft.session_id.as_str())
+            .bind(&draft.source_key)
+            .bind(&ingress_json)
+            .bind(state.as_str())
+            .bind(&input_json)
+            .bind(now as i64)
+            .bind(&submission_digest)
+            .fetch_one(&mut *tx)
+            .await
+            // The `ON CONFLICT (input_id)` arbiter absorbs the id's unique
+            // violation, so only an unrelated insert failure reaches here.
+            .map_err(store_sqlx_error)?;
+            let existing_digest: String =
+                row.try_get("submission_digest").map_err(store_sqlx_error)?;
+            draft.adopt_provisioned_row(
+                pending_turn_input_from_row(pending_turn_input_row(row)?)?,
+                &existing_digest,
+            )?
         } else {
             sqlx::query(
                 crate::turn_ingress::turn_ingress_sql()

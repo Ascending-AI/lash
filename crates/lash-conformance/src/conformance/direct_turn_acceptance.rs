@@ -793,12 +793,20 @@ struct JournalController {
     native: crate::NativeRuntimeEffectController,
     outcomes: std::sync::Mutex<std::collections::HashMap<String, crate::RuntimeEffectOutcome>>,
     crash_at: std::sync::Mutex<Option<crate::RuntimeEffectKind>>,
+    lose_outcome_at: std::sync::Mutex<Option<crate::RuntimeEffectKind>>,
 }
 
 impl JournalController {
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
     fn crash_at_next(&self, kind: crate::RuntimeEffectKind) {
         *self.crash_at.lock().expect("crash lock") = Some(kind);
+    }
+
+    /// The next effect of `kind` runs to completion, and then the worker dies
+    /// before its outcome is recorded, so the redrive runs its body again.
+    #[expect(clippy::expect_used, reason = "conformance fixture lock")]
+    fn lose_outcome_at_next(&self, kind: crate::RuntimeEffectKind) {
+        *self.lose_outcome_at.lock().expect("lose-outcome lock") = Some(kind);
     }
 
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
@@ -910,6 +918,19 @@ impl crate::RuntimeEffectController for JournalController {
             }
         }
         let outcome = self.native.execute_effect(envelope, local_executor).await?;
+        {
+            let mut lose_outcome_at = self.lose_outcome_at.lock().expect("lose-outcome lock");
+            if *lose_outcome_at == Some(kind) {
+                *lose_outcome_at = None;
+                return Err(crate::RuntimeEffectControllerError::foreign(
+                    "conformance_worker_crash",
+                    format!(
+                        "the worker died after the {} effect ran, before its outcome was recorded",
+                        kind.as_str()
+                    ),
+                ));
+            }
+        }
         self.outcomes
             .lock()
             .expect("journal lock")
@@ -1819,4 +1840,78 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
         "the recovery drain's turn is the one that answered it: {applied:?}"
     );
     assert!(pending_input_ids(&store).await.is_empty());
+}
+
+/// An acceptance whose body ran, committed its row, and then lost its outcome
+/// (the worker died before the journal recorded it) is re-run by the redrive.
+/// The re-run names the same provisioned input id, so the store adopts the row
+/// the first run wrote: one admission, one pending row, and one copy of the
+/// words in the committed turn.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn accept_turn_input_redrive_after_store_commit_admits_one_row(
+    prefix: &str,
+    store: Arc<dyn crate::RuntimePersistence>,
+) {
+    let turn_id = TurnId::from(format!("{prefix}-acceptance-lost-outcome"));
+    let journal = Journal::new();
+    journal
+        .controller
+        .lose_outcome_at_next(crate::RuntimeEffectKind::AcceptTurnInput);
+    let (provider, requests) = recording_provider("answered once");
+    journal
+        .run(&store, provider.clone(), &turn_id, "deploy staging once")
+        .await
+        .expect_err("the worker dies before the acceptance outcome is recorded");
+    let admitted = pending_input_ids(&store).await;
+    assert_eq!(admitted.len(), 1, "the first run committed its row");
+
+    let redriven = journal
+        .run(&store, provider, &turn_id, "deploy staging once")
+        .await
+        .expect("the redrive re-runs the acceptance body and commits the turn");
+    let acceptance = redriven
+        .turn_input_acceptance
+        .clone()
+        .expect("a store-backed direct turn exposes its acceptance");
+    assert_eq!(
+        acceptance.input_id, admitted[0],
+        "the re-run returns the input id the first run admitted"
+    );
+    assert!(
+        pending_input_ids(&store).await.is_empty(),
+        "no second row was admitted"
+    );
+    let applied = applications(&store).await;
+    assert_eq!(
+        applied
+            .iter()
+            .map(|application| application.input_id.clone())
+            .collect::<Vec<_>>(),
+        vec![acceptance.input_id.clone()],
+        "the turn applied exactly one admission"
+    );
+    let copies = redriven
+        .state
+        .read_view()
+        .expect("the redriven turn's frame scope resolves")
+        .messages()
+        .iter()
+        .filter(|message| {
+            matches!(message.role, crate::MessageRole::User)
+                && message.parts.iter().any(|part| {
+                    matches!(part, crate::Part::Text { content, .. } if content.contains("deploy staging once"))
+                })
+        })
+        .count();
+    assert_eq!(copies, 1, "the committed turn carries the words once");
+    let requests = requests.lock().expect("request lock").clone();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].matches("deploy staging once").count(),
+        1,
+        "the model saw the words once: {requests:?}"
+    );
 }

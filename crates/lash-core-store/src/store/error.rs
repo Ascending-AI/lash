@@ -480,10 +480,14 @@ pub enum StoreError {
         source_key: String,
         existing_input_id: InputId,
     },
-    /// A draft named an `input_id` a stored pending-input row already carries.
+    /// A draft named an `input_id` a stored pending-input row already carries,
+    /// with different submitted content or from another session.
     ///
     /// Input ids are unique across the whole store, not within one session, so
-    /// the refusing row may belong to a different session than the draft's.
+    /// the refusing row may belong to a different session than the draft's. An
+    /// identical same-session re-submission is not refused: it is the same
+    /// admission re-run (a journaled turn acceptance provisions its id before
+    /// its body runs, ADR 0069 §6) and returns the stored row.
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
     /// return this so a reused input identity is never silently double-filed.
     #[error(

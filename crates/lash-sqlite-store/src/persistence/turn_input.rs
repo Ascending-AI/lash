@@ -538,6 +538,32 @@ impl TurnInputStore for Store {
                             });
                         }
                     }
+                    if let Some(input_id) = draft.input_id.as_deref() {
+                        let holder: Option<(String, String)> = tx
+                            .query_row(
+                                crate::turn_ingress::turn_ingress_sql()
+                                    .pending_inputs_sqlite
+                                    .select_session_by_input_id
+                                    .sql(),
+                                params![input_id],
+                                |row| Ok((row.get(0)?, row.get(1)?)),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?;
+                        if let Some((holder, existing_digest)) = holder {
+                            let existing = load_pending_turn_input_by_id_conn(
+                                tx,
+                                &SessionId::from(holder),
+                                input_id,
+                            )?
+                            .ok_or_else(|| {
+                                StoreError::Backend(
+                                    "pending turn input id row disappeared".to_string(),
+                                )
+                            })?;
+                            return draft.adopt_provisioned_row(existing, &existing_digest);
+                        }
+                    }
                     let input_id = draft.input_id.clone().unwrap_or_else(|| {
                         lash_core_execution::store_backend_support::derive_pending_turn_input_id(
                             &draft.session_id,

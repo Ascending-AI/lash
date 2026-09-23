@@ -62,6 +62,11 @@ macro_rules! turn_crash_matrix_tests {
             (turn_crash_trace_drift_check, "turn-crash-trace-drift", trace),
             (turn_crash_matrix_level_1, "turn-crash-matrix-level-1", matrix),
             (
+                direct_turn_acceptance_crash_after_store_commit_admits_one_row,
+                "turn-crash-direct-acceptance",
+                matrix
+            ),
+            (
                 turn_crash_matrix_error_return_fail_stop,
                 "turn-crash-matrix-error-return-fail-stop",
                 error_return
@@ -97,6 +102,11 @@ macro_rules! turn_crash_recovery_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::turn_crash_recovery_tests!(@catalogue [$(#[$attr])*] $fixture; [
             (turn_crash_matrix_level_1, "turn-crash-matrix-level-1", matrix),
+            (
+                direct_turn_acceptance_crash_after_store_commit_admits_one_row,
+                "turn-crash-direct-acceptance",
+                matrix
+            ),
             (
                 turn_crash_matrix_error_return_fail_stop,
                 "turn-crash-matrix-error-return-fail-stop",

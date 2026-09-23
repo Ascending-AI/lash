@@ -1334,6 +1334,13 @@ pub trait TurnInputStore: Send + Sync {
     }
 
     /// Persist model-visible user input into the pending turn-input lifecycle.
+    ///
+    /// A draft that carries its own `input_id` names one admission: when a
+    /// row with that id exists, an identical submission returns it unchanged
+    /// (whatever its lifecycle state) and anything else is
+    /// [`StoreError::PendingTurnInputIdConflict`]. A journaled turn acceptance
+    /// provisions its id this way, so re-running its body never admits a
+    /// second row (ADR 0069 §6).
     async fn enqueue_pending_turn_input(
         &self,
         input: crate::PendingTurnInputDraft,

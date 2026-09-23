@@ -292,11 +292,22 @@ impl LashRuntime {
                 crate::RuntimeEffectEnvelope::new(
                     acceptance_invocation.clone(),
                     crate::RuntimeEffectCommand::AcceptTurnInput {
-                        draft: Box::new(crate::PendingTurnInputDraft::new(
-                            self.state.session_id.clone(),
-                            crate::TurnInputIngress::next_turn(),
-                            input.durable_projection(),
-                        )),
+                        // The id is provisioned from the acceptance address
+                        // before the body runs, so a body re-run because its
+                        // outcome was never recorded names the row the first
+                        // run wrote and the store adopts it (ADR 0069 §6).
+                        draft: Box::new(
+                            crate::PendingTurnInputDraft::new(
+                                self.state.session_id.clone(),
+                                crate::TurnInputIngress::next_turn(),
+                                input.durable_projection(),
+                            )
+                            .with_input_id(
+                                super::turn_input_ingress::provisioned_turn_input_id(
+                                    acceptance_invocation.address(),
+                                ),
+                            ),
+                        ),
                     },
                 ),
                 crate::RuntimeEffectLocalExecutor::turn_acceptance(

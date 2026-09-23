@@ -379,7 +379,8 @@ pub enum RuntimeErrorCode {
 /// is a store commit failure.
 pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
     match err {
-        err @ crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. } => {
+        err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
+        | crate::store::StoreError::PendingTurnInputIdConflict { .. }) => {
             RuntimeError::new(RuntimeErrorCode::DurableIdentityConflict, err.to_string())
         }
         err => RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err.to_string()),
@@ -388,7 +389,8 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
 
 pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
-        err @ crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. } => {
+        err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
+        | crate::store::StoreError::PendingTurnInputIdConflict { .. }) => {
             runtime_error_from_turn_input_admission(err)
         }
         crate::store::StoreError::Contended => RuntimeError::new(
