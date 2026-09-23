@@ -1145,6 +1145,52 @@ impl AttachmentStore for InMemoryAttachmentStore {
     }
 }
 
+/// No attachment port: a runtime or fixture with nowhere to keep attachment
+/// bytes. Every write is refused with a terminal backend failure, and reads
+/// find nothing, as they would in a store that never accepted a write.
+///
+/// It keeps nothing, so it is not a persistence store: a fixture that only
+/// needs *an* attachment facade takes [`SessionAttachmentStore::unavailable`],
+/// and one that stores attachments takes its backend's port.
+#[cfg(any(test, feature = "testing"))]
+#[derive(Debug, Default)]
+pub struct UnavailableAttachmentStore;
+
+#[cfg(any(test, feature = "testing"))]
+#[async_trait::async_trait]
+impl AttachmentStore for UnavailableAttachmentStore {
+    async fn put(
+        &self,
+        _bytes: Vec<u8>,
+        _meta: AttachmentCreateMeta,
+    ) -> Result<AttachmentRef, AttachmentStoreError> {
+        Err(AttachmentStoreError::Backend {
+            operation: "put",
+            class: AttachmentStoreFailureClass::Terminal,
+            source: "this context has no attachment port".into(),
+        })
+    }
+
+    async fn get(&self, id: &AttachmentId) -> Result<StoredAttachment, AttachmentStoreError> {
+        Err(AttachmentStoreError::NotFound(id.clone()))
+    }
+
+    async fn delete(&self, _id: &AttachmentId) -> Result<(), AttachmentStoreError> {
+        Ok(())
+    }
+
+    async fn list(&self) -> Result<Vec<StoredBlobRef>, AttachmentStoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn head(
+        &self,
+        _id: &AttachmentId,
+    ) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
+        Ok(None)
+    }
+}
+
 /// How many times a `put` re-acquires the write fence before giving the digest
 /// back to the caller as [`AttachmentStoreError::ReclamationInFlight`].
 ///
@@ -1273,6 +1319,13 @@ impl SessionAttachmentStore {
     /// Ephemeral facade over a fresh in-memory backend.
     pub fn in_memory() -> Self {
         Self::ephemeral(Arc::new(InMemoryAttachmentStore::new()))
+    }
+
+    /// Ephemeral facade with no attachment port: every put is refused and
+    /// reads find nothing (see [`UnavailableAttachmentStore`]).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn unavailable() -> Self {
+        Self::ephemeral(Arc::new(UnavailableAttachmentStore))
     }
 
     pub fn backend(&self) -> &Arc<dyn AttachmentStore> {

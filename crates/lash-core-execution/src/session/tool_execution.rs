@@ -579,7 +579,7 @@ mod turn_cancel_gate_tests;
 mod scalar_presentation_tests;
 
 impl RuntimeExecutionContext<'_> {
-    async fn emit_tool_call_started(
+    pub(crate) async fn emit_tool_call_started(
         &self,
         call_id: &str,
         name: &str,
@@ -1103,7 +1103,7 @@ impl RuntimeExecutionContext<'_> {
         }
     }
 
-    pub(super) async fn await_process_with_cancellation(
+    pub(crate) async fn await_process_with_cancellation(
         &self,
         process_ref: &crate::ProcessRef,
         parent_invocation: Option<crate::RuntimeInvocation>,

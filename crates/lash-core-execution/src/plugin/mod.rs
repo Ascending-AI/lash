@@ -878,7 +878,9 @@ mod tests {
             PluginSpec::new()
                 .with_tool_provider(Arc::new(MockToolProvider) as Arc<dyn ToolProvider>),
         ))]);
-        let services = RuntimeServices::new(host.build_session("root").expect("session"));
+        let services = crate::testing::runtime_services_without_ports(
+            host.build_session("root").expect("session"),
+        );
         assert_eq!(services.plugins.session_id(), "root");
         assert!(
             services

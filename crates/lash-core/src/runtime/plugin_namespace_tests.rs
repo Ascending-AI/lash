@@ -155,13 +155,19 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         "restricted exports must not strip runtime checkpoint or fork state"
     );
     runtime_state.session_id = "private-child".into();
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    ));
+    let runtime_services = crate::RuntimeServices::new(
+        child.clone(),
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let restricted_runtime = crate::LashRuntime::from_embedded_state(
         crate::testing::mock_session_policy(),
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )),
-        crate::RuntimeServices::new(child.clone()),
+        runtime_host,
+        runtime_services,
         runtime_state.clone(),
         crate::testing::runtime_lease_owner(),
     )
@@ -172,13 +178,19 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             if message == "plugin-facing session handles cannot construct a host runtime"
     ));
     assert_eq!(restores.load(std::sync::atomic::Ordering::SeqCst), 0);
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    ));
+    let runtime_services = crate::RuntimeServices::new(
+        host.session(&SessionId::from("private-child")).unwrap(),
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let runtime = crate::LashRuntime::from_embedded_state(
         crate::testing::mock_session_policy(),
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )),
-        crate::RuntimeServices::new(host.session(&SessionId::from("private-child")).unwrap()),
+        runtime_host,
+        runtime_services,
         runtime_state.clone(),
         crate::testing::runtime_lease_owner(),
     )

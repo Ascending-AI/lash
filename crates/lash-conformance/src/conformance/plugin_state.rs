@@ -313,13 +313,20 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
     };
     let plugins = fixture.host().build_session(id).unwrap();
     let hook_session = plugins.clone();
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    ));
+    let runtime_services = crate::PersistentRuntimeServices::new(
+        plugins,
+        store.clone(),
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let runtime = crate::LashRuntime::from_persistent_embedded_state(
         policy.clone(),
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )),
-        crate::PersistentRuntimeServices::new(plugins, store.clone()),
+        runtime_host,
+        runtime_services,
         state,
         crate::testing::runtime_lease_owner(),
     )
@@ -372,13 +379,20 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
         )
         .unwrap();
     assert_eq!(rebuilt.state(id).generation(), generation + 1);
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    ));
+    let runtime_services = crate::PersistentRuntimeServices::new(
+        plugins,
+        store.clone(),
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let runtime = crate::LashRuntime::from_persistent_embedded_state(
         policy,
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )),
-        crate::PersistentRuntimeServices::new(plugins, store.clone()),
+        runtime_host,
+        runtime_services,
         state,
         crate::testing::runtime_lease_owner(),
     )

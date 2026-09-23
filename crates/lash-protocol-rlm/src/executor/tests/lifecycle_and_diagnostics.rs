@@ -108,7 +108,8 @@ fn colliding_host_catalog() -> lash_core::ToolCatalog {
 
 async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
     let mut state = RlmExecutionState::new();
-    let mut context = lash_core::testing::code_execution_context();
+    let mut context =
+        lash_core::testing::code_execution_context(crate::testing::memory_backend_ports().await);
     let mut request = ExecRequest {
         language: "typescript".to_string(),
         code: "finish(1);".to_string(),
@@ -128,19 +129,14 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
                     observed_bindings: Default::default(),
                     enumerations: Default::default(),
                 });
-            context = lash_core::testing::code_execution_context_with_tool_provider_catalog_effect_host_and_invocation(
-                provider,
-                lash_core::ToolCatalog::default(),
-                failing_deferred_journal_host().await,
-                lash_core::testing::exec_code_invocation(
+            context = lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(crate::testing::ports_over_host(failing_deferred_journal_host().await).await, provider, lash_core::ToolCatalog::default(), lash_core::testing::exec_code_invocation(
                     "host-setup-failure",
                     "turn-1",
                     0,
                     0,
                     "exec-code",
                     "exec-code:host-setup-failure",
-                ),
-            );
+                ));
             request.code =
                 r#"finish(await web.fetch({ url: "https://example.test" }));"#.to_string();
             deferred_resolver = Some(Arc::new(BindingDeferredResolver {
@@ -150,6 +146,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
         }
         HostSetupFailureSite::HostEnvironment => {
             context = lash_core::testing::code_execution_context_with_tool_catalog(
+                crate::testing::memory_backend_ports().await,
                 colliding_host_catalog(),
             );
         }
@@ -218,7 +215,9 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
             projection_resolver = Arc::new(FailingProjectionResolver);
         }
         HostSetupFailureSite::CancelledSetup => {
-            context = lash_core::testing::cancelled_code_execution_context();
+            context = lash_core::testing::cancelled_code_execution_context(
+                crate::testing::memory_backend_ports().await,
+            );
             request.code = "missing =".to_string();
         }
     }
@@ -378,6 +377,7 @@ pub(super) async fn execute_and_collect_inventory(
     let sink = Arc::new(RecordingTraceSink::default());
     let context =
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+            crate::testing::memory_backend_ports().await,
             Arc::new(BindingRecordingDeferredProvider {
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 observed_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -501,7 +501,9 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
             let mut state = RlmExecutionState::for_engine(language);
             let successful = execute_code_with_channel_and_bounds(
                 &mut state,
-                lash_core::testing::code_execution_context(),
+                lash_core::testing::code_execution_context(
+                    crate::testing::memory_backend_ports().await,
+                ),
                 ExecRequest {
                     language: language.to_string(),
                     code: successful_code.to_string(),
@@ -522,7 +524,9 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 std::time::Duration::from_secs(5),
                 execute_code_with_channel_and_bounds(
                     &mut state,
-                    lash_core::testing::code_execution_context_cancelling_after_yield(),
+                    lash_core::testing::code_execution_context_cancelling_after_yield(
+                        crate::testing::memory_backend_ports().await,
+                    ),
                     ExecRequest {
                         language: language.to_string(),
                         code: code.to_string(),
@@ -584,7 +588,9 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
             let mut state = RlmExecutionState::for_engine(language);
             let response = execute_code_with_channel_and_bounds(
                 &mut state,
-                lash_core::testing::cancelled_code_execution_context(),
+                lash_core::testing::cancelled_code_execution_context(
+                    crate::testing::memory_backend_ports().await,
+                ),
                 ExecRequest {
                     language: language.to_string(),
                     code: code.to_string(),
@@ -624,7 +630,9 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
             for code in [first_code, tail_code] {
                 let response = execute_code_with_channel_and_bounds(
                     &mut state,
-                    lash_core::testing::code_execution_context(),
+                    lash_core::testing::code_execution_context(
+                        crate::testing::memory_backend_ports().await,
+                    ),
                     ExecRequest {
                         language: language.to_string(),
                         code: code.to_string(),
@@ -676,7 +684,9 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                 let mut state = RlmExecutionState::for_engine(language);
                 let first = execute_code_with_channel_and_bounds(
                     &mut state,
-                    lash_core::testing::code_execution_context(),
+                    lash_core::testing::code_execution_context(
+                        crate::testing::memory_backend_ports().await,
+                    ),
                     ExecRequest {
                         language: language.to_string(),
                         code: first_code.clone(),
@@ -702,7 +712,9 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
 
                 let tail = execute_code_with_channel_and_bounds(
                     &mut state,
-                    lash_core::testing::code_execution_context(),
+                    lash_core::testing::code_execution_context(
+                        crate::testing::memory_backend_ports().await,
+                    ),
                     ExecRequest {
                         language: language.to_string(),
                         code: tail_code.to_string(),
@@ -1012,11 +1024,11 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
         &process_id,
         &authority,
     );
-    let context = lash_core::testing::TestExecutionContextBuilder::new()
-        .turn_context(input.turn_context)
-        .borrowed_effect_controller(process_controller())
-        .build()
-        .into_runtime();
+    let context =
+        lash_core::testing::TestExecutionContextBuilder::over_controller(process_controller())
+            .turn_context(input.turn_context)
+            .build()
+            .into_runtime();
     let program = lash_typescript::parse("finish(1);").expect("valid fixture source");
     let artifact = lashlang::ModuleArtifact::from_program(program).expect("valid fixture module");
     let trace = foreground_lashlang_execution_trace(
@@ -1043,16 +1055,22 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
     assert_eq!(trace.identity().attempt(), Some(2));
     assert_eq!(trace.identity().incarnation(), Some(1));
 
-    let non_process_context = lash_core::testing::code_execution_context_with_invocation(
-        lash_core::testing::exec_code_invocation(
-            "rlm-session",
-            "turn-1",
-            0,
-            0,
-            "exec-code",
-            "exec-code:foreground",
-        ),
-    );
+    // The trace identity reads the context alone; the cell never runs, so
+    // the context needs no host.
+    let non_process_context = lash_core::testing::TestExecutionContextBuilder::over_controller(
+        Arc::new(lash_core::testing::UnavailableEffectController)
+            as Arc<dyn lash_core::RuntimeEffectController>,
+    )
+    .runtime_parent_invocation(lash_core::testing::exec_code_invocation(
+        "rlm-session",
+        "turn-1",
+        0,
+        0,
+        "exec-code",
+        "exec-code:foreground",
+    ))
+    .build()
+    .into_runtime();
     let non_process_trace = foreground_lashlang_execution_trace(
         &non_process_context,
         &artifact,
@@ -1082,6 +1100,7 @@ pub(super) async fn execute_continue_as_with_trace_sink(
     );
     let context =
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+            crate::testing::memory_backend_ports().await,
             Arc::new(crate::control_tools::RlmControlToolsProvider {
                 vocabulary: crate::dialect::DialectPromptVocabulary::default(),
             }),
@@ -1196,7 +1215,7 @@ pub(super) async fn execute_test_code(
 ) -> RlmExecutionState {
     let response = Box::pin(execute_code_unbounded_for_tests(
         &mut state,
-        lash_core::testing::code_execution_context(),
+        lash_core::testing::code_execution_context(crate::testing::memory_backend_ports().await),
         ExecRequest {
             language: "typescript".to_string(),
             code,
@@ -1326,9 +1345,11 @@ pub(super) async fn execute_with_host_environment(
     // Triggers are catalogue presence rather than an ability now (FIG-2999), so
     // the harness always supplies the store: a program that never registers one
     // never reaches it.
-    let ctx = lash_core::testing::code_execution_context_with_trigger_store(Arc::new(
-        lash_core::facade_support::InMemoryTriggerStore::default(),
-    ));
+    let ctx = lash_core::testing::code_execution_context_with_trigger_store(
+        crate::testing::memory_backend_ports().await,
+        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+        crate::testing::memory_process_registry().await,
+    );
     let surface = LashlangSurface::new(
         abilities,
         lashlang::LashlangLanguageFeatures::default(),
@@ -1363,7 +1384,9 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
     block_on(async {
         let _ = execute_code_with_bounds(
             &mut RlmExecutionState::new(),
-            lash_core::testing::code_execution_context(),
+            lash_core::testing::code_execution_context(
+                crate::testing::memory_backend_ports().await,
+            ),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: "let i = 0;\nwhile (i < 5000) { i = i + 1; }\nfinish(i);".to_string(),
@@ -1391,7 +1414,9 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
         let previous = set_execution_bound_exhaustion_loud(false);
         let result = execute_code_with_bounds(
             &mut RlmExecutionState::new(),
-            lash_core::testing::code_execution_context(),
+            lash_core::testing::code_execution_context(
+                crate::testing::memory_backend_ports().await,
+            ),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: "const value = 1;".to_string(),
@@ -1438,7 +1463,9 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
 
         let first = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context(),
+            lash_core::testing::code_execution_context(
+                crate::testing::memory_backend_ports().await,
+            ),
             request(),
             lashlang::global_in_memory_lashlang_artifact_store(),
             surface(),
@@ -1456,7 +1483,9 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
 
         let second = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context(),
+            lash_core::testing::code_execution_context(
+                crate::testing::memory_backend_ports().await,
+            ),
             request(),
             lashlang::global_in_memory_lashlang_artifact_store(),
             surface(),

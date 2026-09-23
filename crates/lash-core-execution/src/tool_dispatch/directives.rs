@@ -7,7 +7,7 @@ use crate::plugin::{
 
 use super::context::ToolDispatchContext;
 
-pub(super) struct BeforeToolDirectiveOutcome {
+pub struct BeforeToolDirectiveOutcome {
     pub args: serde_json::Value,
     pub short_circuit: Option<ToolOutcome>,
 }
@@ -122,7 +122,7 @@ impl BeforeToolDirectiveFold {
     }
 }
 
-pub(super) async fn apply_before_tool_directives(
+pub async fn apply_before_tool_directives(
     context: &ToolDispatchContext<'_>,
     args: serde_json::Value,
     directives: Vec<PluginOwned<BeforeToolCallPluginDirective>>,

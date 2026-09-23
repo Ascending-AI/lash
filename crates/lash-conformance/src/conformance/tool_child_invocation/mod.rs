@@ -146,14 +146,19 @@ pub type ToolChildWorldFactory = Arc<
         + Sync,
 >;
 
-/// Builds a fresh process registry for one scenario, supplied by the tier.
+/// One scenario's process substrate: the registry its processes register in
+/// and the process-exec-env store its children's environments publish to.
+pub struct ToolChildProcesses {
+    pub registry: Arc<dyn crate::ProcessRegistry>,
+    pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+}
+
+/// Builds a fresh process substrate for one scenario, supplied by the tier.
 ///
 /// A factory rather than a handle because each scenario opens its own
 /// registry: a durable registry must not carry the previous scenario's rows.
-pub type ToolChildRegistryFactory = Arc<
-    dyn Fn() -> std::pin::Pin<Box<dyn Future<Output = Arc<dyn crate::ProcessRegistry>> + Send>>
-        + Send
-        + Sync,
+pub type ToolChildProcessesFactory = Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn Future<Output = ToolChildProcesses> + Send>> + Send + Sync,
 >;
 
 /// What a tier supplies: a world factory over one substrate, a process
@@ -166,8 +171,9 @@ pub struct ToolChildLawFixture {
     /// tier both calls return the same host, because the process *is* the
     /// substrate there.
     pub make_world: ToolChildWorldFactory,
-    /// A fresh process registry on the substrate the host factory serves.
-    pub make_registry: ToolChildRegistryFactory,
+    /// A fresh process registry and process-exec-env store on the substrate
+    /// the host factory serves.
+    pub make_processes: ToolChildProcessesFactory,
     /// The completion routing this tier would record for a deferrable child:
     /// `Durable` where a resolution survives the worker, `ProcessLifetime`
     /// where the host's keys die with the process (ADR 0099 §14).
@@ -968,8 +974,8 @@ fn law_orchestrating_tool() -> crate::tool_provider::orchestration::Orchestratin
 struct OpenerExtras {
     /// Added on top of the code-protocol factories the context defaults to.
     plugin_factories: Vec<Arc<dyn crate::plugin::PluginFactory>>,
-    /// The session attachment store the dispatch binds; `None` takes the
-    /// builder's fresh in-memory default.
+    /// The session attachment store the dispatch binds; `None` binds no
+    /// attachment port, so a put is refused.
     attachment_store: Option<Arc<crate::SessionAttachmentStore>>,
 }
 
@@ -1013,24 +1019,26 @@ fn build_opener_dispatch(
     let processes = processes.unwrap_or_else(|| {
         crate::testing::effect_backed_process_service(
             registry.expect("a dispatch without a process service takes the registry"),
+            Arc::clone(&process_env_store),
         )
     });
-    let mut builder = crate::testing::TestExecutionContextBuilder::new()
-        .provider(provider)
-        .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
-        .tool_registry(Arc::new(tool_registry))
-        .processes(processes)
-        .direct_completions(crate::DirectCompletionClient::from_fn(
-            |request, _source| {
-                Ok(if request.model == "law-billed-model" {
-                    law_billed_completion()
-                } else {
-                    law_direct_completion()
-                })
-            },
-        ))
-        .process_env_store(process_env_store)
-        .borrowed_effect_controller(controller);
+    let mut builder = crate::testing::TestExecutionContextBuilder::new(
+        crate::testing::TestExecutionPorts::over_host(Arc::clone(host), process_env_store),
+    )
+    .provider(provider)
+    .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
+    .tool_registry(Arc::new(tool_registry))
+    .processes(processes)
+    .direct_completions(crate::DirectCompletionClient::from_fn(
+        |request, _source| {
+            Ok(if request.model == "law-billed-model" {
+                law_billed_completion()
+            } else {
+                law_direct_completion()
+            })
+        },
+    ))
+    .borrowed_effect_controller(controller);
     if let Some(attachment_store) = extras.attachment_store {
         builder = builder.attachment_store(attachment_store);
     }
@@ -1742,7 +1750,10 @@ async fn scenario(
     session_id: &crate::SessionId,
     start_metadata: serde_json::Value,
 ) -> Scenario {
-    let registry = (fixture.make_registry)().await;
+    let ToolChildProcesses {
+        registry,
+        process_env_store,
+    } = (fixture.make_processes)().await;
     let intent_target = crate::ProcessId::from(format!("{session_id}-intent-target"));
     registry
         .register_process_with_observers(
@@ -1767,7 +1778,7 @@ async fn scenario(
         )
         .await
         .expect("register the intent target process");
-    let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
+    let env_ref = crate::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let observation = Arc::new(LawObservation::default());
     Scenario {
         provider: Arc::new(LawLeafProvider {

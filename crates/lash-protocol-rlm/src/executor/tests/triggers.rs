@@ -97,7 +97,9 @@ async fn execute_with_deferred_trigger(
     let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
         &mut state,
         lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
+            crate::testing::memory_backend_ports().await,
             Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+            crate::testing::memory_process_registry().await,
             lash_core::testing::exec_code_invocation(
                 "session",
                 "turn",
@@ -292,7 +294,9 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
         let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
+                crate::testing::memory_backend_ports().await,
                 Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
+                crate::testing::memory_process_registry().await,
                 lash_core::testing::exec_code_invocation(
                     "session",
                     "turn",
@@ -464,9 +468,10 @@ pub(super) async fn execute_with_capturing_trigger_effects(
     capture: TriggerEffectCapture,
 ) -> ExecResponse {
     let mut state = RlmExecutionState::new();
-    let ctx = lash_core::testing::code_execution_context_with_trigger_store_and_effect_host(
+    let ctx = lash_core::testing::code_execution_context_with_trigger_store(
+        crate::testing::ports_over_host(capture.effect_host().await).await,
         Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
-        capture.effect_host().await,
+        crate::testing::memory_process_registry().await,
     );
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
@@ -642,9 +647,10 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
     block_on(async {
         let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
         let capture = TriggerEffectCapture::default();
-        let ctx = lash_core::testing::code_execution_context_with_trigger_store_and_effect_host(
+        let ctx = lash_core::testing::code_execution_context_with_trigger_store(
+            crate::testing::ports_over_host(capture.effect_host().await).await,
             store.clone(),
-            capture.effect_host().await,
+            crate::testing::memory_process_registry().await,
         );
         let surface = LashlangSurface::new(
             lashlang::LashlangAbilities::default(),
@@ -824,7 +830,11 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
 
         let first = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context_with_trigger_store(trigger_store.clone()),
+            lash_core::testing::code_execution_context_with_trigger_store(
+                crate::testing::memory_backend_ports().await,
+                trigger_store.clone(),
+                crate::testing::memory_process_registry().await,
+            ),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: r#"
@@ -865,7 +875,11 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
 
         let unrelated = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context_with_trigger_store(trigger_store.clone()),
+            lash_core::testing::code_execution_context_with_trigger_store(
+                crate::testing::memory_backend_ports().await,
+                trigger_store.clone(),
+                crate::testing::memory_process_registry().await,
+            ),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: r#"
@@ -934,7 +948,10 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
                 lash_core::OnParentEnd::Abandon,
             ),
         );
-        let context = lash_core::testing::code_execution_context_for_process(&registration);
+        let context = lash_core::testing::code_execution_context_for_process(
+            crate::testing::memory_backend_ports().await,
+            &registration,
+        );
         let owner_error = context
             .trigger_owner_scope()
             .expect_err("a bare host process must not have a trigger owner namespace");
@@ -1053,12 +1070,11 @@ async fn execute_trigger_process_with_originator(
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
+        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
         processes,
-        effect_host,
-        process_env_store,
         lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
             session_policy,
@@ -1162,7 +1178,10 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
                 lash_core::OnParentEnd::Abandon,
             ),
         );
-        let context = lash_core::testing::code_execution_context_for_process(&registration);
+        let context = lash_core::testing::code_execution_context_for_process(
+            crate::testing::memory_backend_ports().await,
+            &registration,
+        );
         let owner_error = context
             .trigger_owner_scope()
             .expect_err("a bare host process must not have a trigger owner namespace");
@@ -1798,9 +1817,10 @@ async fn execute_typescript_with_capturing_trigger_effects(
     let mut state = RlmExecutionState::for_engine("typescript");
     execute_code_with_channel_and_bounds(
         &mut state,
-        lash_core::testing::code_execution_context_with_trigger_store_and_effect_host(
+        lash_core::testing::code_execution_context_with_trigger_store(
+            crate::testing::ports_over_host(capture.effect_host().await).await,
             Arc::new(lash_core::facade_support::InMemoryTriggerStore::default()),
-            capture.effect_host().await,
+            crate::testing::memory_process_registry().await,
         ),
         ExecRequest {
             language: "typescript".to_string(),

@@ -425,7 +425,9 @@ pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_a
         let (mut state, registry) = restored_projection_degradation_fixture();
         let response = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context(),
+            lash_core::testing::code_execution_context(
+                crate::testing::memory_backend_ports().await,
+            ),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: "console.log(healthy);\nconsole.log(dead);\nfinish(ordinary);".to_string(),
@@ -499,7 +501,9 @@ pub(super) fn strict_host_policy_can_abort_on_the_degraded_binding_list() {
         let (mut state, registry) = restored_projection_degradation_fixture();
         let response = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context(),
+            lash_core::testing::code_execution_context(
+                crate::testing::memory_backend_ports().await,
+            ),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: "finish(healthy);".to_string(),
@@ -1076,7 +1080,9 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
 pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
     block_on(async {
         let mut state = RlmExecutionState::new();
-        let ctx = lash_core::testing::code_execution_context();
+        let ctx = lash_core::testing::code_execution_context(
+            crate::testing::memory_backend_ports().await,
+        );
         let response = execute_code_unbounded_for_tests(
             &mut state,
             ctx,
@@ -1118,7 +1124,9 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
 pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
     block_on(async {
         let mut state = RlmExecutionState::new();
-        let ctx = lash_core::testing::code_execution_context();
+        let ctx = lash_core::testing::code_execution_context(
+            crate::testing::memory_backend_ports().await,
+        );
         // Same constructs the runtime-perf `rlm_globals` scenario seeds:
         // a large record and a large list that exceed the inline budget.
         let code = r#"let big_map: Record<string, unknown> = {};

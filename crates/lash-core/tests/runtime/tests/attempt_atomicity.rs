@@ -165,6 +165,9 @@ impl lash_core::RuntimeEffectController for ControllerOwnedTier {
 }
 
 struct Fixtures {
+    /// The backend whose registry and process-exec-env store the matrix
+    /// runs over; held so its in-memory databases outlive every row.
+    backend: lash_sqlite_store::SqliteBackend,
     host: Arc<lash_core::testing::MockSessionManager>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<lash_core::facade_support::InMemoryTriggerStore>,
@@ -198,15 +201,20 @@ async fn fixtures() -> Fixtures {
         lash_core::runtime::EmbeddedRuntimeHost::new(super::helpers::test_runtime_host_config()),
     ))
     .await;
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("memory backend");
+    let registry = lash_core::Backend::process_registry(&backend);
     let host = Arc::new(
-        lash_core::testing::MockSessionManager::default().with_tool_registry(
-            lash_core::ToolRegistry::from_tool_provider(Arc::new(
-                lash_core::testing::EmptyToolProvider,
-            ))
-            .expect("empty tool registry"),
-        ),
+        lash_core::testing::MockSessionManager::default()
+            .with_process_registry(Arc::clone(&registry))
+            .with_tool_registry(
+                lash_core::ToolRegistry::from_tool_provider(Arc::new(
+                    lash_core::testing::EmptyToolProvider,
+                ))
+                .expect("empty tool registry"),
+            ),
     );
-    let registry: Arc<dyn lash_core::ProcessRegistry> = host.process_registry.clone();
     let event_types = [
         "attempt.atomicity.note",
         "attempt.atomicity.awaited",
@@ -282,6 +290,7 @@ async fn fixtures() -> Fixtures {
         .expect("start live matrix process");
     let trigger_store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     Fixtures {
+        backend,
         host,
         registry,
         trigger_store,
@@ -338,8 +347,10 @@ fn tool_context_with_provider<'run>(
     let plugins = lash_core::testing::test_plugin_host(Vec::new())
         .build_session(SESSION)
         .expect("build attempt-atomicity plugin session");
-    let processes =
-        lash_core::testing::effect_backed_process_service(Arc::clone(&fixtures.registry));
+    let processes = lash_core::testing::effect_backed_process_service(
+        Arc::clone(&fixtures.registry),
+        lash_core::Backend::process_env_store(&fixtures.backend),
+    );
     let child_process_starts = Arc::clone(&fixtures.child_process_starts);
     let effect_controller = lash_core::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
     let attempt_parent = attempt_invocation().into_runtime_invocation();
@@ -387,7 +398,9 @@ fn tool_context_with_provider<'run>(
         turn_activity_tx: None,
         checkpoint_messages: lash_core::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: lash_core::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory()),
+        attachment_store: Arc::new(
+            lash_core::facade_support::SessionAttachmentStore::unavailable(),
+        ),
         attachment_source_policy: Arc::new(lash_core::attachments::OpenAttachmentSourcePolicy),
         turn_context: lash_core::TurnContext::default(),
         clock: Arc::new(lash_core::facade_support::SystemClock),
@@ -1657,7 +1670,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
         SessionId::from(SESSION.to_string()),
         dispatch,
         Arc::new(lash_core::InMemoryProcessExecutionEnvStore::new()),
-        Arc::new(lash_core::facade_support::SessionAttachmentStore::in_memory()),
+        Arc::new(lash_core::facade_support::SessionAttachmentStore::unavailable()),
         Arc::new(lash_core::facade_support::ChronologicalProjection::default()),
         None,
         lash_core::TurnContext::default(),

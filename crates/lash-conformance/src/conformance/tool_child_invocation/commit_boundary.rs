@@ -124,7 +124,10 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         let sink = Arc::new(IntentSink::default());
         sink.hold_all();
         let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-            inner: crate::testing::effect_backed_process_service(Arc::clone(&scenario.registry)),
+            inner: crate::testing::effect_backed_process_service(
+                Arc::clone(&scenario.registry),
+                Arc::clone(&scenario.process_env_store),
+            ),
             sink: Arc::clone(&sink),
         });
         let _guard = register_opener_with_processes(
@@ -198,6 +201,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         let sink = Arc::clone(&crash_sink);
         let routing_kind = fixture.deferrable_routing;
         let opener = opener.clone();
+        let make_processes = Arc::clone(&fixture.make_processes);
         move |world| {
             Box::pin(async move {
                 sink.hold_all();
@@ -208,11 +212,15 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
                     intent_target: intent_target.clone(),
                     start_metadata: serde_json::Value::Null,
                 });
-                let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
+                let crash_processes = make_processes().await;
+                let env_store = crash_processes.process_env_store;
+                let env_ref =
+                    crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
                 let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-                    inner: crate::testing::effect_backed_process_service(Arc::new(
-                        crate::TestLocalProcessRegistry::default(),
-                    )),
+                    inner: crate::testing::effect_backed_process_service(
+                        crash_processes.registry,
+                        Arc::clone(&env_store),
+                    ),
                     sink: Arc::clone(&sink),
                 });
                 let _guard = register_opener_with_processes(
@@ -272,13 +280,17 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         lease_ttl_ms: LIVE_LEASE_MS,
     })
     .await;
-    let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
+    let env_store = (fixture.make_processes)().await.process_env_store;
+    let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
     install_child_host(&successor.host, &env_store);
     until_claims_lapse(&successor, &group_key).await;
     let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
     let sink = Arc::new(IntentSink::default());
     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-        inner: crate::testing::effect_backed_process_service(Arc::clone(&scenario.registry)),
+        inner: crate::testing::effect_backed_process_service(
+            Arc::clone(&scenario.registry),
+            Arc::clone(&scenario.process_env_store),
+        ),
         sink: Arc::clone(&sink),
     });
     let _guard = register_opener_with_processes(
@@ -447,6 +459,7 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
             let sink = Arc::clone(&crash_sink);
             let routing_kind = fixture.deferrable_routing;
             let opener = opener.clone();
+            let make_processes = Arc::clone(&fixture.make_processes);
             move |world| {
                 Box::pin(async move {
                     observation.hold(&call_a);
@@ -458,11 +471,15 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
                         intent_target: intent_target.clone(),
                         start_metadata: serde_json::Value::Null,
                     });
-                    let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
+                    let crash_processes = make_processes().await;
+                    let env_store = crash_processes.process_env_store;
+                    let env_ref =
+                        crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
                     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-                        inner: crate::testing::effect_backed_process_service(Arc::new(
-                            crate::TestLocalProcessRegistry::default(),
-                        )),
+                        inner: crate::testing::effect_backed_process_service(
+                            crash_processes.registry,
+                            Arc::clone(&env_store),
+                        ),
                         sink: Arc::clone(&sink),
                     });
                     let _guard = register_opener_with_processes(
@@ -541,14 +558,18 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
             lease_ttl_ms: LIVE_LEASE_MS,
         })
         .await;
-        let (env_store, env_ref) = crate::testing::process_execution_env_fixture();
+        let env_store = (fixture.make_processes)().await.process_env_store;
+        let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
         install_child_host(&successor.host, &env_store);
         until_claims_lapse(&successor, &group_key).await;
         let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
         let sink = Arc::new(IntentSink::default());
         sink.hold(&call_b);
         let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-            inner: crate::testing::effect_backed_process_service(Arc::clone(&scenario.registry)),
+            inner: crate::testing::effect_backed_process_service(
+                Arc::clone(&scenario.registry),
+                Arc::clone(&scenario.process_env_store),
+            ),
             sink: Arc::clone(&sink),
         });
         let _guard = register_opener_with_processes(
@@ -650,7 +671,10 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
     scenario.observation.hold(&call_a);
     sink.hold(&call_b);
     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-        inner: crate::testing::effect_backed_process_service(Arc::clone(&scenario.registry)),
+        inner: crate::testing::effect_backed_process_service(
+            Arc::clone(&scenario.registry),
+            Arc::clone(&scenario.process_env_store),
+        ),
         sink: Arc::clone(&sink),
     });
     let _guard = register_opener_with_processes(

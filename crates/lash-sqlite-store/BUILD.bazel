@@ -579,6 +579,32 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
+    name = "lash-sqlite-store__fv_6fc66767",
+    build_script = None,
+    crate_features = [
+        "default",
+        "lashlang",
+    ],
+    crate_name = "lash_sqlite_store",
+    declared_features = [
+        "default",
+        "lashlang",
+        "perf-witness",
+        "testing",
+    ],
+    exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-sqlite-store",
+    package_name = "lash-internal-sqlite-store",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_acf2157d", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_46307028", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-memory": "//crates/lash-core-memory:lash-core-memory__fv_691bdd6c", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930", "//crates/lashlang": "//crates/lashlang:lashlang__fv_138504b6"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
     name = "lash-sqlite-store__fv_7069c5c5",
     build_script = None,
     crate_features = [],

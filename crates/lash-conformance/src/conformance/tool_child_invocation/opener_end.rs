@@ -42,26 +42,28 @@ fn opener_context(
         vec![law_orchestrating_tool()],
     )
     .expect("the law's leaf provider and orchestrating tool register disjoint ids");
-    crate::testing::TestExecutionContextBuilder::new()
-        .session_id(session_id.clone())
-        .provider(provider)
-        .tool_catalog(crate::ToolCatalog::from_tool_definitions(leaf_definitions()))
-        .tool_registry(Arc::new(tool_registry))
-        .processes(processes)
-        .direct_completions(
-            crate::DirectCompletionClient::from_fn(|_request, _source| Ok(law_direct_completion()))
-                .with_usage_charge_sink(charge),
-        )
-        .process_env_store(process_env_store)
-        .effect_host(Arc::clone(host))
-        .borrowed_effect_controller(controller)
-        .build()
-        .into_runtime()
-        .with_opener_state(crate::session::OpenerState::new(
-            crate::session::OpenerWorkBound::default(),
-        ))
-        .with_group_closing(host.effect_group_closing())
-        .with_cancellation_token(cancel)
+    crate::testing::TestExecutionContextBuilder::new(crate::testing::TestExecutionPorts::over_host(
+        Arc::clone(host),
+        process_env_store,
+    ))
+    .session_id(session_id.clone())
+    .provider(provider)
+    .tool_catalog(crate::ToolCatalog::from_tool_definitions(leaf_definitions()))
+    .tool_registry(Arc::new(tool_registry))
+    .processes(processes)
+    .direct_completions(
+        crate::DirectCompletionClient::from_fn(|_request, _source| Ok(law_direct_completion()))
+            .with_usage_charge_sink(charge),
+    )
+    .borrowed_effect_controller(controller)
+    .route_tool_children()
+    .build()
+    .into_runtime()
+    .with_opener_state(crate::session::OpenerState::new(
+        crate::session::OpenerWorkBound::default(),
+    ))
+    .with_group_closing(host.effect_group_closing())
+    .with_cancellation_token(cancel)
 }
 
 /// The one turn every run of a law's session belongs to: a retried end is the
@@ -198,7 +200,10 @@ pub async fn a_cancelled_aggregates_committed_loser_is_incorporated_by_its_opene
     let sink = Arc::new(IntentSink::default());
     sink.hold_all();
     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-        inner: crate::testing::effect_backed_process_service(Arc::clone(&scenario.registry)),
+        inner: crate::testing::effect_backed_process_service(
+            Arc::clone(&scenario.registry),
+            Arc::clone(&scenario.process_env_store),
+        ),
         sink: Arc::clone(&sink),
     });
     let charge = Arc::new(RecordingCharge::default());
@@ -308,7 +313,10 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
         let sink = Arc::new(IntentSink::default());
         sink.hold_all();
         let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-            inner: crate::testing::effect_backed_process_service(Arc::clone(&scenario.registry)),
+            inner: crate::testing::effect_backed_process_service(
+                Arc::clone(&scenario.registry),
+                Arc::clone(&scenario.process_env_store),
+            ),
             sink: Arc::clone(&sink),
         });
         scenario.observation.hold(&spender);
@@ -382,6 +390,7 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
         let spender = spender.clone();
         let group_key = Arc::clone(&group_key);
         let first_race = race();
+        let make_processes = Arc::clone(&fixture.make_processes);
         move |world| {
             Box::pin(async move {
                 let observation = Arc::new(LawObservation::default());
@@ -392,13 +401,17 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
                     intent_target: crate::ProcessId::from(format!("{session_id}-intent-target")),
                     start_metadata: serde_json::Value::Null,
                 });
-                let (env_store, _env_ref) = crate::testing::process_execution_env_fixture();
+                let crash_processes = make_processes().await;
+                let env_store = crash_processes.process_env_store;
+                let _env_ref =
+                    crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
                 let sink = Arc::new(IntentSink::default());
                 sink.hold_all();
                 let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
-                    inner: crate::testing::effect_backed_process_service(Arc::new(
-                        crate::TestLocalProcessRegistry::default(),
-                    )),
+                    inner: crate::testing::effect_backed_process_service(
+                        crash_processes.registry,
+                        Arc::clone(&env_store),
+                    ),
                     sink: Arc::clone(&sink),
                 });
                 observation.hold(&spender);
@@ -463,7 +476,10 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
         &successor.host,
         &session_id,
         Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
-        crate::testing::effect_backed_process_service(Arc::clone(&scenario.registry)),
+        crate::testing::effect_backed_process_service(
+            Arc::clone(&scenario.registry),
+            Arc::clone(&scenario.process_env_store),
+        ),
         Arc::clone(&scenario.process_env_store),
         Arc::clone(&charge),
         CancellationToken::new(),

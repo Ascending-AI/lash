@@ -68,7 +68,7 @@ fn invocation(effect_id: &str) -> crate::RuntimeInvocation {
 /// The request the child was admitted under. Every field here deliberately
 /// disagrees with [`lent`]'s, so a rebind that dropped a line shows up as the
 /// opener's value surviving.
-fn request() -> ToolChildRequest {
+pub(super) fn request() -> ToolChildRequest {
     request_with_identity(ToolAttemptEffectIdentity::Scalar {
         parent: Some(invocation("recorded-parent")),
     })
@@ -136,7 +136,7 @@ fn lent_with_direct_completions(
         process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::NativeRuntimeEffectController::default(),
+            crate::testing::UnavailableEffectController,
         )),
         direct_completions,
         parent_invocation: Some(invocation("opener-parent")),
@@ -147,7 +147,7 @@ fn lent_with_direct_completions(
         turn_activity_tx: None,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
+        attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
@@ -156,9 +156,9 @@ fn lent_with_direct_completions(
 
 /// The child's own admitted controller, bound to the child's claim scope and
 /// not the opener's.
-fn child_controller() -> ScopedEffectController<'static> {
+pub(super) fn child_controller() -> ScopedEffectController<'static> {
     ScopedEffectController::shared(
-        Arc::new(crate::NativeRuntimeEffectController::default()),
+        Arc::new(crate::testing::UnavailableEffectController),
         crate::AdmittedScope::turn("child-session", "turn"),
     )
     .expect("a valid child scope")
@@ -312,54 +312,6 @@ fn the_child_runs_on_its_own_admitted_controller() {
     );
 }
 
-/// The claim pin is the recorded `AdmittedScope`, never `enclosing_process`.
-/// A process opener legitimately encloses its own incarnation, so the pair
-/// `opener = P#7, enclosing = P#7` validates — but when the admitted claim is a
-/// turn scope, the controller must stay that turn's controller. The retired
-/// post-admission pin block would have pinned P#7 onto it instead, making
-/// the execution context the claim pin.
-#[test]
-fn a_process_openers_enclosing_incarnation_is_never_the_claim_pin() {
-    let mut request = request();
-    let opener_ref = crate::ProcessRef::new(
-        "worker",
-        crate::ProcessIncarnation::from_registration_sequence(7),
-    );
-    request.scope.opener = crate::EffectOpener::process(opener_ref.clone());
-    request.enclosing_process = Some(opener_ref.clone());
-    request
-        .validate()
-        .expect("a process opener enclosing its own incarnation is a legal request");
-
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = ToolChildHost::new(
-        &host,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::default()),
-    );
-    let binding = crate::GroupChildBinding {
-        child: crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "child")
-            .expect("a valid child address"),
-        membership: crate::EffectGroupMembership {
-            group_key: "group".to_string(),
-            position: 0,
-            wake: crate::GroupWakePolicy::All,
-            loser_disposition: crate::LoserPolicy::RunToCompletion,
-        },
-    };
-    let controller = tool_children
-        .child_controller(&request.scope.admitted_scope, binding)
-        .expect("the admitted pair constructs the child's controller");
-    assert_eq!(
-        controller.execution_scope(),
-        &ExecutionScope::turn("child-session", "turn"),
-        "the controller is the recorded claim's, a turn scope"
-    );
-    assert!(
-        controller.admitted_process().is_none(),
-        "the opener's incarnation never became the claim pin"
-    );
-}
-
 /// Child-local buffers. Their contents ride the child's outcome (§6, §13), so a
 /// child that wrote into the opener's buffers would put its facts somewhere its
 /// settlement cannot carry them from — and would smuggle the opener's pending
@@ -483,90 +435,6 @@ fn a_childs_tool_context_holds_no_runtime_execution_context() {
             .as_ref()
             .is_some_and(|dispatch| Arc::ptr_eq(dispatch, &rebound)),
         "the context's dispatch is the child's rebound dispatch"
-    );
-}
-
-/// §1 and the registry's key rule, at the driver's door: a child whose opener
-/// is not live in this process is **neither run nor failed**. The resolver
-/// answers absence, the group leaves the child accepted, and the process whose
-/// opener is live runs it.
-#[test]
-fn a_child_whose_opener_is_not_registered_here_is_not_routed() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = ToolChildHost::new(
-        &host,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::default()),
-    );
-    let envelope = crate::RuntimeEffectEnvelope::new(
-        crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "child")
-                .expect("a valid effect address"),
-            crate::RuntimeAttribution::for_session("child-session"),
-            "child",
-        ),
-        RuntimeEffectCommand::ToolInvocation {
-            request: Box::new(request()),
-        },
-    );
-
-    assert!(
-        super::super::group_drain::GroupExecutors::executor_for(tool_children.as_ref(), &envelope)
-            .is_none(),
-        "an unregistered opener is a routing fact, not an executor and not a failure"
-    );
-
-    let lent_dispatch = lent();
-    let lent_controller = lent_dispatch
-        .effect_controller
-        .scoped()
-        .to_static()
-        .expect("the lent dispatch's controller is 'static");
-    let live = LiveOpenerContext::capture(
-        &lent_dispatch,
-        lent_controller,
-        tokio_util::sync::CancellationToken::new(),
-    );
-    let guard = tool_children
-        .openers()
-        .register(crate::EffectOpener::turn("child-session", "turn"), live);
-    assert!(
-        super::super::group_drain::GroupExecutors::executor_for(tool_children.as_ref(), &envelope)
-            .is_some(),
-        "the same child routes once its opener is live here"
-    );
-    drop(guard);
-    assert!(
-        super::super::group_drain::GroupExecutors::executor_for(tool_children.as_ref(), &envelope)
-            .is_none(),
-        "and stops routing when the opener's registration ends"
-    );
-}
-
-/// A command this resolver does not run is honestly not its child, and it
-/// says so rather than refusing the group on someone else's behalf. `Sleep`
-/// and `AwaitEvent` children are this resolver's too (FIG-3397), so the
-/// probe uses `SyncExecutionEnvironment` — a kind no group child can be.
-#[test]
-fn the_resolver_answers_only_for_tool_children() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = ToolChildHost::new(
-        &host,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::default()),
-    );
-    let envelope = crate::RuntimeEffectEnvelope::new(
-        crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "env-sync")
-                .expect("a valid effect address"),
-            crate::RuntimeAttribution::for_session("child-session"),
-            "env-sync",
-        ),
-        RuntimeEffectCommand::SyncExecutionEnvironment {
-            update_machine_config: false,
-        },
-    );
-    assert!(
-        super::super::group_drain::GroupExecutors::executor_for(tool_children.as_ref(), &envelope)
-            .is_none()
     );
 }
 
@@ -776,7 +644,7 @@ fn probed_lent(
             call,
         }),
         crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::NativeRuntimeEffectController::default(),
+            crate::testing::UnavailableEffectController,
         )),
         Some(crate::TurnId::from("opener-turn")),
     ))
@@ -933,152 +801,6 @@ async fn a_billed_failed_completion_attempt_lands_on_the_child_usage() {
     assert_eq!(deltas[0].usage.input_tokens, 5);
 }
 
-/// The tool-child host the recorded-authority checks run against.
-fn tool_children(host: &Arc<dyn EffectHost>) -> Arc<ToolChildHost> {
-    ToolChildHost::new(
-        host,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::default()),
-    )
-}
-
-/// A controller that reports `EffectJournaling::Journaled` and
-/// names the host's await-event authority, so the recorded-authority checks
-/// see the durable arms rather than the native local ones.
-struct DurableReplayController {
-    authority_id: std::sync::OnceLock<String>,
-}
-
-impl crate::AwaitEventResolver for DurableReplayController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.authority_id.get().cloned()
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::RuntimeEffectController for DurableReplayController {
-    fn effect_journaling(&self) -> crate::EffectJournaling {
-        crate::EffectJournaling::Journaled
-    }
-
-    async fn execute_effect(
-        &self,
-        _envelope: RuntimeEffectEnvelope,
-        _local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        unreachable!("the authority-check tests execute no effects")
-    }
-
-    async fn open_effect_group(
-        &self,
-        _group: crate::RuntimeEffectGroup,
-    ) -> Result<crate::EffectGroupHandle, RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("DurableReplayController"))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut crate::EffectGroupHandle,
-        _cancel: crate::CancellationToken,
-    ) -> Result<crate::GroupSettlement, RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("DurableReplayController"))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: crate::EffectGroupHandle,
-        _disposition: crate::LoserPolicy,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        Err(crate::effect_groups_unsupported("DurableReplayController"))
-    }
-}
-
-/// A scoped durable-participant controller whose await-event authority is this
-/// host's, so the host's binding derivation accepts it.
-fn durable_child_controller(host: &Arc<dyn EffectHost>) -> ScopedEffectController<'static> {
-    let controller = Arc::new(DurableReplayController {
-        authority_id: std::sync::OnceLock::new(),
-    });
-    controller
-        .authority_id
-        .set(host.turn_control_binding_id())
-        .expect("the authority id is set once");
-    ScopedEffectController::shared(
-        controller,
-        crate::AdmittedScope::turn("child-session", "turn"),
-    )
-    .expect("a valid child scope")
-}
-
-/// A request whose recorded cancellation authority is exactly what `host`
-/// derives for the child's admitted scope — the fixture every durable-side
-/// check needs, because a durable participant always records `Some`.
-fn durably_admitted_request(
-    host: &Arc<dyn EffectHost>,
-    routing: ToolChildCompletionRouting,
-) -> ToolChildRequest {
-    let derived = crate::runtime::effect::executor::turn_control_binding_id_for_scope(
-        &host.turn_control_binding_id(),
-        &ExecutionScope::turn("child-session", "turn"),
-    )
-    .expect("a scope-derived binding id");
-    let mut request = request().with_cancellation_authority(
-        crate::TurnControlBindingId::new(derived).expect("a valid binding id"),
-    );
-    request.completion_routing = routing;
-    request
-}
-
-/// §3's cancellation line, wrong direction: a recorded binding this host did
-/// not mint for the admitted scope is a foreign authority — the cooperative
-/// signal it would honour is not the one this opener sends.
-#[tokio::test]
-async fn a_foreign_cancellation_binding_is_refused() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = tool_children(&host);
-    let request = request().with_cancellation_authority(
-        crate::TurnControlBindingId::new("a-binding-this-host-did-not-mint")
-            .expect("a valid binding id"),
-    );
-    let error = validate_recorded_authorities(&tool_children, &child_controller(), &request)
-        .await
-        .expect_err("a binding this host did not mint for the scope is refused");
-    assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority
-    );
-}
-
-/// And the matching one is accepted: presence was never the check — the
-/// recorded id must equal what this host derives for the admitted scope, and
-/// it is only legal under the durable participation that minted it.
-#[tokio::test]
-async fn the_recorded_cancellation_binding_is_accepted() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = tool_children(&host);
-    let controller = durable_child_controller(&host);
-    let request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);
-    validate_recorded_authorities(&tool_children, &controller, &request)
-        .await
-        .expect("the binding this host derives for the admitted scope is accepted");
-}
-
-/// A `None` record is legal only under local participation: reopened against
-/// a durable-journaled controller it is an inconsistency, because the
-/// cooperative authority exists and the record that omits it lies.
-#[tokio::test]
-async fn a_missing_cancellation_record_on_a_durable_participant_is_refused() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = tool_children(&host);
-    let controller = durable_child_controller(&host);
-    let error = validate_recorded_authorities(&tool_children, &controller, &request())
-        .await
-        .expect_err("a durable participant without a recorded binding is inconsistent");
-    assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::RuntimeEffectToolChildCancellationAuthority
-    );
-}
-
 /// The recorded cancellation authority is the scope the child's waits
 /// observe: whether the child is waiting out a retry, parked on a deferred
 /// completion, or running the attempt body, the cooperative signal that can
@@ -1113,218 +835,6 @@ async fn the_cancel_wait_observes_the_admitted_scope() {
     assert!(
         wait.process_turn_cancellation().is_none(),
         "no recorded authority, no turn observation"
-    );
-}
-
-/// §14's routing line, wrong issuer: a process-lifetime key minted by another
-/// registry is unresolvable here — refused, never re-minted into a second
-/// dispatch.
-#[tokio::test]
-async fn a_process_lifetime_key_from_a_foreign_issuer_is_refused() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = tool_children(&host);
-    let mut request = request();
-    request.completion_routing = ToolChildCompletionRouting::ProcessLifetime {
-        issuer: crate::TurnControlBindingId::new("registry-not-this-one")
-            .expect("a valid binding id"),
-    };
-    let error = validate_recorded_authorities(&tool_children, &child_controller(), &request)
-        .await
-        .expect_err("a key issued by another registry is refused");
-    assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting
-    );
-}
-
-/// The same routing bound to this host's registry identity is accepted.
-#[tokio::test]
-async fn a_process_lifetime_key_from_this_registry_is_accepted() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = tool_children(&host);
-    let mut request = request();
-    request.completion_routing = ToolChildCompletionRouting::ProcessLifetime {
-        issuer: crate::TurnControlBindingId::new(host.turn_control_binding_id())
-            .expect("a valid binding id"),
-    };
-    validate_recorded_authorities(&tool_children, &child_controller(), &request)
-        .await
-        .expect("a key this registry issued resolves here");
-}
-
-/// `Durable` routing needs a durable await-event authority behind the child's
-/// controller — on a locally-participating one the child is refused rather
-/// than parked on a key nothing resolves. The request is a consistent local
-/// admission (`None` cancellation record), so the refusal it reaches is the
-/// routing check's, not the cancellation matrix's.
-#[tokio::test]
-async fn durable_routing_without_a_durable_authority_is_refused() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = tool_children(&host);
-    let mut request = request();
-    request.completion_routing = ToolChildCompletionRouting::Durable;
-    let error = validate_recorded_authorities(&tool_children, &child_controller(), &request)
-        .await
-        .expect_err("durable routing needs a durable await-event authority");
-    assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting
-    );
-}
-
-/// And it is admitted where the authority exists.
-#[tokio::test]
-async fn durable_routing_with_a_durable_authority_is_accepted() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = tool_children(&host);
-    let controller = durable_child_controller(&host);
-    let request = durably_admitted_request(&host, ToolChildCompletionRouting::Durable);
-    validate_recorded_authorities(&tool_children, &controller, &request)
-        .await
-        .expect("durable routing under a durable authority is admitted");
-}
-
-/// An executor resolver that opens a group without dispatching the real
-/// child: `open` resolves every child through the registered resolver before
-/// recording the group, and a resolver answering an executor that can never
-/// run leaves the host's dispatched copy to fail fast while the caller's own
-/// resolved runner remains the child's real execution.
-struct UnrunnableGroupExecutors;
-
-impl super::super::group_drain::GroupExecutors for UnrunnableGroupExecutors {
-    fn executor_for(
-        &self,
-        _envelope: &RuntimeEffectEnvelope,
-    ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        Some(RuntimeEffectLocalExecutor::unavailable())
-    }
-}
-
-/// §2's lifetime line at the driver: the runner `executor_for` hands back owns
-/// the `LiveOpenerContext` it resolved against. Dropping the opener's
-/// registration guard between resolution and execution must neither stall the
-/// child on a re-registration nothing promised nor rebind it to a successor —
-/// the accepted child completes on the captured context.
-#[tokio::test]
-async fn a_resolved_child_executes_on_the_captured_opener_context() {
-    let controller = Arc::new(crate::NativeRuntimeEffectController::default());
-    let host = Arc::new(crate::NativeEffectHost::with_native_controller(Arc::clone(
-        &controller,
-    )));
-    let env_store = Arc::new(crate::InMemoryProcessExecutionEnvStore::default());
-    let tool_children =
-        ToolChildHost::new(&(host.clone() as Arc<dyn EffectHost>), env_store.clone());
-    let mut request = request();
-    request.execution_env = crate::publish_process_execution_env(
-        env_store.as_ref(),
-        &crate::ArtifactOwner::host("tool-child-driver-tests"),
-        &spec(3),
-    )
-    .await
-    .expect("the recorded environment publishes");
-    let opener = request.scope.opener.clone();
-    let envelope = crate::RuntimeEffectEnvelope::new(
-        crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(ExecutionScope::turn("child-session", "turn"), "child")
-                .expect("a valid effect address"),
-            crate::RuntimeAttribution::for_session("child-session"),
-            "child",
-        ),
-        RuntimeEffectCommand::ToolInvocation {
-            request: Box::new(request),
-        },
-    )
-    .in_effect_group(
-        "group",
-        0,
-        crate::GroupWakePolicy::All,
-        crate::LoserPolicy::Cancel,
-    );
-    // The child's admitted controller fences every effect under the group
-    // binding, so the group must exist on the host's controller before the
-    // claim — an unopened group refuses as a controller error, which under
-    // FIG-3528 aborts the child rather than laundering into a tool result.
-    crate::RuntimeEffectController::register_group_executors(
-        controller.as_ref(),
-        Arc::new(UnrunnableGroupExecutors),
-    )
-    .expect("the stub resolver registers once");
-    crate::RuntimeEffectController::open_effect_group(
-        controller.as_ref(),
-        crate::RuntimeEffectGroup::try_new(
-            crate::RuntimeEffectInvocation::new(
-                crate::EffectAddress::new(
-                    ExecutionScope::turn("child-session", "turn"),
-                    "group:group",
-                )
-                .expect("a valid group address"),
-                crate::RuntimeAttribution::none(),
-                "group",
-            ),
-            "group",
-            vec![envelope.clone()],
-            crate::GroupWakePolicy::All,
-            crate::LoserPolicy::Cancel,
-        )
-        .expect("the one-child group assembles"),
-    )
-    .await
-    .expect("the child's group is open before it claims");
-    let lent_dispatch = lent();
-    let lent_controller = lent_dispatch
-        .effect_controller
-        .scoped()
-        .to_static()
-        .expect("the lent dispatch's controller is 'static");
-    let live = LiveOpenerContext::capture(
-        &lent_dispatch,
-        lent_controller,
-        tokio_util::sync::CancellationToken::new(),
-    );
-    let guard = tool_children.openers().register(opener, live);
-    let executor =
-        super::super::group_drain::GroupExecutors::executor_for(tool_children.as_ref(), &envelope)
-            .expect("the live opener routes the child");
-
-    // The opener's registration ends between resolution and execution: the
-    // runner must still complete on the context it captured rather than wait
-    // for a re-registration nothing promises — the timeout is what makes a
-    // wait-for-reregistration regression a failure and not a hang.
-    drop(guard);
-    let outcome = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        executor.execute(envelope),
-    )
-    .await
-    .expect("a resolved child never waits for the opener to re-register")
-    .expect("the captured context executes the child");
-    assert!(
-        matches!(outcome, crate::RuntimeEffectOutcome::ToolInvocation { .. }),
-        "the child settles its own recorded work"
-    );
-}
-
-/// §14's routing line, right issuer wrong participation: a process-lifetime
-/// key is a local-participation admission — a durable journal would resolve it
-/// after the issuing process is gone. Even this registry's own issuer id is
-/// therefore refused on a durable-journaled controller, before any key is
-/// prepared.
-#[tokio::test]
-async fn a_process_lifetime_key_is_refused_under_durable_participation() {
-    let host: Arc<dyn EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let tool_children = tool_children(&host);
-    let controller = durable_child_controller(&host);
-    let mut request = durably_admitted_request(&host, ToolChildCompletionRouting::Inline);
-    request.completion_routing = ToolChildCompletionRouting::ProcessLifetime {
-        issuer: crate::TurnControlBindingId::new(host.turn_control_binding_id())
-            .expect("a valid binding id"),
-    };
-    let error = validate_recorded_authorities(&tool_children, &controller, &request)
-        .await
-        .expect_err("a process-lifetime key cannot ride a durable journal");
-    assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::RuntimeEffectToolChildCompletionRouting
     );
 }
 

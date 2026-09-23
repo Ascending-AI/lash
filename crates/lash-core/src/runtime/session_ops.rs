@@ -978,13 +978,20 @@ mod plugin_state_boundary_tests {
         let plugins = crate::PluginHost::new(factories)
             .build_session("event-state")
             .unwrap();
+        let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ));
+        let runtime_services = crate::PersistentRuntimeServices::new(
+            plugins,
+            store,
+            std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+            std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+        );
         let mut runtime = LashRuntime::from_persistent_embedded_state(
             policy.clone(),
-            crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            )),
-            crate::PersistentRuntimeServices::new(plugins, store),
+            runtime_host,
+            runtime_services,
             RuntimeSessionState {
                 session_id: "event-state".into(),
                 ..RuntimeSessionState::new(policy)

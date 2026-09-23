@@ -528,8 +528,8 @@ impl OrchestratingToolDef {
         Self { implementation }
     }
 
-    #[cfg(test)]
-    pub(crate) fn new(implementation: Arc<dyn OrchestratingToolImplementation>) -> Self {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new(implementation: Arc<dyn OrchestratingToolImplementation>) -> Self {
         Self { implementation }
     }
 

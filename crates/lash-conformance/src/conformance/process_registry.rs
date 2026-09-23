@@ -7,10 +7,12 @@ mod event_paging;
 mod event_replay;
 mod external_ref;
 mod lifecycle;
+mod observer_transfer;
 mod parent_end;
 mod registration;
 pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 pub use lifecycle::superseded_process_lease_cannot_release_or_complete;
+pub use observer_transfer::a_failed_observer_transfer_leaves_no_partial_mutation;
 pub use registration::{
     concurrent_identical_registrations_are_idempotent, process_registry_fresh_instances,
     registration_and_observers_are_atomic, registration_reports_created_then_existing,

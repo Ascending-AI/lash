@@ -55,6 +55,7 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
     block_on(async {
         let definition = approval_request_definition();
         let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            crate::testing::memory_backend_ports().await,
             Arc::new(PolicyDeniedToolProvider),
             lash_core::ToolCatalog::from_tool_definitions(vec![definition]),
         );
@@ -144,13 +145,9 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
             let sink = Arc::new(FailureTraceSink::default());
             let response = execute_code_with_channel_and_bounds(
                 &mut RlmExecutionState::for_engine("typescript"),
-                lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-                    Arc::new(PolicyDeniedToolProvider),
-                    lash_core::ToolCatalog::from_tool_definitions(vec![approval_request_definition()]),
-                    lash_core::testing::exec_code_invocation(
+                lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(crate::testing::memory_backend_ports().await, Arc::new(PolicyDeniedToolProvider), lash_core::ToolCatalog::from_tool_definitions(vec![approval_request_definition()]), lash_core::testing::exec_code_invocation(
                         "failure-session", "failure-turn", 0, 0, "failure-exec", "exec:failure",
-                    ),
-                ),
+                    )),
                 ExecRequest { language: "typescript".into(), code: code.into() },
                 lashlang::global_in_memory_lashlang_artifact_store(),
                 LashlangSurface::default(),
@@ -243,7 +240,7 @@ async fn execute_typescript_test_cell(
 ) -> (RlmExecutionState, ExecResponse) {
     let response = execute_code_with_channel_and_bounds(
         &mut state,
-        lash_core::testing::code_execution_context(),
+        lash_core::testing::code_execution_context(crate::testing::memory_backend_ports().await),
         ExecRequest {
             language: "typescript".to_string(),
             code: code.to_string(),
@@ -472,6 +469,7 @@ impl lash_core::ToolProvider for EchoToolProvider {
 fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
     block_on(async {
         let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+            crate::testing::memory_backend_ports().await,
             Arc::new(EchoToolProvider),
             lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
         );

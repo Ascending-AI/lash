@@ -403,27 +403,6 @@ impl NativeRuntimeEffectController {
         self.process_lifetime_completion_keys_enabled = true;
         self
     }
-    /// Register the process and its initial observer edges into the durable registry.
-    ///
-    /// The native controller no longer runs the process here: the registry's
-    /// non-terminal row *is* the durable work queue, and the host-owned
-    /// [`ProcessWorkSubstrate`](crate::ProcessWorkSubstrate) is the sole executor.
-    /// Registering the row is all this path does; the control seam drives the
-    /// host driver after a successful start.
-    /// Start, reporting whether the registry inserted the row or returned one
-    /// it already held under the same registration fingerprint (FIG-3070).
-    pub(crate) async fn start_process_reporting_realization(
-        registry: Arc<dyn crate::ProcessRegistry>,
-        registration: crate::ProcessRegistration,
-        observers: Vec<SessionId>,
-    ) -> Result<(ProcessRecord, crate::StoreRealization), PluginError> {
-        let outcome = registry
-            .register_process_reporting_disposition(registration, &observers)
-            .await?;
-        let realization = crate::StoreRealization::from_wrote(outcome.is_created());
-        Ok((outcome.record, realization))
-    }
-
     pub async fn request_process_cancel(
         registry: Arc<dyn crate::ProcessRegistry>,
         process_id: &ProcessId,
@@ -432,38 +411,8 @@ impl NativeRuntimeEffectController {
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, PluginError> {
         let process_ref = registry.resolve_process_ref(process_id).await?;
-        Self::request_process_cancel_ref(registry, &process_ref, origin, requester, attribution)
-            .await
-    }
-
-    pub(crate) async fn request_process_cancel_ref(
-        registry: Arc<dyn crate::ProcessRegistry>,
-        process_ref: &crate::ProcessRef,
-        origin: crate::CancelOrigin,
-        requester: String,
-        attribution: Option<crate::RuntimeReplayAttribution>,
-    ) -> Result<ProcessRecord, PluginError> {
         registry
-            .request_process_cancel(process_ref, origin, requester, attribution)
-            .await
-    }
-
-    /// Cancel, reporting whether this call recorded the request or found the
-    /// same cancellation already recorded (FIG-3070).
-    pub(crate) async fn request_process_cancel_ref_reporting_realization(
-        registry: Arc<dyn crate::ProcessRegistry>,
-        process_ref: &crate::ProcessRef,
-        origin: crate::CancelOrigin,
-        requester: String,
-        attribution: Option<crate::RuntimeReplayAttribution>,
-    ) -> Result<(ProcessRecord, crate::StoreRealization), PluginError> {
-        registry
-            .request_process_cancel_reporting_realization(
-                process_ref,
-                origin,
-                requester,
-                attribution,
-            )
+            .request_process_cancel(&process_ref, origin, requester, attribution)
             .await
     }
 }

@@ -845,7 +845,12 @@ mod tests {
             "identical call lists under different occurrences mint different batch ids"
         );
 
-        let context = crate::testing::code_execution_context();
+        let context = crate::testing::TestExecutionContextBuilder::over_controller(
+            std::sync::Arc::new(crate::testing::UnavailableEffectController)
+                as std::sync::Arc<dyn crate::RuntimeEffectController>,
+        )
+        .build()
+        .into_runtime();
         let first = context.tool_child_group_key(&first_id);
         let second = context.tool_child_group_key(&second_id);
         assert_ne!(first, second);

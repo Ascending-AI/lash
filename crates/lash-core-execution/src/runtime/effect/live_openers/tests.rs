@@ -41,7 +41,7 @@ fn live_context() -> LiveOpenerContext {
         process_definitions: None,
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::NativeRuntimeEffectController::default(),
+            crate::testing::UnavailableEffectController,
         )),
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
@@ -57,7 +57,7 @@ fn live_context() -> LiveOpenerContext {
         turn_activity_tx: None,
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::new(crate::SessionAttachmentStore::in_memory()),
+        attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),

@@ -704,10 +704,17 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
             lash_core::plugin::RecordedSessionConfig::new(durable.protocol_turn_options.clone()),
         )
         .expect("reopen plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        runtime_store,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let _reopened = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(plugins, runtime_store),
+        runtime_host,
+        runtime_services,
         durable,
         lash_core::testing::runtime_lease_owner(),
     )
@@ -841,10 +848,17 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
             lash_core::plugin::RecordedSessionConfig::new(durable.protocol_turn_options.clone()),
         )
         .expect("cold-reopen plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        runtime_store,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let _reopened = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(plugins, runtime_store),
+        runtime_host,
+        runtime_services,
         durable,
         lash_core::testing::runtime_lease_owner(),
     )
@@ -1365,10 +1379,16 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
             },
         )
         .expect("frame child plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+        plugins,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::testing::runtime_internals::RuntimeServices::new(plugins),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),

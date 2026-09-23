@@ -106,7 +106,8 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
     let opener_b = crate::EffectOpener::for_scope(&crate::admit(scope_b.clone()))
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-usage-group");
-    let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
+    let process_env_store = (fixture.make_processes)().await.process_env_store;
+    let env_ref = crate::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
 
     let probe_world = (fixture.make_world)(ToolChildWorldSpec {
         lease_ttl_ms: LIVE_LEASE_MS,
@@ -264,7 +265,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
         &successor.host,
         &scope_a,
         provider(&session_a),
-        (fixture.make_registry)().await,
+        (fixture.make_processes)().await.registry,
         Arc::clone(&process_env_store),
         opener_a,
         tokio_util::sync::CancellationToken::new(),

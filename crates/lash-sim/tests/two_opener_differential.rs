@@ -1188,7 +1188,8 @@ async fn fixture(
         catalog_definitions: leaf_definitions(),
         session_host: Arc::new(MockSessionManager::default()),
         processes: effect_backed_process_service(
-            Arc::clone(&registry_a) as Arc<dyn ProcessRegistry>
+            Arc::clone(&registry_a) as Arc<dyn ProcessRegistry>,
+            Arc::clone(&env_store),
         ),
         process_registry: registry_a,
         trigger_router: None,
@@ -1205,7 +1206,7 @@ async fn fixture(
         env_ref: env_ref_a,
         session_id: SessionId::from("session-a"),
         agent_frame_id: FrameNodeId::new("frame-a").expect("a valid frame id"),
-        attachment_store: Arc::new(SessionAttachmentStore::in_memory()),
+        attachment_store: Arc::new(SessionAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(OpenAttachmentSourcePolicy),
         turn_context: TurnContext::default(),
         clock: Arc::new(SystemClock),
@@ -1230,7 +1231,8 @@ async fn fixture(
         catalog_definitions: b_catalog_definitions(),
         session_host: Arc::new(MockSessionManager::default()),
         processes: effect_backed_process_service(
-            Arc::clone(&registry_b) as Arc<dyn ProcessRegistry>
+            Arc::clone(&registry_b) as Arc<dyn ProcessRegistry>,
+            Arc::clone(&env_store),
         ),
         process_registry: registry_b,
         trigger_router: Some(TriggerRouter::new(
@@ -1253,7 +1255,7 @@ async fn fixture(
         env_ref: env_ref_b,
         session_id: SessionId::from("session-b"),
         agent_frame_id: FrameNodeId::new("frame-b").expect("a valid frame id"),
-        attachment_store: Arc::new(SessionAttachmentStore::in_memory()),
+        attachment_store: Arc::new(SessionAttachmentStore::unavailable()),
         attachment_source_policy: Arc::new(OpenAttachmentSourcePolicy),
         turn_context: turn_context_b,
         clock: Arc::new(TestClock::new(1_700_000_000_000)),

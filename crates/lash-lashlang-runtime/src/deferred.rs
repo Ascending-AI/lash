@@ -783,8 +783,13 @@ mod tests {
         } else {
             record.select_link(link_key);
         }
-        lash_core::testing::code_execution_context_with_effect_host_and_invocation(
-            effect_host,
+        // A deferred-resolution context journals through `effect_host` and
+        // never publishes an execution environment.
+        lash_core::testing::code_execution_context_with_invocation(
+            lash_core::testing::TestExecutionPorts::over_host(
+                effect_host,
+                Arc::new(lash_core::testing::UnavailableProcessExecutionEnvStore),
+            ),
             invocation,
         )
     }
@@ -1513,8 +1518,10 @@ mod tests {
             "exec-code",
             "exec-code:other",
         );
-        let mismatched_context =
-            lash_core::testing::code_execution_context_with_invocation(mismatched_invocation);
+        let mismatched_context = lash_core::testing::code_execution_context_with_invocation(
+            &crate::lib_tests::memory_backend().await,
+            mismatched_invocation,
+        );
 
         let error = resolve_and_fold_deferred(
             &program,

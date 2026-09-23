@@ -1,99 +1,4 @@
 use super::*;
-use crate::ProcessId;
-
-struct ToolIntentGateSink {
-    gate: Arc<tokio::sync::Mutex<()>>,
-    admissions: std::sync::atomic::AtomicUsize,
-}
-
-impl Default for ToolIntentGateSink {
-    fn default() -> Self {
-        Self {
-            gate: Arc::new(tokio::sync::Mutex::new(())),
-            admissions: std::sync::atomic::AtomicUsize::new(0),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolIntentOutcomeSink for ToolIntentGateSink {
-    async fn lock_submission_gate(&self, _replay_key: &str) -> ToolIntentSubmissionGuard {
-        ToolIntentSubmissionGuard::from_owned_mutex_guard(Arc::clone(&self.gate).lock_owned().await)
-    }
-
-    async fn admit(
-        &self,
-        _record: crate::ToolIntentSubmissionRecord,
-    ) -> Result<crate::ToolIntentSubmissionAdmission, RuntimeError> {
-        self.admissions
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(crate::ToolIntentSubmissionAdmission::Admitted)
-    }
-
-    async fn complete_submission(
-        &self,
-        _identity: &crate::ToolIntentIdentity,
-        _outcome: crate::ToolIntentExecutionOutcome,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
-    }
-
-    async fn retain_in_journal(
-        &self,
-        _identity: &crate::ToolIntentIdentity,
-        _submitted: crate::ToolIntent,
-        _outcome: crate::ToolIntentExecutionOutcome,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
-    }
-}
-
-fn test_tool_intent() -> (crate::ToolIntentIdentity, crate::ToolIntent) {
-    let identity = crate::derive_tool_intent_identity(
-        &SessionId::from("tool-intent-gate-session"),
-        "tool-intent-gate-turn",
-        Some("tool-intent-gate-call"),
-        0,
-    )
-    .expect("tool-intent gate identity");
-    let intent = crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
-        session_id: SessionId::from("tool-intent-gate-session"),
-        process_id: ProcessId::from("tool-intent-gate-process"),
-    });
-    (identity, intent)
-}
-
-#[tokio::test]
-async fn runtime_tool_intent_preparation_holds_the_gate_until_dropped() {
-    let host = crate::NativeEffectHost::default();
-    let sink = ToolIntentGateSink::default();
-    let (identity, intent) = test_tool_intent();
-    let first = host
-        .prepare_tool_intent(&sink, &identity, intent.clone())
-        .await
-        .expect("first tool-intent preparation");
-
-    let blocked = tokio::time::timeout(
-        std::time::Duration::from_millis(20),
-        host.prepare_tool_intent(&sink, &identity, intent.clone()),
-    )
-    .await;
-    assert!(
-        blocked.is_err(),
-        "a duplicate preparation must remain blocked while the first preparation is held"
-    );
-
-    drop(first);
-    let second = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        host.prepare_tool_intent(&sink, &identity, intent),
-    )
-    .await
-    .expect("duplicate preparation unblocks after release")
-    .expect("second tool-intent preparation");
-    assert!(matches!(second, ToolIntentPreparation::RuntimeOwned { .. }));
-    assert_eq!(sink.admissions.load(std::sync::atomic::Ordering::SeqCst), 2);
-}
 
 struct CompletionKeyProbe {
     issue_calls: std::sync::atomic::AtomicUsize,
@@ -618,25 +523,6 @@ fn queued_lane_holder(expires_at_epoch_ms: u64) -> QueuedLaneHolder {
     })
 }
 
-async fn queued_lane_guard() -> QueuedLaneGuard {
-    let clock: Arc<dyn crate::Clock> = Arc::new(crate::testing::TestClock::new(1_000));
-    let store = Arc::new(crate::runtime::InMemorySessionStore::with_clock(
-        Arc::clone(&clock),
-    ));
-    let guard = crate::runtime::session_execution_lease::SessionExecutionLeaseGuard::try_acquire(
-        store as Arc<dyn crate::store::RuntimePersistence>,
-        &SessionId::from("queued-lane-test"),
-        &crate::LeaseOwnerIdentity::opaque("owner", "owner:incarnation"),
-        "queued-lane-test-executor",
-        crate::LeaseTimings::default(),
-        clock,
-    )
-    .await
-    .expect("queued-lane test claim")
-    .expect("queued-lane test guard");
-    QueuedLaneGuard::new(guard)
-}
-
 #[tokio::test]
 async fn default_queued_lane_acquisition_stops_after_one_busy_attempt() {
     let probe = Arc::new(FakeQueuedLaneProbe::new([QueuedLaneAttempt::Busy(
@@ -654,31 +540,6 @@ async fn default_queued_lane_acquisition_stops_after_one_busy_attempt() {
     assert!(matches!(result, QueuedLaneAcquisition::NotAcquired));
     assert_eq!(probe.try_calls(), 1);
     assert_eq!(probe.pause_calls(), 0);
-}
-
-#[tokio::test]
-async fn provided_wait_retries_a_crashed_looking_holder_until_acquired() {
-    let probe = Arc::new(FakeQueuedLaneProbe::new([
-        QueuedLaneAttempt::Busy(queued_lane_holder(7_400)),
-        QueuedLaneAttempt::Acquired(queued_lane_guard().await),
-    ]));
-
-    let result = TestResolver
-        .wait_out_crashed_lane_holder(
-            Arc::clone(&probe) as Arc<dyn QueuedLaneProbe>,
-            CancellationToken::new(),
-        )
-        .await
-        .expect("provided queued-lane wait");
-
-    assert!(
-        matches!(result, QueuedLaneAcquisition::Acquired(_)),
-        "expected acquisition after one crashed-looking holder; try_calls={}, pause_calls={}",
-        probe.try_calls(),
-        probe.pause_calls(),
-    );
-    assert_eq!(probe.try_calls(), 2);
-    assert_eq!(probe.pause_calls(), 1);
 }
 
 #[tokio::test]
@@ -715,53 +576,6 @@ async fn provided_wait_reports_a_renewing_holder_as_typed_retryable_busy() {
             1
         );
     }
-}
-
-async fn acquire_through_task_controller(
-    controller: &TestResolver,
-    probe: Arc<dyn QueuedLaneProbe>,
-) -> Result<QueuedLaneAcquisition, RuntimeError> {
-    let (scoped, mut requests) = EffectTaskController::scoped(
-        controller,
-        AdmittedScope::queue_drain("queued-lane-test", "drain"),
-    )?;
-    let acquire = scoped
-        .controller()
-        .acquire_queued_lane(probe, CancellationToken::new());
-    let drive = async {
-        requests
-            .recv()
-            .await
-            .expect("queued-lane task request")
-            .into_future(controller)
-            .await;
-    };
-    let (result, ()) = tokio::join!(acquire, drive);
-    result
-}
-
-#[tokio::test]
-async fn queued_lane_acquisition_round_trips_through_the_task_controller() {
-    let controller = TestResolver;
-    let busy = acquire_through_task_controller(
-        &controller,
-        Arc::new(FakeQueuedLaneProbe::new([QueuedLaneAttempt::Busy(
-            queued_lane_holder(7_400),
-        )])),
-    )
-    .await
-    .expect("busy queued-lane proxy response");
-    assert!(matches!(busy, QueuedLaneAcquisition::NotAcquired));
-
-    let acquired = acquire_through_task_controller(
-        &controller,
-        Arc::new(FakeQueuedLaneProbe::new([QueuedLaneAttempt::Acquired(
-            queued_lane_guard().await,
-        )])),
-    )
-    .await
-    .expect("acquired queued-lane proxy response");
-    assert!(matches!(acquired, QueuedLaneAcquisition::Acquired(_)));
 }
 
 #[tokio::test]

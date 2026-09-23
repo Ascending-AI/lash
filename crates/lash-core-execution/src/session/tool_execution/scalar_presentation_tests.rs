@@ -137,25 +137,24 @@ async fn a_scalar_presentation_replays_from_the_journal_on_redrive() {
     let journal = Arc::new(JournalByEffectId::default());
     let runs = Arc::new(AtomicUsize::new(0));
     let execute = || {
-        let context = crate::testing::TestExecutionContextBuilder::new()
-            .plugin_factories(vec![Arc::new(RecordingStepFactory {
-                runs: Arc::clone(&runs),
-            })])
-            .provider(Arc::new(EchoTool {
-                definition: definition.clone(),
-            }))
-            .tool_catalog(crate::ToolCatalog::from_tool_definitions(vec![
-                definition.clone(),
-            ]))
-            .borrowed_effect_controller(
-                crate::ScopedEffectController::shared(
-                    Arc::clone(&journal) as Arc<dyn crate::RuntimeEffectController>,
-                    crate::AdmittedScope::turn("root", "scalar-presentation-redrive"),
-                )
-                .expect("valid turn scope"),
+        let context = crate::testing::TestExecutionContextBuilder::over_controller(
+            crate::ScopedEffectController::shared(
+                Arc::clone(&journal) as Arc<dyn crate::RuntimeEffectController>,
+                crate::AdmittedScope::turn("root", "scalar-presentation-redrive"),
             )
-            .build()
-            .into_runtime();
+            .expect("valid turn scope"),
+        )
+        .plugin_factories(vec![Arc::new(RecordingStepFactory {
+            runs: Arc::clone(&runs),
+        })])
+        .provider(Arc::new(EchoTool {
+            definition: definition.clone(),
+        }))
+        .tool_catalog(crate::ToolCatalog::from_tool_definitions(vec![
+            definition.clone(),
+        ]))
+        .build()
+        .into_runtime();
         let tool_id = definition.manifest.id.clone();
         async move {
             Box::pin(context.execute_tool_call_by_id(

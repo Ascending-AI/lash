@@ -1312,7 +1312,13 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("source key");
-    let (process_env_store, process_env_ref) = lash_core::testing::process_execution_env_fixture();
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("process-exec-env backend")
+            .process_env_store();
+    let process_env_ref =
+        lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let registration = store
         .execute_command(
             "fig806-register",
@@ -1438,7 +1444,7 @@ pub(super) async fn register_fig811_subscription(
     subscription_key: &str,
     source_key: &str,
 ) -> String {
-    let (_, process_env_ref) = lash_core::testing::process_execution_env_fixture();
+    let process_env_ref = lash_core::testing::process_execution_env_fixture_ref();
     let outcome = store
         .execute_command(
             operation_id,
@@ -1509,7 +1515,13 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
     );
 
     let registry = process_registry();
-    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("process-exec-env backend")
+            .process_env_store();
+    // The fixture environment every subscription draft here records.
+    lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         registry_process_wiring(Arc::clone(&registry)),
@@ -1641,7 +1653,13 @@ pub(super) async fn fig811_independent_client_retry_reports_duplicate_without_a_
     )
     .await;
     let registry = process_registry();
-    let (process_env_store, _) = lash_core::testing::process_execution_env_fixture();
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("process-exec-env backend")
+            .process_env_store();
+    // The fixture environment every subscription draft here records.
+    lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let router = lash_core::facade_support::TriggerRouter::new(
         Arc::clone(&store) as Arc<dyn lash_core::TriggerStore>,
         registry_process_wiring(Arc::clone(&registry)),

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 use crate::ToolContext;
 use crate::plugin::ToolCallHookContext;
 use crate::validate_tool_input;
@@ -8,18 +8,18 @@ use crate::{
     ToolExecutionGrant, ToolFailureClass, ToolManifest, ToolPrepareCall, ToolPrepareContext,
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 use super::context::ToolDispatchOutcome;
 use super::context::{
     ToolDispatchContext, ToolPreparationOutcome, completed_preparation, runtime_failure,
 };
 use super::directives::apply_before_tool_directives;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 use super::execution::dispatch_prepared_tool_call_with_execution_context;
 use super::retry::normalized_outcome;
 
-#[cfg(test)]
-pub(crate) async fn dispatch_tool_call(
+#[cfg(any(test, feature = "testing"))]
+pub async fn dispatch_tool_call(
     context: &ToolDispatchContext<'_>,
     tool_name: String,
     args: serde_json::Value,
@@ -34,8 +34,8 @@ pub(crate) async fn dispatch_tool_call(
     .await
 }
 
-#[cfg(test)]
-pub(crate) async fn dispatch_tool_call_with_execution_context<'run>(
+#[cfg(any(test, feature = "testing"))]
+pub async fn dispatch_tool_call_with_execution_context<'run>(
     context: &ToolDispatchContext<'run>,
     tool_name: String,
     args: serde_json::Value,
@@ -293,8 +293,8 @@ pub fn resolve_internal_manifest_by_id(
         .map(|entry| entry.manifest.clone())
 }
 
-#[cfg(test)]
-pub(crate) fn resolve_tool_argument_projection_policy(
+#[cfg(any(test, feature = "testing"))]
+pub fn resolve_tool_argument_projection_policy(
     context: &ToolDispatchContext<'_>,
     tool_name: &str,
 ) -> crate::ToolArgumentProjectionPolicy {

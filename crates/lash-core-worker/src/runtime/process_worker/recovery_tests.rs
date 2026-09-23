@@ -372,7 +372,8 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
         local_owner("reentrant-worker", "host-a", "claimant-start"),
         Arc::clone(&trigger_store),
         Arc::clone(&run_handle),
-    );
+    )
+    .await;
 
     let report = worker
         .drive_pending_processes()
@@ -516,7 +517,7 @@ async fn seed_reserved_trigger_delivery(
 }
 
 fn recovery_test_trigger_draft(source_key: String) -> crate::TriggerSubscriptionDraft {
-    let (_, process_env_ref) = crate::testing::process_execution_env_fixture();
+    let process_env_ref = crate::testing::process_execution_env_fixture_ref();
     crate::TriggerSubscriptionDraft::for_process(
         "recovery-test",
         process_env_ref,
@@ -1348,7 +1349,8 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
         Arc::clone(&registry),
         local_owner("trigger-worker", "host-a", "claimant-start"),
         Arc::clone(&trigger_store),
-    );
+    )
+    .await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -1591,7 +1593,8 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         Arc::clone(&registry),
         local_owner("trigger-worker", "host-a", "claimant-start"),
         Arc::clone(&trigger_store_dyn),
-    );
+    )
+    .await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -1693,7 +1696,8 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
         Arc::clone(&registry),
         local_owner("trigger-worker", "host-a", "claimant-start"),
         trigger_store,
-    );
+    )
+    .await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -1728,7 +1732,8 @@ async fn sweep_never_claims_externally_owned_rows() {
     let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
-    );
+    )
+    .await;
     let report = worker
         .drive_pending_processes()
         .await
@@ -1807,7 +1812,8 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
     let worker = native_worker(
         Arc::clone(&registry),
         local_owner("recovery-worker", "host-b", "recovery-start"),
-    );
+    )
+    .await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -1850,7 +1856,8 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
     let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
-    );
+    )
+    .await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -1904,7 +1911,8 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
     let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
-    );
+    )
+    .await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -1963,7 +1971,8 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
     let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
-    );
+    )
+    .await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -1997,7 +2006,8 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     let worker = native_worker(
         Arc::clone(&registry),
         local_owner("live-worker", "host-a", "claimant-start"),
-    );
+    )
+    .await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -2194,7 +2204,7 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
 async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
     let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
     let owner = local_owner("drain-host", "host-a", "start-a");
-    let worker = native_worker(Arc::clone(&registry), owner.clone());
+    let worker = native_worker(Arc::clone(&registry), owner.clone()).await;
 
     // (a) OwnerBound row this worker started -> drained.
     registry
@@ -2386,7 +2396,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
         )))
         .await;
 
-    let worker = native_worker(registry.clone(), owner);
+    let worker = native_worker(registry.clone(), owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 

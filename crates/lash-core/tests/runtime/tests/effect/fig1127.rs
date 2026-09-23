@@ -94,7 +94,12 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
     let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
     let registry: Arc<dyn lash_core::ProcessRegistry> =
         Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let (process_env_store, process_env_ref) = lash_core::testing::process_execution_env_fixture();
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("memory backend");
+    let process_env_store = lash_core::Backend::process_env_store(&backend);
+    let process_env_ref =
+        lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
         .expect("empty trigger source key");
     let registration = lash_core::TriggerStore::execute_command(

@@ -567,7 +567,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
     install_child_host(&successor.host, &scenario.process_env_store);
     until_claims_lapse(&successor, &group_key).await;
     let (changed_factories, a2_runs, b2_runs) = ab2_steps();
-    let registry = (fixture.make_registry)().await;
+    let registry = (fixture.make_processes)().await.registry;
     let _guard = register_opener_with_extras(
         &successor.host,
         &scope,

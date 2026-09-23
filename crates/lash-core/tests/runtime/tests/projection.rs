@@ -271,13 +271,17 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
 
     let store = Arc::new(RecordingStore::default());
     let plugins = plugin_session_with_tools(&SessionId::from("root"), Arc::new(EmptyTools));
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        Arc::clone(&plugins),
+        store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            Arc::clone(&plugins),
-            store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -352,13 +356,17 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
         .current_frame_node_id
         .clone()
         .expect("provisional initial frame");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugin_session_with_tools(&SessionId::from("preopened-session"), Arc::new(EmptyTools)),
+        store as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let runtime = LashRuntime::from_persistent_embedded_state(
         policy,
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            plugin_session_with_tools(&SessionId::from("preopened-session"), Arc::new(EmptyTools)),
-            store as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         state,
         lash_core::testing::runtime_lease_owner(),
     )
@@ -411,13 +419,17 @@ async fn park_returns_error_when_final_commit_fails() {
         )
         .await;
     let plugins = plugin_session_with_tools(&SessionId::from("park-session"), Arc::new(EmptyTools));
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        store as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            plugins,
-            store as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState {
             session_id: SessionId::from("park-session"),
             policy: standard_test_policy(),
@@ -455,13 +467,17 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
             advance_store_head: true,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        store as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            plugins,
-            store as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -515,10 +531,16 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
             advance_store_head: false,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+        plugins,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::testing::runtime_internals::RuntimeServices::new(plugins),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -588,13 +610,17 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
             advance_store_head: false,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        store as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            plugins,
-            store as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -708,13 +734,17 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
             advance_store_head: false,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        Arc::clone(&store) as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            plugins,
-            Arc::clone(&store) as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -776,13 +806,17 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
             advance_store_head: false,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugins,
+        store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            plugins,
-            store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState {
             session_id: SessionId::from(session_id.to_string()),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -881,13 +915,17 @@ async fn completed_turns_are_persisted_in_session_graph() {
                 .with_tool_provider(Arc::clone(&base_provider_factory)),
         ))]);
     let plugins = plugin_host.build_session("root").expect("plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        Arc::clone(&plugins),
+        store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            Arc::clone(&plugins),
-            store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),

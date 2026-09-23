@@ -417,7 +417,7 @@ mod tests {
         )
     }
 
-    fn context(
+    async fn context(
         record: &mut DeferredTriggerResolutionRecord,
         replay_key: &str,
     ) -> lash_core::RuntimeExecutionContext<'static> {
@@ -433,7 +433,10 @@ mod tests {
             crate::DeferredResolutionLinkKey::from_exec_code_invocation(&invocation)
                 .expect("effect invocation has identity"),
         );
-        lash_core::testing::code_execution_context_with_invocation(invocation)
+        lash_core::testing::code_execution_context_with_invocation(
+            &crate::lib_tests::memory_backend().await,
+            invocation,
+        )
     }
 
     #[tokio::test]
@@ -479,7 +482,7 @@ mod tests {
         let resolver: SharedDeferredTriggerResolver = Arc::new(registry);
         let referenced = BTreeSet::from(["calendar.Changed".to_string()]);
         let mut record = DeferredTriggerResolutionRecord::default();
-        let ctx = context(&mut record, "exec-code:resident-equivalence");
+        let ctx = context(&mut record, "exec-code:resident-equivalence").await;
         let (deferred, _) = resolve_and_fold_deferred_triggers(
             &referenced,
             LashlangSurface::default(),
@@ -533,7 +536,7 @@ mod tests {
         let resolver: SharedDeferredTriggerResolver = Arc::new(registry);
         let referenced = BTreeSet::from(["calendar.Changed".to_string()]);
         let mut record = DeferredTriggerResolutionRecord::default();
-        let ctx = context(&mut record, "exec-code:trigger-replay");
+        let ctx = context(&mut record, "exec-code:trigger-replay").await;
         let (resolved, captured) = resolve_and_fold_deferred_triggers(
             &referenced,
             LashlangSurface::default(),
@@ -563,7 +566,7 @@ mod tests {
                 event_type("calendar.Change", "different"),
             )
             .expect("changed ambient definition");
-        let replay_ctx = context(&mut record, "exec-code:trigger-replay");
+        let replay_ctx = context(&mut record, "exec-code:trigger-replay").await;
         let (replayed, replayed_record) =
             resolve_and_fold_deferred_triggers(&referenced, changed, None, &captured, &replay_ctx)
                 .await
@@ -587,7 +590,7 @@ mod tests {
             Arc::new(DeferredTriggerProviderRegistry::new());
         let referenced = BTreeSet::from(["calendar.Changed".to_string()]);
         let mut record = DeferredTriggerResolutionRecord::default();
-        let ctx = context(&mut record, "exec-code:negative-trigger-replay");
+        let ctx = context(&mut record, "exec-code:negative-trigger-replay").await;
         let (_, captured) = resolve_and_fold_deferred_triggers(
             &referenced,
             LashlangSurface::default(),
@@ -611,7 +614,7 @@ mod tests {
                 event_type("calendar.Change", "id"),
             )
             .expect("later ambient definition");
-        let replay_ctx = context(&mut record, "exec-code:negative-trigger-replay");
+        let replay_ctx = context(&mut record, "exec-code:negative-trigger-replay").await;
         let (replayed, replayed_record) =
             resolve_and_fold_deferred_triggers(&referenced, changed, None, &captured, &replay_ctx)
                 .await
@@ -638,7 +641,7 @@ mod tests {
         let resolver: SharedDeferredTriggerResolver = Arc::new(registry);
         let referenced = BTreeSet::from(["calendar.Changed".to_string()]);
         let mut record = DeferredTriggerResolutionRecord::default();
-        let ctx = context(&mut record, "exec-code:ambiguous-trigger");
+        let ctx = context(&mut record, "exec-code:ambiguous-trigger").await;
 
         assert!(matches!(
             resolve_and_fold_deferred_triggers(

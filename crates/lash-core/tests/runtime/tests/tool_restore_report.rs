@@ -1014,10 +1014,15 @@ async fn require_refuses_a_process_child_whose_inherited_snapshot_lost_a_member(
         .expect("plugins");
     let mut host = test_host_config();
     host.core.control.tool_source_policy = lash_core::ToolSourcePolicy::Require;
+    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+        plugin_session,
+        Arc::clone(&host.core.durability.attachment_store),
+        Arc::clone(&host.core.durability.process_env_store),
+    );
     let mut runtime = Box::pin(LashRuntime::from_embedded_state(
         standard_test_policy(),
         host,
-        lash_core::testing::runtime_internals::RuntimeServices::new(plugin_session),
+        runtime_services,
         RuntimeSessionState {
             session_id: SessionId::from("fig3367-child-parent"),
             policy: standard_test_policy(),

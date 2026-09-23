@@ -280,7 +280,7 @@ async fn unavailable_prepared_tool_outcome(
     unavailable
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) async fn dispatch_prepared_tool_call_with_execution_context<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: PreparedToolCall,
@@ -537,7 +537,7 @@ pub async fn finalize_tool_result_with_execution_context(
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 async fn tool_call_launch_into_done_or_runtime_failure(
     context: &ToolDispatchContext<'_>,
     launch: ToolCallLaunch,

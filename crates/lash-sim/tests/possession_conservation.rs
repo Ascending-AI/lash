@@ -39,9 +39,9 @@ use lash_core::tool_dispatch::ToolDispatchOutcome;
 use lash_core::{
     EffectOpener, OnParentEnd, ParentScope, PluginOptions, ProcessExecutionEnvSpec, ProcessId,
     ProcessInput, ProcessLifecyclePolicy, ProcessListFilter, ProcessOriginator, ProcessProvenance,
-    ProcessQuery as _, ProcessRef, ProcessRegistrar as _, ProcessRegistration, ProcessStartRequest,
-    RecoveryContract, RuntimeExecutionContext, SessionId, SessionPolicy, ToolCallOutcome,
-    ToolCallOutput, ToolCallRecord, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+    ProcessRef, ProcessRegistration, ProcessStartRequest, RecoveryContract,
+    RuntimeExecutionContext, SessionId, SessionPolicy, ToolCallOutcome, ToolCallOutput,
+    ToolCallRecord, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
     ToolIntentRefusalReason, ToolIntents, TurnBudget, TurnId,
 };
 
@@ -57,6 +57,10 @@ struct Opener {
 /// The two-opener world: one registry, one context per live opener, and the
 /// world's own ledger of what each start channel actually realized.
 struct PossessionWorld {
+    /// The memory backend (ADR 0102) the world's contexts journal on and
+    /// whose registry the session host's process routes write.
+    backend: lash_sqlite_store::SqliteBackend,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
     host: Arc<MockSessionManager>,
     openers: BTreeMap<&'static str, Opener>,
     /// Registry rows a possession-conferring start channel realized, keyed to
@@ -68,9 +72,21 @@ struct PossessionWorld {
 }
 
 impl PossessionWorld {
-    fn new() -> Self {
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture: a memory backend that fails to open aborts the law"
+    )]
+    async fn new() -> Self {
+        let backend = lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open a memory backend");
+        let registry = lash_core::Backend::process_registry(&backend);
         Self {
-            host: Arc::new(MockSessionManager::default()),
+            host: Arc::new(
+                MockSessionManager::default().with_process_registry(Arc::clone(&registry)),
+            ),
+            backend,
+            registry,
             openers: BTreeMap::new(),
             realized: BTreeMap::new(),
             registered_only: BTreeSet::new(),
@@ -78,7 +94,7 @@ impl PossessionWorld {
     }
 
     fn context_for(&self, session: &SessionId) -> RuntimeExecutionContext<'static> {
-        TestExecutionContextBuilder::new()
+        TestExecutionContextBuilder::for_backend(&self.backend)
             .session_id(session.clone())
             .shared_session_host(self.host.clone())
             .processes(self.host.clone())
@@ -163,8 +179,7 @@ impl PossessionWorld {
             (call_id, identity, child_id)
         };
         let record = self
-            .host
-            .process_registry
+            .registry
             .register_process(self.realized_registration(&child_id, opener_name))
             .await
             .unwrap_or_else(|err| panic!("register realized child {child_id}: {err}"));
@@ -245,8 +260,7 @@ impl PossessionWorld {
     async fn settle_signal_echoing_handle(&mut self, opener_name: &'static str, victim: &str) {
         let victim_id = ProcessId::from(victim);
         let victim_record = self
-            .host
-            .process_registry
+            .registry
             .get_process(&victim_id)
             .await
             .expect("registry read")
@@ -276,8 +290,7 @@ impl PossessionWorld {
     /// run-local. Possession of it by any opener is a phantom.
     async fn register_observed_only(&mut self, label: &str) {
         let process_id = ProcessId::from(label);
-        self.host
-            .process_registry
+        self.registry
             .register_process(ProcessRegistration::new(
                 process_id.clone(),
                 ProcessInput::External {
@@ -413,8 +426,7 @@ impl PossessionWorld {
         }
         for process_id in self.realized.keys() {
             assert!(
-                self.host
-                    .process_registry
+                self.registry
                     .get_process(process_id)
                     .await
                     .expect("registry read")
@@ -423,8 +435,7 @@ impl PossessionWorld {
             );
         }
         let registry_rows: BTreeSet<ProcessId> = self
-            .host
-            .process_registry
+            .registry
             .list_processes(&ProcessListFilter::default())
             .await
             .expect("registry list")
@@ -483,7 +494,7 @@ fn settled_outcome(
 /// inside its helper, so the sequence below reads as the workload itself.
 #[tokio::test]
 async fn realized_processes_are_possessed_by_exactly_one_opener_after_every_step() {
-    let mut world = PossessionWorld::new();
+    let mut world = PossessionWorld::new().await;
     world.add_opener("A", "session-a").await;
     world.add_opener("B", "session-b").await;
 

@@ -73,12 +73,11 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         engines: fixture_process_engines(artifact_store.clone(), surface.clone()),
     });
     let ctx = lash_core::testing::code_execution_context_with_process_dependencies(
+        lash_core::testing::TestExecutionPorts::over_host(effect_host, process_env_store),
         Arc::new(ProcessControlToolProvider),
         process_control_tool_catalog(),
         None,
         processes,
-        effect_host,
-        process_env_store,
         lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
             session_policy,
@@ -200,20 +199,15 @@ pub(super) async fn typescript_runtime_values_replay_from_the_journal_after_reop
             lash_sqlite_store::SqliteRuntimeEffectController::open(path, scope.clone())
                 .await
                 .expect("open SQLite effect controller");
-        let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
-            Arc::new(ProcessControlToolProvider),
-            lash_core::ToolCatalog::default(),
-            lash_core::ScopedEffectController::shared(Arc::new(controller), durable_admission(scope))
-                .expect("admit SQLite controller scope"),
-            lash_core::testing::exec_code_invocation(
+        let ctx = lash_core::testing::code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(crate::testing::memory_backend_ports().await, Arc::new(ProcessControlToolProvider), lash_core::ToolCatalog::default(), lash_core::ScopedEffectController::shared(Arc::new(controller), durable_admission(scope))
+                .expect("admit SQLite controller scope"), lash_core::testing::exec_code_invocation(
                 session_id,
                 turn_id,
                 0,
                 0,
                 "runtime-values",
                 "replay:runtime-values",
-            ),
-        );
+            ));
         let number = async |operation: &str| {
             let value = lash_lashlang_runtime::journaled_typescript_runtime_value(
                 &ctx,

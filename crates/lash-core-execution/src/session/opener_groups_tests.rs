@@ -7,7 +7,13 @@ fn bound(children: usize) -> OpenerWorkBound {
 }
 
 fn opener(children: usize) -> RuntimeExecutionContext<'static> {
-    crate::testing::code_execution_context().with_opener_state(OpenerState::new(bound(children)))
+    crate::testing::TestExecutionContextBuilder::over_controller(std::sync::Arc::new(
+        crate::testing::UnavailableEffectController,
+    )
+        as std::sync::Arc<dyn crate::RuntimeEffectController>)
+    .build()
+    .into_runtime()
+    .with_opener_state(OpenerState::new(bound(children)))
 }
 
 /// Unique children are reserved at formation; a reservation is reused, not

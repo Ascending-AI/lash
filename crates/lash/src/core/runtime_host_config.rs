@@ -319,8 +319,9 @@ mod tests {
         assert_conflict(builder, base_config(), "attachment_store");
 
         let mut builder = fresh_builder();
-        builder.deps.process_env_store =
-            Some(lash_core::testing::process_execution_env_fixture().0);
+        builder.deps.process_env_store = Some(Arc::new(
+            lash_core::testing::UnavailableProcessExecutionEnvStore,
+        ));
         assert_conflict(builder, base_config(), "process_env_store");
 
         let mut builder = fresh_builder();
@@ -385,8 +386,9 @@ mod tests {
         builder.deps.effect_host = Some(Arc::new(facade_support::NativeEffectHost::default()));
         builder.deps.attachment_store =
             Some(Arc::new(facade_support::InMemoryAttachmentStore::new()));
-        builder.deps.process_env_store =
-            Some(lash_core::testing::process_execution_env_fixture().0);
+        builder.deps.process_env_store = Some(Arc::new(
+            lash_core::testing::UnavailableProcessExecutionEnvStore,
+        ));
         builder.deps.commit_budget = Some(facade_support::CommitBudget::bounded(1, 1));
         builder.deps.queued_work_batching = Some(facade_support::QueuedWorkBatchingConfig::new(1));
         builder.max_attachment_bytes = Some(Some(4096));

@@ -462,13 +462,20 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
         .build_session("root")
         .expect("mixed-envelope plugin session");
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    ));
+    let runtime_services = crate::PersistentRuntimeServices::new(
+        plugins,
+        Arc::clone(&store),
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
         policy.clone(),
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )),
-        crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
+        runtime_host,
+        runtime_services,
         crate::RuntimeSessionState {
             policy,
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
@@ -779,13 +786,20 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
         .build_session("root")
         .expect("cancelled usage plugin session");
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    ));
+    let runtime_services = crate::PersistentRuntimeServices::new(
+        plugins,
+        Arc::clone(&store),
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = crate::LashRuntime::from_persistent_embedded_state(
         policy.clone(),
-        crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )),
-        crate::PersistentRuntimeServices::new(plugins, Arc::clone(&store)),
+        runtime_host,
+        runtime_services,
         crate::RuntimeSessionState {
             policy,
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(

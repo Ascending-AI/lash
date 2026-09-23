@@ -321,10 +321,17 @@ async fn runtime_for_config_settlement(
         crate::QueuedWorkBatchingConfig::new(1),
     )
     .with_clock(clock as Arc<dyn crate::Clock>);
+    let runtime_host = crate::EmbeddedRuntimeHost::new(host);
+    let runtime_services = crate::PersistentRuntimeServices::new(
+        plugins,
+        store,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     crate::LashRuntime::from_persistent_embedded_state(
         request.policy.clone(),
-        crate::EmbeddedRuntimeHost::new(host),
-        crate::PersistentRuntimeServices::new(plugins, store),
+        runtime_host,
+        runtime_services,
         state,
         crate::testing::runtime_lease_owner(),
     )

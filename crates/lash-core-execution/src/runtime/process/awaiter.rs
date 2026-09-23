@@ -85,6 +85,13 @@ impl WatchedRegistry {
     }
 
     /// Attach a live event observer to this watched registry and its bound port.
+    /// How many event sinks are attached: what the registration-detach law in
+    /// `tests/store_backed` reads, since the sink list is private.
+    #[cfg(feature = "testing")]
+    pub fn event_sink_count_for_testing(&self) -> usize {
+        self.sinks.lock_recover().len()
+    }
+
     pub fn add_event_sink(&self, sink: Arc<dyn ProcessEventSink>) -> ProcessEventSinkRegistration {
         self.sinks.lock_recover().push(Arc::clone(&sink));
         ProcessEventSinkRegistration {
@@ -195,28 +202,5 @@ impl super::registry::ProcessClockRebind for WatchedProcessRegistry {
                 event_paths: Mutex::new(HashMap::new()),
             }) as Arc<dyn ProcessRegistry>
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct TestSink;
-
-    #[async_trait::async_trait]
-    impl ProcessEventSink for TestSink {
-        async fn emit(&self, _: &crate::ProcessEvent) {}
-    }
-
-    #[test]
-    fn registration_detaches_its_sink_on_drop() {
-        let registry: Arc<dyn ProcessRegistry> =
-            Arc::new(crate::runtime::process::TestLocalProcessRegistry::default());
-        let watched = watch_process_registry(registry);
-        let registration = watched.add_event_sink(Arc::new(TestSink));
-        assert_eq!(watched.sinks.lock_recover().len(), 1);
-        drop(registration);
-        assert!(watched.sinks.lock_recover().is_empty());
     }
 }

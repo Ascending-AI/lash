@@ -92,9 +92,9 @@ fn test_tool_context() -> crate::ToolContext<'static> {
         Arc::new(crate::testing::MockSessionManager::default()),
         Arc::new(crate::UnavailableProcessService),
         crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-            crate::NativeRuntimeEffectController::default(),
+            crate::testing::UnavailableEffectController,
         )),
-        Arc::new(crate::SessionAttachmentStore::in_memory()),
+        Arc::new(crate::SessionAttachmentStore::unavailable()),
         crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),

@@ -217,7 +217,7 @@ impl ToolChildHost {
     /// every nested semantic admission *under* it, fenced by the substrate's
     /// own arbitration for that child rather than by any `caused_by` lineage
     /// an envelope happens to carry.
-    fn child_controller(
+    pub(crate) fn child_controller(
         &self,
         admitted: &AdmittedScope,
         binding: crate::GroupChildBinding,
@@ -769,7 +769,7 @@ pub(crate) async fn run_tool_child<'run>(
 ///   issuing process is gone — and its recorded issuer must be *this*
 ///   host's registry identity: a process-lifetime key minted by another
 ///   registry is unresolvable here and a fresh one would double dispatch.
-async fn validate_recorded_authorities(
+pub(crate) async fn validate_recorded_authorities(
     host: &ToolChildHost,
     controller: &ScopedEffectController<'_>,
     request: &ToolChildRequest,
@@ -1293,6 +1293,8 @@ pub fn opener_for_execution_scope(admitted: &AdmittedScope) -> Option<EffectOpen
     EffectOpener::for_scope(admitted).ok()
 }
 
+#[cfg(test)]
+mod local_participation_tests;
 #[cfg(test)]
 #[path = "tool_child_driver/tests.rs"]
 mod tests;

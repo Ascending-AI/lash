@@ -319,7 +319,7 @@ pub(super) async fn wait_for_terminal_count(
     }
 }
 
-pub(super) fn native_worker(
+pub(super) async fn native_worker(
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
 ) -> DurableProcessWorker {
@@ -328,30 +328,21 @@ pub(super) fn native_worker(
         lease_owner,
         Arc::new(crate::InMemoryTriggerStore::default()),
     )
+    .await
 }
 
-pub(super) fn native_worker_with_trigger_store(
+pub(super) async fn native_worker_with_trigger_store(
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
     trigger_store: Arc<dyn TriggerStore>,
 ) -> DurableProcessWorker {
     let watched = crate::watch_process_registry(registry);
-    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
     DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(
                 crate::testing::test_standard_protocol_factories(),
             )),
-            RuntimeHostConfig::in_memory(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            )
-            .with_process_env_store(process_env_store)
-            .with_process_engine_registration(
-                crate::ProcessEngineRegistration::accepting(Arc::new(
-                    crate::testing::FixtureProcessEngine,
-                )),
-            ),
+            host_config_with_fixture_env().await,
             Arc::new(InMemorySessionStoreFactory::default()),
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
@@ -366,7 +357,7 @@ pub(super) fn native_worker_with_trigger_store(
 /// driver's run handle drives this same worker, which is the shape the facade
 /// builds and the shape that produced the "a call reports its own admission as
 /// `Busy`" defect.
-pub(super) fn reentrant_worker_with_trigger_store(
+pub(super) async fn reentrant_worker_with_trigger_store(
     registry: Arc<dyn ProcessRegistry>,
     lease_owner: LeaseOwnerIdentity,
     trigger_store: Arc<dyn TriggerStore>,
@@ -374,22 +365,12 @@ pub(super) fn reentrant_worker_with_trigger_store(
 ) -> DurableProcessWorker {
     let (_driver_registry, _driver_hub, process_work) =
         late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
-    let (process_env_store, _) = crate::testing::process_execution_env_fixture();
     let worker = DurableProcessWorker::new(
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(
                 crate::testing::test_standard_protocol_factories(),
             )),
-            RuntimeHostConfig::in_memory(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            )
-            .with_process_env_store(process_env_store)
-            .with_process_engine_registration(
-                crate::ProcessEngineRegistration::accepting(Arc::new(
-                    crate::testing::FixtureProcessEngine,
-                )),
-            ),
+            host_config_with_fixture_env().await,
             Arc::new(InMemorySessionStoreFactory::default()),
             crate::WorkerProcessWork::External(process_work),
             Arc::new(crate::NoQueuedWork::new()),
@@ -403,4 +384,20 @@ pub(super) fn reentrant_worker_with_trigger_store(
         .set(worker.clone())
         .unwrap_or_else(|_| panic!("test process worker is bound exactly once"));
     worker
+}
+
+/// The worker's host config, with the fixture execution environment published
+/// into its own process-exec-env store: a trigger delivery the worker starts
+/// loads that environment by the reference its subscription recorded.
+async fn host_config_with_fixture_env() -> RuntimeHostConfig {
+    let config = RuntimeHostConfig::in_memory(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    )
+    .with_process_engine_registration(crate::ProcessEngineRegistration::accepting(Arc::new(
+        crate::testing::FixtureProcessEngine,
+    )));
+    crate::testing::process_execution_env_fixture(config.durability.process_env_store.as_ref())
+        .await;
+    config
 }

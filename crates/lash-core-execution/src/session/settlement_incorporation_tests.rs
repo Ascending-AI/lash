@@ -49,14 +49,17 @@ impl UsageChargeSink for RecordingCharge {
 }
 
 fn context_with_charge(charge: Arc<RecordingCharge>) -> crate::RuntimeExecutionContext<'static> {
-    crate::testing::TestExecutionContextBuilder::new()
-        .plugin_factories(Vec::new())
-        .direct_completions(
-            crate::DirectCompletionClient::unavailable("incorporation test context")
-                .with_usage_charge_sink(charge),
-        )
-        .build()
-        .into_runtime()
+    crate::testing::TestExecutionContextBuilder::over_controller(std::sync::Arc::new(
+        crate::testing::UnavailableEffectController,
+    )
+        as std::sync::Arc<dyn crate::RuntimeEffectController>)
+    .plugin_factories(Vec::new())
+    .direct_completions(
+        crate::DirectCompletionClient::unavailable("incorporation test context")
+            .with_usage_charge_sink(charge),
+    )
+    .build()
+    .into_runtime()
 }
 
 fn delta(attempt: u32, call_id: &str, provider_attempt: u32, input_tokens: i64) -> ToolUsageDelta {

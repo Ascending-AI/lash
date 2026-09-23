@@ -68,28 +68,33 @@ async fn run_batch(
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     ));
-    let context = crate::testing::TestExecutionContextBuilder::new()
-        .session_id(session_id.clone())
-        .provider(Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>)
-        .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
-        .tool_registry(Arc::new(tool_registry))
-        .processes(crate::testing::effect_backed_process_service(
-            scenario.registry,
-        ))
-        .direct_completions(crate::DirectCompletionClient::from_fn(
-            |request, _source| {
-                Ok(if request.model == "law-billed-model" {
-                    law_billed_completion()
-                } else {
-                    law_direct_completion()
-                })
-            },
-        ))
-        .process_env_store(scenario.process_env_store)
-        .effect_host(Arc::clone(host))
-        .borrowed_effect_controller(controller)
-        .build()
-        .into_runtime();
+    let context = crate::testing::TestExecutionContextBuilder::new(
+        crate::testing::TestExecutionPorts::over_host(
+            Arc::clone(host),
+            Arc::clone(&scenario.process_env_store),
+        ),
+    )
+    .session_id(session_id.clone())
+    .provider(Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>)
+    .tool_catalog(crate::ToolCatalog::from_tool_definitions(definitions))
+    .tool_registry(Arc::new(tool_registry))
+    .processes(crate::testing::effect_backed_process_service(
+        scenario.registry,
+        scenario.process_env_store,
+    ))
+    .direct_completions(crate::DirectCompletionClient::from_fn(
+        |request, _source| {
+            Ok(if request.model == "law-billed-model" {
+                law_billed_completion()
+            } else {
+                law_direct_completion()
+            })
+        },
+    ))
+    .borrowed_effect_controller(controller)
+    .route_tool_children()
+    .build()
+    .into_runtime();
     let replies = context
         .call_tool_batch(calls, crate::session::ToolGroupOccurrence::Opener(1))
         .await;

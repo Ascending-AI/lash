@@ -254,6 +254,9 @@ struct SurfaceRunner {
     name: &'static str,
     scenario: StoreContractScenario,
     process_registry: Arc<dyn lash_core::ProcessRegistry>,
+    /// Where the runner's process service publishes a started process's
+    /// execution environment.
+    process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     trigger_store: Arc<dyn TriggerStore>,
     effect_host: Arc<dyn EffectHost>,
     /// `None` on the in-memory runner: it exercises no durable groups, and
@@ -780,9 +783,10 @@ impl SurfaceRunner {
                     scope,
                 )
                 .map_err(|error| error.to_string())?;
-                let processes = lash_core::testing::effect_backed_process_service(Arc::clone(
-                    &self.process_registry,
-                ));
+                let processes = lash_core::testing::effect_backed_process_service(
+                    Arc::clone(&self.process_registry),
+                    Arc::clone(&self.process_env_store),
+                );
                 let (completed, settled) =
                     Box::pin(lash_conformance::coordinate_tool_provider_with_services(
                         controller.clone(),
@@ -1568,6 +1572,19 @@ async fn reset_postgres_surface(storage: &PostgresStorage) {
     sqlx::query("INSERT INTO lash_process_change_clock (singleton, current_seq, tombstone_compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, tombstone_compaction_horizon = 0").execute(storage.pool()).await.unwrap();
 }
 
+/// A fresh SQLite memory backend's process-exec-env store (ADR 0102): the
+/// environment store a runner with no durable one of its own publishes to.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a memory backend that fails to open aborts the harness"
+)]
+async fn memory_backend_env_store() -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
+    lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a memory backend")
+        .process_env_store()
+}
+
 #[expect(
     clippy::unwrap_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
@@ -1671,6 +1688,7 @@ async fn surface_runners(
                 runtime: memory_runtime.clone(),
             }),
             process_registry: memory_registry.clone(),
+            process_env_store: memory_backend_env_store().await,
             trigger_store: memory_triggers.clone(),
             effect_host: memory_effect,
             groups: None,
@@ -1689,6 +1707,7 @@ async fn surface_runners(
                 runtime: sqlite_runtime,
             }),
             process_registry: sqlite_registry,
+            process_env_store: memory_backend_env_store().await,
             trigger_store: sqlite_triggers,
             effect_host: sqlite_effect,
             groups: Some(sqlite_groups),
@@ -1709,6 +1728,7 @@ async fn surface_runners(
                 runtime: postgres_runtime,
             }),
             process_registry: postgres_registry,
+            process_env_store: Arc::new(storage.process_env_store()),
             trigger_store: postgres_triggers,
             effect_host: postgres_effect,
             groups: Some(postgres_groups),

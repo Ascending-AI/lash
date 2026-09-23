@@ -80,7 +80,13 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         )
         .await
         .expect("publish serializable-input artifact");
-    let (process_env_store, process_env_ref) = lash_core::testing::process_execution_env_fixture();
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("process-exec-env backend")
+            .process_env_store();
+    let process_env_ref =
+        lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let process_ref = linked_module
         .artifact
         .process_ref("scan")

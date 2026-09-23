@@ -115,3 +115,27 @@ pub fn in_memory_lineage_handles() -> crate::testing::lineage::LineageConformanc
         lash_core_memory::in_memory_store::in_memory_lineage_handles(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+
+    #[tokio::test]
+    async fn memory_factory_trait_adapter_uses_same_store() {
+        let concrete = crate::InMemorySessionStoreFactory::new();
+        let request = crate::testing::store_fixtures::session_store_request(
+            &crate::SessionId::from("factory-adapter"),
+            "model",
+            crate::SessionRelation::Root,
+        );
+        let direct = concrete.create_store(&request).await.unwrap();
+        let facade: std::sync::Arc<dyn crate::SessionStoreFactory> = std::sync::Arc::new(concrete);
+        let reopened = facade.open_existing_store(&request).await.unwrap().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&direct, &reopened));
+        assert!(
+            !facade
+                .session_was_deleted(&request.session_id)
+                .await
+                .unwrap()
+        );
+    }
+}

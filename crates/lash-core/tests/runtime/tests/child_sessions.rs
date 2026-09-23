@@ -116,10 +116,16 @@ async fn inherited_child_session_carries_parent_tool_state() {
                 .with_tool_provider(Arc::new(MemoryProbeTool)),
         ))]);
     let plugin_session = plugin_host.build_session("root").expect("plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+        plugin_session,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::testing::runtime_internals::RuntimeServices::new(plugin_session),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -214,10 +220,16 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
                 .with_tool_provider(Arc::new(MemoryProbeTool)),
         ))]);
     let plugin_session = plugin_host.build_session("root").expect("plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+        plugin_session,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::testing::runtime_internals::RuntimeServices::new(plugin_session),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),
@@ -326,13 +338,17 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
             lash_core::TurnBudget::Unbounded,
         ))
     };
+    let runtime_host = host;
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugin_session_with_tools(&SessionId::from("root"), Arc::new(AttachmentWritingTool)),
+        Arc::clone(&root_store) as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let runtime = LashRuntime::from_persistent_embedded_state(
         standard_test_policy(),
-        host,
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            plugin_session_with_tools(&SessionId::from("root"), Arc::new(AttachmentWritingTool)),
-            Arc::clone(&root_store) as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         state,
         lash_core::testing::runtime_lease_owner(),
     )
@@ -452,16 +468,20 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         lash_core::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
         Arc::new(lash_core::NoQueuedWork::new()),
     );
+    let runtime_host = host;
+    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
+        plugin_session_with_orchestrating_tool(
+            &SessionId::from("root"),
+            FirstTurnProcessTool::orchestrating(),
+        ),
+        root_store as Arc<dyn lash_core::store::RuntimePersistence>,
+        std::sync::Arc::clone(&runtime_host.embedded().core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.embedded().core.durability.process_env_store),
+    );
     let runtime = LashRuntime::from_persistent_background_state(
         standard_test_policy(),
-        host,
-        lash_core::facade_support::PersistentRuntimeServices::new(
-            plugin_session_with_orchestrating_tool(
-                &SessionId::from("root"),
-                FirstTurnProcessTool::orchestrating(),
-            ),
-            root_store as Arc<dyn lash_core::store::RuntimePersistence>,
-        ),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState {
             session_id: SessionId::from("root"),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -564,10 +584,16 @@ impl lash_core::plugin::SessionPlugin for MemoryProbePlugin {
 async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebuild() {
     let plugin_host = lash_core::testing::test_plugin_host(vec![Arc::new(MemoryProbeFactory)]);
     let plugin_session = plugin_host.build_session("root").expect("plugins");
+    let runtime_host = test_host_config();
+    let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
+        plugin_session,
+        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_embedded_state(
         standard_test_policy(),
-        test_host_config(),
-        lash_core::testing::runtime_internals::RuntimeServices::new(plugin_session),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState::new(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,
         )),

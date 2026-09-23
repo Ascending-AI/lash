@@ -1232,10 +1232,16 @@ async fn run_seed_probe_inner(
         lash_core::ProcessWorkWiring::new(watched, process_port),
         Arc::new(lash_core::NoQueuedWork::new()),
     );
+    let runtime_host = host;
+    let runtime_services = RuntimeServices::new(
+        plugins,
+        std::sync::Arc::clone(&runtime_host.embedded().core.durability.attachment_store),
+        std::sync::Arc::clone(&runtime_host.embedded().core.durability.process_env_store),
+    );
     let mut runtime = LashRuntime::from_background_state(
         policy.clone(),
-        host,
-        RuntimeServices::new(plugins),
+        runtime_host,
+        runtime_services,
         RuntimeSessionState {
             session_id: SessionId::from("root"),
             policy,

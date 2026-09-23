@@ -56,7 +56,8 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-recovery-group");
-    let (process_env_store, env_ref) = crate::testing::process_execution_env_fixture();
+    let process_env_store = (fixture.make_processes)().await.process_env_store;
+    let env_ref = crate::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
 
     let probe_world = (fixture.make_world)(ToolChildWorldSpec {
         lease_ttl_ms: LIVE_LEASE_MS,
@@ -314,7 +315,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         intent_target: crate::ProcessId::from("unused-in-recovery"),
         start_metadata: serde_json::Value::Null,
     });
-    let registry = (fixture.make_registry)().await;
+    let registry = (fixture.make_processes)().await.registry;
     let _guard = register_opener(
         &successor.host,
         &scope,

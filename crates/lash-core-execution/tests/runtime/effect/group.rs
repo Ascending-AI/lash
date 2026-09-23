@@ -689,7 +689,7 @@ mod effect_group_contract_tests {
 /// Retention of a closed group's record on the native tier (FIG-3548).
 ///
 /// These laws are part of `effect_model`, which also runs in the zero-feature
-/// lane (`effect_model__test__fv_ecbe9667`): the retention they pin is
+/// lane (`effect_model__test__fv_1b88c62a`): the retention they pin is
 /// production behavior, not a `testing` convenience.
 mod native_group_retention {
     use std::sync::Arc;

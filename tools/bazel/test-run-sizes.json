@@ -20,7 +20,7 @@
     "peak_bytes": 17235968,
     "samples": 3
   },
-  "//crates/lash-core-execution:effect_model__test__fv_ecbe9667": {
+  "//crates/lash-core-execution:effect_model__test__fv_1b88c62a": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
@@ -48,7 +48,7 @@
     "peak_bytes": 15974400,
     "samples": 3
   },
-  "//crates/lash-core-execution:process_model__test__fv_ecbe9667": {
+  "//crates/lash-core-execution:process_model__test__fv_1b88c62a": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,

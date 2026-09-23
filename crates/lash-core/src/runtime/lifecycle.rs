@@ -464,9 +464,21 @@ impl LashRuntime {
             return Err(error);
         }
         let host = super::host::RuntimeHost::from_embedded_with_work(embedded_host, work);
+        // Both arms take their attachment and process-exec-env ports from the
+        // host, which takes them from its backend (ADR 0102): a runtime
+        // with no session store — the worker's reconstruction runtime among
+        // them — writes attachments through the backend's attachment port
+        // with no manifest, never through an in-memory stand-in.
+        let attachment_store = Arc::clone(&host.core.durability.attachment_store);
+        let process_env_store = Arc::clone(&host.core.durability.process_env_store);
         let runtime = match store {
             Some(store) => {
-                let mut services = PersistentRuntimeServices::new(plugin_session, store);
+                let mut services = PersistentRuntimeServices::new(
+                    plugin_session,
+                    store,
+                    attachment_store,
+                    process_env_store,
+                );
                 if let Some(manifest_store) = attachment_manifest_store {
                     services = services.with_attachment_manifest_store(manifest_store);
                 }
@@ -481,7 +493,8 @@ impl LashRuntime {
                 .await?
             }
             None => {
-                let services = RuntimeServices::new(plugin_session);
+                let services =
+                    RuntimeServices::new(plugin_session, attachment_store, process_env_store);
                 Self::from_host_state(
                     policy,
                     host,
@@ -963,13 +976,17 @@ mod tests {
             .create_store(&request)
             .await
             .expect("create session store before parking");
+        let runtime_host = test_host_config();
+        let runtime_services = crate::PersistentRuntimeServices::new(
+            plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
+            Arc::clone(&store),
+            std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+            std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+        );
         let runtime = crate::LashRuntime::from_persistent_embedded_state(
             policy.clone(),
-            test_host_config(),
-            crate::PersistentRuntimeServices::new(
-                plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
-                Arc::clone(&store),
-            ),
+            runtime_host,
+            runtime_services,
             crate::RuntimeSessionState {
                 session_id: SessionId::from(session_id.to_string()),
                 policy,
@@ -1029,13 +1046,17 @@ mod tests {
             })
             .await
             .expect("create session store before parking");
+        let runtime_host = test_host_config();
+        let runtime_services = crate::PersistentRuntimeServices::new(
+            plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
+            store,
+            std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
+            std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
+        );
         let runtime = crate::LashRuntime::from_persistent_embedded_state(
             policy.clone(),
-            test_host_config(),
-            crate::PersistentRuntimeServices::new(
-                plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
-                store,
-            ),
+            runtime_host,
+            runtime_services,
             crate::RuntimeSessionState {
                 session_id: SessionId::from(session_id.to_string()),
                 policy,

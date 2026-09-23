@@ -231,7 +231,15 @@ impl RlmCheckpointPerfFixture {
         );
         let response = execute_code_with_bounds(
             &mut self.state,
-            lash_core::testing::code_execution_context(),
+            // The fixture measures state capture over pure bindings: no
+            // effect, environment or attachment is reached, so the context
+            // runs over no host and would refuse one.
+            lash_core::testing::TestExecutionContextBuilder::over_controller(Arc::new(
+                lash_core::testing::UnavailableEffectController,
+            )
+                as Arc<dyn lash_core::RuntimeEffectController>)
+            .build()
+            .into_runtime(),
             ExecRequest {
                 language: "typescript".to_string(),
                 code,

@@ -83,7 +83,7 @@ pub enum EffectControllerTaskRequest {
 }
 
 impl EffectControllerTaskRequest {
-    pub(super) fn into_future<'run>(
+    pub(crate) fn into_future<'run>(
         self,
         controller: &'run dyn RuntimeEffectController,
     ) -> EffectControllerTaskFuture<'run> {

@@ -852,6 +852,7 @@ trait ToolIntentCorpusReplay {
 
 pub(super) struct ToolIntentCorpusReplayImpl {
     registry: Arc<dyn ProcessRegistry>,
+    process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
 }
 
 impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
@@ -927,7 +928,10 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
             controller
                 .scoped_effect_controller(durable_admission(&scope))
                 .map_err(TerminalError::from_error)?,
-            lash_core::testing::effect_backed_process_service(Arc::clone(&self.registry)),
+            lash_core::testing::effect_backed_process_service(
+                Arc::clone(&self.registry),
+                Arc::clone(&self.process_env_store),
+            ),
             &SessionId::from(TOOL_INTENT_CORPUS_SESSION),
             "tool-intent-corpus-call",
             &intents,
@@ -942,11 +946,12 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
 
 pub(super) async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessRegistry>) {
     let clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
-    let registry: Arc<dyn ProcessRegistry> =
-        lash_sqlite_store::SqliteBackend::memory_with_clock(clock)
-            .await
-            .expect("open corpus process registry")
-            .process_registry();
+    let backend = lash_sqlite_store::SqliteBackend::memory_with_clock(clock)
+        .await
+        .expect("open corpus backend");
+    let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
+    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
+        backend.process_env_store();
     registry
         .register_process(
             ProcessRegistration::new(
@@ -973,6 +978,7 @@ pub(super) async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessR
         .bind(
             ToolIntentCorpusReplayImpl {
                 registry: Arc::clone(&registry),
+                process_env_store,
             }
             .serve(),
         )
