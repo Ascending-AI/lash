@@ -138,7 +138,7 @@ fn process_node_record() -> lash_trace::TraceRecord {
                 },
                 payload: lash_trace::TraceLanguageExecutionPayload::NodeStarted {
                     node_id: "node".to_string(),
-                    node_kind: "call".to_string(),
+                    node_kind: lash_sansio::ExecutionNodeKind::Call,
                     label: "call()".to_string(),
                     occurrence: 1,
                     call_id: None,

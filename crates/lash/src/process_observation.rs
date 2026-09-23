@@ -722,11 +722,12 @@ mod tests {
                         site: lash_sansio::WorkflowExecutionSite::new(
                             "main",
                             [0],
-                            "call",
+                            lash_sansio::ExecutionNodeKind::Call,
                             "call()",
                         ),
-                        kind: "call".to_string(),
+                        kind: lash_sansio::ExecutionNodeKind::Call,
                         label: "call()".to_string(),
+                        branch_memberships: Vec::new(),
                         label_metadata: None,
                     }],
                     edges: Vec::new(),
@@ -735,7 +736,7 @@ mod tests {
         } else {
             TraceLanguageExecutionPayload::NodeStarted {
                 node_id: "node".to_string(),
-                node_kind: "call".to_string(),
+                node_kind: lash_sansio::ExecutionNodeKind::Call,
                 label: "call()".to_string(),
                 occurrence,
                 call_id: None,
