@@ -2357,9 +2357,9 @@ mod closing;
 mod derivation;
 mod drain;
 mod groups;
-mod lease_renewal;
 #[cfg(feature = "testing")]
 mod journal_faults;
+mod lease_renewal;
 #[cfg(feature = "testing")]
 pub use journal_faults::{EffectJournalFaultPoint, EffectJournalFaults};
 

@@ -1290,8 +1290,9 @@ struct TraceTool {
     control: SeamControl,
     /// The journaled controller's fault injector (FIG-3524). When the armed
     /// placement is `EffectJournalRenew`, the tool holds its own execution
-    /// open until the injected renew error fires, so the lease-renewal loop
-    /// is guaranteed to reach the fault before the effect completes.
+    /// open until the injected renew error fires and the renewal loop has
+    /// retried, so the lease-renewal loop is guaranteed to reach the fault
+    /// before the effect completes.
     journal_faults: Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaults>,
 }
 
@@ -1347,6 +1348,16 @@ impl crate::ToolProvider for TraceTool {
                 .expect(
                     "armed effect-lease renew fault never fired; the placement covered nothing",
                 );
+            // A failed renewal is a missed renewal, not a lost lease
+            // (FIG-3512): hold the tool open until the renewal loop has
+            // retried, so the run observes the retry it is ruled on.
+            tokio::time::timeout(HIT_TIMEOUT, async {
+                while faults.calls_after_fire() == 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("a failed effect-lease renewal must be retried while the tool runs");
         }
         crate::ToolOutcome::ok(serde_json::json!({"effect":"executed"})).into()
     }

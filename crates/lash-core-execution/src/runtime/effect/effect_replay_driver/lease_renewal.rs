@@ -97,6 +97,12 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         fence: &EffectLeaseFence,
         budget: &RenewalBudget,
     ) -> Option<Result<bool, RuntimeEffectControllerError>> {
+        #[cfg(feature = "testing")]
+        if let Some(err) =
+            self.take_journal_fault(EffectJournalFaultPoint::Renew, &fence.replay_key)
+        {
+            return Some(Err(err));
+        }
         let renew = self.row_store.renew(fence, self.lease_timings.ttl_ms());
         let Some(deadline) = budget.deadline() else {
             return Some(renew.await);

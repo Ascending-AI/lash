@@ -244,7 +244,7 @@
   {
     "error_return": {
       "placement": "effect-journal-renew",
-      "outcome": "An unretried store error from the effect-lease renew aborts the turn as a controller error (FIG-3528): the typed error reaches the caller and no provider request or durable commit follows.",
+      "outcome": "A store error from the effect-lease renew is a missed renewal, not a lost lease (FIG-3512, LeaseTimings' two-miss budget): the renewal loop retries it while the tool keeps running, the tool completes and finalizes, and the injected error never reaches the caller. This supersedes the FIG-3528 unretried-abort ruling for this placement: a single renew error is retried by design, so the fail-stop law's retried branch applies.",
       "violations": []
     }
   }
