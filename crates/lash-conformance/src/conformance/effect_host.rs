@@ -380,27 +380,22 @@ pub async fn effect_controller_segmentation_vector(
             let input = serde_json::json!({ "iteration": ordinal, "accumulator": ordinal * 3 });
             let outcome = controller
                 .execute_effect(
-                    exec_code_conformance_envelope(
+                    journaled_conformance_envelope(
                         execution_scope,
                         &format!("{id_prefix}-{ordinal}"),
                         &input.to_string(),
                     ),
                     RuntimeEffectLocalExecutor::testing(move |_| async move {
                         calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        Ok(replay_conformance_exec_outcome(&input.to_string()))
+                        Ok(replay_conformance_value_outcome(&input.to_string()))
                     }),
                 )
                 .await
                 .expect("segmentation vector journaled effect");
-            let RuntimeEffectOutcome::ExecCode { result } = outcome else {
-                panic!("segmentation vector must return exec-code outcome");
+            let RuntimeEffectOutcome::LanguageRuntimeValue { value } = outcome else {
+                panic!("segmentation vector must return a language-runtime-value outcome");
             };
-            effects.push(
-                result
-                    .expect("segmentation exec result")
-                    .terminal_finish
-                    .expect("segmentation exec marker"),
-            );
+            effects.push(value);
             progress.effects_executed += 1;
             if honor_boundaries
                 && ordinal + 1 < 7
@@ -562,6 +557,120 @@ impl ConformanceInvocation {
     pub fn end(self) {
         (self.end)();
     }
+}
+
+/// A code cell replays by re-execution on every durable host (ADR 0103).
+///
+/// The live pass runs the cell once, and the cell issues one nested journaled
+/// effect. The redrive runs the cell again — its interpreter state is rebuilt
+/// only by running it — while the nested effect answers from the journal
+/// without calling its executor. The replayed cell therefore sees the same
+/// nested value and returns the same response.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn effect_controller_code_cell_replays_by_reexecution<F>(make: F)
+where
+    F: FnOnce() -> ConformanceInvocation,
+{
+    async fn run_cell(
+        controller: Arc<dyn RuntimeEffectController>,
+        scope: &ExecutionScope,
+        cell_runs: Arc<std::sync::atomic::AtomicUsize>,
+        nested_runs: Arc<std::sync::atomic::AtomicUsize>,
+    ) -> Option<serde_json::Value> {
+        let cell = RuntimeEffectEnvelope::new(
+            RuntimeEffectInvocation::new(
+                EffectAddress::new(scope.clone(), "code-cell-reexecution:cell")
+                    .expect("valid code-cell address"),
+                RuntimeAttribution::for_turn("journaled-session", "journaled-turn", 7, 0),
+                "code-cell-reexecution:cell",
+            ),
+            RuntimeEffectCommand::ExecCode {
+                language: "conformance".to_string(),
+                code: "const value = await nested();".to_string(),
+            },
+        );
+        let nested = journaled_conformance_envelope(scope, "code-cell-nested", "nested");
+        let outcome = controller
+            .clone()
+            .execute_effect(
+                cell,
+                RuntimeEffectLocalExecutor::testing(move |_| async move {
+                    cell_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let nested_value = controller
+                        .execute_effect(
+                            nested,
+                            RuntimeEffectLocalExecutor::testing(move |_| async move {
+                                let run =
+                                    nested_runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                Ok(replay_conformance_value_outcome(&format!(
+                                    "nested-live-{run}"
+                                )))
+                            }),
+                        )
+                        .await?;
+                    let RuntimeEffectOutcome::LanguageRuntimeValue { value } = nested_value else {
+                        panic!("the nested effect must return a language-runtime-value outcome");
+                    };
+                    Ok(RuntimeEffectOutcome::ExecCode {
+                        result: Box::new(Ok(crate::ExecResponse {
+                            observations: Vec::new(),
+                            calls: Vec::new(),
+                            printed_images: Vec::new(),
+                            error: None,
+                            duration_ms: 0,
+                            degraded_bindings: Vec::new(),
+                            terminal_finish: Some(value),
+                        })),
+                    })
+                }),
+            )
+            .await
+            .expect("code cell executes");
+        let RuntimeEffectOutcome::ExecCode { result } = outcome else {
+            panic!("a code cell must return an exec-code outcome");
+        };
+        result.expect("code cell response").terminal_finish
+    }
+
+    let invocation = make();
+    let scope = invocation.execution_scope().clone();
+    let cell_runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let nested_runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let live = run_cell(
+        invocation.controller_handle(),
+        &scope,
+        Arc::clone(&cell_runs),
+        Arc::clone(&nested_runs),
+    )
+    .await;
+    let invocation = invocation.redrive();
+    let replayed = run_cell(
+        invocation.controller_handle(),
+        &scope,
+        Arc::clone(&cell_runs),
+        Arc::clone(&nested_runs),
+    )
+    .await;
+    invocation.end();
+
+    assert_eq!(live, Some(serde_json::json!("nested-live-0")));
+    assert_eq!(
+        replayed, live,
+        "the re-executed cell must see the journaled nested value"
+    );
+    assert_eq!(
+        cell_runs.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "a code cell runs on the live pass and again on replay; it is never served from a row"
+    );
+    assert_eq!(
+        nested_runs.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the cell's nested effect executes once and replays from the journal"
+    );
 }
 
 /// Run journaled-effect replay checks across an explicitly scoped invocation.
@@ -829,7 +938,7 @@ pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
         let controller = host
             .scoped(admit(scope.clone()))
             .expect("retired journal scope");
-        let envelope = exec_code_conformance_envelope(
+        let envelope = journaled_conformance_envelope(
             &scope,
             &format!("retired-journal-{ordinal}"),
             "retired-journal-envelope",
@@ -839,7 +948,7 @@ pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
             .execute_effect(
                 envelope,
                 RuntimeEffectLocalExecutor::testing(|_| async {
-                    Ok(replay_conformance_exec_outcome(
+                    Ok(replay_conformance_value_outcome(
                         "recorded-before-retirement",
                     ))
                 }),
@@ -873,13 +982,13 @@ pub async fn effect_host_retires_process_journal(host: &dyn EffectHost) {
     controller
         .controller()
         .execute_effect(
-            exec_code_conformance_envelope(
+            journaled_conformance_envelope(
                 &scope,
                 "retired-process-journal",
                 "retired-process-envelope",
             ),
             RuntimeEffectLocalExecutor::testing(|_| async {
-                Ok(replay_conformance_exec_outcome(
+                Ok(replay_conformance_value_outcome(
                     "recorded-before-retirement",
                 ))
             }),
@@ -918,9 +1027,9 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
             .expect("runtime-operation scope")
             .controller()
             .execute_effect(
-                exec_code_conformance_envelope(&scope, effect_id, "op-envelope"),
+                journaled_conformance_envelope(&scope, effect_id, "op-envelope"),
                 RuntimeEffectLocalExecutor::testing(|_| async {
-                    Ok(replay_conformance_exec_outcome(
+                    Ok(replay_conformance_value_outcome(
                         "recorded-before-retirement",
                     ))
                 }),
@@ -946,9 +1055,9 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
         .expect("retired scope still binds a controller")
         .controller()
         .execute_effect(
-            exec_code_conformance_envelope(&retired_scope, "retired-op-journal", "op-envelope"),
+            journaled_conformance_envelope(&retired_scope, "retired-op-journal", "op-envelope"),
             RuntimeEffectLocalExecutor::testing(|_| async {
-                Ok(replay_conformance_exec_outcome("never-admitted"))
+                Ok(replay_conformance_value_outcome("never-admitted"))
             }),
         )
         .await
@@ -961,19 +1070,19 @@ pub async fn effect_host_retires_runtime_operation_journal(host: &dyn EffectHost
         .expect("in-flight scope")
         .controller()
         .execute_effect(
-            exec_code_conformance_envelope(&in_flight_scope, "in-flight-op-journal", "op-envelope"),
+            journaled_conformance_envelope(&in_flight_scope, "in-flight-op-journal", "op-envelope"),
             RuntimeEffectLocalExecutor::testing(|_| async {
-                Ok(replay_conformance_exec_outcome("executed-again"))
+                Ok(replay_conformance_value_outcome("executed-again"))
             }),
         )
         .await
         .expect("the in-flight operation still replays");
-    let RuntimeEffectOutcome::ExecCode { result } = replayed else {
-        panic!("the in-flight operation must return an exec-code outcome");
+    let RuntimeEffectOutcome::LanguageRuntimeValue { value } = replayed else {
+        panic!("the in-flight operation must return a language-runtime-value outcome");
     };
     assert_eq!(
-        result.expect("in-flight exec result").terminal_finish,
-        Some(serde_json::json!("recorded-before-retirement")),
+        value,
+        serde_json::json!("recorded-before-retirement"),
         "a sibling operation's journal answers from its recorded row"
     );
 }
@@ -1963,22 +2072,21 @@ where
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) fn exec_code_conformance_envelope(
+pub(super) fn journaled_conformance_envelope(
     execution_scope: &ExecutionScope,
     effect_id: &str,
-    code: &str,
+    operation: &str,
 ) -> RuntimeEffectEnvelope {
-    let replay_key = format!("exec-code-replay:{effect_id}");
+    let replay_key = format!("journaled-replay:{effect_id}");
     RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
             EffectAddress::new(execution_scope.clone(), replay_key)
-                .expect("valid exec-code conformance address"),
+                .expect("valid journaled conformance address"),
             RuntimeAttribution::for_turn("journaled-session", "journaled-turn", 7, 0),
-            format!("exec-code:{effect_id}"),
+            format!("journaled:{effect_id}"),
         ),
-        RuntimeEffectCommand::ExecCode {
-            language: "conformance".to_string(),
-            code: code.to_string(),
+        RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: operation.to_string(),
         },
     )
 }
@@ -2215,28 +2323,19 @@ fn replay_conformance_tool_attempt_outcome(
     }
 }
 
-pub(super) fn replay_conformance_exec_outcome(effect_id: &str) -> RuntimeEffectOutcome {
-    RuntimeEffectOutcome::ExecCode {
-        result: Box::new(Ok(crate::ExecResponse {
-            observations: Vec::new(),
-            calls: Vec::new(),
-            printed_images: Vec::new(),
-            error: None,
-            duration_ms: 0,
-            degraded_bindings: Vec::new(),
-            terminal_finish: Some(serde_json::json!(effect_id)),
-        })),
+pub(super) fn replay_conformance_value_outcome(effect_id: &str) -> RuntimeEffectOutcome {
+    RuntimeEffectOutcome::LanguageRuntimeValue {
+        value: serde_json::json!(effect_id),
     }
 }
 
-fn assert_replay_conformance_exec_marker(outcome: RuntimeEffectOutcome, expected: &str) {
-    let RuntimeEffectOutcome::ExecCode { result } = outcome else {
-        panic!("expected exec-code effect outcome");
+fn assert_replay_conformance_value_marker(outcome: RuntimeEffectOutcome, expected: &str) {
+    let RuntimeEffectOutcome::LanguageRuntimeValue { value } = outcome else {
+        panic!("expected language-runtime-value effect outcome");
     };
-    let response = result.expect("exec-code response");
     assert_eq!(
-        response.terminal_finish,
-        Some(serde_json::json!(expected)),
+        value,
+        serde_json::json!(expected),
         "replayed outcome must come from the matching replay key"
     );
 }

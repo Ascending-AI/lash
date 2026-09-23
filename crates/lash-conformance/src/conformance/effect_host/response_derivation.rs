@@ -13,7 +13,7 @@ where
 {
     let invocation = make();
     let scope = invocation.execution_scope().clone();
-    let mut completion = exec_code_conformance_envelope(&scope, "completion", "unused");
+    let mut completion = journaled_conformance_envelope(&scope, "completion", "unused");
     completion.command = RuntimeEffectCommand::LlmCall {
         request: Box::new(crate::LlmRequestSpec {
             instructions: None,
@@ -28,7 +28,7 @@ where
             output_spec: None,
         }),
     };
-    let mut hook = exec_code_conformance_envelope(&scope, "response-hook", "unused");
+    let mut hook = journaled_conformance_envelope(&scope, "response-hook", "unused");
     hook.command = RuntimeEffectCommand::AssistantResponseHooks {
         response: Box::default(),
     };
@@ -123,9 +123,8 @@ where
             ),
         ),
         (
-            RuntimeEffectCommand::ExecCode {
-                language: "conformance".into(),
-                code: "effect".into(),
+            RuntimeEffectCommand::LanguageRuntimeValue {
+                operation: "effect".into(),
             },
             RuntimeEffectControllerError::retryable_response_derivation("wrong command"),
         ),
@@ -145,7 +144,7 @@ where
     .into_iter()
     .enumerate()
     {
-        let mut envelope = exec_code_conformance_envelope(
+        let mut envelope = journaled_conformance_envelope(
             invocation.execution_scope(),
             &format!("terminal-{index}"),
             "unused",

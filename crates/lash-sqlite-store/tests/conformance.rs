@@ -853,11 +853,11 @@ lash_conformance::artifact_store_reopenable_tests!({
     })
 });
 
-fn exec_envelope(
+fn value_envelope(
     scope: ExecutionScope,
     attribution: lash_core_execution::RuntimeAttribution,
     replay_key: &str,
-    code: &str,
+    operation: &str,
 ) -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
@@ -866,37 +866,27 @@ fn exec_envelope(
             attribution,
             replay_key,
         ),
-        RuntimeEffectCommand::ExecCode {
-            language: "code".to_string(),
-            code: code.to_string(),
+        RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: operation.to_string(),
         },
     )
 }
 
-fn exec_outcome(marker: &str) -> RuntimeEffectOutcome {
-    RuntimeEffectOutcome::ExecCode {
-        result: Box::new(Ok(lash_core_execution::ExecResponse {
-            observations: Vec::new(),
-            calls: Vec::new(),
-            printed_images: Vec::new(),
-            error: None,
-            duration_ms: 0,
-            degraded_bindings: Vec::new(),
-            terminal_finish: Some(serde_json::json!(marker)),
-        })),
+fn value_outcome(marker: &str) -> RuntimeEffectOutcome {
+    RuntimeEffectOutcome::LanguageRuntimeValue {
+        value: serde_json::json!(marker),
     }
 }
 
-fn assert_exec_marker(outcome: RuntimeEffectOutcome, expected: &str) {
-    let RuntimeEffectOutcome::ExecCode { result } = outcome else {
-        panic!("expected exec-code outcome");
+fn assert_value_marker(outcome: RuntimeEffectOutcome, expected: &str) {
+    let RuntimeEffectOutcome::LanguageRuntimeValue { value } = outcome else {
+        panic!("expected language-runtime-value outcome");
     };
-    let response = result.expect("exec-code response");
-    assert_eq!(response.terminal_finish, Some(serde_json::json!(expected)));
+    assert_eq!(value, serde_json::json!(expected));
 }
 
 fn returning_executor(marker: &'static str) -> RuntimeEffectLocalExecutor<'static> {
-    RuntimeEffectLocalExecutor::testing(move |_| async move { Ok(exec_outcome(marker)) })
+    RuntimeEffectLocalExecutor::testing(move |_| async move { Ok(value_outcome(marker)) })
 }
 
 fn failing_executor() -> RuntimeEffectLocalExecutor<'static> {
@@ -2082,7 +2072,7 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
         async move {
             controller
                 .execute_effect(
-                    exec_envelope(
+                    value_envelope(
                         durable_turn_scope(
                             "injected-clock-effect-session",
                             "injected-clock-effect-turn",
@@ -2099,7 +2089,7 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
                     RuntimeEffectLocalExecutor::testing(move |_| async move {
                         let _ = entered_tx.send(());
                         executor_release.notified().await;
-                        Ok(exec_outcome("stamped"))
+                        Ok(value_outcome("stamped"))
                     }),
                 )
                 .await
@@ -2133,7 +2123,7 @@ async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
     );
 
     release.notify_waiters();
-    assert_exec_marker(
+    assert_value_marker(
         executing
             .await
             .expect("execution task joins")
@@ -2269,7 +2259,7 @@ lash_conformance::effect_controller_response_derivation_tests!({
 async fn sqlite_effect_controller_replays_without_local_executor() {
     let scope = durable_turn_scope("session", "turn");
     let (_controller_dir, controller) = open_ephemeral_effect_controller(scope.clone()).await;
-    let envelope = exec_envelope(
+    let envelope = value_envelope(
         scope,
         lash_core_execution::RuntimeAttribution::for_turn("session", "turn", 1, 0),
         "exec-replay",
@@ -2279,14 +2269,14 @@ async fn sqlite_effect_controller_replays_without_local_executor() {
         .execute_effect(envelope.clone(), returning_executor("recorded"))
         .await
         .expect("first effect");
-    assert_exec_marker(first, "recorded");
+    assert_value_marker(first, "recorded");
 
     controller.start_replay();
     let replayed = controller
         .execute_effect(envelope, failing_executor())
         .await
         .expect("replayed effect");
-    assert_exec_marker(replayed, "recorded");
+    assert_value_marker(replayed, "recorded");
 }
 
 #[tokio::test]

@@ -4,7 +4,7 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 use lash_core::{ToolCall, ToolProvider};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 struct CountingFirstPartyProvider {
     inner: Arc<dyn ToolProvider>,
@@ -241,6 +241,11 @@ impl ProductionToolCell {
         self.run_once(&mut live, effect_host)
             .await
             .expect_err("the live worker dies at its final commit");
+        let live_state = live
+            .snapshot_execution_state()
+            .await
+            .expect("snapshot live execution state");
+        assert_binds_result_global(live_state.as_ref());
         assert_eq!(
             self.tool_executions.load(Ordering::SeqCst),
             1,
@@ -268,6 +273,14 @@ impl ProductionToolCell {
             replay_turn.outcome,
             lash_core::facade_support::TurnOutcome::Finished(_)
         ));
+        let replay_state = replay
+            .snapshot_execution_state()
+            .await
+            .expect("snapshot replayed execution state");
+        assert_eq!(
+            replay_state, live_state,
+            "replay re-runs the code cell, so it rebuilds the live pass's interpreter state"
+        );
         assert_eq!(
             self.tool_executions.load(Ordering::SeqCst),
             1,
@@ -294,20 +307,7 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
     for manifest in manifests {
         let _ = args_for(&manifest.name);
 
-        let mut local_cell = ProductionToolCell::new(ControllerMode::Local, &manifest.name).await;
-        local_cell
-            .runtime_store
-            .admit_and_bind_session(&lash_core::SessionBinding::root(
-                local_cell.session_id.clone(),
-            ))
-            .await
-            .expect("bind local session");
-        let local = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(&local_cell._dir.path().join("effects.db"))
-                .await
-                .expect("in-process production replay host"),
-        );
-        local_cell.host.control.effect_host = Arc::clone(&local) as Arc<dyn EffectHost>;
+        let (local_cell, local) = ProductionToolCell::sqlite(&manifest.name).await;
         local_cell
             .run(local.as_ref(), || local.start_replay())
             .await;
@@ -339,4 +339,183 @@ async fn every_registered_first_party_tool_succeeds_and_replays_in_every_context
             manifest.name
         );
     }
+}
+
+/// The production cell binds `const result`, so its interpreter state names it.
+fn assert_binds_result_global(state: Option<&lash_core::plugin::HydratedExecutionState>) {
+    let state = state.expect("an RLM turn leaves execution state");
+    assert!(
+        String::from_utf8_lossy(&state.root).contains("result"),
+        "the cell's `result` global must be in the execution state root"
+    );
+}
+
+/// Fails the first turn-final commit before it reaches the store: the crash
+/// window between the last journaled effect and the durable head.
+struct CrashAtFinalCommit {
+    inner: Arc<dyn lash_core::RuntimePersistence>,
+    armed: AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl lash_core::store::RuntimePersistenceDecorator for CrashAtFinalCommit {
+    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn commit_runtime_state(
+        &self,
+        commit: lash_core::store::RuntimeCommit,
+    ) -> Result<lash_core::store::RuntimeCommitReceipt, lash_core::StoreError> {
+        if commit.turn_commit.operation.key == "final" && self.armed.swap(false, Ordering::SeqCst) {
+            return Err(lash_core::StoreError::Backend(
+                "injected crash at the turn-final commit".to_string(),
+            ));
+        }
+        self.inner.commit_runtime_state(commit).await
+    }
+}
+
+impl ProductionToolCell {
+    /// A cell on the SQLite effect host with its session bound, ready to run.
+    async fn sqlite(tool_name: &str) -> (Self, Arc<lash_sqlite_store::SqliteEffectHost>) {
+        let mut cell = Self::new(ControllerMode::Local, tool_name).await;
+        cell.runtime_store
+            .admit_and_bind_session(&lash_core::SessionBinding::root(cell.session_id.clone()))
+            .await
+            .expect("bind local session");
+        let host = Arc::new(
+            lash_sqlite_store::SqliteEffectHost::open(&cell._dir.path().join("effects.db"))
+                .await
+                .expect("in-process production replay host"),
+        );
+        cell.host.control.effect_host = Arc::clone(&host) as Arc<dyn EffectHost>;
+        (cell, host)
+    }
+
+    async fn runtime_on(
+        &self,
+        store: Arc<dyn lash_core::RuntimePersistence>,
+    ) -> lash_core::facade_support::LashRuntime {
+        replay_test_runtime_with_plugins(
+            &self.session_id,
+            self.policy.clone(),
+            self.initial_state.clone(),
+            self.host.clone(),
+            store,
+            self.plugin_factories.clone(),
+        )
+        .await
+    }
+
+    /// The execution state of the store's durable head, restored the way a
+    /// fresh process restores it: from the head, with no caller-supplied state.
+    async fn committed_execution_state(&self) -> Option<lash_core::plugin::HydratedExecutionState> {
+        let mut runtime = Box::pin(
+            lash_core::facade_support::LashRuntime::builder(
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::QueuedWorkBatchingConfig::new(1),
+                lash_core::LeaseOwnerIdentity::opaque(
+                    "lash-restate-head-reader",
+                    "lash-restate-head-reader-boot",
+                ),
+            )
+            .with_session_id(&self.session_id)
+            .with_policy(self.policy.clone())
+            .with_runtime_host(self.host.clone())
+            .with_plugin_factories(self.plugin_factories.clone())
+            .with_store(Arc::clone(&self.runtime_store))
+            .build(),
+        )
+        .await
+        .expect("open a runtime on the committed head");
+        runtime
+            .snapshot_execution_state()
+            .await
+            .expect("snapshot committed execution state")
+    }
+}
+
+/// FIG-3549: a crash between the last journaled effect and the turn-final
+/// commit, then a same-store redrive, commits the live pass's interpreter
+/// state. The redrive re-runs the code cell (ADR 0103); the cell's nested
+/// `llm_query` answers from the journal, so no provider call is re-issued.
+#[tokio::test]
+async fn redrive_after_a_crash_at_final_commit_commits_the_live_execution_state() {
+    let (control, control_host) = ProductionToolCell::sqlite("llm_query").await;
+    let mut control_runtime = control.runtime_on(Arc::clone(&control.runtime_store)).await;
+    let control_turn = control
+        .run_once(&mut control_runtime, control_host.as_ref())
+        .await
+        .expect("the control turn commits");
+    assert!(matches!(
+        control_turn.outcome,
+        lash_core::facade_support::TurnOutcome::Finished(_)
+    ));
+    drop(control_runtime);
+    let live_head = control.committed_execution_state().await;
+    assert_binds_result_global(live_head.as_ref());
+
+    let (cell, host) = ProductionToolCell::sqlite("llm_query").await;
+    let crashing: Arc<dyn lash_core::RuntimePersistence> = Arc::new(CrashAtFinalCommit {
+        inner: Arc::clone(&cell.runtime_store),
+        armed: AtomicBool::new(true),
+    });
+    let mut crashed = cell.runtime_on(Arc::clone(&crashing)).await;
+    let turn_scope = crashed.export_persistence_state().turn_scope(&cell.turn_id);
+    let crashed_turn = crashed
+        .stream_turn(
+            replay_test_input(&cell.turn_id),
+            lash_core::facade_support::TurnOptions::new(
+                tokio_util::sync::CancellationToken::new(),
+                host.scoped(durable_admission(&turn_scope))
+                    .expect("scope crashing tool cell"),
+            ),
+        )
+        .await;
+    assert!(
+        !matches!(
+            crashed_turn.as_ref().map(|turn| &turn.outcome),
+            Ok(lash_core::facade_support::TurnOutcome::Finished(_))
+        ),
+        "the injected crash must stop the turn-final commit"
+    );
+    drop(crashed);
+    assert_eq!(cell.tool_executions.load(Ordering::SeqCst), 1);
+    assert_eq!(cell.llm_provider_calls.load(Ordering::SeqCst), 2);
+
+    host.start_replay();
+    let mut redrive = cell.runtime_on(Arc::clone(&cell.runtime_store)).await;
+    let redriven = cell
+        .run_once(&mut redrive, host.as_ref())
+        .await
+        .expect("the redrive commits");
+    assert!(matches!(
+        redriven.outcome,
+        lash_core::facade_support::TurnOutcome::Finished(_)
+    ));
+    assert_eq!(
+        redrive
+            .snapshot_execution_state()
+            .await
+            .expect("snapshot redriven execution state"),
+        live_head,
+        "the redrive re-runs the cell and holds the live interpreter state"
+    );
+    drop(redrive);
+    assert_eq!(
+        cell.committed_execution_state().await,
+        live_head,
+        "the redriven turn commits the live pass's execution state byte for byte"
+    );
+    assert_eq!(
+        cell.tool_executions.load(Ordering::SeqCst),
+        1,
+        "the cell's ToolAttempt replays from the journal"
+    );
+    assert_eq!(
+        cell.llm_provider_calls.load(Ordering::SeqCst),
+        2,
+        "the redrive re-issues neither the outer generation nor the nested llm_query call"
+    );
 }

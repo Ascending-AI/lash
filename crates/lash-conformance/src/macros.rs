@@ -1198,12 +1198,14 @@ macro_rules! effect_controller_replay_tests {
         $crate::effect_controller_replay_tests!(@catalogue $fixture; [
             (effect_controller_journaled_effect_replay, "effect-controller-journaled-replay"),
             (effect_controller_concurrent_replay_deterministic, "effect-controller-concurrent-replay"),
+            (effect_controller_code_cell_replays_by_reexecution, "effect-controller-code-cell-reexecution"),
         ]);
     };
     ($fixture:block, $verify:expr) => {
         $crate::effect_controller_replay_tests!(@catalogue $fixture, $verify; [
             (effect_controller_journaled_effect_replay, "effect-controller-journaled-replay"),
             (effect_controller_concurrent_replay_deterministic, "effect-controller-concurrent-replay"),
+            (effect_controller_code_cell_replays_by_reexecution, "effect-controller-code-cell-reexecution"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

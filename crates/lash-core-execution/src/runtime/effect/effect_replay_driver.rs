@@ -1807,6 +1807,9 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         scope
             .validate()
             .map_err(RuntimeEffectControllerError::from)?;
+        if envelope.command.replays_by_reexecution() {
+            return self.reexecute_effect(envelope, local_executor).await;
+        }
         let reconstructed_envelope = envelope.canonical_form()?;
         let replay_trace = local_executor.replay_validation_trace().cloned();
         // Kept before the claim loop, while the envelope still names the group
@@ -1926,6 +1929,30 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 },
             }
         }
+    }
+
+    /// Run a command that replays by re-execution (ADR 0103): no claim, no
+    /// row, no lease. The local executor runs on every pass, live or replay,
+    /// exactly as Restate's direct local call does, and the nested effects it
+    /// issues come back through this driver on their own replay keys, so they
+    /// are journaled on the first pass and served from the journal after.
+    ///
+    /// Strict replay mode does not apply: there is no row to find. A group
+    /// member is refused, because the group's envelope-hash fence lives on a
+    /// row this path never writes.
+    async fn reexecute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<EffectRun, RuntimeEffectControllerError> {
+        super::group::refuse_unhonored_group_membership(
+            envelope.group.as_deref(),
+            "re-executed on replay",
+        )?;
+        local_executor
+            .execute(envelope)
+            .await
+            .map(EffectRun::Terminal)
     }
 
     async fn prepare_effect(

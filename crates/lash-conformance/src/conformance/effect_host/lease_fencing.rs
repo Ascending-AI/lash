@@ -161,9 +161,8 @@ fn lease_fencing_envelope(replay_key: &str) -> RuntimeEffectEnvelope {
             RuntimeAttribution::for_turn("effect-lease-session", "effect-lease-turn", 1, 0),
             replay_key,
         ),
-        RuntimeEffectCommand::ExecCode {
-            language: "code".to_string(),
-            code: "emit".to_string(),
+        RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "emit".to_string(),
         },
     )
 }
@@ -213,7 +212,7 @@ async fn lease_fencing_renews_long_running_lease(backend: &EffectLeaseFencingBac
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
                     let _ = entered_tx.send(());
                     first_release.notified().await;
-                    Ok(replay_conformance_exec_outcome("renewed-owner"))
+                    Ok(replay_conformance_value_outcome("renewed-owner"))
                 }),
             )
             .await
@@ -243,7 +242,7 @@ async fn lease_fencing_renews_long_running_lease(backend: &EffectLeaseFencingBac
                 competing_envelope,
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
                     let _ = competing_entered_tx.send(());
-                    Ok(replay_conformance_exec_outcome("stolen-owner"))
+                    Ok(replay_conformance_value_outcome("stolen-owner"))
                 }),
             )
             .await
@@ -266,7 +265,7 @@ async fn lease_fencing_renews_long_running_lease(backend: &EffectLeaseFencingBac
         .await
         .expect("first task joins")
         .expect("renewed owner finalizes");
-    assert_replay_conformance_exec_marker(first_outcome, "renewed-owner");
+    assert_replay_conformance_value_marker(first_outcome, "renewed-owner");
 
     (second.start_replay)();
     let replayed = second
@@ -277,7 +276,7 @@ async fn lease_fencing_renews_long_running_lease(backend: &EffectLeaseFencingBac
         )
         .await
         .expect("replayed renewed outcome");
-    assert_replay_conformance_exec_marker(replayed, "renewed-owner");
+    assert_replay_conformance_value_marker(replayed, "renewed-owner");
 }
 
 #[expect(
@@ -305,7 +304,7 @@ async fn lease_fencing_reports_lease_lost_when_stolen(
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
                     let _ = entered_tx.send(());
                     owner_release.notified().await;
-                    Ok(replay_conformance_exec_outcome("should-not-finalize"))
+                    Ok(replay_conformance_value_outcome("should-not-finalize"))
                 }),
             )
             .await
@@ -355,7 +354,7 @@ async fn lease_fencing_rejects_finalize_after_expiry(
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
                     let _ = entered_tx.send(());
                     owner_release.notified().await;
-                    Ok(replay_conformance_exec_outcome("expired-owner"))
+                    Ok(replay_conformance_value_outcome("expired-owner"))
                 }),
             )
             .await
@@ -408,7 +407,7 @@ async fn lease_fencing_reclaims_explicitly_expired_lease(
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
                     let _ = entered_tx.send(());
                     owner_release.notified().await;
-                    Ok(replay_conformance_exec_outcome("vanished-owner"))
+                    Ok(replay_conformance_value_outcome("vanished-owner"))
                 }),
             )
             .await
@@ -426,14 +425,14 @@ async fn lease_fencing_reclaims_explicitly_expired_lease(
         successor.controller.execute_effect(
             envelope,
             RuntimeEffectLocalExecutor::testing(move |_| async move {
-                Ok(replay_conformance_exec_outcome("successor-owner"))
+                Ok(replay_conformance_value_outcome("successor-owner"))
             }),
         ),
     )
     .await
     .expect("a successor must reclaim the abandoned row after its lease is explicitly expired")
     .expect("successor executes the reclaimed effect");
-    assert_replay_conformance_exec_marker(reclaimed, "successor-owner");
+    assert_replay_conformance_value_marker(reclaimed, "successor-owner");
     let _keep_notify_alive = never_release;
 }
 
