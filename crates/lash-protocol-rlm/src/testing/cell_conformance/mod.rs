@@ -31,6 +31,7 @@ mod generative;
 mod harness;
 mod multi_cell;
 mod no_poisoning;
+mod node_oracle;
 mod parked_continuation;
 mod persistence;
 mod syntax;

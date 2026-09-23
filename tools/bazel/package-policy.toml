@@ -132,6 +132,13 @@ packages = ["lash-internal-remote-protocol"]
 kinds = ["unit-test"]
 compile_data = ["//:host_schemas"]
 
+# The Node session oracle (FIG-3599) runs the dialect's session corpus through
+# the RLM executor; the corpus and its Node answers live with the dialect.
+[[rule]]
+packages = ["lash-internal-protocol-rlm"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lash-typescript:session_oracle_corpus"]
+
 # --- Binary and integration-test support -------------------------------------
 
 # The checked-in workspace fact that replaces a nested `cargo metadata` call
@@ -370,6 +377,9 @@ queued_claim_atomicity = { srcs = ["tests/support/queued_claim_atomicity.rs"] }
 
 [filegroups.lash-internal-lashlang]
 old_module_fixture = { srcs = ["tests/fixtures/module-artifact-old.json"] }
+
+[filegroups.lash-internal-typescript]
+session_oracle_corpus = { srcs = ["tests/differential/sessions/expectations.json"] }
 
 # --- trybuild fixtures ---------------------------------------------------------
 

@@ -1,0 +1,1381 @@
+{
+  "node": "v25.2.1",
+  "sessions": [
+    {
+      "id": "top-level-declarations",
+      "about": "let, const, var and function declarations at a cell's top level are session globals",
+      "probe": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "deviations": [
+        "closure-boundary"
+      ],
+      "cells": [
+        {
+          "source": "let a = 1;\nconst b = [2, 3];\nvar c = { three: 3 };\nfunction d() { return 4; }\nconsole.log(a, b, c, d());\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1 [2,3] {\"three\":3} 4"
+            ],
+            "probes": {
+              "a": "number 1",
+              "b": "object [2,3]",
+              "c": "object {\"three\":3}",
+              "d": "function undefined"
+            },
+            "closures": [
+              "d"
+            ]
+          }
+        },
+        {
+          "source": "console.log(a + b.length + c.three);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "6"
+            ],
+            "probes": {
+              "a": "number 1",
+              "b": "object [2,3]",
+              "c": "object {\"three\":3}",
+              "d": "function undefined"
+            },
+            "closures": [
+              "d"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "top-level-class",
+      "about": "class is a named rejection, so the cell never binds its name",
+      "probe": [
+        "Shape"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "class Shape {}\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "rejected",
+            "prints": [],
+            "probes": {
+              "Shape": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "for-of-binder",
+      "about": "a for...of binder ends with its loop (FIG-3571 phase-1 leak `item`)",
+      "probe": [
+        "items",
+        "item",
+        "total"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const items = [1, 2, 3];\nlet total = 0;\nfor (const item of items) {\n  total = total + item;\n}\nconsole.log(total);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "6"
+            ],
+            "probes": {
+              "items": "object [1,2,3]",
+              "item": "unbound",
+              "total": "number 6"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "loop-binders",
+      "about": "for...in, classic for and while-block bindings end with their loop",
+      "probe": [
+        "record",
+        "key",
+        "keys",
+        "i",
+        "count",
+        "inner"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const record = { x: 1, y: 2 };\nconst keys = [];\nfor (const key in record) {\n  keys.push(key);\n}\nlet count = 0;\nfor (let i = 0; i < 3; i++) {\n  count = count + i;\n}\nwhile (count < 5) {\n  const inner = count;\n  count = inner + 1;\n}\nconsole.log(keys, count);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[\"x\",\"y\"] 5"
+            ],
+            "probes": {
+              "record": "object {\"x\":1,\"y\":2}",
+              "key": "unbound",
+              "keys": "object [\"x\",\"y\"]",
+              "i": "unbound",
+              "count": "number 5",
+              "inner": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "if-arm-and-bare-block",
+      "about": "a const in an if arm or a bare block ends with its block (FIG-3571 phase-1 leak `armed`)",
+      "probe": [
+        "flag",
+        "armed",
+        "scratch"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const flag = true;\nif (flag) {\n  const armed = \"yes\";\n  console.log(armed);\n} else {\n  const armed = \"no\";\n  console.log(armed);\n}\n{\n  const scratch = 7;\n  console.log(scratch);\n}\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "yes",
+              "7"
+            ],
+            "probes": {
+              "flag": "boolean true",
+              "armed": "unbound",
+              "scratch": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "var-hoists-out-of-blocks",
+      "about": "a var declared in a block or loop head of the top level is a session global",
+      "probe": [
+        "hoisted",
+        "looped",
+        "seen"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "if (true) {\n  var hoisted = \"up\";\n}\nconst seen = [];\nfor (var looped of [1, 2]) {\n  seen.push(looped);\n}\nconsole.log(hoisted, looped, seen);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "up 2 [1,2]"
+            ],
+            "probes": {
+              "hoisted": "string \"up\"",
+              "looped": "number 2",
+              "seen": "object [1,2]"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "block-name-then-top-level-name",
+      "about": "a block binding and a later top-level binding of the same name are two bindings",
+      "probe": [
+        "first",
+        "second"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "{\n  const first = 1;\n  console.log(first);\n}\nlet first = 2;\nfor (const second of [3]) {\n  console.log(second);\n}\nconst second = 4;\nconsole.log(first, second);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1",
+              "3",
+              "2 4"
+            ],
+            "probes": {
+              "first": "number 2",
+              "second": "number 4"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "shadowing",
+      "about": "a block shadow neither leaks nor overwrites the session global it shadows",
+      "probe": [
+        "shade"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "let shade = \"outer\";\n{\n  let shade = \"inner\";\n  console.log(shade);\n}\nconsole.log(shade);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "inner",
+              "outer"
+            ],
+            "probes": {
+              "shade": "string \"outer\""
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "{\n  const shade = \"block\";\n  console.log(shade);\n}\nif (shade === \"outer\") {\n  let shade = \"arm\";\n  console.log(shade);\n}\nconsole.log(shade);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "block",
+              "arm",
+              "outer"
+            ],
+            "probes": {
+              "shade": "string \"outer\""
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "catch-and-switch-binders",
+      "about": "a catch binder and a switch-case declaration end with their blocks",
+      "probe": [
+        "caught",
+        "picked",
+        "choice"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "try {\n  throw new Error(\"boom\");\n} catch (caught) {\n  console.log(caught.message);\n}\nconst choice = 2;\nswitch (choice) {\n  case 2: {\n    const picked = \"two\";\n    console.log(picked);\n    break;\n  }\n  default:\n    console.log(\"other\");\n}\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "boom",
+              "two"
+            ],
+            "probes": {
+              "caught": "unbound",
+              "picked": "unbound",
+              "choice": "number 2"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "function-locals",
+      "about": "a function's parameters and locals are never session globals",
+      "probe": [
+        "scale",
+        "factor",
+        "local",
+        "result"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const factor = 3;\nconst result = [1, 2].map((scale) => {\n  const local = scale * factor;\n  return local;\n});\nconsole.log(result);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[3,6]"
+            ],
+            "probes": {
+              "scale": "unbound",
+              "factor": "number 3",
+              "local": "unbound",
+              "result": "object [3,6]"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "tdz-within-a-cell",
+      "about": "a read of a let before its declaration, which the dialect refuses statically",
+      "probe": [
+        "early",
+        "before"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const before = 1;\nconsole.log(typeof early);\nlet early = 2;\n",
+          "reject": "TS_TEMPORAL_DEAD_ZONE",
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "rejected",
+            "prints": [],
+            "probes": {
+              "early": "unbound",
+              "before": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-temporaries",
+      "about": "member assignment, callbacks, destructuring and process literals bind only authored names",
+      "probe": [
+        "box",
+        "doubled",
+        "v",
+        "p",
+        "r1",
+        "r2",
+        "head",
+        "tail",
+        "index",
+        "value",
+        "total"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const box = { value: 1 };\nbox.value = 2;\nbox.value += 3;\nconst doubled = [1, 2].map((v) => v * 2).filter((v) => v > 2);\nconst { p, q: [r1, r2] } = { p: 1, q: [2, 3] };\nconst [head, ...tail] = [4, 5, 6];\nlet total = 0;\nfor (const [index, value] of [[0, 10], [1, 20]]) {\n  total = total + index + value;\n}\nconsole.log(box.value, doubled, p, r1, r2, head, tail, total);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "5 [4] 1 2 3 4 [5,6] 31"
+            ],
+            "probes": {
+              "box": "object {\"value\":5}",
+              "doubled": "object [4]",
+              "v": "unbound",
+              "p": "number 1",
+              "r1": "number 2",
+              "r2": "number 3",
+              "head": "number 4",
+              "tail": "object [5,6]",
+              "index": "unbound",
+              "value": "unbound",
+              "total": "number 31"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "global-object-and-lexical-binding",
+      "about": "a write through globalThis creates a global object property that a let of the same name shadows",
+      "probe": [
+        "counter"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "let counter = 1;\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "counter": "number 1"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "globalThis.counter = counter + 1;\nconsole.log(counter);\n",
+          "reject": null,
+          "deviation": "global-object-aliases-lexical-bindings",
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1"
+            ],
+            "probes": {
+              "counter": "number 1"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "normal",
+              "prints": [
+                "2"
+              ],
+              "probes": {
+                "counter": "number 2"
+              }
+            },
+            "restart": {
+              "outcome": "normal",
+              "prints": [
+                "2"
+              ],
+              "probes": {
+                "counter": "number 2"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "direct-reassignment-across-cells",
+      "about": "assigning an earlier cell's let without declaring it, which the dialect refuses statically",
+      "probe": [
+        "tally"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "let tally = 1;\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "tally": "number 1"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "tally = tally + 1;\nconsole.log(tally);\n",
+          "reject": "TS_ASSIGN_CONST",
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "rejected",
+            "prints": [],
+            "probes": {
+              "tally": "number 1"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "redeclaration-across-cells",
+      "about": "a later cell declares a name an earlier cell's let bound",
+      "probe": [
+        "again"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "let again = 1;\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "again": "number 1"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "let again = 2;\nconsole.log(again);\n",
+          "reject": null,
+          "deviation": "cross-cell-redeclaration",
+          "defect": null,
+          "node": {
+            "outcome": "throw",
+            "prints": [],
+            "error": "SyntaxError",
+            "probes": {
+              "again": "number 1"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "normal",
+              "prints": [
+                "2"
+              ],
+              "probes": {
+                "again": "number 2"
+              }
+            },
+            "restart": {
+              "outcome": "normal",
+              "prints": [
+                "2"
+              ],
+              "probes": {
+                "again": "number 2"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "closures-capturing-session-globals",
+      "about": "a closure reads the session global it captures",
+      "probe": [
+        "base",
+        "add",
+        "value"
+      ],
+      "deviations": [
+        "closure-boundary"
+      ],
+      "cells": [
+        {
+          "source": "const base = 10;\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "base": "number 10",
+              "add": "unbound",
+              "value": "unbound"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "const add = (value) => value + base;\nconsole.log(add(1));\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "11"
+            ],
+            "probes": {
+              "base": "number 10",
+              "add": "function undefined",
+              "value": "unbound"
+            },
+            "closures": [
+              "add"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "failed-cell",
+      "about": "a cell that throws after binding a name",
+      "probe": [
+        "kept",
+        "lost",
+        "poisoned"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const kept = 1;\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "kept": "number 1",
+              "lost": "unbound",
+              "poisoned": "unbound"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "const lost = 2;\nthrow new RangeError(\"stop\");\nlet poisoned = 3;\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "throw",
+            "prints": [],
+            "error": "RangeError",
+            "probes": {
+              "kept": "number 1",
+              "lost": "number 2",
+              "poisoned": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "finish-ends-the-cell",
+      "about": "finish ends the cell with its value after earlier statements ran",
+      "probe": [
+        "answer"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const answer = 41 + 1;\nfinish(answer);\nconsole.log(\"unreachable\");\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "finish",
+            "prints": [],
+            "finish": 42,
+            "probes": {
+              "answer": "number 42"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "runtime-error-classes",
+      "about": "an uncaught error reports its class",
+      "probe": [
+        "value"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const value = null;\nconsole.log(value.missing);\n",
+          "reject": null,
+          "deviation": "runtime-fault-brand",
+          "defect": null,
+          "node": {
+            "outcome": "throw",
+            "prints": [],
+            "error": "TypeError",
+            "probes": {
+              "value": "object null"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "throw",
+              "error": "RuntimeError",
+              "prints": [],
+              "probes": {
+                "value": "object null"
+              }
+            },
+            "restart": {
+              "outcome": "throw",
+              "error": "RuntimeError",
+              "prints": [],
+              "probes": {
+                "value": "object null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "printed-values",
+      "about": "console.log renders objects and arrays as JSON and everything else as ToString",
+      "probe": [
+        "record",
+        "list"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const record = { a: 1, b: [true, null] };\nconst list = [\"x\", 2];\nconsole.log(record, list, \"text\", 3.5, undefined, null, new Map([[\"k\", 1]]));\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "{\"a\":1,\"b\":[true,null]} [\"x\",2] text 3.5 undefined null [object Map]"
+            ],
+            "probes": {
+              "record": "object {\"a\":1,\"b\":[true,null]}",
+              "list": "object [\"x\",2]"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "console.log(JSON.stringify(record), list.length);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "{\"a\":1,\"b\":[true,null]} 2"
+            ],
+            "probes": {
+              "record": "object {\"a\":1,\"b\":[true,null]}",
+              "list": "object [\"x\",2]"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "exotic-globals",
+      "about": "Map and Set bindings stay live across cells",
+      "probe": [
+        "seen",
+        "tags"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const seen = new Map([[\"a\", 1]]);\nconst tags = new Set([\"x\"]);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": "exotic-session-globals",
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "seen": "object {}",
+              "tags": "object {}"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "normal",
+              "prints": [],
+              "probes": {
+                "seen": "unbound",
+                "tags": "unbound"
+              }
+            },
+            "restart": {
+              "outcome": "normal",
+              "prints": [],
+              "probes": {
+                "seen": "unbound",
+                "tags": "unbound"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "var-loop-head",
+      "about": "a var in a for...of head is the one var binding of the script, not a loop binding",
+      "probe": [
+        "shared"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "var shared = 0;\nfor (var shared of [1, 2]) {\n  console.log(shared);\n}\nconsole.log(shared);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1",
+              "2",
+              "2"
+            ],
+            "probes": {
+              "shared": "number 2"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "var-in-an-if-arm",
+      "about": "a var in an if arm is a session global",
+      "probe": [
+        "lifted"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "if (true) {\n  var lifted = \"up\";\n}\nconsole.log(lifted);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "up"
+            ],
+            "probes": {
+              "lifted": "string \"up\""
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "const-reassignment",
+      "about": "assigning a const in the cell that declared it",
+      "probe": [
+        "fixed"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const fixed = 1;\nfixed = 2;\n",
+          "reject": "TS_ASSIGN_CONST",
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "rejected",
+            "prints": [],
+            "probes": {
+              "fixed": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "caught-runtime-fault",
+      "about": "a caught runtime fault is an Error of the fault's class",
+      "probe": [
+        "nothing",
+        "error"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "try {\n  const nothing = null;\n  console.log(nothing.field);\n} catch (error) {\n  console.log(error.name, error instanceof Error, error instanceof TypeError);\n}\n",
+          "reject": null,
+          "deviation": "runtime-fault-brand",
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "TypeError true true"
+            ],
+            "probes": {
+              "nothing": "unbound",
+              "error": "unbound"
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "normal",
+              "prints": [
+                "RuntimeError true false"
+              ],
+              "probes": {
+                "error": "unbound",
+                "nothing": "unbound"
+              }
+            },
+            "restart": {
+              "outcome": "normal",
+              "prints": [
+                "RuntimeError true false"
+              ],
+              "probes": {
+                "error": "unbound",
+                "nothing": "unbound"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "process-literal-binding",
+      "about": "a top-level uncalled async arrow is a function value, and lifts to a process in lash",
+      "probe": [
+        "worker"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const worker = async () => {\n  return 1;\n};\nconsole.log(typeof worker);\n",
+          "reject": null,
+          "deviation": "process-literal-is-a-process-value",
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "function"
+            ],
+            "probes": {
+              "worker": "function undefined"
+            },
+            "closures": [
+              "worker"
+            ]
+          },
+          "lash": {
+            "resident": {
+              "outcome": "normal",
+              "prints": [
+                "object"
+              ],
+              "probes": {
+                "worker": "object {\"$lash_process\":true,\"process_name\":\"__process_<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0},\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\"}"
+              }
+            },
+            "restart": {
+              "outcome": "normal",
+              "prints": [
+                "object"
+              ],
+              "probes": {
+                "worker": "object {\"$lash_process\":true,\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_name\":\"__process_<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0}}"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "mutation-through-session-globals",
+      "about": "a later cell mutates the objects and arrays earlier cells bound",
+      "probe": [
+        "holder",
+        "queue"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const holder = { count: 1 };\nconst queue = [1];\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "holder": "object {\"count\":1}",
+              "queue": "object [1]"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "holder.count += 1;\nholder.extra = \"x\";\nqueue.push(2);\nconsole.log(holder, queue);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "{\"count\":2,\"extra\":\"x\"} [1,2]"
+            ],
+            "probes": {
+              "holder": "object {\"count\":2,\"extra\":\"x\"}",
+              "queue": "object [1,2]"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "console.log(holder.count, queue.length);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "2 2"
+            ],
+            "probes": {
+              "holder": "object {\"count\":2,\"extra\":\"x\"}",
+              "queue": "object [1,2]"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "per-iteration-bindings",
+      "about": "each iteration of a let/const loop has its own binding, which a closure captures",
+      "probe": [
+        "fns",
+        "i",
+        "f"
+      ],
+      "deviations": [
+        "closure-boundary"
+      ],
+      "cells": [
+        {
+          "source": "const fns = [];\nfor (let i = 0; i < 3; i++) {\n  fns.push(() => i);\n}\nconsole.log(fns.map((f) => f()));\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[0,1,2]"
+            ],
+            "probes": {
+              "fns": "object [null,null,null]",
+              "i": "unbound",
+              "f": "unbound"
+            },
+            "closures": [
+              "fns"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "destructuring-loop-heads",
+      "about": "destructured loop-head bindings end with their loop",
+      "probe": [
+        "rows",
+        "id",
+        "first",
+        "sum"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const rows = [{ id: 1, tags: [\"a\"] }, { id: 2, tags: [\"b\"] }];\nlet sum = 0;\nfor (const { id, tags: [first] } of rows) {\n  sum = sum + id;\n  console.log(first);\n}\nconsole.log(sum);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "a",
+              "b",
+              "3"
+            ],
+            "probes": {
+              "rows": "object [{\"id\":1,\"tags\":[\"a\"]},{\"id\":2,\"tags\":[\"b\"]}]",
+              "id": "unbound",
+              "first": "unbound",
+              "sum": "number 3"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "unbraced-switch-case",
+      "about": "a declaration directly in a switch case ends with the switch",
+      "probe": [
+        "label"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "switch (1) {\n  case 1:\n    const label = \"one\";\n    console.log(label);\n    break;\n}\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "one"
+            ],
+            "probes": {
+              "label": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "optional-and-nullish-temporaries",
+      "about": "optional chaining and nullish coalescing bind only authored names",
+      "probe": [
+        "deep",
+        "got",
+        "missing"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const deep = JSON.parse('{\"a\":{\"b\":1}}');\nconst got = deep?.a?.b ?? 0;\nconst missing = deep?.x?.y ?? \"none\";\nconsole.log(got, missing);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1 none"
+            ],
+            "probes": {
+              "deep": "object {\"a\":{\"b\":1}}",
+              "got": "number 1",
+              "missing": "string \"none\""
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "global-object-names",
+      "about": "a name written through globalThis is a session global a bare name reads",
+      "probe": [
+        "fresh",
+        "old"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "globalThis.fresh = 1;\nvar old = 1;\nglobalThis.old = 2;\nconsole.log(fresh, old);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1 2"
+            ],
+            "probes": {
+              "fresh": "number 1",
+              "old": "number 2"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "console.log(fresh + old);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "3"
+            ],
+            "probes": {
+              "fresh": "number 1",
+              "old": "number 2"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "finish-after-bindings",
+      "about": "a finished cell keeps the bindings it made before finishing",
+      "probe": [
+        "made"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const made = [1];\nfinish(made.length);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "finish",
+            "prints": [],
+            "finish": 1,
+            "probes": {
+              "made": "object [1]"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "static-field-check",
+      "about": "reading a field an object literal's type lacks, which the linker refuses as TypeScript does",
+      "probe": [
+        "shape"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const shape = { a: 1 };\nconsole.log(shape.missing);\n",
+          "reject": "TS_LINK_ERROR",
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "rejected",
+            "prints": [],
+            "probes": {
+              "shape": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "var-then-const-redeclaration",
+      "about": "a later cell declares a const over an earlier cell's var",
+      "probe": [
+        "earlier"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "var earlier = \"var\";\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "earlier": "string \"var\""
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "const earlier = \"const\";\nconsole.log(earlier);\n",
+          "reject": null,
+          "deviation": "cross-cell-redeclaration",
+          "defect": null,
+          "node": {
+            "outcome": "throw",
+            "prints": [],
+            "error": "SyntaxError",
+            "probes": {
+              "earlier": "string \"var\""
+            },
+            "closures": []
+          },
+          "lash": {
+            "resident": {
+              "outcome": "normal",
+              "prints": [
+                "const"
+              ],
+              "probes": {
+                "earlier": "string \"const\""
+              }
+            },
+            "restart": {
+              "outcome": "normal",
+              "prints": [
+                "const"
+              ],
+              "probes": {
+                "earlier": "string \"const\""
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "key-order-across-cells",
+      "about": "an object's property order is its insertion order, in every later cell",
+      "probe": [
+        "ordered",
+        "nested"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const ordered = { zeta: 1, alpha: 2, mid: 3 };\nconst nested = { b: { y: 1, x: 2 }, a: [{ q: 1, p: 2 }] };\n",
+          "reject": null,
+          "deviation": null,
+          "defect": "durable-key-order",
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "ordered": "object {\"zeta\":1,\"alpha\":2,\"mid\":3}",
+              "nested": "object {\"b\":{\"y\":1,\"x\":2},\"a\":[{\"q\":1,\"p\":2}]}"
+            },
+            "closures": []
+          },
+          "lash": {
+            "restart": {
+              "outcome": "normal",
+              "prints": [],
+              "probes": {
+                "nested": "object {\"a\":[{\"p\":2,\"q\":1}],\"b\":{\"x\":2,\"y\":1}}",
+                "ordered": "object {\"alpha\":2,\"mid\":3,\"zeta\":1}"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

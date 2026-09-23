@@ -1,0 +1,440 @@
+# The Node session oracle's corpus (FIG-3599). See README.md for the format
+# and the cell mapping; `generate.mjs` turns it into `expectations.json`.
+
+session top-level-declarations
+about let, const, var and function declarations at a cell's top level are session globals
+probe a b c d
+deviation closure-boundary
+cell
+let a = 1;
+const b = [2, 3];
+var c = { three: 3 };
+function d() { return 4; }
+console.log(a, b, c, d());
+cell
+console.log(a + b.length + c.three);
+end
+
+session top-level-class
+about class is a named rejection, so the cell never binds its name
+probe Shape
+cell reject TS_CLASS_UNSUPPORTED
+class Shape {}
+end
+
+session for-of-binder
+about a for...of binder ends with its loop (FIG-3571 phase-1 leak `item`)
+probe items item total
+cell
+const items = [1, 2, 3];
+let total = 0;
+for (const item of items) {
+  total = total + item;
+}
+console.log(total);
+end
+
+session loop-binders
+about for...in, classic for and while-block bindings end with their loop
+probe record key keys i count inner
+cell
+const record = { x: 1, y: 2 };
+const keys = [];
+for (const key in record) {
+  keys.push(key);
+}
+let count = 0;
+for (let i = 0; i < 3; i++) {
+  count = count + i;
+}
+while (count < 5) {
+  const inner = count;
+  count = inner + 1;
+}
+console.log(keys, count);
+end
+
+session if-arm-and-bare-block
+about a const in an if arm or a bare block ends with its block (FIG-3571 phase-1 leak `armed`)
+probe flag armed scratch
+cell
+const flag = true;
+if (flag) {
+  const armed = "yes";
+  console.log(armed);
+} else {
+  const armed = "no";
+  console.log(armed);
+}
+{
+  const scratch = 7;
+  console.log(scratch);
+}
+end
+
+session var-hoists-out-of-blocks
+about a var declared in a block or loop head of the top level is a session global
+probe hoisted looped seen
+cell
+if (true) {
+  var hoisted = "up";
+}
+const seen = [];
+for (var looped of [1, 2]) {
+  seen.push(looped);
+}
+console.log(hoisted, looped, seen);
+end
+
+session block-name-then-top-level-name
+about a block binding and a later top-level binding of the same name are two bindings
+probe first second
+cell
+{
+  const first = 1;
+  console.log(first);
+}
+let first = 2;
+for (const second of [3]) {
+  console.log(second);
+}
+const second = 4;
+console.log(first, second);
+end
+
+session shadowing
+about a block shadow neither leaks nor overwrites the session global it shadows
+probe shade
+cell
+let shade = "outer";
+{
+  let shade = "inner";
+  console.log(shade);
+}
+console.log(shade);
+cell
+{
+  const shade = "block";
+  console.log(shade);
+}
+if (shade === "outer") {
+  let shade = "arm";
+  console.log(shade);
+}
+console.log(shade);
+end
+
+session catch-and-switch-binders
+about a catch binder and a switch-case declaration end with their blocks
+probe caught picked choice
+cell
+try {
+  throw new Error("boom");
+} catch (caught) {
+  console.log(caught.message);
+}
+const choice = 2;
+switch (choice) {
+  case 2: {
+    const picked = "two";
+    console.log(picked);
+    break;
+  }
+  default:
+    console.log("other");
+}
+end
+
+session function-locals
+about a function's parameters and locals are never session globals
+probe scale factor local result
+cell
+const factor = 3;
+const result = [1, 2].map((scale) => {
+  const local = scale * factor;
+  return local;
+});
+console.log(result);
+end
+
+session tdz-within-a-cell
+about a read of a let before its declaration, which the dialect refuses statically
+probe early before
+cell reject TS_TEMPORAL_DEAD_ZONE
+const before = 1;
+console.log(typeof early);
+let early = 2;
+end
+
+session generated-temporaries
+about member assignment, callbacks, destructuring and process literals bind only authored names
+probe box doubled v p r1 r2 head tail index value total
+cell
+const box = { value: 1 };
+box.value = 2;
+box.value += 3;
+const doubled = [1, 2].map((v) => v * 2).filter((v) => v > 2);
+const { p, q: [r1, r2] } = { p: 1, q: [2, 3] };
+const [head, ...tail] = [4, 5, 6];
+let total = 0;
+for (const [index, value] of [[0, 10], [1, 20]]) {
+  total = total + index + value;
+}
+console.log(box.value, doubled, p, r1, r2, head, tail, total);
+end
+
+session global-object-and-lexical-binding
+about a write through globalThis creates a global object property that a let of the same name shadows
+probe counter
+cell
+let counter = 1;
+cell deviation global-object-aliases-lexical-bindings
+globalThis.counter = counter + 1;
+console.log(counter);
+lash {"outcome":"normal","prints":["2"],"probes":{"counter":"number 2"}}
+end
+
+session direct-reassignment-across-cells
+about assigning an earlier cell's let without declaring it, which the dialect refuses statically
+probe tally
+cell
+let tally = 1;
+cell reject TS_ASSIGN_CONST
+tally = tally + 1;
+console.log(tally);
+end
+
+session redeclaration-across-cells
+about a later cell declares a name an earlier cell's let bound
+probe again
+cell
+let again = 1;
+cell deviation cross-cell-redeclaration
+let again = 2;
+console.log(again);
+lash {"outcome":"normal","prints":["2"],"probes":{"again":"number 2"}}
+end
+
+session closures-capturing-session-globals
+about a closure reads the session global it captures
+probe base add value
+deviation closure-boundary
+cell
+const base = 10;
+cell
+const add = (value) => value + base;
+console.log(add(1));
+end
+
+session failed-cell
+about a cell that throws after binding a name
+probe kept lost poisoned
+cell
+const kept = 1;
+cell
+const lost = 2;
+throw new RangeError("stop");
+let poisoned = 3;
+end
+
+session finish-ends-the-cell
+about finish ends the cell with its value after earlier statements ran
+probe answer
+cell
+const answer = 41 + 1;
+finish(answer);
+console.log("unreachable");
+end
+
+session runtime-error-classes
+about an uncaught error reports its class
+probe value
+cell deviation runtime-fault-brand
+const value = null;
+console.log(value.missing);
+lash {"outcome":"throw","error":"RuntimeError","prints":[],"probes":{"value":"object null"}}
+end
+
+session printed-values
+about console.log renders objects and arrays as JSON and everything else as ToString
+probe record list
+cell
+const record = { a: 1, b: [true, null] };
+const list = ["x", 2];
+console.log(record, list, "text", 3.5, undefined, null, new Map([["k", 1]]));
+cell
+console.log(JSON.stringify(record), list.length);
+end
+
+session exotic-globals
+about Map and Set bindings stay live across cells
+probe seen tags
+cell defect exotic-session-globals
+const seen = new Map([["a", 1]]);
+const tags = new Set(["x"]);
+lash {"outcome":"normal","prints":[],"probes":{"seen":"unbound","tags":"unbound"}}
+end
+
+session var-loop-head
+about a var in a for...of head is the one var binding of the script, not a loop binding
+probe shared
+cell
+var shared = 0;
+for (var shared of [1, 2]) {
+  console.log(shared);
+}
+console.log(shared);
+end
+
+session var-in-an-if-arm
+about a var in an if arm is a session global
+probe lifted
+cell
+if (true) {
+  var lifted = "up";
+}
+console.log(lifted);
+end
+
+session const-reassignment
+about assigning a const in the cell that declared it
+probe fixed
+cell reject TS_ASSIGN_CONST
+const fixed = 1;
+fixed = 2;
+end
+
+session caught-runtime-fault
+about a caught runtime fault is an Error of the fault's class
+probe nothing error
+cell deviation runtime-fault-brand
+try {
+  const nothing = null;
+  console.log(nothing.field);
+} catch (error) {
+  console.log(error.name, error instanceof Error, error instanceof TypeError);
+}
+lash {"outcome":"normal","prints":["RuntimeError true false"],"probes":{"error":"unbound","nothing":"unbound"}}
+end
+
+session process-literal-binding
+about a top-level uncalled async arrow is a function value, and lifts to a process in lash
+probe worker
+cell deviation process-literal-is-a-process-value
+const worker = async () => {
+  return 1;
+};
+console.log(typeof worker);
+lash-resident {"outcome":"normal","prints":["object"],"probes":{"worker":"object {\"$lash_process\":true,\"process_name\":\"__process_<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0},\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\"}"}}
+lash-restart {"outcome":"normal","prints":["object"],"probes":{"worker":"object {\"$lash_process\":true,\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_name\":\"__process_<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0}}"}}
+end
+
+session mutation-through-session-globals
+about a later cell mutates the objects and arrays earlier cells bound
+probe holder queue
+cell
+const holder = { count: 1 };
+const queue = [1];
+cell
+holder.count += 1;
+holder.extra = "x";
+queue.push(2);
+console.log(holder, queue);
+cell
+console.log(holder.count, queue.length);
+end
+
+session per-iteration-bindings
+about each iteration of a let/const loop has its own binding, which a closure captures
+probe fns i f
+deviation closure-boundary
+cell
+const fns = [];
+for (let i = 0; i < 3; i++) {
+  fns.push(() => i);
+}
+console.log(fns.map((f) => f()));
+end
+
+session destructuring-loop-heads
+about destructured loop-head bindings end with their loop
+probe rows id first sum
+cell
+const rows = [{ id: 1, tags: ["a"] }, { id: 2, tags: ["b"] }];
+let sum = 0;
+for (const { id, tags: [first] } of rows) {
+  sum = sum + id;
+  console.log(first);
+}
+console.log(sum);
+end
+
+session unbraced-switch-case
+about a declaration directly in a switch case ends with the switch
+probe label
+cell
+switch (1) {
+  case 1:
+    const label = "one";
+    console.log(label);
+    break;
+}
+end
+
+session optional-and-nullish-temporaries
+about optional chaining and nullish coalescing bind only authored names
+probe deep got missing
+cell
+const deep = JSON.parse('{"a":{"b":1}}');
+const got = deep?.a?.b ?? 0;
+const missing = deep?.x?.y ?? "none";
+console.log(got, missing);
+end
+
+session global-object-names
+about a name written through globalThis is a session global a bare name reads
+probe fresh old
+cell
+globalThis.fresh = 1;
+var old = 1;
+globalThis.old = 2;
+console.log(fresh, old);
+cell
+console.log(fresh + old);
+end
+
+session finish-after-bindings
+about a finished cell keeps the bindings it made before finishing
+probe made
+cell
+const made = [1];
+finish(made.length);
+end
+
+session static-field-check
+about reading a field an object literal's type lacks, which the linker refuses as TypeScript does
+probe shape
+cell reject TS_LINK_ERROR
+const shape = { a: 1 };
+console.log(shape.missing);
+end
+
+session var-then-const-redeclaration
+about a later cell declares a const over an earlier cell's var
+probe earlier
+cell
+var earlier = "var";
+cell deviation cross-cell-redeclaration
+const earlier = "const";
+console.log(earlier);
+lash {"outcome":"normal","prints":["const"],"probes":{"earlier":"string \"const\""}}
+end
+
+session key-order-across-cells
+about an object's property order is its insertion order, in every later cell
+probe ordered nested
+cell defect durable-key-order
+const ordered = { zeta: 1, alpha: 2, mid: 3 };
+const nested = { b: { y: 1, x: 2 }, a: [{ q: 1, p: 2 }] };
+lash-restart {"outcome":"normal","prints":[],"probes":{"nested":"object {\"a\":[{\"p\":2,\"q\":1}],\"b\":{\"x\":2,\"y\":1}}","ordered":"object {\"alpha\":2,\"mid\":3,\"zeta\":1}"}}
+end
