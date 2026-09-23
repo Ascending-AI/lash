@@ -1,4 +1,3 @@
-use lash_sansio::SessionId;
 mod runtime_feedback;
 use crate::support::*;
 use lash_core::llm::transport::ProviderFailureKind;
@@ -31,6 +30,7 @@ mod reasoning_retention_tests;
 mod replay_provenance_tests;
 mod request_work_tests;
 mod responses_text_slot_tests;
+mod session_affinity_tests;
 mod strict_tool_omission_tests;
 mod usage_reconciliation_tests;
 
@@ -260,45 +260,6 @@ fn count_object_key(value: &Value, key: &str) -> usize {
 }
 
 #[tokio::test]
-async fn host_enabled_session_affinity_works_through_a_custom_proxy_url() {
-    let transport = Arc::new(RecordingHttpTransport::default());
-    let mut provider = OpenAiCompatibleProvider::new("key", "https://router-proxy.example/v1")
-        .with_compat(OpenAiCompat {
-            cache_session_affinity: Some(true),
-            ..OpenAiCompat::default()
-        })
-        .with_transport(transport.clone());
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    let session_id = SessionId::from(format!("{}étrailing", "s".repeat(255)));
-    req.scope.session_id = session_id.clone();
-
-    provider.complete(req).await.expect("request succeeds");
-
-    let requests = transport.requests.lock_recover();
-    let wire_request = requests.first().expect("captured request");
-    let body: Value = serde_json::from_slice(&wire_request.body).expect("request body");
-    let expected = session_id.chars().take(256).collect::<String>();
-    assert_eq!(body["session_id"], expected);
-    assert_eq!(
-        body["session_id"]
-            .as_str()
-            .expect("session id")
-            .chars()
-            .count(),
-        256
-    );
-    assert!(
-        wire_request
-            .headers
-            .iter()
-            .all(|(name, _)| !name.eq_ignore_ascii_case("session_id"))
-    );
-    assert!(wire_request.headers.iter().any(|(name, value)| {
-        name.eq_ignore_ascii_case("x-client-request-id") && value == "session-1:request:test"
-    }));
-}
-
-#[tokio::test]
 async fn session_affinity_is_disabled_without_endpoint_capability() {
     let transport = Arc::new(RecordingHttpTransport::default());
     let mut provider =
@@ -425,13 +386,15 @@ async fn direct_openai_prompt_cache_key_does_not_enable_body_session_affinity() 
     let transport = Arc::new(RecordingHttpTransport::default());
     let mut provider = OpenAiProvider::new("key").with_transport(transport.clone());
     let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+    let expected_cache_key = req.provider_prompt_cache_key();
 
     provider.complete(req).await.expect("request succeeds");
 
     let requests = transport.requests.lock_recover();
     let wire_request = requests.first().expect("captured request");
     let body: Value = serde_json::from_slice(&wire_request.body).expect("request body");
-    assert_eq!(body["prompt_cache_key"], "session-1::session-1:frame:test");
+    assert_eq!(body["prompt_cache_key"], expected_cache_key);
+    assert_ne!(body["prompt_cache_key"], "session-1::session-1:frame:test");
     assert!(body.get("session_id").is_none());
     assert!(
         wire_request
@@ -1345,7 +1308,7 @@ fn responses_long_cache_retention_emits_openai_retention() {
 
     let body = provider.build_responses_request_body(&req, true).unwrap();
 
-    assert_eq!(body["prompt_cache_key"], "session-1::session-1:frame:test");
+    assert_eq!(body["prompt_cache_key"], req.provider_prompt_cache_key());
     assert_eq!(body["prompt_cache_retention"], "24h");
     assert!(body.get("cache_control").is_none());
 }

@@ -30,6 +30,8 @@ use ws_testing::{
 mod idle_timeout_tests;
 #[path = "response_error_tests.rs"]
 mod response_error_tests;
+#[path = "session_affinity_tests.rs"]
+mod session_affinity_tests;
 fn process_event(state: &mut CodexStreamState, event: Value) {
     CodexProvider::process_sse_event(&event.to_string(), state, None).unwrap();
 }
@@ -985,7 +987,9 @@ async fn codex_scripted_websocket_full_turn_sends_response_create() {
             .iter()
             .find_map(|(header_name, value)| (header_name == name).then_some(value.as_str()))
     };
-    assert_eq!(header("session-id"), Some("session-1"));
+    let session_affinity =
+        LlmRequestScope::new("session-1", "", "").provider_session_affinity_key();
+    assert_eq!(header("session-id"), Some(session_affinity.as_str()));
     assert_eq!(
         header("x-client-request-id"),
         Some("session-1:request:test")
@@ -1225,12 +1229,14 @@ async fn codex_scripted_websocket_same_session_different_frame_does_not_reuse_co
     assert_eq!(captured.len(), 2);
     assert!(captured[1].get("previous_response_id").is_none());
     assert_eq!(captured[1]["input"].as_array().unwrap().len(), 3);
+    let session_affinity =
+        LlmRequestScope::new("session-1", "", "").provider_session_affinity_key();
     let handshakes = ws.handshakes();
     assert_eq!(
         handshakes[1]
             .iter()
             .find_map(|(name, value)| (name == "session-id").then_some(value.as_str())),
-        Some("session-1")
+        Some(session_affinity.as_str())
     );
     assert_eq!(
         handshakes[1].iter().find_map(|(name, value)| {
@@ -1526,12 +1532,22 @@ async fn codex_auto_with_distinct_scopes_uses_uncached_websockets() {
             .iter()
             .find_map(|(header_name, value)| (header_name == name).then_some(value.as_str()))
     }
-    assert_eq!(header(&handshakes[0], "session-id"), Some("direct-a"));
+    let direct_a_affinity =
+        LlmRequestScope::new("direct-a", "", "").provider_session_affinity_key();
+    let direct_b_affinity =
+        LlmRequestScope::new("direct-b", "", "").provider_session_affinity_key();
+    assert_eq!(
+        header(&handshakes[0], "session-id"),
+        Some(direct_a_affinity.as_str())
+    );
     assert_eq!(
         header(&handshakes[0], "x-client-request-id"),
         Some("direct-a:request")
     );
-    assert_eq!(header(&handshakes[1], "session-id"), Some("direct-b"));
+    assert_eq!(
+        header(&handshakes[1], "session-id"),
+        Some(direct_b_affinity.as_str())
+    );
     assert_eq!(
         header(&handshakes[1], "x-client-request-id"),
         Some("direct-b:request")
@@ -1793,52 +1809,6 @@ async fn codex_sse_stream_evidence_carries_allowlisted_response_headers() {
                     && !evidence.response_metadata.contains_key("header:set-cookie")
         )
     }));
-}
-
-#[tokio::test]
-async fn codex_auto_skips_websocket_while_session_fallback_is_active() {
-    let http = spawn_http_sse_sequence(vec![
-        ("resp_http_1", "msg_http_1", "fallback-one"),
-        ("resp_http_2", "msg_http_2", "fallback-two"),
-    ])
-    .await;
-    let mut provider = websocket_test_provider(
-        CodexTransport::Auto,
-        http.url.clone(),
-        "ws://127.0.0.1:1/codex/responses".to_string(),
-    );
-
-    let first = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "hello")]))
-        .await
-        .expect("first SSE fallback response");
-
-    assert_eq!(first.full_text(), "fallback-one");
-    assert!(
-        provider
-            .websocket_fallback_reason(&request(vec![LlmMessage::text(LlmRole::User, "hello")]))
-            .is_some()
-    );
-
-    let ws = spawn_scripted_websocket(vec![ScriptedWsAction::Complete {
-        response_id: "resp_ws",
-        message_id: "msg_ws",
-        text: "should-not-run",
-    }])
-    .await;
-    provider.websocket_url = ws.url.clone();
-    let second = provider
-        .complete(request(vec![LlmMessage::text(LlmRole::User, "next")]))
-        .await
-        .expect("second SSE fallback response");
-
-    assert_eq!(second.full_text(), "fallback-two");
-    assert_eq!(ws.captured().len(), 0);
-    assert_eq!(http.captured_len(), 2);
-    let sse_request = http.captured().remove(0);
-    assert!(sse_request.contains("session-id: session-1"));
-    assert!(sse_request.contains("x-client-request-id: session-1:request:test"));
-    assert!(!sse_request.contains("session_id:"));
 }
 
 #[tokio::test]

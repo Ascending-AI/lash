@@ -11,7 +11,7 @@
       "model": { "equals": "gemini-3.1-pro-preview" },
       "request.contents[0].role": { "equals": "user" },
       "request.contents[0].parts[0].text": { "contains": "answer directly" },
-      "request.sessionId": { "equals": "session-1" },
+      "request.sessionId": { "equals": "2c3aeee1e747a05a80b1f178a22f11f58356620c62edabd3e4e3f116727f729e" },
       "project": { "equals": "project-1" }
     },
     "headers": {

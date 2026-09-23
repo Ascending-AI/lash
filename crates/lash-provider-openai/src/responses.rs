@@ -125,7 +125,7 @@ impl OpenAiCompatibleProvider {
         let cache_control_emitted =
             policy.cache_retention != CacheRetention::None && compat.prompt_cache_key;
         if cache_control_emitted {
-            body["prompt_cache_key"] = json!(req.continuation_key());
+            body["prompt_cache_key"] = json!(req.provider_prompt_cache_key());
         }
         if policy.cache_retention == CacheRetention::Long && compat.prompt_cache_retention {
             body["prompt_cache_retention"] = json!("24h");

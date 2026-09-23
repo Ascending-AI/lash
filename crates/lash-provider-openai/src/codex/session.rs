@@ -381,11 +381,12 @@ impl CodexProvider {
                 )))
             })?,
         );
-        let session_value = HeaderValue::from_str(&req.scope.session_id).map_err(|error| {
-            CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
-                "Invalid Codex WebSocket session header: {error}"
-            )))
-        })?;
+        let session_value = HeaderValue::from_str(&req.scope.provider_session_affinity_key())
+            .map_err(|error| {
+                CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
+                    "Invalid Codex WebSocket session header: {error}"
+                )))
+            })?;
         let request_value = HeaderValue::from_str(&req.scope.request_id).map_err(|error| {
             CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
                 "Invalid Codex WebSocket request header: {error}"
