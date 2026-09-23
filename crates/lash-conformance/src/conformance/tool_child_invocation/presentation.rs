@@ -651,9 +651,11 @@ pub async fn the_oracle_and_the_budget_plugin_coexist(fixture: &ToolChildLawFixt
                             limit: 512,
                             max_lines:
                                 lash_plugin_tool_output_budget::DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+                            head_share_percent: 50,
                             retain_full_output: false,
                         },
-                    ),
+                    )
+                    .expect("valid tool output budget config"),
                 ),
                 steps_factory(vec![marker_step("oracle", Arc::clone(&oracle_runs))]),
             ],
@@ -789,9 +791,11 @@ pub async fn a_retained_full_output_is_a_durable_artifact_not_a_path(
                         limit: 512,
                         max_lines:
                             lash_plugin_tool_output_budget::DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+                        head_share_percent: 50,
                         retain_full_output: true,
                     },
-                ),
+                )
+                .expect("valid tool output budget config"),
             )],
             attachment_store: Some(attachment_store),
         },

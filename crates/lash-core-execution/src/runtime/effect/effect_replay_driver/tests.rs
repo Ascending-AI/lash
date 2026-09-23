@@ -700,3 +700,55 @@ fn terminals_write_exactly_one_payload_column() {
     assert_eq!(failed.outcome_json(), None);
     assert_eq!(failed.error_json(), Some("{\"code\":\"boom\"}"));
 }
+
+#[test]
+fn journal_fault_fires_once_on_the_armed_point_and_key() {
+    let faults = EffectJournalFaults::new(RuntimeErrorCode::RuntimeStore);
+    faults.fail_next(EffectJournalFaultPoint::Claim, "key-a");
+
+    assert!(faults.take(EffectJournalFaultPoint::Claim, "key-a"));
+    assert!(faults.fired());
+    assert_eq!(faults.calls_after_fire(), 0);
+
+    // One-shot: a second claim on the same pair consumes nothing and counts
+    // as the retried call the fail-stop oracle looks for.
+    assert!(!faults.take(EffectJournalFaultPoint::Claim, "key-a"));
+    assert_eq!(faults.calls_after_fire(), 1);
+}
+
+#[test]
+fn journal_fault_is_keyed_to_the_replay_key_and_point() {
+    let faults = EffectJournalFaults::new(RuntimeErrorCode::RuntimeStore);
+    faults.fail_next(EffectJournalFaultPoint::Renew, "key-a");
+
+    // A sibling effect's renew does not consume the armed fault.
+    assert!(!faults.take(EffectJournalFaultPoint::Renew, "key-b"));
+    assert!(!faults.fired());
+    // Neither does a different point on the armed key.
+    assert!(!faults.take(EffectJournalFaultPoint::Claim, "key-a"));
+    assert!(!faults.fired());
+    assert!(faults.take(EffectJournalFaultPoint::Renew, "key-a"));
+}
+
+#[test]
+fn journal_fault_reports_the_backend_store_code() {
+    let faults = EffectJournalFaults::new(RuntimeErrorCode::RuntimeStore);
+    assert_eq!(faults.store_code(), RuntimeErrorCode::RuntimeStore);
+}
+
+#[tokio::test]
+async fn journal_fault_wait_fired_resolves_once_the_fault_fires() {
+    let faults = EffectJournalFaults::new(RuntimeErrorCode::RuntimeStore);
+    let waiter = faults.clone();
+    let waiting = crate::task::spawn(async move { waiter.wait_fired().await });
+
+    faults.fail_next(EffectJournalFaultPoint::Finalize, "key-a");
+    tokio::task::yield_now().await;
+    assert!(!waiting.is_finished());
+    assert!(faults.take(EffectJournalFaultPoint::Finalize, "key-a"));
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), waiting)
+        .await
+        .expect("wait_fired resolves once the armed fault fires")
+        .expect("waiter task joins");
+}

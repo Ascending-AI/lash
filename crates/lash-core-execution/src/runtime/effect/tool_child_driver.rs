@@ -241,6 +241,10 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
             None,
         ))
     }
+
+    fn live_generation(&self, opener: &crate::EffectOpener) -> Option<u64> {
+        self.openers.generation_of(opener)
+    }
 }
 
 #[cfg(feature = "testing")]

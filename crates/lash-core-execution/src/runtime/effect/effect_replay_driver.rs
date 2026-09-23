@@ -1415,6 +1415,10 @@ pub struct StoreEffectReplayDriver<P, A> {
     /// stop.
     #[cfg(feature = "testing")]
     offered_child_selection: AtomicUsize,
+    /// Error-return injector (FIG-3524) over `claim`, `finalize` and `renew`,
+    /// consulted by `take_journal_fault` at each row-store call.
+    #[cfg(feature = "testing")]
+    journal_faults: EffectJournalFaults,
 }
 
 /// How a group open decides whether an executor the caller staged for its own
@@ -1463,7 +1467,11 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             std::process::id(),
             clock.timestamp_ms()
         );
+        #[cfg(feature = "testing")]
+        let journal_faults = EffectJournalFaults::new(row_store.vocabulary().store_code());
         Self {
+            #[cfg(feature = "testing")]
+            journal_faults,
             row_store,
             await_events,
             clock,
@@ -1977,6 +1985,12 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             strict_replay: self.replay_mode.load(Ordering::SeqCst),
         };
 
+        #[cfg(feature = "testing")]
+        if let Some(err) =
+            self.take_journal_fault(EffectJournalFaultPoint::Claim, &request.replay_key)
+        {
+            return Err(err);
+        }
         match self.row_store.claim(&request).await? {
             EffectClaimObservation::Claimed { due_at_ms } => {
                 Ok(PreparedEffect::Claimed(ClaimedEffect {
@@ -2119,23 +2133,14 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 EffectCommitState::Pending => {}
             }
         }
-        if claim.group_key.is_none()
-            && let Err(error) = outcome
-            && error
-                .journal_disposition(command_kind)
-                .is_retryable_derivation()
+        if derivation::release_derivation(self, claim, command_kind, outcome).await? {
+            return Ok(());
+        }
+        #[cfg(feature = "testing")]
+        if let Some(err) =
+            self.take_journal_fault(EffectJournalFaultPoint::Finalize, &fence.replay_key)
         {
-            return if self.row_store.release_uncommitted_derivation(fence).await? {
-                Ok(())
-            } else {
-                Err(vocabulary.error(
-                    EffectReplayFailure::LeaseLost,
-                    format!(
-                        "runtime effect replay lease was lost before releasing derivation `{}`",
-                        fence.replay_key
-                    ),
-                ))
-            };
+            return Err(err);
         }
         match self.row_store.finalize(fence, &terminal).await? {
             EffectFinalizeOutcome::Written { commit_seq: _ } => {
@@ -2225,6 +2230,12 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         &self,
         fence: &EffectLeaseFence,
     ) -> Result<(), RuntimeEffectControllerError> {
+        #[cfg(feature = "testing")]
+        if let Some(err) =
+            self.take_journal_fault(EffectJournalFaultPoint::Renew, &fence.replay_key)
+        {
+            return Err(err);
+        }
         if self
             .row_store
             .renew(fence, self.lease_timings.ttl_ms())
@@ -2400,8 +2411,13 @@ fn sleep_spec(envelope: &RuntimeEffectEnvelope) -> Option<SleepSpec> {
 }
 
 mod closing;
+mod derivation;
 mod drain;
 mod groups;
+#[cfg(feature = "testing")]
+mod journal_faults;
+#[cfg(feature = "testing")]
+pub use journal_faults::{EffectJournalFaultPoint, EffectJournalFaults};
 
 #[cfg(test)]
 mod tests;

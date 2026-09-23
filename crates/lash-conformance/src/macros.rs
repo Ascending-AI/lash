@@ -737,25 +737,6 @@ macro_rules! effect_group_cancelled_child_terminal_tests {
 }
 
 #[macro_export]
-macro_rules! effect_host_tests {
-    ($fixture:block) => {
-        $crate::effect_host_tests!(@catalogue $fixture; [
-            (effect_host, "effect-host"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make) = $fixture;
-                $crate::registration_macro_support::$law(make).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
-#[macro_export]
 macro_rules! effect_host_await_event_tests {
     ($fixture:block) => {
         $crate::effect_host_await_event_tests!(@catalogue $fixture; [
@@ -1828,7 +1809,7 @@ macro_rules! __turn_crash_matrix_register {
     ($fixture:block; $law:ident, $label:literal, trace) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, make, _make_invocation) = $fixture;
+            let (_guard, make, _make_invocation, _make_error_invocation) = $fixture;
             let _ = $label;
             Box::pin($crate::registration_macro_support::$law(make)).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
@@ -1837,7 +1818,7 @@ macro_rules! __turn_crash_matrix_register {
     ($fixture:block; $law:ident, $label:literal, matrix) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, make, make_invocation) = $fixture;
+            let (_guard, make, make_invocation, _make_error_invocation) = $fixture;
             let _ = $label;
             Box::pin($crate::registration_macro_support::$law(
                 make,
@@ -1847,15 +1828,38 @@ macro_rules! __turn_crash_matrix_register {
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
+    ($fixture:block; $law:ident, $label:literal, error_return) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, make, _make_invocation, make_error_invocation) = $fixture;
+            let _ = $label;
+            Box::pin($crate::registration_macro_support::$law(
+                make,
+                make_error_invocation,
+            ))
+            .await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
 }
 
 /// Register the level-one turn crash checks.
+///
+/// The fixture yields `(guard, make, make_invocation, make_error_invocation)`:
+/// `make_invocation` drives the crash placements, and `make_error_invocation`
+/// — a `(scenario, scope)` factory — supplies the journaled controller the
+/// FIG-3524 error-return sweep needs on tiers that have an effect journal.
 #[macro_export]
 macro_rules! turn_crash_matrix_tests {
     ($fixture:block) => {
         $crate::turn_crash_matrix_tests!(@catalogue $fixture; [
             (turn_crash_trace_drift_check, "turn-crash-trace-drift", trace),
             (turn_crash_matrix_level_1, "turn-crash-matrix-level-1", matrix),
+            (
+                turn_crash_matrix_error_return_fail_stop,
+                "turn-crash-matrix-error-return-fail-stop",
+                error_return
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {

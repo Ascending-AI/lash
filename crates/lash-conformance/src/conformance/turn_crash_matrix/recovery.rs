@@ -30,6 +30,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
         inner: invocation.controller_handle(),
         control: control.clone(),
         executions: Arc::clone(&executions),
+        journal_faults: None,
     });
     let runtime = Box::pin(build_runtime(
         decorated,
@@ -78,6 +79,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
             inner: successor_invocation.controller_handle(),
             control: successor_control.clone(),
             executions: Arc::clone(&executions),
+            journal_faults: None,
         });
     let successor = Box::pin(build_runtime_with_lease_timings(
         Arc::clone(&successor_store),
@@ -130,6 +132,7 @@ pub(super) async fn run_crash_matrix_case<F, I>(
             inner: redrive.controller_handle(),
             control: control.clone(),
             executions: Arc::clone(&executions),
+            journal_faults: None,
         });
         let runtime = Box::pin(build_runtime_with_lease_timings(
             SeamStore::wrap(make(scenario), control.clone()),
@@ -295,6 +298,7 @@ async fn drive_drain_turn<F, I>(
         inner: invocation.controller_handle(),
         control: control.clone(),
         executions: Arc::clone(executions),
+        journal_faults: None,
     });
     let runtime = Box::pin(build_runtime_with_lease_timings(
         store,

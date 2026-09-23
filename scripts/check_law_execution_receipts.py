@@ -77,6 +77,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 MACROS = ROOT / "crates/lash-conformance/src/macros.rs"
 ADDITIONAL_MACRO_FILES = (
+    ROOT / "crates/lash-conformance/src/effect_host_macros.rs",
     ROOT / "crates/lash-conformance/src/response_derivation_macros.rs",
 )
 WORKSPACE_TARGETS = ROOT / "tools/bazel/workspace_targets.bzl"

@@ -1486,6 +1486,26 @@ lash_conformance::turn_crash_matrix_tests!({
         dir,
         move |scenario: &str| open_store(&root.join(format!("turn-crash-matrix-{scenario}.db"))),
         |_: &str| lash_conformance::ConformanceInvocation::native(),
+        |_: &str, scope: ExecutionScope| {
+            // FIG-3524: the error-return sweep needs the journaled controller
+            // so the claim/finalize/renew placements arm real journal faults.
+            // The short renew interval lets a `renew` fault fire while the
+            // parked tool attempt is still open.
+            let controller = sync_await(SqliteRuntimeEffectController::memory_with_options(
+                scope.clone(),
+                SqliteEffectReplayOptions {
+                    lease_timings: lash_core::facade_support::LeaseTimings::new(
+                        std::time::Duration::from_secs(60),
+                        std::time::Duration::from_millis(50),
+                    )
+                    .expect("error-return effect lease timings"),
+                    ..SqliteEffectReplayOptions::default()
+                },
+            ))
+            .expect("journaled error-return controller");
+            sqlite_conformance_invocation(controller.clone(), scope)
+                .with_effect_journal_faults(controller.effect_journal_faults())
+        },
     )
 });
 

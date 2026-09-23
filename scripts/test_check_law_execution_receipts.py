@@ -507,6 +507,10 @@ class RealTreeTests(unittest.TestCase):
 
     def test_response_derivation_catalogue_has_only_backend_claimants(self) -> None:
         macros = MODULE.load_macros()
+        self.assertEqual(
+            MODULE.suite_expected(macros, "effect_host_tests"),
+            {("effect_host", "effect-host")},
+        )
         laws = MODULE.suite_expected(macros, "effect_controller_response_derivation_tests")
         self.assertEqual(
             laws,

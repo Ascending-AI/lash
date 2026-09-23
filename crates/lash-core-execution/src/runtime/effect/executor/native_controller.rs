@@ -509,12 +509,13 @@ pub(crate) struct NativeEffectGroups {
     /// after the decision committed — the same §7 bound the SQL tiers take at
     /// construction, set here by the controller builder.
     drain_budget: crate::runtime::effect::group::EffectGroupDrainBudget,
-    /// The final record of every reaped group, so the reference tier's own
-    /// tests can observe a completed group's settlement order. Test-only, in the
-    /// style of `AwaitEventRegistry`'s cache counter: production keeps nothing
-    /// once a group is reaped.
+    /// Every reaped group, so the reference tier's own tests can observe a
+    /// completed group's settlement order — and so a reopen resurrects it
+    /// rather than re-dispatching children whose effects already ran.
+    /// Test-only, in the style of `AwaitEventRegistry`'s cache counter:
+    /// production keeps nothing once a group is reaped.
     #[cfg(any(test, feature = "testing"))]
-    retired: Mutex<HashMap<String, Vec<RecordedSettlement>>>,
+    retired: Mutex<HashMap<String, Arc<NativeEffectGroup>>>,
 }
 
 /// One open group: its shape, its settlement record, and the wake that tells
@@ -536,6 +537,15 @@ struct NativeEffectGroup {
     wake: GroupWakePolicy,
     /// The disposition declared at open, which a crash-drain would apply.
     declared: LoserPolicy,
+    /// The opener registration this group was opened under — the opener's
+    /// identity *and* its registration generation. A re-registration of the
+    /// same opener value is a new incarnation: this tier keeps no journal,
+    /// so a group's recorded state lives exactly as long as the registration
+    /// that produced it, and a reopen under a superseding registration must
+    /// dispatch fresh rather than serve the dead context's answers.
+    /// `None` when the resolver reports no registration — an unversioned
+    /// group is always servable.
+    opener_registration: Option<(crate::EffectOpener, u64)>,
     /// Fired by a close that resolves to [`LoserPolicy::Cancel`]. Children
     /// select on their own child token, so cancelling the group cancels exactly
     /// the children that have not settled.
@@ -654,13 +664,17 @@ impl EffectGroupRecordAccessor for NativeEffectGroup {
 }
 
 impl NativeEffectGroup {
-    fn new(group: &RuntimeEffectGroup) -> Self {
+    fn new(
+        group: &RuntimeEffectGroup,
+        opener_registration: Option<(crate::EffectOpener, u64)>,
+    ) -> Self {
         Self {
             group_key: group.group_key().to_string(),
             scope: group.invocation().execution_scope().clone(),
             children: group.children().len(),
             wake: group.wake(),
             declared: group.loser_disposition(),
+            opener_registration,
             cancel: CancellationToken::new(),
             positions: group
                 .children()
@@ -685,6 +699,45 @@ impl NativeEffectGroup {
             tasks: std::sync::Mutex::new(tokio::task::JoinSet::new()),
         }
     }
+
+    /// Whether the opener registration that produced this group has been
+    /// superseded by a re-registration of the same opener value.
+    ///
+    /// A reopened group whose registration is stale must dispatch its
+    /// children again under the live registration's context: this tier keeps
+    /// no journal, so serving the superseded registration's recorded
+    /// settlements would stamp a dead context's answers under the new
+    /// incarnation's name. A resolver that cannot report a generation — or
+    /// an opener that is not live — leaves the record standing, since nobody
+    /// else could run the children anyway.
+    fn registration_stale(&self, executors: &Arc<dyn GroupExecutors>) -> bool {
+        let Some((opener, generation)) = &self.opener_registration else {
+            return false;
+        };
+        executors
+            .live_generation(opener)
+            .is_some_and(|live| live != *generation)
+    }
+
+    /// Closed with every child recorded: nothing in flight, so discarding
+    /// the entry strands no running work.
+    fn fully_settled(&self) -> bool {
+        let inner = self.state.lock_recover();
+        inner.closed && inner.order.len() == self.children
+    }
+}
+
+/// The opener the group's children bind. Scope validation makes every child
+/// share the group's scope, so the first tool child's opener is the group's;
+/// a group carrying no tool children has no registration to compare.
+fn group_opener(group: &RuntimeEffectGroup) -> Option<crate::EffectOpener> {
+    group
+        .children()
+        .iter()
+        .find_map(|child| match &child.command {
+            RuntimeEffectCommand::ToolInvocation { request } => Some(request.scope.opener.clone()),
+            _ => None,
+        })
 }
 
 impl NativeEffectGroups {
@@ -779,25 +832,49 @@ impl NativeEffectGroups {
     /// because only the caller knows how far it consumed; a caller resuming from
     /// a durable continuation restores its own cursor with
     /// [`EffectGroupHandle::restored`].
+    ///
+    /// The exception is a group whose opener registration has been
+    /// superseded — a re-registered turn, a new process incarnation. The
+    /// record the entry holds belongs to a dead context, and this tier keeps
+    /// no journal, so the reopen dispatches the children fresh under the live
+    /// registration rather than serving it.
     fn open(
         groups: &Arc<Self>,
         executors: &Arc<dyn GroupExecutors>,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
         let handle = EffectGroupHandle::new(&group);
+        // The registration the open is happening under — the live
+        // generation now, captured before resolution so the fresh state
+        // records exactly the registration its children resolve through.
+        let registration = group_opener(&group).and_then(|opener| {
+            executors
+                .live_generation(&opener)
+                .map(|live| (opener, live))
+        });
         {
-            let open = groups.open.write_recover();
+            let mut open = groups.open.write_recover();
             if let Some(existing) = open.get(group.group_key()) {
                 fence_reopen(&group, existing.as_ref())?;
-                // A reopen is a new caller interest: an entry closed by an
-                // earlier caller but not yet reaped opens again — a closed
-                // group's settlements keep landing under host ownership
-                // precisely so a caller may read them. Only `closed` clears;
-                // the narrowed disposition stays cumulative. The clear runs
-                // under the map's write lock so a `reap` re-judging the entry
-                // under the same lock cannot retire it out from under the new
-                // handle.
-                existing.state.lock_recover().closed = false;
+                if existing.fully_settled() && existing.registration_stale(executors) {
+                    // A superseded registration's completed record: dropped so
+                    // the reopen falls through to a fresh dispatch.
+                    open.remove(group.group_key());
+                } else {
+                    // A reopen is a new caller interest: an entry closed by an
+                    // earlier caller but not yet reaped opens again — a closed
+                    // group's settlements keep landing under host ownership
+                    // precisely so a caller may read them. Only `closed` clears;
+                    // the narrowed disposition stays cumulative. The clear runs
+                    // under the map's write lock so a `reap` re-judging the entry
+                    // under the same lock cannot retire it out from under the new
+                    // handle.
+                    existing.state.lock_recover().closed = false;
+                    return Ok(handle);
+                }
+            }
+            #[cfg(any(test, feature = "testing"))]
+            if groups.resurrect(&mut open, executors, &group)? {
                 return Ok(handle);
             }
         }
@@ -806,10 +883,18 @@ impl NativeEffectGroups {
             let mut open = groups.open.write_recover();
             if let Some(existing) = open.get(group.group_key()) {
                 fence_reopen(&group, existing.as_ref())?;
-                existing.state.lock_recover().closed = false;
+                if existing.fully_settled() && existing.registration_stale(executors) {
+                    open.remove(group.group_key());
+                } else {
+                    existing.state.lock_recover().closed = false;
+                    return Ok(handle);
+                }
+            }
+            #[cfg(any(test, feature = "testing"))]
+            if groups.resurrect(&mut open, executors, &group)? {
                 return Ok(handle);
             }
-            let state = Arc::new(NativeEffectGroup::new(&group));
+            let state = Arc::new(NativeEffectGroup::new(&group, registration.clone()));
             open.insert(group.group_key().to_string(), Arc::clone(&state));
             state
         };
@@ -1417,6 +1502,44 @@ impl NativeEffectGroups {
         Ok(())
     }
 
+    /// A group the reaper already retired still owes a reopening caller the
+    /// settlements it recorded: on this reference tier, retirement is a
+    /// retention detail — not contract state — so the reopen resurrects the
+    /// same state under the `open` map's write lock rather than
+    /// re-dispatching children whose effects already ran. (The journaled
+    /// tiers re-dispatch and let each child's claim replay; this tier
+    /// journals nothing, so re-dispatch would re-execute.)
+    ///
+    /// Test-only, like `retired` itself: production keeps nothing once a
+    /// group is reaped and a reopen there opens fresh.
+    ///
+    /// The fence is judged before the group leaves `retired`, so a refused
+    /// reopen costs the key nothing and `recorded` still answers for it. A
+    /// record whose opener registration was superseded is dropped rather
+    /// than resurrected, so the reopen dispatches under the live one.
+    #[cfg(any(test, feature = "testing"))]
+    fn resurrect(
+        &self,
+        open: &mut HashMap<String, Arc<NativeEffectGroup>>,
+        executors: &Arc<dyn GroupExecutors>,
+        group: &RuntimeEffectGroup,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        let mut retired = self.retired.lock_recover();
+        let Some(existing) = retired.get(group.group_key()) else {
+            return Ok(false);
+        };
+        fence_reopen(group, existing.as_ref())?;
+        let stale = existing.registration_stale(executors);
+        let state = Arc::clone(existing);
+        retired.remove(group.group_key());
+        if stale {
+            return Ok(false);
+        }
+        state.state.lock_recover().closed = false;
+        open.insert(group.group_key().to_string(), state);
+        Ok(true)
+    }
+
     /// Completion alone is not enough, because `RunToCompletion` losers keep
     /// settling after the caller is gone and their settlements are the thing this
     /// state exists to record; a close alone is not enough for the same reason.
@@ -1443,11 +1566,13 @@ impl NativeEffectGroups {
             }
         }) {
             open.remove(group_key);
+            // The group itself, not a projection of it: a reopen resurrects
+            // this state so the settlements it recorded are served rather
+            // than re-run.
             #[cfg(any(test, feature = "testing"))]
-            self.retired.lock_recover().insert(
-                group_key.to_string(),
-                Self::snapshot(&state.state.lock_recover()),
-            );
+            self.retired
+                .lock_recover()
+                .insert(group_key.to_string(), Arc::clone(state));
         }
     }
 
@@ -1491,7 +1616,7 @@ impl NativeEffectGroups {
                 .retired
                 .lock_recover()
                 .get(group_key)
-                .cloned()
+                .map(|state| Self::snapshot(&state.state.lock_recover()))
                 .unwrap_or_default();
         };
         let inner = state.state.lock_recover();
