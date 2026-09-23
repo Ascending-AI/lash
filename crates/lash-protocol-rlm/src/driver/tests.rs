@@ -81,17 +81,10 @@ fn assistant_prose_event(id: &str, text: &str) -> SessionHistoryRecord {
 }
 
 pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
-    let mut bound_variables_cache = crate::rlm_support::BoundVariableRenderCache::default();
     RlmContextProjector {
         prompt_features: Default::default(),
         max_output_chars,
         max_budget_tokens: None,
-        last_prompt_usage: Arc::new(RwLock::new(None)),
-        bound_variables_prompt: Arc::new(RwLock::new(crate::rlm_support::render_bound_variables(
-            &mut bound_variables_cache,
-            &[],
-            crate::dialect::DialectPromptVocabulary::default(),
-        ))),
         dialect: Arc::new(TypescriptDialect::prompt_only(LashlangSurface::default())),
     }
 }
@@ -119,13 +112,14 @@ fn project_iteration_request(
     protocol_iteration: usize,
     model: &str,
 ) -> Arc<LlmRequest> {
-    project_iteration_request_with_generation(
+    project_iteration_request_with_inputs(
         projector,
         events,
         protocol_iteration,
         model,
         Default::default(),
         None,
+        &lash_core::sansio::ProjectorTurnInputs::default(),
     )
 }
 
@@ -136,6 +130,27 @@ fn project_iteration_request_with_generation(
     model: &str,
     generation: lash_core::GenerationOptions,
     max_context_tokens: Option<usize>,
+    projector_turn_inputs: &lash_core::sansio::ProjectorTurnInputs,
+) -> Arc<LlmRequest> {
+    project_iteration_request_with_inputs(
+        projector,
+        events,
+        protocol_iteration,
+        model,
+        generation,
+        max_context_tokens,
+        projector_turn_inputs,
+    )
+}
+
+fn project_iteration_request_with_inputs(
+    projector: &RlmContextProjector,
+    events: &[SessionHistoryRecord],
+    protocol_iteration: usize,
+    model: &str,
+    generation: lash_core::GenerationOptions,
+    max_context_tokens: Option<usize>,
+    projector_turn_inputs: &lash_core::sansio::ProjectorTurnInputs,
 ) -> Arc<LlmRequest> {
     let config = projection_test_config(model, generation, max_context_tokens);
     projector.project(ProjectorContext {
@@ -145,6 +160,7 @@ fn project_iteration_request_with_generation(
         turn_causes: &[],
         protocol_iteration,
         use_tools: false,
+        projector_turn_inputs,
     })
 }
 
@@ -173,6 +189,7 @@ pub(super) fn projection_test_config(
         autonomous: false,
         tool_specs: Arc::new(Vec::new()),
         system_prompt: Arc::from("stable RLM system prompt"),
+        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("prefix-stability"),
         agent_frame_id: "prefix-stability-frame".to_string(),
         turn_id: TurnId::from("prefix-stability-turn"),
@@ -207,6 +224,7 @@ fn rlm_projector_suppresses_every_nonempty_caller_stop_list() {
                 ..Default::default()
             },
             None,
+            &lash_core::sansio::ProjectorTurnInputs::default(),
         );
         assert!(request.generation.stop_sequences.is_empty());
         assert!(request.generation.stop_sequences_suppressed_by_protocol());
@@ -834,10 +852,32 @@ fn rlm_instructions_are_stable_while_history_and_globals_change() {
         rendered_bound_variables(&mut cache, serde_json::json!({ "scratch_note": "saved" }));
     let projector = projector(1000);
 
-    *projector.bound_variables_prompt.write_recover() = previous_bound;
-    let previous = project_iteration_request(&projector, &previous_events, 0, "test-model");
-    *projector.bound_variables_prompt.write_recover() = next_bound;
-    let next = project_iteration_request(&projector, &next_events, 1, "test-model");
+    let previous_inputs = lash_core::sansio::ProjectorTurnInputs {
+        bound_variables_prompt: Some(previous_bound),
+        ..Default::default()
+    };
+    let previous = project_iteration_request_with_inputs(
+        &projector,
+        &previous_events,
+        0,
+        "test-model",
+        Default::default(),
+        None,
+        &previous_inputs,
+    );
+    let next_inputs = lash_core::sansio::ProjectorTurnInputs {
+        bound_variables_prompt: Some(next_bound),
+        ..Default::default()
+    };
+    let next = project_iteration_request_with_inputs(
+        &projector,
+        &next_events,
+        1,
+        "test-model",
+        Default::default(),
+        None,
+        &next_inputs,
+    );
 
     assert_eq!(previous.instructions, next.instructions);
     assert_eq!(
@@ -877,8 +917,19 @@ fn bound_variables_render_in_the_volatile_tail_in_name_order() {
         }),
     );
     let projector = projector(1000);
-    *projector.bound_variables_prompt.write_recover() = bound_variables;
-    let request = project_iteration_request(&projector, &events, 1, "test-model");
+    let inputs = lash_core::sansio::ProjectorTurnInputs {
+        bound_variables_prompt: Some(bound_variables),
+        ..Default::default()
+    };
+    let request = project_iteration_request_with_inputs(
+        &projector,
+        &events,
+        1,
+        "test-model",
+        Default::default(),
+        None,
+        &inputs,
+    );
     let tail = message_text(request.messages.last().expect("volatile tail"));
 
     assert!(tail.contains("=== BOUND VARIABLES ==="), "{tail}");

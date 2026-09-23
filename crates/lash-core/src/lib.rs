@@ -575,8 +575,8 @@ pub mod sansio {
     pub use lash_sansio::sansio::{
         ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
         ContextProjector, EffectId, ExecutionEnvironmentSync, LlmCallError, PendingToolCall,
-        ProtocolDriverHandle, Response, TurnCause, TurnMachine, WaitingExecState, WaitingLlmState,
-        render_turn_causes_prompt,
+        ProjectorTurnInputs, ProtocolDriverHandle, Response, TurnCause, TurnMachine,
+        WaitingExecState, WaitingLlmState, render_turn_causes_prompt,
     };
 }
 

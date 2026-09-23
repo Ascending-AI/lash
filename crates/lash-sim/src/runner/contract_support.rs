@@ -558,6 +558,7 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         autonomous: false,
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
+        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("standard-max-turn-contract"),
         agent_frame_id: "standard-max-turn-frame".to_string(),
         turn_id: TurnId::from("standard-max-turn"),

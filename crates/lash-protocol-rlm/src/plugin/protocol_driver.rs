@@ -2,16 +2,13 @@ use crate::dialect::TypescriptDialect;
 use std::sync::Arc;
 
 use super::RlmProtocolPluginConfig;
-use crate::driver::{RlmPreambleConfig, SharedUsage, build_rlm_preamble_with_dialect};
-use crate::rlm_support::SharedBoundVariablesPrompt;
+use crate::driver::{RlmPreambleConfig, build_rlm_preamble_with_dialect};
 use lash_core::plugin::ProtocolDriverPlugin;
 use lash_core::{ProtocolBuildInput, TurnDriverPreamble};
 
 pub(super) struct RlmProtocolDriver {
     pub(super) config: RlmProtocolPluginConfig,
     pub(super) dialect: Arc<TypescriptDialect>,
-    pub(super) last_prompt_usage: SharedUsage,
-    pub(super) bound_variables_prompt: SharedBoundVariablesPrompt,
 }
 
 impl ProtocolDriverPlugin for RlmProtocolDriver {
@@ -22,10 +19,8 @@ impl ProtocolDriverPlugin for RlmProtocolDriver {
                 discovery: self.config.discovery.clone(),
                 max_output_chars: self.config.max_output_chars,
                 max_budget_tokens: self.config.continue_as_soft_warn_tokens,
-                last_prompt_usage: Arc::clone(&self.last_prompt_usage),
                 prompt_features: self.config.prompt_features,
             },
-            Arc::clone(&self.bound_variables_prompt),
             Arc::clone(&self.dialect),
         )
     }

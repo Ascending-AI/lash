@@ -34,6 +34,7 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
         autonomous: false,
         tool_specs: Vec::new().into(),
         system_prompt: Arc::from(""),
+        projector_turn_inputs: Default::default(),
         session_id: lash_core::SessionId::from("standard-driver-contract"),
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-driver-turn"),

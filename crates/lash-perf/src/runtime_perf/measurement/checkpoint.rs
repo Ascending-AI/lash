@@ -474,6 +474,7 @@ fn checkpoint_config(
         system_prompt: Arc::from(
             "Synthetic sans-IO checkpoint profiler prompt. Preserve pending effects across checkpoint restore.",
         ),
+        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("runtime-perf-turn-checkpoint"),
         agent_frame_id: "runtime-perf-turn-frame".to_string(),
         turn_id: TurnId::from("runtime-perf-turn"),

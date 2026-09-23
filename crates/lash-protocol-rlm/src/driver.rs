@@ -1,16 +1,14 @@
 use crate::execution_prompt::render_system_prompt;
-use lash_sansio::sync::RwLockExt;
 pub(crate) mod history;
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 #[cfg(any(test, feature = "testing"))]
 use lash_core::llm::types::{LlmContentBlock, LlmMessage};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
 use lash_core::{
-    LlmRequest, ProjectorContext, ProtocolBuildInput, TokenUsage, TurnDriverConfig,
-    TurnDriverPreamble,
+    LlmRequest, ProjectorContext, ProtocolBuildInput, TurnDriverConfig, TurnDriverPreamble,
 };
 use lash_lashlang_runtime::LashlangSurface;
 use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
@@ -18,25 +16,17 @@ use lash_rlm_types::{RlmFinalAnswerFormat, RlmTermination, RlmTurnOptions};
 use crate::dialect::TypescriptDialect;
 #[cfg(test)]
 use crate::projection::rlm_protocol_event;
-use crate::rlm_support::{SharedBoundVariablesPrompt, decode_rlm_options, effective_budget_tokens};
+use crate::rlm_support::{decode_rlm_options, effective_budget_tokens};
 
 #[cfg(any(test, feature = "testing"))]
 use history::render_history_messages;
 use history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
-
-/// Cell shared between the RLM protocol plugin's turn-prepare hook (writer)
-/// and the projector (reader). The plugin's hook captures `prompt_usage`
-/// from `TurnTransformContext` each turn and stores it here so the
-/// projector can render the budget suffix into the volatile turn-tail
-/// message — keeping the cached system prefix byte-stable.
-pub type SharedUsage = Arc<RwLock<Option<TokenUsage>>>;
 
 #[derive(Clone)]
 pub struct RlmProjectorConfig {
     pub discovery: Option<lash_core::ToolDiscovery>,
     pub max_output_chars: usize,
     pub max_budget_tokens: Option<usize>,
-    pub last_prompt_usage: SharedUsage,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub lashlang_surface: LashlangSurface,
 }
@@ -45,7 +35,6 @@ pub(crate) struct RlmPreambleConfig {
     pub(crate) discovery: Option<lash_core::ToolDiscovery>,
     pub(crate) max_output_chars: usize,
     pub(crate) max_budget_tokens: Option<usize>,
-    pub(crate) last_prompt_usage: SharedUsage,
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
 }
 
@@ -55,7 +44,6 @@ impl Default for RlmProjectorConfig {
             discovery: None,
             max_output_chars: 10_000,
             max_budget_tokens: None,
-            last_prompt_usage: Arc::new(RwLock::new(None)),
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
             lashlang_surface: LashlangSurface::default(),
         }
@@ -66,21 +54,6 @@ pub fn build_rlm_preamble(
     input: ProtocolBuildInput,
     config: RlmProjectorConfig,
 ) -> TurnDriverPreamble {
-    let mut cache = crate::rlm_support::BoundVariableRenderCache::default();
-    let bound_variables_prompt = Arc::new(RwLock::new(crate::rlm_support::render_bound_variables(
-        &mut cache,
-        &[],
-        // This preamble path constructs a prompt-only TypeScript dialect below.
-        crate::dialect::DialectPromptVocabulary::default(),
-    )));
-    build_rlm_preamble_with_bound_variables(input, config, bound_variables_prompt)
-}
-
-pub(crate) fn build_rlm_preamble_with_bound_variables(
-    input: ProtocolBuildInput,
-    config: RlmProjectorConfig,
-    bound_variables_prompt: SharedBoundVariablesPrompt,
-) -> TurnDriverPreamble {
     let dialect: Arc<TypescriptDialect> = Arc::new(TypescriptDialect::prompt_only(
         config.lashlang_surface.clone(),
     ));
@@ -90,10 +63,8 @@ pub(crate) fn build_rlm_preamble_with_bound_variables(
             discovery: config.discovery,
             max_output_chars: config.max_output_chars,
             max_budget_tokens: config.max_budget_tokens,
-            last_prompt_usage: config.last_prompt_usage,
             prompt_features: config.prompt_features,
         },
-        bound_variables_prompt,
         dialect,
     )
 }
@@ -105,7 +76,6 @@ pub(crate) fn build_rlm_preamble_with_bound_variables(
 pub(crate) fn build_rlm_preamble_with_dialect(
     input: ProtocolBuildInput,
     config: RlmPreambleConfig,
-    bound_variables_prompt: SharedBoundVariablesPrompt,
     dialect: Arc<TypescriptDialect>,
 ) -> TurnDriverPreamble {
     let tool_catalog = input.tool_catalog.as_ref();
@@ -142,8 +112,6 @@ pub(crate) fn build_rlm_preamble_with_dialect(
                 prompt_features: config.prompt_features,
                 max_output_chars: config.max_output_chars,
                 max_budget_tokens: config.max_budget_tokens,
-                last_prompt_usage: config.last_prompt_usage,
-                bound_variables_prompt,
                 dialect: Arc::clone(&dialect),
             }),
             sync_execution_environment: true,
@@ -286,8 +254,6 @@ struct RlmContextProjector {
     prompt_features: crate::protocol::RlmPromptFeatures,
     max_output_chars: usize,
     max_budget_tokens: Option<usize>,
-    last_prompt_usage: SharedUsage,
-    bound_variables_prompt: SharedBoundVariablesPrompt,
     dialect: Arc<TypescriptDialect>,
 }
 
@@ -306,15 +272,18 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         let required_output = required_output_block(&termination);
         let vocabulary = self.dialect.prompt_vocabulary();
         let final_answer_format = final_answer_format_prompt(&options, vocabulary);
-        let guard = self.last_prompt_usage.read_recover();
         let budget_suffix = crate::rlm_support::format_budget_suffix_with_vocabulary(
             ctx.protocol_iteration + 1,
-            guard.as_ref(),
+            ctx.projector_turn_inputs.prompt_usage.as_ref(),
             effective_budget_tokens(self.max_budget_tokens, ctx.config.max_context_tokens),
             vocabulary,
             self.prompt_features.decomposition,
         );
-        let bound_variables_prompt = self.bound_variables_prompt.read_recover().clone();
+        let bound_variables_prompt = ctx
+            .projector_turn_inputs
+            .bound_variables_prompt
+            .as_deref()
+            .unwrap_or("");
 
         let mut messages = Vec::new();
 
@@ -331,7 +300,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
                 required_output: required_output.as_deref(),
                 final_answer_format: final_answer_format.as_deref(),
                 budget_suffix: budget_suffix.as_deref(),
-                bound_variables: &bound_variables_prompt,
+                bound_variables: bound_variables_prompt,
             },
         ));
 

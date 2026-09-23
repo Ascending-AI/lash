@@ -747,6 +747,7 @@ fn rlm_contract_config_with_turn_options(
         autonomous: false,
         tool_specs: Vec::new().into(),
         system_prompt: std::sync::Arc::from(""),
+        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("rlm-contract"),
         agent_frame_id: "rlm-contract-frame".to_string(),
         turn_id: TurnId::from("rlm-contract-turn"),
@@ -765,6 +766,7 @@ fn drain_rlm_contract_effects(machine: &mut lash_core::TurnMachine) -> Vec<lash_
                 result: Ok(Some(lash_core::sansio::ExecutionEnvironmentSync {
                     system_prompt: std::sync::Arc::from(""),
                     tool_specs: Arc::new(Vec::new()),
+                    projector_turn_inputs: None,
                 })),
             });
             continue;

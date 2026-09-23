@@ -1,7 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use lash_core::{TextProjectionMetadata, TokenUsage};
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
@@ -13,8 +13,6 @@ pub(crate) const PRINT_HISTORY_PROJECTION_CONFIG: BudgetedJsonProjectionConfig =
     BudgetedJsonProjectionConfig::new(50 * 1024, 2_000, 6);
 pub(crate) const BOUND_VARIABLE_PROJECTION_CONFIG: BudgetedJsonProjectionConfig =
     BudgetedJsonProjectionConfig::new(1024, 40, 3);
-
-pub(crate) type SharedBoundVariablesPrompt = Arc<RwLock<Arc<str>>>;
 
 pub(crate) fn print_history_projector() -> BudgetedJsonProjector {
     BudgetedJsonProjector::new(PRINT_HISTORY_PROJECTION_CONFIG)

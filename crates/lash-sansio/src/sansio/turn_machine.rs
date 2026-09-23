@@ -491,6 +491,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 if let Some(update) = update {
                     self.config.system_prompt = update.system_prompt;
                     self.config.tool_specs = update.tool_specs;
+                    if let Some(projector_turn_inputs) = update.projector_turn_inputs {
+                        self.config.projector_turn_inputs = projector_turn_inputs;
+                    }
                 }
                 self.synced_protocol_iteration = Some(self.protocol_iteration);
                 self.state = MachineState::PrepareIteration;

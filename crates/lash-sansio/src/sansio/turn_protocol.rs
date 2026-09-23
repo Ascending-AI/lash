@@ -337,10 +337,37 @@ pub enum Response {
     },
 }
 
+/// The projector inputs that vary across a turn's protocol iterations.
+///
+/// Every value here is derived from recorded turn state — the committed
+/// usage record and the journaled execution-environment sync — never read
+/// live at projection time. The host fills it when the machine is built and
+/// refreshes it through each journaled [`ExecutionEnvironmentSync`], so a
+/// redriven iteration replays the recorded inputs instead of re-deriving
+/// them from plugin cells (FIG-3538).
+#[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
+pub struct ProjectorTurnInputs {
+    /// The turn's recorded prompt-usage figure: the previous turn's committed
+    /// usage, constant across this turn's iterations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_usage: Option<TokenUsage>,
+    /// The protocol-rendered view of execution-bound variables, refreshed at
+    /// each iteration boundary. `None` means the protocol exposes no such
+    /// surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_variables_prompt: Option<Arc<str>>,
+}
+
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct ExecutionEnvironmentSync {
     pub system_prompt: Arc<str>,
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
+    /// The projector's recorded-state inputs for this iteration, journaled
+    /// with the rest of the sync so a redrive replays them verbatim. `None`
+    /// (including records written before this field existed) leaves the
+    /// machine's current inputs in place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projector_turn_inputs: Option<ProjectorTurnInputs>,
 }
 
 pub struct WaitingLlmState<M: TurnProtocol = UnitTurnProtocol> {
@@ -422,6 +449,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
             turn_causes: self.turn_causes,
             protocol_iteration: self.protocol_iteration,
             use_tools,
+            projector_turn_inputs: &self.config.projector_turn_inputs,
         })
     }
 
@@ -483,6 +511,11 @@ pub struct ProjectorContext<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub turn_causes: &'a [TurnCause],
     pub protocol_iteration: usize,
     pub use_tools: bool,
+    /// Recorded-state inputs for this projection. Borrowed from the machine
+    /// config — which the journaled execution-environment sync keeps equal to
+    /// the recorded value — so a redrive projects from the same inputs
+    /// (FIG-3538).
+    pub projector_turn_inputs: &'a ProjectorTurnInputs,
 }
 
 pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
@@ -619,6 +652,10 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub autonomous: bool,
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
     pub system_prompt: Arc<str>,
+    /// The projector's recorded-state inputs for the upcoming iteration.
+    /// Filled by the host from recorded turn state and refreshed by each
+    /// journaled [`ExecutionEnvironmentSync`].
+    pub projector_turn_inputs: ProjectorTurnInputs,
     pub session_id: SessionId,
     /// The committed active frame whose history is being projected.
     pub agent_frame_id: String,

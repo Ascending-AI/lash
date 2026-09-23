@@ -104,6 +104,19 @@ impl RuntimeTurnDriver<'_> {
             self.turn_context.prompt_layer(),
             Some(self.session.prompt_cache()),
         );
+        let projector_turn_inputs = match self.projector_turn_inputs().await {
+            Ok(inputs) => inputs,
+            Err(err) => {
+                emit!(make_error_event(
+                    crate::TurnFailureKind::PluginPrompt,
+                    None,
+                    err.to_string(),
+                    Some(err.to_string()),
+                ));
+                emit!(SessionStreamEvent::Done);
+                return Err((messages, run_offset));
+            }
+        };
         let prepared = crate::build_turn(crate::SansIoTurnInput {
             session_id: self.session_id.clone(),
             agent_frame_id: self
@@ -123,6 +136,7 @@ impl RuntimeTurnDriver<'_> {
             protocol_run_offset: run_offset,
             turn_driver_preamble: execution_environment.turn_driver_preamble,
             prepared_prompt,
+            projector_turn_inputs,
             turn_budget: session_policy.turn_budget,
             no_progress_budget: session_policy.no_progress_budget,
             model_variant: session_policy.model.variant.clone(),
@@ -177,6 +191,7 @@ impl RuntimeTurnDriver<'_> {
             self.turn_context.prompt_layer(),
             Some(self.session.prompt_cache()),
         );
+        let projector_turn_inputs = self.projector_turn_inputs().await?;
 
         Ok(Some(crate::sansio::ExecutionEnvironmentSync {
             system_prompt: prepared_prompt.system_prompt,
@@ -184,7 +199,32 @@ impl RuntimeTurnDriver<'_> {
                 .turn_driver_preamble
                 .tool_specs
                 .clone(),
+            projector_turn_inputs: Some(projector_turn_inputs),
         }))
+    }
+
+    /// The projector inputs derived from recorded turn state.
+    ///
+    /// `prompt_usage` is the previous turn's committed usage, held on the
+    /// recorded session state; the bound-variables view is rendered by the
+    /// protocol's session plugin. The results are installed into the machine
+    /// config and journaled with each execution-environment sync, so a
+    /// redriven iteration replays them rather than re-deriving them from live
+    /// plugin cells (FIG-3538).
+    async fn projector_turn_inputs(
+        &mut self,
+    ) -> Result<crate::sansio::ProjectorTurnInputs, crate::SessionError> {
+        let protocol_session = std::sync::Arc::clone(self.session.plugins().protocol_session());
+        let bound_variables_prompt = protocol_session
+            .bound_variables_prompt(crate::plugin::ProtocolSessionContext::new(
+                &mut self.session,
+                &self.session_id,
+            ))
+            .await?;
+        Ok(crate::sansio::ProjectorTurnInputs {
+            prompt_usage: self.turn_pipeline.state().last_prompt_usage.clone(),
+            bound_variables_prompt,
+        })
     }
 
     async fn prepare_execution_environment(

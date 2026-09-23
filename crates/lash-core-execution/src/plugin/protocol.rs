@@ -88,6 +88,21 @@ pub trait ProtocolSessionPlugin: Send + Sync {
     ) -> Result<Option<ProtocolLlmCallAction>, crate::PluginError> {
         Ok(None)
     }
+
+    /// Render the protocol's bound-variables view for the context projector,
+    /// if the protocol exposes one.
+    ///
+    /// The runtime calls this only where the result becomes a recorded
+    /// projector input — the turn-machine build and each journaled
+    /// execution-environment sync — so a redriven iteration replays the
+    /// recorded render instead of re-reading live plugin state (FIG-3538).
+    /// `None` (the default) means the protocol has no bound-variables surface.
+    async fn bound_variables_prompt(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+    ) -> Result<Option<Arc<str>>, crate::SessionError> {
+        Ok(None)
+    }
 }
 
 /// The protocol-owned inputs needed to restore a session.

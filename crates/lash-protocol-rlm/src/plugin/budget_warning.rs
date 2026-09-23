@@ -1,30 +1,4 @@
-use lash_core::facade_support::PreparedContext;
-use lash_core::plugin::{ContextError, TurnContextTransform, TurnTransformContext};
-use lash_sansio::sync::RwLockExt;
-
-use crate::driver::SharedUsage;
-
 pub(crate) const BUDGET_WARNING_STATUS: &str = "rlm_context_budget_warning";
-
-pub(crate) struct BudgetUsageObserver {
-    pub(crate) cell: SharedUsage,
-}
-
-#[async_trait::async_trait]
-impl TurnContextTransform for BudgetUsageObserver {
-    fn id(&self) -> &'static str {
-        "rlm.budget_usage_observer"
-    }
-
-    async fn transform(
-        &self,
-        ctx: &TurnTransformContext<'_>,
-        input: PreparedContext,
-    ) -> Result<PreparedContext, ContextError> {
-        *self.cell.write_recover() = ctx.prompt_usage.clone();
-        Ok(input)
-    }
-}
 
 #[cfg(test)]
 mod tests {

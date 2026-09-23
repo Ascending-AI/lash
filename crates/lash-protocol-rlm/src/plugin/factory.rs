@@ -1,5 +1,5 @@
 use lash_sansio::SessionId;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
 
 use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
@@ -14,7 +14,6 @@ use lash_lashlang_runtime::{
 use super::registration::register_rlm_protocol_plugin;
 use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
 use crate::dialect::{RlmDialectServices, TypescriptDialect};
-use crate::driver::SharedUsage;
 use crate::executor::RlmLashlangExecutionTraceConfig;
 use crate::projection::{ProjectionRegistry, ProjectionResolver};
 
@@ -374,14 +373,9 @@ impl PluginFactory for RlmProtocolPluginFactory {
             return Ok(Arc::new(crate::native::RlmNativeToolPlugin {
                 config,
                 dialect,
-                last_prompt_usage: Arc::new(RwLock::new(None)),
             }));
         }
-        Ok(Arc::new(RlmProtocolPlugin {
-            config,
-            dialect,
-            last_prompt_usage: Arc::new(RwLock::new(None)),
-        }))
+        Ok(Arc::new(RlmProtocolPlugin { config, dialect }))
     }
 }
 
@@ -436,7 +430,6 @@ pub type ModuleCompileOutput = lashlang::ModuleCompileOutput;
 struct RlmProtocolPlugin {
     config: RlmProtocolPluginConfig,
     dialect: Arc<TypescriptDialect>,
-    last_prompt_usage: SharedUsage,
 }
 
 impl SessionPlugin for RlmProtocolPlugin {
@@ -445,12 +438,7 @@ impl SessionPlugin for RlmProtocolPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        register_rlm_protocol_plugin(
-            reg,
-            self.config.clone(),
-            Arc::clone(&self.dialect),
-            Arc::clone(&self.last_prompt_usage),
-        )
+        register_rlm_protocol_plugin(reg, self.config.clone(), Arc::clone(&self.dialect))
     }
 }
 

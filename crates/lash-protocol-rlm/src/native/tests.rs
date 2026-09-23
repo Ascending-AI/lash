@@ -47,6 +47,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         autonomous: false,
         tool_specs: Arc::new(Vec::new()),
         system_prompt: Arc::from(""),
+        projector_turn_inputs: Default::default(),
         session_id: SessionId::from("parity"),
         agent_frame_id: "parity-frame".to_string(),
         turn_id: TurnId::from("parity-turn"),
