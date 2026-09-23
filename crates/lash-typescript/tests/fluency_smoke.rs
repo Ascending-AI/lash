@@ -311,7 +311,7 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
             }
         };
         let outcome = futures::executor::block_on(lashlang::execute(
-            &lash_typescript::compile_linked(&linked),
+            &lashlang::testing::harness::compile_linked_main(&linked),
             &mut State::new(),
             &FluencyHost,
         ));
@@ -330,7 +330,7 @@ fn first_shot_agent_programs_execute_without_missing_methods_or_rejections() {
     match lash_typescript::link(rejected_control, &environment) {
         Ok(linked) => {
             match futures::executor::block_on(lashlang::execute(
-                &lash_typescript::compile_linked(&linked),
+                &lashlang::testing::harness::compile_linked_main(&linked),
                 &mut State::new(),
                 &FluencyHost,
             )) {

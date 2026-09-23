@@ -25,7 +25,7 @@ pub use artifact::{
     ArtifactPublicationPause, ArtifactStoreError, ContentHash, DurabilityTier, HostRequirements,
     HostRequirementsRef, InMemoryLashlangArtifactStore, LASHLANG_COMPILER_VERSION,
     LASHLANG_SEMANTIC_HASH_VERSION, LASHLANG_VM_ABI_VERSION, LashlangArtifactStore, ModuleArtifact,
-    ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef, canonical_program_ir,
+    ModuleArtifactError, ModuleExports, ModuleRef, ProcessRef,
     global_in_memory_lashlang_artifact_store, host_requirements_for_program,
 };
 pub use ast::{
@@ -34,8 +34,8 @@ pub use ast::{
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LIFTED_PROCESS_NAME_PREFIX,
     LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH, NestingTooDeep, ProcessDecl,
     ProcessLiteralExpr, ProcessOrigin, ProcessParam, ProcessSignalDecl, ProcessSignature,
-    ProcessSignatureError, ProcessType, Program, ResourceRefExpr, StructuralRole, TryExpr,
-    TypeDecl, TypeExpr, TypeField, UnaryOp, UnionMembers, check_ast_nesting_depth,
+    ProcessSignatureError, ProcessType, Program, ResourceRefExpr, SourceLanguage, StructuralRole,
+    TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp, UnionMembers, check_ast_nesting_depth,
     fold_expr_children, format_type_expr, lifted_process_identity, process_wrapper_run_path,
     validate_ast, walk_expr,
 };
@@ -71,27 +71,28 @@ pub use linker::{
     OperationContract, OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding,
     ResourceTypeCatalog, TriggerSourceBinding, ValueConstructorBinding,
 };
+#[cfg(test)]
+pub(crate) use runtime::compile_ast;
 pub use runtime::{
     AbilityOp, AbilityResult, AggregateConsumer, BudgetedJsonProjectionConfig,
     BudgetedJsonProjector, CompileStats, CompiledLinkedProgram, CompiledProcessCache,
-    CompiledProcessCacheKey, CompiledProgram, CompiledProgramCache, CompiledProgramCacheStats,
-    ContinuationError, ErrorTaxonomy, ExecutableProgram, ExecutionBound, ExecutionBounds,
-    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
-    ExecutionScratch, FormatError, GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue,
-    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
-    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
-    LASH_TYPE_KEY, LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError,
-    ListValue, ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport,
-    ProfileStat, ProjectedBindingError, ProjectedBindings, ProjectedFuture,
-    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
-    ResourceHandle, ResourceOperation, ResourceOperationBatch, ResourceOperationBatchLeaf,
+    CompiledProcessCacheKey, CompiledProgram, CompiledProgramCacheStats, ContinuationError, Entry,
+    ErrorTaxonomy, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
+    ExecutionHostError, ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError,
+    GlobalPatch, GlobalPatchOutcome, HeapId, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
+    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
+    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
+    LASHLANG_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError, ListValue,
+    ProcessEvent, ProcessEventKind, ProcessSignal, ProcessStart, ProfileReport, ProfileStat,
+    ProjectedBindingError, ProjectedBindings, ProjectedFuture, ProjectedHostDescriptor,
+    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record, ResourceHandle,
+    ResourceOperation, ResourceOperationBatch, ResourceOperationBatchLeaf,
     ResourceOperationBatchResult, ResourceOperationResult, RuntimeError, RuntimeFailure, Sleep,
     SleepKind, Snapshot, SnapshotDecodeError, State, VM_CONTINUATION_FORMAT_VERSION, Value,
     ValueProjectionContext, ValueProjector, Vm, VmContinuation, VmFinallyCompletionContinuation,
     VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
     VmIteratorCursor, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
-    compile_ast, compile_linked, compile_linked_process, compile_module_artifact_process,
-    compile_process, execute, from_json, is_process_handle, prewarm, unwrap_type_value,
+    compile, execute, from_json, is_process_handle, prewarm, unwrap_type_value,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -312,10 +313,6 @@ mod tests {
     use crate::testing::ast_builders as b;
 
     /// `finish <value>`
-    fn finish_number(value: f64) -> Program {
-        b::program(vec![b::finish(b::num(value))])
-    }
-
     /// `finish (await tools.read_file({ path: "." }))?`
     fn read_file_program() -> Program {
         b::program(vec![b::finish(b::module_call(
@@ -489,28 +486,6 @@ mod tests {
     }
 
     #[test]
-    fn compiled_program_cache_reuses_source_and_tracks_lru_stats() {
-        let mut cache = CompiledProgramCache::with_capacity(2);
-        let first = cache.get_or_compile_ast("finish 1", finish_number(1.0));
-        let second = cache.get_or_compile_ast("finish 1", finish_number(1.0));
-        let same_ast = cache.get_or_compile_ast("finish 1\n", finish_number(1.0));
-        let other = cache.get_or_compile_ast("finish 2", finish_number(2.0));
-        let third = cache.get_or_compile_ast("finish 3", finish_number(3.0));
-
-        assert!(std::sync::Arc::ptr_eq(&first, &second));
-        assert!(!std::sync::Arc::ptr_eq(&first, &same_ast));
-        assert!(!std::sync::Arc::ptr_eq(&first, &other));
-        assert!(!std::sync::Arc::ptr_eq(&other, &third));
-
-        let stats = cache.stats();
-        assert_eq!(stats.hits, 1);
-        assert_eq!(stats.misses, 4);
-        assert_eq!(stats.evictions, 2);
-        assert_eq!(stats.entries, 2);
-        assert_eq!(stats.capacity, 2);
-    }
-
-    #[test]
     fn linked_program_cache_reuses_source_when_host_environment_satisfies_requirements() {
         let source = r#"finish (await tools.read_file({ path: "." }))?"#;
         let base_environment = LashlangHostEnvironment::new(
@@ -536,8 +511,8 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&first, &second));
         assert!(std::sync::Arc::ptr_eq(&first, &extra));
         assert_eq!(
-            first.linked_module().host_requirements_ref,
-            extra.linked_module().host_requirements_ref
+            first.linked_module().artifact.host_requirements_ref,
+            extra.linked_module().artifact.host_requirements_ref
         );
 
         let stats = cache.stats();
@@ -645,8 +620,8 @@ mod tests {
         assert!(!std::sync::Arc::ptr_eq(&first, &newline));
         assert!(!std::sync::Arc::ptr_eq(&first, &changed));
         assert_ne!(
-            first.linked_module().host_requirements_ref,
-            changed.linked_module().host_requirements_ref
+            first.linked_module().artifact.host_requirements_ref,
+            changed.linked_module().artifact.host_requirements_ref
         );
         assert!(matches!(
             missing,
@@ -757,7 +732,7 @@ mod tests {
             ),
         )
         .expect("source should link");
-        let compiled = compile_linked(&linked);
+        let compiled = crate::testing::harness::compile_linked_main(&linked);
         let mut state = State::new();
         let outcome = execute(&compiled, &mut state, &Host)
             .await

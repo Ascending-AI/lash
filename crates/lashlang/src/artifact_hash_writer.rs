@@ -56,17 +56,6 @@ impl HashWriter {
         self.hasher.update(b";");
     }
 
-    /// One atom whose content is `prefix` followed by `value` in decimal.
-    pub(super) fn numbered_atom(&mut self, prefix: &str, value: u64) {
-        let mut buffer = [0u8; DECIMAL_CAPACITY];
-        let digits = decimal(value, &mut buffer);
-        self.integer((prefix.len() + digits.len()) as u64);
-        self.hasher.update(b":");
-        self.hasher.update(prefix.as_bytes());
-        self.hasher.update(digits);
-        self.hasher.update(b";");
-    }
-
     pub(super) fn bool(&mut self, value: bool) {
         self.atom(if value { "true" } else { "false" });
     }

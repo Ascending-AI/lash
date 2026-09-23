@@ -10,11 +10,15 @@ use crate::span::Span;
 mod roles;
 use roles::check_program_roles;
 pub use roles::{
-    AttributeAssignParts, AttributeStep, ProcessOrigin, StructuralRole, process_wrapper_run_path,
+    AttributeAssignParts, AttributeStep, ProcessOrigin, SourceLanguage, StructuralRole,
+    process_wrapper_run_path,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Program {
+    /// The front end the program was lowered from. It is part of a module's
+    /// identity: two front ends never share a module ref.
+    pub language: SourceLanguage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declarations: Vec<Declaration>,
     pub main: Expr,
@@ -357,8 +361,10 @@ pub fn check_ast_nesting_depth(program: &Program) -> Result<(), NestingTooDeep> 
 }
 
 impl Program {
+    /// A program authored directly as IR.
     pub fn block(expressions: Vec<Expr>) -> Self {
         Self {
+            language: SourceLanguage::ir(),
             declarations: Vec::new(),
             main: Expr::Block(expressions),
             spans: BTreeMap::new(),
@@ -377,7 +383,9 @@ impl Program {
 
 impl PartialEq for Program {
     fn eq(&self, other: &Self) -> bool {
-        self.declarations == other.declarations && self.main == other.main
+        self.language == other.language
+            && self.declarations == other.declarations
+            && self.main == other.main
     }
 }
 

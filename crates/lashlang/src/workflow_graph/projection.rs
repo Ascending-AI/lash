@@ -58,7 +58,7 @@ pub fn workflow_graph_from_artifact(
     artifact: &crate::ModuleArtifact,
     text: &dyn WorkflowStatementText,
 ) -> WorkflowGraph {
-    WorkflowGraphProjector::new(&artifact.canonical_ir)
+    WorkflowGraphProjector::new(&artifact.ir)
         .with_source_identity(artifact.source_identity())
         .project(text)
 }

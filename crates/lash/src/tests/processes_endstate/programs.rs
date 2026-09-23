@@ -36,13 +36,13 @@ impl LinkedTestProcess {
             .clone();
         let signal_event_types = linked
             .artifact
-            .canonical_ir
+            .ir
             .process(process_name)
             .map(lash_lashlang_runtime::lashlang_process_signal_event_types)
             .unwrap_or_default();
         Self {
-            module_ref: linked.module_ref,
-            host_requirements_ref: linked.host_requirements_ref,
+            module_ref: linked.artifact.module_ref.clone(),
+            host_requirements_ref: linked.artifact.host_requirements_ref.clone(),
             process_ref,
             process_name: process_name.to_string(),
             signal_event_types,

@@ -47,7 +47,7 @@ fn lift_processes_a_literal_in_a_process_typed_slot() {
 
     let linked = LinkedModule::link(program, full_host_environment())
         .expect("a literal lifts where the slot expects a process");
-    let names = process_names(linked.program());
+    let names = process_names(&linked.artifact.ir);
     assert_eq!(names.len(), 1, "{names:?}");
     assert!(
         names[0].starts_with(crate::LIFTED_PROCESS_NAME_PREFIX),
@@ -91,7 +91,8 @@ fn lifted_literals_do_not_lower_process_parameters_to_any() {
 
 fn process_names_first(linked: &LinkedModule) -> Option<&Declaration> {
     linked
-        .program()
+        .artifact
+        .ir
         .declarations
         .iter()
         .find(|declaration| matches!(declaration, Declaration::Process(_)))
@@ -127,7 +128,7 @@ fn relinking_the_same_lift_lifts_the_same_process_ref() {
             }
         }
         let mut refs = Ref(BTreeSet::new());
-        crate::walk_expr(&mut refs, &linked.program().main);
+        crate::walk_expr(&mut refs, &linked.artifact.ir.main);
         refs.0.into_iter().next().expect("one lifted ref")
     }
 
@@ -202,7 +203,7 @@ fn a_const_bound_literal_lifts_the_same_way() {
 
     let linked = LinkedModule::link(program, full_host_environment())
         .expect("a const-bound literal lifts at the binding");
-    let names = process_names(linked.program());
+    let names = process_names(&linked.artifact.ir);
     assert_eq!(names.len(), 1, "{names:?}");
 }
 
@@ -231,7 +232,7 @@ fn a_const_bound_literal_lifts_when_the_session_already_carries_the_name() {
     let carried = full_host_environment().with_globals(["handler"]);
     let linked = LinkedModule::link(program, carried)
         .expect("a re-bound session global is still the process slot");
-    let names = process_names(linked.program());
+    let names = process_names(&linked.artifact.ir);
     assert_eq!(names.len(), 1, "{names:?}");
 }
 

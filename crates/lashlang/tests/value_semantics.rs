@@ -12,7 +12,7 @@
 
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Expr, Program,
-    Snapshot, State, Value, compile_ast, execute,
+    Snapshot, State, Value, execute,
 };
 
 // `a::list`/`a::number` build IR nodes; the bare `list`/`number` below build
@@ -54,7 +54,7 @@ fn finished(outcome: ExecutionOutcome) -> Value {
     reason = "the probe cell compiles and executes against the probe host, per each message"
 )]
 async fn run(state: &mut State, cell: Program) -> Value {
-    let compiled = compile_ast(&cell).expect("probe cell should compile");
+    let compiled = lashlang_compile_program(&cell).expect("probe cell should compile");
     finished(
         execute(&compiled, state, &ProbeHost)
             .await
@@ -271,7 +271,7 @@ async fn self_insertion_builds_a_cycle_the_host_boundary_refuses() {
     // a = []
     // a = push(a, a)
     // finish a
-    let compiled = compile_ast(&a::program(vec![
+    let compiled = lashlang_compile_program(&a::program(vec![
         a::assign("a", a::list(Vec::new())),
         a::assign("a", push(a::var("a"), a::var("a"))),
         a::finish(a::var("a")),
@@ -662,7 +662,7 @@ async fn arithmetic_on_a_container_binding_names_the_container_type() {
     let mut state = State::new();
     // xs = [1, 2]
     // finish format("{0}", xs + 1)
-    let compiled = compile_ast(&a::program(vec![
+    let compiled = lashlang_compile_program(&a::program(vec![
         a::assign("xs", a::list(vec![a::number(1.0), a::number(2.0)])),
         a::finish(a::call(
             "format",
@@ -683,4 +683,17 @@ async fn arithmetic_on_a_container_binding_names_the_container_type() {
         !message.contains("heap_ref"),
         "error must not leak the heap representation: {message}"
     );
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

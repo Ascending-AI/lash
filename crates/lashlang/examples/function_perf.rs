@@ -9,7 +9,7 @@ mod bench_support;
 use bench_support::{BenchHost, FunctionScenario, function_benchmark_program};
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
-    State, Value, Vm, VmRunOutcome, compile_ast, execute,
+    State, Value, Vm, VmRunOutcome, execute,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;
@@ -97,7 +97,8 @@ fn main() {
         .build()
         .expect("tokio runtime");
     let program = function_benchmark_program(scenario);
-    let compiled = compile_ast(&program).expect("benchmark program nesting is within the cap");
+    let compiled =
+        lashlang_compile_program(&program).expect("benchmark program nesting is within the cap");
     ALLOCATIONS.store(0, Ordering::Relaxed);
     ALLOCATED_BYTES.store(0, Ordering::Relaxed);
     let started = Instant::now();
@@ -157,4 +158,17 @@ fn main() {
     println!("heap_allocations: {maximum_heap_allocations}");
     println!("live_logical_bytes: {maximum_live_logical_bytes}");
     std::hint::black_box(Value::Null);
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

@@ -81,6 +81,7 @@ pub(super) fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<Intrinsic
 /// `program.spans` keyed the way the compiler looks them up. Declaration
 /// bodies are included, so a deferred function body's nodes resolve their own
 /// spans without a copy step.
+#[cfg(test)]
 pub(crate) fn expression_source_spans(program: &Program) -> FxHashMap<AstPath, Span> {
     program
         .spans

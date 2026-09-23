@@ -10,9 +10,9 @@ use bench_support::{
     linked_benchmark_program, projected_bindings, seeded_state_for,
 };
 use lashlang::{
-    CompiledProcessCache, CompiledProgramCache, ExecutionEnvironment, ExecutionOutcome,
-    ExecutionScratch, InMemoryLashlangArtifactStore, LashlangArtifactStore, LinkedModule,
-    LinkedProgramCache, ProjectedBindings, Snapshot, State, compile_linked, execute, prewarm,
+    CompiledProcessCache, ExecutionEnvironment, ExecutionOutcome, ExecutionScratch,
+    InMemoryLashlangArtifactStore, LashlangArtifactStore, LinkedModule, LinkedProgramCache,
+    ProjectedBindings, Snapshot, State, execute, prewarm,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;
@@ -98,7 +98,6 @@ enum Mode {
     Snapshot,
     ArtifactRoundtrip,
     CompiledProcessCache,
-    CompiledProgramCache,
     LinkedProgramCache,
     PhaseBreakdown,
 }
@@ -130,7 +129,7 @@ fn main() {
             Mode::CompiledExecute | Mode::Snapshot | Mode::CompiledProcessCache => 100_000,
             Mode::LinkArtifact => 25_000,
             Mode::ArtifactRoundtrip => 10_000,
-            Mode::CompiledProgramCache | Mode::LinkedProgramCache => 25_000,
+            Mode::LinkedProgramCache => 25_000,
             Mode::PhaseBreakdown => 10_000,
         });
 
@@ -157,7 +156,6 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
     let host = BenchHost;
     let mut scratch = ExecutionScratch::new();
     let mut process_cache_stats = None;
-    let mut program_cache_stats = None;
     let mut linked_cache_stats = None;
     let mut artifact_bytes = None;
     let mut phase_breakdown = None;
@@ -170,7 +168,12 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                 let mut state = seeded_state_for(scenario);
                 let mut scratch = ExecutionScratch::new();
                 let linked = linked_benchmark_program(std::hint::black_box(scenario));
-                let compiled = compile_linked(&linked);
+                let compiled = lashlang::compile(
+                    &linked.artifact,
+                    lashlang::Entry::Main,
+                    Some(linked.spans()),
+                )
+                .expect("a module main entry compiles");
                 let outcome =
                     execute_benchmark(rt, &compiled, &mut state, &host, &mut scratch, &projected);
                 expect_finished(outcome);
@@ -184,7 +187,12 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                 let mut state = seeded_state_for(scenario);
                 let mut scratch = ExecutionScratch::new();
                 let linked = linked_benchmark_program(std::hint::black_box(scenario));
-                let compiled = compile_linked(&linked);
+                let compiled = lashlang::compile(
+                    &linked.artifact,
+                    lashlang::Entry::Main,
+                    Some(linked.spans()),
+                )
+                .expect("a module main entry compiles");
                 let outcome =
                     execute_benchmark(rt, &compiled, &mut state, &host, &mut scratch, &projected);
                 expect_finished(outcome);
@@ -193,12 +201,20 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
         Mode::LinkArtifact => {
             for _ in 0..iterations {
                 let linked = linked_benchmark_program(std::hint::black_box(scenario));
-                std::hint::black_box((&linked.module_ref, &linked.host_requirements_ref));
+                std::hint::black_box((
+                    &linked.artifact.module_ref,
+                    &linked.artifact.host_requirements_ref,
+                ));
             }
         }
         Mode::CompiledExecute => {
             let linked = linked_benchmark_program(scenario);
-            let compiled = compile_linked(&linked);
+            let compiled = lashlang::compile(
+                &linked.artifact,
+                lashlang::Entry::Main,
+                Some(linked.spans()),
+            )
+            .expect("a module main entry compiles");
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
                 let outcome =
@@ -208,7 +224,12 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
         }
         Mode::Snapshot => {
             let linked = linked_benchmark_program(scenario);
-            let compiled = compile_linked(&linked);
+            let compiled = lashlang::compile(
+                &linked.artifact,
+                lashlang::Entry::Main,
+                Some(linked.spans()),
+            )
+            .expect("a module main entry compiles");
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
                 let snapshot = state.snapshot();
@@ -235,7 +256,7 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                 rt.block_on(store.publish_module_artifact(&owner, &linked.artifact))
                     .expect("artifact store put should succeed");
                 let artifact = rt
-                    .block_on(store.get_module_artifact(&linked.module_ref))
+                    .block_on(store.get_module_artifact(&linked.artifact.module_ref))
                     .expect("artifact store get should succeed")
                     .expect("artifact should exist");
                 std::hint::black_box(artifact);
@@ -254,28 +275,12 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                     .get_or_compile(
                         &linked.artifact,
                         &process_ref,
-                        &linked.host_requirements_ref,
+                        &linked.artifact.host_requirements_ref,
                     )
                     .expect("process cache compile should succeed");
                 std::hint::black_box(compiled.compile_stats());
             }
             process_cache_stats = Some(cache.stats());
-        }
-        Mode::CompiledProgramCache => {
-            // The dialect front-end lives above this crate (ADR 0096), so the
-            // benchmark parses the way a host does and hands the cache the AST.
-            // A hit must still cost only the keyed lookup, which is what the
-            // `cached_compiled_program` probe measures.
-            let mut cache = CompiledProgramCache::new();
-            for _ in 0..iterations {
-                let key = std::hint::black_box(cache_key.as_str());
-                let compiled = match cache.cached_compiled_program(key) {
-                    Some(compiled) => compiled,
-                    None => cache.get_or_compile_ast(key, benchmark_program(scenario)),
-                };
-                std::hint::black_box(compiled.compile_stats());
-            }
-            program_cache_stats = Some(cache.stats());
         }
         Mode::LinkedProgramCache => {
             let mut cache = LinkedProgramCache::new();
@@ -345,12 +350,6 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
         println!("process_cache_evictions: {}", stats.evictions);
         println!("process_cache_entries: {}", stats.entries);
     }
-    if let Some(stats) = program_cache_stats {
-        println!("program_cache_hits: {}", stats.hits);
-        println!("program_cache_misses: {}", stats.misses);
-        println!("program_cache_evictions: {}", stats.evictions);
-        println!("program_cache_entries: {}", stats.entries);
-    }
     if let Some(stats) = linked_cache_stats {
         println!("linked_cache_hits: {}", stats.hits);
         println!("linked_cache_misses: {}", stats.misses);
@@ -413,7 +412,12 @@ fn run_phase_breakdown(
     let parsed = benchmark_program(scenario);
     let linked = LinkedModule::link(parsed.clone(), benchmark_host_environment())
         .expect("benchmark program should link");
-    let compiled = compile_linked(&linked);
+    let compiled = lashlang::compile(
+        &linked.artifact,
+        lashlang::Entry::Main,
+        Some(linked.spans()),
+    )
+    .expect("a module main entry compiles");
     let projected = projected_bindings(scenario);
     let host = BenchHost;
     let mut scratch = ExecutionScratch::new();
@@ -428,10 +432,15 @@ fn run_phase_breakdown(
             benchmark_host_environment(),
         )
         .expect("benchmark program should link");
-        std::hint::black_box(linked.module_ref);
+        std::hint::black_box(linked.artifact.module_ref);
     });
     let compile = measure_phase("compile", iterations, || {
-        let compiled = compile_linked(std::hint::black_box(&linked));
+        let compiled = lashlang::compile(
+            &linked.artifact,
+            lashlang::Entry::Main,
+            Some(linked.spans()),
+        )
+        .expect("a module main entry compiles");
         std::hint::black_box(compiled.compile_stats());
     });
     let execute = measure_phase("execute", iterations, || {
@@ -507,11 +516,10 @@ fn parse_mode(value: &str) -> Mode {
         "snapshot" => Mode::Snapshot,
         "artifact_roundtrip" => Mode::ArtifactRoundtrip,
         "compiled_process_cache" => Mode::CompiledProcessCache,
-        "compiled_program_cache" => Mode::CompiledProgramCache,
         "linked_program_cache" => Mode::LinkedProgramCache,
         "phase_breakdown" => Mode::PhaseBreakdown,
         other => panic!(
-            "unknown mode `{other}`; expected one_shot, prewarmed_one_shot, link_artifact, compiled_execute, snapshot, artifact_roundtrip, compiled_process_cache, compiled_program_cache, linked_program_cache, or phase_breakdown"
+            "unknown mode `{other}`; expected one_shot, prewarmed_one_shot, link_artifact, compiled_execute, snapshot, artifact_roundtrip, compiled_process_cache, linked_program_cache, or phase_breakdown"
         ),
     }
 }

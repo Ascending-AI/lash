@@ -884,13 +884,12 @@ fn validate_trigger_compatibility_target(
             process_ref: format!("{:?}", target.process_ref),
         });
     }
-    let process = artifact
-        .canonical_ir
-        .process(exported_process_name)
-        .ok_or_else(|| TriggerCompatibilityError::MissingProcess {
+    let process = artifact.ir.process(exported_process_name).ok_or_else(|| {
+        TriggerCompatibilityError::MissingProcess {
             module_ref: target.module_ref.to_string(),
             process_name: target.process_name.clone(),
-        })?;
+        }
+    })?;
     for (input_name, _) in inputs.entries() {
         if !process
             .params

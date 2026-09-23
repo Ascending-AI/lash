@@ -92,7 +92,7 @@ fn label_on_await_assignment_attaches_to_await_instruction() {
         .with_language_features(crate::LashlangLanguageFeatures::default().with_label_annotations())
         .with_globals(["handle"]);
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    let compiled = crate::compile_linked(&linked);
+    let compiled = crate::testing::harness::compile_linked_main(&linked);
     let await_instruction = compiled
         .chunk
         .code
@@ -1579,11 +1579,12 @@ fn compile_labeled_program_with_historical_context(
         crate::LashlangLanguageFeatures::default().with_label_annotations(),
     );
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    let current = crate::compile_linked(&linked);
+    let current = crate::testing::harness::compile_linked_main(&linked);
     let mut historical_artifact = linked.artifact.clone();
     historical_artifact.module_ref = historical_module_ref(historical_module_hash);
     let (chunk, compile_stats) = Compiler::compile_linked_program(
-        linked.program(),
+        &linked.artifact.ir,
+        Default::default(),
         (&historical_artifact).into(),
         crate::tracking::LashlangExecutionContext::main(),
     );
@@ -1605,14 +1606,16 @@ fn compile_labeled_process_with_historical_context(
         crate::LashlangLanguageFeatures::default().with_label_annotations(),
     );
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    let current = crate::compile_linked_process(&linked, process_name)
+    let current = crate::testing::harness::compile_linked_process_named(&linked, process_name)
         .expect("current process should compile");
     let process = linked
-        .program()
+        .artifact
+        .ir
         .process(process_name)
         .expect("historical process should exist");
     let process_program = Program {
-        declarations: linked.program().declarations.clone(),
+        language: linked.artifact.ir.language.clone(),
+        declarations: linked.artifact.ir.declarations.clone(),
         main: process.body.clone(),
         spans: Default::default(),
     };
@@ -1627,6 +1630,7 @@ fn compile_labeled_process_with_historical_context(
     );
     let (chunk, compile_stats) = Compiler::compile_linked_process_program(
         &process_program,
+        Default::default(),
         (&historical_artifact).into(),
         crate::tracking::LashlangExecutionContext::process(process_name),
     );

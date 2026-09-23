@@ -34,9 +34,7 @@ mod bench_support;
 use bench_support::{
     BenchHost, Scenario, linked_benchmark_program, projected_bindings, seeded_state_for,
 };
-use lashlang::{
-    CompiledProgram, ExecutionEnvironment, ExecutionOutcome, State, compile_linked, execute,
-};
+use lashlang::{CompiledProgram, ExecutionEnvironment, ExecutionOutcome, State, execute};
 
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
@@ -203,8 +201,18 @@ async fn bytes_per_iteration(
 }
 
 /// The corpus scenario, built from the AST exactly as the benchmark builds it.
+#[expect(
+    clippy::expect_used,
+    reason = "a linked module's main entry always compiles; the Result is the one compile entry's shape"
+)]
 fn ast_heap_list_iteration() -> CompiledProgram {
-    compile_linked(&linked_benchmark_program(Scenario::HeapListIteration))
+    let linked = linked_benchmark_program(Scenario::HeapListIteration);
+    lashlang::compile(
+        &linked.artifact,
+        lashlang::Entry::Main,
+        Some(linked.spans()),
+    )
+    .expect("a module main entry compiles")
 }
 
 /// The same scenario authored in TypeScript: append 2,000 rows, then walk them.
@@ -264,7 +272,7 @@ finish(rows.length);
     reason = "the dialect cost probe's source compiles, per the message"
 )]
 fn typescript(source: &str) -> CompiledProgram {
-    lash_typescript::compile(source).expect("dialect program should compile")
+    lash_typescript::testing::compile(source).expect("dialect program should compile")
 }
 
 async fn typescript_bytes_per_iteration(source: &str, iterations: usize) -> f64 {

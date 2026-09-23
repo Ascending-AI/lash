@@ -42,9 +42,13 @@ async fn public_ast_constructs_and_calls_a_capturing_function() {
     ]);
 
     assert_eq!(
-        execute(&program, &mut State::new(), &Host)
-            .await
-            .expect("public AST function executes"),
+        execute(
+            &lashlang_compile_program(&program).expect("the program compiles"),
+            &mut State::new(),
+            &Host
+        )
+        .await
+        .expect("public AST function executes"),
         ExecutionOutcome::Finished(Value::Number(17.0))
     );
 }
@@ -77,13 +81,21 @@ async fn a_closure_from_an_earlier_program_does_not_fail_the_next_one() {
     let second = Program::block(vec![Expr::Finish(Box::new(Expr::Number(42.0)))]);
 
     let mut state = State::new();
-    execute(&first, &mut state, &Host)
-        .await
-        .expect("the first program executes");
+    execute(
+        &lashlang_compile_program(&first).expect("the program compiles"),
+        &mut state,
+        &Host,
+    )
+    .await
+    .expect("the first program executes");
     assert_eq!(
-        execute(&second, &mut state, &Host)
-            .await
-            .expect("a later program must not inherit the earlier program's closures"),
+        execute(
+            &lashlang_compile_program(&second).expect("the program compiles"),
+            &mut state,
+            &Host
+        )
+        .await
+        .expect("a later program must not inherit the earlier program's closures"),
         ExecutionOutcome::Finished(Value::Number(42.0))
     );
     assert_eq!(state.globals().get("kept"), Some(&Value::Number(7.0)));
@@ -109,11 +121,12 @@ async fn a_closure_from_an_earlier_program_does_not_fail_the_next_one() {
 /// for a stale index to land on and the law is asserted rather than sampled.
 #[tokio::test(flavor = "current_thread")]
 async fn a_declared_function_from_an_earlier_program_does_not_fail_the_next_one() {
-    let first = lash_typescript::compile(
+    let first = lash_typescript::testing::compile(
         "function scale(n: number): number { return n * 2; }\nconst scaled = scale(3);",
     )
     .expect("the declaring program compiles");
-    let second = lash_typescript::compile("finish(42);").expect("the next program compiles");
+    let second =
+        lash_typescript::testing::compile("finish(42);").expect("the next program compiles");
 
     let mut state = State::new();
     execute(&first, &mut state, &Host)
@@ -126,4 +139,17 @@ async fn a_declared_function_from_an_earlier_program_does_not_fail_the_next_one(
         ExecutionOutcome::Finished(Value::Number(42.0))
     );
     assert_eq!(state.globals().get("scaled"), Some(&Value::Number(6.0)));
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

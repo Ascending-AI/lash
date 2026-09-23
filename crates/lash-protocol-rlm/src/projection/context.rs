@@ -583,7 +583,7 @@ mod tests {
         let globals = BTreeSet::from(["history".to_string()]);
         let parsed = lash_typescript::parse_with_globals(source, &globals)
             .unwrap_or_else(|error| panic!("`{source}` should parse: {error}"));
-        let compiled = lashlang::compile_ast(&parsed)
+        let compiled = lashlang::testing::harness::try_compile_program(&parsed)
             .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
         let env =
             lashlang::ExecutionEnvironment::new(&FinishOnlyHost).with_projected_bindings(bindings);

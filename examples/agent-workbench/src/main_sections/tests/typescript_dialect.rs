@@ -434,7 +434,7 @@ async fn run_tutorial(source: &str) -> Result<lashlang::ExecutionOutcome, String
     let host = TutorialHost::new();
     let linked = lash_typescript::link(source, &host.environment)
         .map_err(|error| format!("does not link: {error}"))?;
-    let compiled = lashlang::compile_linked(&linked);
+    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
     lashlang::execute(&compiled, &mut lashlang::State::new(), &host)
         .await
         .map_err(|error| format!("{error:?}"))

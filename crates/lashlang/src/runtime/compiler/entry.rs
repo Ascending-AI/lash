@@ -25,6 +25,7 @@ pub(super) enum ListComprehensionElement<'a> {
 }
 
 impl Compiler {
+    #[cfg(test)]
     pub(crate) fn compile_program(program: &Program) -> (Chunk, CompileStats) {
         let stats = Rc::new(RefCell::new(CompileStats::default()));
         let mut compiler = Self::with_slots_and_stats(
@@ -41,6 +42,7 @@ impl Compiler {
 
     pub(crate) fn compile_linked_program(
         program: &Program,
+        source_spans: FxHashMap<AstPath, Span>,
         module_context: CompiledModuleContext,
         lashlang_execution_context: LashlangExecutionContext,
     ) -> (Chunk, CompileStats) {
@@ -56,7 +58,7 @@ impl Compiler {
                 .into_ownership_map(),
             sites: Vec::new(),
         });
-        compiler.expression_source_spans = expression_source_spans(program);
+        compiler.expression_source_spans = source_spans;
         compiler.compile_program_block(program);
         let chunk = compiler.finish();
         let compile_stats = *stats.borrow();
@@ -65,6 +67,7 @@ impl Compiler {
 
     pub(crate) fn compile_linked_process_program(
         program: &Program,
+        source_spans: FxHashMap<AstPath, Span>,
         module_context: CompiledModuleContext,
         lashlang_execution_context: LashlangExecutionContext,
     ) -> (Chunk, CompileStats) {
@@ -83,7 +86,7 @@ impl Compiler {
             .into_ownership_map(),
             sites: Vec::new(),
         });
-        compiler.expression_source_spans = expression_source_spans(program);
+        compiler.expression_source_spans = source_spans;
         compiler.compile_program_block(program);
         let chunk = compiler.finish();
         let compile_stats = *stats.borrow();

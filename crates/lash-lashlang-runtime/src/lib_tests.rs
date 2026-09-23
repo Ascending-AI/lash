@@ -2136,7 +2136,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             .unwrap();
     let mut forged = mismatching.artifact.clone();
     let process = forged
-        .canonical_ir
+        .ir
         .declarations
         .iter_mut()
         .find_map(|declaration| match declaration {
@@ -2195,7 +2195,7 @@ async fn prepared_start_rejects_a_forged_receiving_artifact() {
         .expect("module publishes");
     let mut forged = output.artifact.clone();
     let process = forged
-        .canonical_ir
+        .ir
         .declarations
         .iter_mut()
         .find_map(|declaration| match declaration {

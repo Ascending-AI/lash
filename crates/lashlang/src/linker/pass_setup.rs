@@ -177,6 +177,7 @@ impl<'module> Linker<'module> {
             declarations.push(declaration);
         }
         Ok(Program {
+            language: self.program.language.clone(),
             declarations,
             main,
             spans,

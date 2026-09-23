@@ -45,13 +45,13 @@ fn committed_node_expectations_match_the_accepted_dialect() {
         let expression: String = serde_json::from_str(expression_json).expect("expression JSON");
 
         if *disposition == "reject" {
-            let error = lash_typescript::compile(&format!("finish({expression});"))
+            let error = lash_typescript::testing::compile(&format!("finish({expression});"))
                 .expect_err("registered unsupported expression must reject");
             assert_eq!(error.code.as_str(), *diagnostic, "expression: {expression}");
             continue;
         }
         if *disposition == "runtime-reject" {
-            let program = lash_typescript::compile(&format!("finish({expression});"))
+            let program = lash_typescript::testing::compile(&format!("finish({expression});"))
                 .expect("runtime-only deviation must compile");
             let error =
                 futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
@@ -66,7 +66,7 @@ fn committed_node_expectations_match_the_accepted_dialect() {
         assert_eq!(*diagnostic, "-", "accepted rows have no diagnostic");
         let expected: String = serde_json::from_str(expected_json).expect("expected JSON");
         let source = format!("finish(`${{{expression}}}`);");
-        let program = lash_typescript::compile(&source)
+        let program = lash_typescript::testing::compile(&source)
             .unwrap_or_else(|error| panic!("compile `{expression}`: {error}"));
         let outcome =
             futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))

@@ -183,7 +183,7 @@ async fn linked_value_constructor_wraps_host_descriptor() {
         builders::finish(builders::var("source")),
     ]);
     let linked = crate::LinkedModule::link(program, surface).expect("program should link");
-    let compiled = crate::compile_linked(&linked);
+    let compiled = crate::testing::harness::compile_linked_main(&linked);
     let mut state = State::new();
     let outcome = execute_compiled(&compiled, &mut state, &Host)
         .await
@@ -399,14 +399,14 @@ fn compiled_process_cache_reuses_process_ref_and_host_requirements_ref() {
         .get_or_compile(
             &linked.artifact,
             &process_ref,
-            &linked.host_requirements_ref,
+            &linked.artifact.host_requirements_ref,
         )
         .expect("compile first");
     let second = cache
         .get_or_compile(
             &linked.artifact,
             &process_ref,
-            &linked.host_requirements_ref,
+            &linked.artifact.host_requirements_ref,
         )
         .expect("compile second");
 
@@ -504,7 +504,9 @@ async fn while_runs_inside_process_body() {
         )],
         Vec::new(),
     );
-    let compiled = crate::compile_process(&program, "count_to").expect("process should compile");
+    let linked = crate::testing::harness::link_labeled(program);
+    let compiled = crate::testing::harness::compile_linked_process_named(&linked, "count_to")
+        .expect("process should compile");
     let mut state = State::new();
     state
         .insert_global("limit", Value::Number(4.0))
@@ -1895,7 +1897,7 @@ fn a_compiled_process_cache_hit_builds_no_key() {
         .get_or_compile(
             &linked.artifact,
             &process_ref,
-            &linked.host_requirements_ref,
+            &linked.artifact.host_requirements_ref,
         )
         .expect("first compile misses");
     let after_miss = crate::runtime::cache::COMPILED_PROCESS_KEYS_BUILT.load(Ordering::Relaxed);
@@ -1906,7 +1908,7 @@ fn a_compiled_process_cache_hit_builds_no_key() {
             .get_or_compile(
                 &linked.artifact,
                 &process_ref,
-                &linked.host_requirements_ref,
+                &linked.artifact.host_requirements_ref,
             )
             .expect("subsequent lookups hit");
     }

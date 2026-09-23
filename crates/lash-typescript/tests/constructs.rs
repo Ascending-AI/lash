@@ -16,8 +16,8 @@ impl ExecutionHost for Host {
 }
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
-    let program =
-        lash_typescript::compile(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    let program = lash_typescript::testing::compile(source)
+        .unwrap_or_else(|error| panic!("{source}: {error}"));
     futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
 }
 
@@ -102,14 +102,14 @@ fn error_constructors_and_instanceof_use_heap_kinds() {
         ),
         Value::String("SyntaxError,ReferenceError,URIError,EvalError,AggregateError".into())
     );
-    let error = lash_typescript::compile("finish({} instanceof Promise);")
+    let error = lash_typescript::testing::compile("finish({} instanceof Promise);")
         .expect_err("Promise remains unavailable as an instanceof RHS");
     assert_eq!(
         error.code,
         lash_typescript::DiagnosticCode::InstanceOfUnsupported
     );
     assert!(error.message.contains("Unsupported:"));
-    let stack = lash_typescript::compile("finish(new Error('x').stack);")
+    let stack = lash_typescript::testing::compile("finish(new Error('x').stack);")
         .expect_err("nondeterministic stack must reject");
     assert!(stack.message.contains("stack"));
 }
@@ -290,7 +290,7 @@ fn parameter_defaults_rest_and_destructuring_run_in_parameter_order() {
 
 #[test]
 fn classic_for_creates_per_iteration_closure_values() {
-    lash_typescript::compile(
+    lash_typescript::testing::compile(
         "function run(){let first=()=>-1; let second=()=>-1; for(let i=0;i<2;i++){if(i===0){first=()=>i;}else{second=()=>i;}} return `${first()}|${second()}`;} finish(run());",
     )
     .expect("per-iteration closure captures classify and lower");
@@ -298,7 +298,7 @@ fn classic_for_creates_per_iteration_closure_values() {
 
 #[test]
 fn program_bounds_bypass_catch_and_finally_code() {
-    let program = lash_typescript::compile(
+    let program = lash_typescript::testing::compile(
         "try { while (true) {} } catch (error) { finish('caught'); } finally { finish('finally'); }",
     )
     .expect("bounded program compiles");

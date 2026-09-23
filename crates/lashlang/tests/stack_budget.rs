@@ -6,7 +6,7 @@
 use lashlang::{
     AbilityOp, AbilityResult, CatchClause, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Expr, LashlangAbilities, LashlangHostEnvironment, Program, Record, State, TryExpr, Value,
-    compile_linked, execute,
+    execute,
 };
 use std::sync::Arc;
 
@@ -60,7 +60,12 @@ finish({
                 .expect("process start operation");
             let surface = LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
             let linked = lashlang::LinkedModule::link(program, surface).expect("program links");
-            let compiled = compile_linked(&linked);
+            let compiled = lashlang::compile(
+                &linked.artifact,
+                lashlang::Entry::Main,
+                Some(linked.spans()),
+            )
+            .expect("a module main entry compiles");
             let mut state = State::new();
 
             let outcome = execute(&compiled, &mut state, &StackBudgetHost)
@@ -117,7 +122,12 @@ fn stack_budget_max_nesting_depth_lower_link_compile_execute() {
             LashlangAbilities::all(),
         );
         let linked = lashlang::LinkedModule::link(program, surface).expect("program links");
-        let compiled = compile_linked(&linked);
+        let compiled = lashlang::compile(
+            &linked.artifact,
+            lashlang::Entry::Main,
+            Some(linked.spans()),
+        )
+        .expect("a module main entry compiles");
         let mut state = State::new();
 
         let outcome = tokio::runtime::Builder::new_current_thread()
@@ -184,7 +194,12 @@ fn stack_budget_most_expensive_ast_variant_at_the_nesting_cap() {
         let program = nested_try_program(depth);
         let linked =
             lashlang::LinkedModule::link(program, stack_budget_environment()).expect("links");
-        let compiled = compile_linked(&linked);
+        let compiled = lashlang::compile(
+            &linked.artifact,
+            lashlang::Entry::Main,
+            Some(linked.spans()),
+        )
+        .expect("a module main entry compiles");
         let mut state = State::new();
         let outcome = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -204,7 +219,12 @@ fn stack_budget_ast_try_finally_at_front_end_max_depth() {
         let program = nested_try_program(deepest_accepted_nesting());
         let linked =
             lashlang::LinkedModule::link(program, stack_budget_environment()).expect("links");
-        let compiled = compile_linked(&linked);
+        let compiled = lashlang::compile(
+            &linked.artifact,
+            lashlang::Entry::Main,
+            Some(linked.spans()),
+        )
+        .expect("a module main entry compiles");
         let mut state = State::new();
         let outcome = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -233,7 +253,7 @@ fn ast_only_nesting_beyond_the_cap_is_a_typed_error_not_an_abort() {
                 .expect_err("linking must refuse the nesting");
             assert!(error.to_string().contains("nesting too deep"), "{error}");
             let error =
-                lashlang::compile_ast(&program).expect_err("compiling must refuse the nesting");
+                lashlang_compile_program(&program).expect_err("compiling must refuse the nesting");
             assert!(error.to_string().contains("nesting too deep"), "{error}");
         });
         return;
@@ -356,4 +376,17 @@ impl ExecutionHost for StackBudgetHost {
             )),
         }
     }
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

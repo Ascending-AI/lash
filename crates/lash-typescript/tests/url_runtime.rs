@@ -15,7 +15,7 @@ impl ExecutionHost for Host {
 }
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
-    let program = lash_typescript::compile(source)
+    let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
     futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
 }

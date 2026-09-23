@@ -31,7 +31,7 @@ impl ExecutionHost for PrintHost {
 }
 
 fn printed(source: &str) -> Vec<String> {
-    let program = lash_typescript::compile(source).expect("TypeScript should compile");
+    let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     let host = PrintHost::default();
     futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
         .expect("TypeScript should execute");
@@ -55,7 +55,7 @@ impl ExecutionHost for RawPrintHost {
 }
 
 fn printed_values(source: &str) -> Vec<Value> {
-    let program = lash_typescript::compile(source).expect("TypeScript should compile");
+    let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     let host = RawPrintHost::default();
     futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
         .expect("TypeScript should execute");
@@ -158,8 +158,9 @@ fn every_console_method_renders_the_same_way() {
 /// Pinned so the refusal is not mistaken for a rendering defect.
 #[test]
 fn cyclic_objects_are_refused_before_they_can_be_printed() {
-    let program = lash_typescript::compile("const a: any = {}; a.self = a; console.log(a);")
-        .expect("compile");
+    let program =
+        lash_typescript::testing::compile("const a: any = {}; a.self = a; console.log(a);")
+            .expect("compile");
     let host = PrintHost::default();
     let error = futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
         .expect_err("a cyclic object never reaches the observation");
@@ -184,7 +185,7 @@ fn string_concatenation_refuses_the_objects_with_no_string_of_their_own() {
         "console.log(`${{ a: 1 }}`);",
         "console.log(String({ a: 1 }));",
     ] {
-        let program = lash_typescript::compile(source).expect("TypeScript should compile");
+        let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
         let host = PrintHost::default();
         let error =
             futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
@@ -249,7 +250,7 @@ fn functions_render_as_a_named_placeholder() {
 /// oversized JavaScript string produces.
 #[test]
 fn a_shared_object_graph_refuses_at_the_byte_budget_instead_of_expanding() {
-    let program = lash_typescript::compile(
+    let program = lash_typescript::testing::compile(
         "let a: any = { v: 1 }; for (let i = 0; i < 22; i++) { a = { l: a, r: a }; } console.log(a);",
     )
     .expect("compile");
@@ -277,7 +278,7 @@ fn a_shared_object_graph_refuses_at_the_byte_budget_instead_of_expanding() {
 /// must see the bytes the first one already wrote.
 #[test]
 fn the_byte_budget_covers_every_argument_together() {
-    let program = lash_typescript::compile(
+    let program = lash_typescript::testing::compile(
         "let a: any = { v: 1 }; for (let i = 0; i < 18; i++) { a = { l: a, r: a }; } console.log(a, a);",
     )
     .expect("compile");

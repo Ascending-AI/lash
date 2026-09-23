@@ -90,7 +90,8 @@ impl ExecutionHost for ScriptedHost {
 }
 
 fn run(source: &str, host: &ScriptedHost) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
-    let compiled = lash_typescript::compile(source).unwrap_or_else(|error| panic!("{error}"));
+    let compiled =
+        lash_typescript::testing::compile(source).unwrap_or_else(|error| panic!("{error}"));
     futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), host))
 }
 

@@ -1185,12 +1185,12 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
         .await
         .expect("put artifact");
     let restored = store
-        .get_module_artifact(&linked.module_ref)
+        .get_module_artifact(&linked.artifact.module_ref)
         .await
         .expect("get artifact")
         .expect("artifact exists");
 
-    assert_eq!(restored.module_ref, linked.module_ref);
+    assert_eq!(restored.module_ref, linked.artifact.module_ref);
     assert_eq!(
         restored.process_ref("scan"),
         linked.artifact.process_ref("scan")

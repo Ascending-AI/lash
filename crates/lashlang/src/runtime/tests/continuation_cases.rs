@@ -702,7 +702,7 @@ async fn requested_boundary_mid_run_leaves_the_vm_runnable() {
     let linked =
         crate::LinkedModule::link(program, runtime_test_environment().with_globals(["input"]))
             .expect("program should link");
-    let program = crate::compile_linked(&linked);
+    let program = crate::testing::harness::compile_linked_main(&linked);
     let mut projected = ProjectedBindings::new();
     projected.insert("input", ProjectedValue::scalar("input", Value::Number(3.0)));
     let slots = SlotState::from_globals(

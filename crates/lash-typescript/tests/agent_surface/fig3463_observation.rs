@@ -9,7 +9,7 @@ fn direct_process_handle_await_error_keeps_typed_provenance() {
     "#;
     let linked = lash_typescript::link(source, &process_environment()).expect("link await");
     let error = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &ProcessAwaitFailureHost::Typed,
     ))

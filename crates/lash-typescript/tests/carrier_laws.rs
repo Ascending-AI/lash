@@ -141,7 +141,7 @@ fn alpha_rename(program: &Program) -> Program {
 #[test]
 fn l3_alpha_renaming_private_binders_preserves_node_ids() {
     for source in CORPUS {
-        let program = link(source).program().clone();
+        let program = link(source).artifact.ir;
         let renamed = alpha_rename(&program);
         assert_ne!(program, renamed, "the corpus source has private binders");
         let original = lashlang::workflow_graph_from_program(&program, &TypeScriptStatementText);

@@ -110,20 +110,10 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     )
     .await
     .expect("open provisioned Postgres storage");
-    let frozen: serde_json::Value = serde_json::from_slice(include_bytes!(
-        "../../lashlang/tests/fixtures/module-artifact-old.json"
-    ))
-    .expect("decode frozen artifact JSON");
-    let artifact = lashlang::LinkedModule::link(
-        serde_json::from_value(frozen["canonical_ir"].clone())
-            .expect("decode frozen artifact program"),
-        lashlang::LashlangHostEnvironment::new(
-            lashlang::LashlangHostCatalog::default(),
-            lashlang::LashlangAbilities::all(),
-        ),
-    )
-    .expect("link the frozen source IR with a complete process signature")
-    .artifact;
+    let artifact = lashlang::ModuleArtifact::from_program(lashlang::Program::block(vec![
+        lashlang::Expr::Finish(Box::new(lashlang::Expr::String("done".into()))),
+    ]))
+    .expect("a one-statement module forms an artifact");
     storage
         .lashlang_artifact_store()
         .publish_module_artifact(
@@ -143,7 +133,7 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     assert_eq!(page.items[0].cursor, artifact.module_ref.as_str());
     match &page.items[0].payload {
         DurablePayload::Json(json) => assert!(
-            json.contains("host_requirements_ref") && json.contains("canonical_ir"),
+            json.contains("host_requirements_ref") && json.contains("\"ir\""),
             "{json}"
         ),
         other => panic!("expected module artifact JSON, got {other:?}"),

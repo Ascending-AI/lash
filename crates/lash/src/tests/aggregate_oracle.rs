@@ -1365,8 +1365,8 @@ fn literal_array_batch_program() -> lashlang::Program {
 #[tokio::test]
 async fn a_literal_array_batch_reports_the_first_written_rejection() {
     let host = AllResultsHost::new();
-    let compiled =
-        lashlang::compile_ast(&literal_array_batch_program()).expect("compile the literal batch");
+    let compiled = lashlang::testing::harness::try_compile_program(&literal_array_batch_program())
+        .expect("compile the literal batch");
     let error = lashlang::execute(&compiled, &mut lashlang::State::new(), &host)
         .await
         .expect_err("both leaves reject, so the aggregate rejects");
@@ -1414,7 +1414,8 @@ fn list_batch_program() -> lashlang::Program {
 #[tokio::test]
 async fn the_standalone_list_batch_still_selects_the_first_written_rejection() {
     let host = AllResultsHost::new();
-    let compiled = lashlang::compile_ast(&list_batch_program()).expect("compile the list batch");
+    let compiled = lashlang::testing::harness::try_compile_program(&list_batch_program())
+        .expect("compile the list batch");
     let error = lashlang::execute(&compiled, &mut lashlang::State::new(), &host)
         .await
         .expect_err("both leaves reject, so the aggregate rejects");
@@ -1469,8 +1470,8 @@ fn nested_comprehension_program() -> lashlang::Program {
 #[tokio::test]
 async fn a_nested_comprehension_is_one_batch_that_keeps_written_rejection_order() {
     let host = AllResultsHost::new();
-    let compiled =
-        lashlang::compile_ast(&nested_comprehension_program()).expect("compile the nested shape");
+    let compiled = lashlang::testing::harness::try_compile_program(&nested_comprehension_program())
+        .expect("compile the nested shape");
     let error = lashlang::execute(&compiled, &mut lashlang::State::new(), &host)
         .await
         .expect_err("both leaves reject, so the aggregate rejects");

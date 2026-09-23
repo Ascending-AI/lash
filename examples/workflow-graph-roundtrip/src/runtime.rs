@@ -11,7 +11,7 @@ use lash::rlm::{
         ExecutionHostError, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
         LashlangLanguageFeatures, LinkedModule, OperationContract, ResourceOperation,
         ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
-        State, Value, WorkflowGraph, compile_linked_process, from_json,
+        State, Value, WorkflowGraph, compile, from_json,
     },
 };
 use lash::tracing::TraceLanguageExecutionPayload;
@@ -54,8 +54,18 @@ impl PreparedRun {
                 _ => None,
             })
             .ok_or_else(|| anyhow!("saved workflow has no process to run"))?;
-        let compiled = compile_linked_process(&linked, process_name)
-            .context("compile saved workflow process")?;
+        // The run is the admitted artifact's process, selected by its ref: the
+        // same program the graph's node ids and the run's sites come from.
+        let process_ref = linked
+            .artifact
+            .process_ref(process_name)
+            .ok_or_else(|| anyhow!("saved workflow process `{process_name}` is not exported"))?;
+        let compiled = compile(
+            &linked.artifact,
+            lash::rlm::lang::Entry::Process(process_ref),
+            Some(linked.spans()),
+        )
+        .context("compile saved workflow process")?;
         Ok(Self {
             compiled,
             workflow_version,

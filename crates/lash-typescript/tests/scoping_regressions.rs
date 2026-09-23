@@ -17,7 +17,7 @@ impl ExecutionHost for Host {
 }
 
 fn finished(source: &str) -> Value {
-    let program = lash_typescript::compile(source).expect("TypeScript should compile");
+    let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
         .expect("TypeScript should execute")
     {
@@ -34,7 +34,7 @@ fn assign_only_mutable_captures_reject_by_name() {
     ];
     for source in cases {
         assert_eq!(
-            lash_typescript::compile(source)
+            lash_typescript::testing::compile(source)
                 .expect_err("mutable capture writes must reject")
                 .code,
             lash_typescript::DiagnosticCode::MutableCaptureUnsupported,
@@ -61,12 +61,13 @@ fn catch_body_declarations_shadow_enclosing_function_slots() {
 
 #[test]
 fn unresolved_reads_and_arguments_reject_before_execution() {
-    let typo =
-        lash_typescript::compile("finish(someTypo);").expect_err("unknown binding must reject");
+    let typo = lash_typescript::testing::compile("finish(someTypo);")
+        .expect_err("unknown binding must reject");
     assert_eq!(typo.code, lash_typescript::DiagnosticCode::UnknownBinding);
-    let arguments =
-        lash_typescript::compile("function f(): number { return arguments.length; } finish(f());")
-            .expect_err("arguments must direct authors to rest parameters");
+    let arguments = lash_typescript::testing::compile(
+        "function f(): number { return arguments.length; } finish(f());",
+    )
+    .expect_err("arguments must direct authors to rest parameters");
     assert_eq!(
         arguments.code,
         lash_typescript::DiagnosticCode::ThisUnsupported
@@ -77,7 +78,7 @@ fn unresolved_reads_and_arguments_reject_before_execution() {
 #[test]
 fn implicit_global_assignment_rejects_before_execution() {
     assert_eq!(
-        lash_typescript::compile("durableTypo = 5; finish(durableTypo);")
+        lash_typescript::testing::compile("durableTypo = 5; finish(durableTypo);")
             .expect_err("module-goal assignment cannot create a global")
             .code,
         lash_typescript::DiagnosticCode::UnknownBinding
@@ -224,7 +225,7 @@ fn mutually_recursive_declarations_reject_with_their_cycle() {
             "ping -> pong -> ping",
         ),
     ] {
-        let error = lash_typescript::compile(source)
+        let error = lash_typescript::testing::compile(source)
             .expect_err("mutually recursive declarations must reject");
         assert_eq!(
             error.code,
@@ -238,7 +239,7 @@ fn mutually_recursive_declarations_reject_with_their_cycle() {
     }
     // A cycle nested inside a function body has the same lowering problem and
     // takes the same rejection, with the names the author wrote.
-    let error = lash_typescript::compile(
+    let error = lash_typescript::testing::compile(
         "function shell(n: number): number { function up(k: number): number { if (k === 0) { return 0; } return down(k - 1) + 1; } function down(k: number): number { return up(k); } return up(n); } finish(shell(5));",
     )
     .expect_err("a nested cycle must reject too");
@@ -277,7 +278,7 @@ fn generated_binding_namespace_is_reserved() {
         "let __typescript_0_frame = 1; finish(__typescript_0_frame);",
     ] {
         assert_eq!(
-            lash_typescript::compile(source)
+            lash_typescript::testing::compile(source)
                 .expect_err("generated-namespace identifiers must reject")
                 .code,
             lash_typescript::DiagnosticCode::ReservedIdentifier,
@@ -312,7 +313,7 @@ fn named_function_expressions_bind_their_own_name() {
     // The name is scoped to the body and does not escape into the enclosing
     // scope, and it does not shadow an enclosing binding of the same name.
     assert_eq!(
-        lash_typescript::compile(
+        lash_typescript::testing::compile(
             "const g = function self(n: number): number { return n; }; finish(self(1));"
         )
         .expect_err("the expression name is not visible outside its body")
@@ -327,9 +328,11 @@ fn named_function_expressions_bind_their_own_name() {
     );
     // The generated namespace is reserved on this path too.
     assert_eq!(
-        lash_typescript::compile("const g = function __typescript_h(): number { return 1; };")
-            .expect_err("a generated-namespace expression name must reject")
-            .code,
+        lash_typescript::testing::compile(
+            "const g = function __typescript_h(): number { return 1; };"
+        )
+        .expect_err("a generated-namespace expression name must reject")
+        .code,
         lash_typescript::DiagnosticCode::ReservedIdentifier
     );
 }
@@ -508,7 +511,8 @@ fn a_top_level_typo_on_line_40_is_refused_before_any_effect_and_says_where() {
     lines.push("finish(value_39_typo);".to_string());
     let source = lines.join("\n");
 
-    let error = lash_typescript::compile(&source).expect_err("the typo must refuse the cell");
+    let error =
+        lash_typescript::testing::compile(&source).expect_err("the typo must refuse the cell");
     assert_eq!(error.code, lash_typescript::DiagnosticCode::UnknownBinding);
 
     let diagnostic = lash_typescript::format_diagnostic(&source, &error);
@@ -527,7 +531,8 @@ fn a_top_level_typo_on_line_40_is_refused_before_any_effect_and_says_where() {
 #[test]
 fn a_temporal_dead_zone_read_says_where_it_read() {
     let source = "const first = 1;\nconst second = later + first;\nconst later = 2;\n";
-    let error = lash_typescript::compile(source).expect_err("the read beats the declaration");
+    let error =
+        lash_typescript::testing::compile(source).expect_err("the read beats the declaration");
     assert_eq!(
         error.code,
         lash_typescript::DiagnosticCode::TemporalDeadZone

@@ -176,6 +176,7 @@ mod rlm_inventory {
     use lash::rlm::lang::AbilityResult as _;
     use lash::rlm::lang::ContentHash as _;
     use lash::rlm::lang::DurabilityTier as _;
+    use lash::rlm::lang::Entry as _;
     use lash::rlm::lang::ExecutionEnvironment as _;
     use lash::rlm::lang::ExecutionHost as _;
     use lash::rlm::lang::ExecutionHostError as _;
@@ -198,7 +199,7 @@ mod rlm_inventory {
     use lash::rlm::lang::TriggerRegistrationRequest as _;
     use lash::rlm::lang::Value as _;
     use lash::rlm::lang::add_trigger_resource_operations as _;
-    use lash::rlm::lang::compile_linked as _;
+    use lash::rlm::lang::compile as _;
     use lash::rlm::lang::compile_module as _;
     use lash::rlm::lang::execute as _;
     use lash::rlm::lang::from_json as _;
@@ -287,7 +288,7 @@ mod subagents_inventory {
 
 #[cfg(feature = "typescript")]
 mod typescript_inventory {
-    use lash::typescript::{compile as _, parse as _};
+    use lash::typescript::{link as _, parse as _};
 }
 
 #[cfg(feature = "http-transport")]

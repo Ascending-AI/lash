@@ -1371,7 +1371,7 @@ mod tests {
             .build()
             .expect("runtime")
             .block_on(lashlang::execute(
-                &lash_typescript::compile_linked(&linked),
+                &lashlang::testing::harness::compile_linked_main(&linked),
                 &mut lashlang::State::new(),
                 &host,
             ))

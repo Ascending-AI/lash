@@ -44,7 +44,7 @@ fn named_process_signature_round_trips_and_names_change_identity() {
 fn artifact_explicitly_refuses_obsolete_process_type_shape() {
     let artifact = process_typed_artifact("event");
     let mut raw = serde_json::to_value(&artifact).expect("artifact serializes");
-    let declarations = raw["canonical_ir"]["declarations"]
+    let declarations = raw["ir"]["declarations"]
         .as_array_mut()
         .expect("declarations array");
     let install = declarations
@@ -160,7 +160,9 @@ fn a_recorded_compilation_dialect_is_refused_as_a_retired_field() {
 }
 
 #[test]
-fn frozen_sha256_artifact_without_the_obsolete_field_hits_the_identity_fence() {
+fn frozen_predecessor_artifact_is_refused_by_its_shape() {
+    // A pre-FIG-3571 artifact carries a renamed `canonical_ir` and no program
+    // `language`; the one-carrier shape refuses it before any identity check.
     let mut raw: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/module-artifact-old.json"
     ))
@@ -170,15 +172,15 @@ fn frozen_sha256_artifact_without_the_obsolete_field_hits_the_identity_fence() {
     // The frozen fixture predates ADR 0096 and still records a dialect,
     // which is its own typed refusal (see
     // `a_recorded_compilation_dialect_is_refused_as_a_retired_field`).
-    // Drop it so the subject here stays the identity fence.
     object.remove("compilation_dialect");
-    raw["canonical_ir"]["declarations"][0]["Process"]["return_ty"] = serde_json::json!("Str");
     let error = ModuleArtifact::from_store_bytes(
         &serde_json::to_vec(&raw).expect("legacy artifact should encode"),
     )
-    .expect_err("a SHA-256 artifact must not verify under the BLAKE3 generation");
-    assert!(matches!(error, ModuleArtifactError::HashMismatch { .. }));
-    assert!(error.to_string().contains("lashlang:v2:blake3:"));
+    .expect_err("a predecessor artifact must be refused");
+    assert!(
+        matches!(&error, ModuleArtifactError::Codec(message) if message.contains("`ir`")),
+        "{error}"
+    );
 }
 
 #[test]
@@ -188,7 +190,7 @@ fn future_shape_refuses_before_serde_reaches_unknown_variants() {
     ))
     .expect("frozen fixture should be JSON");
     raw["compilation_dialect"] = serde_json::json!("future_dialect");
-    raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+    raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
 
     let error = ModuleArtifact::from_store_bytes(
         &serde_json::to_vec(&raw).expect("future fixture should encode"),
@@ -206,7 +208,7 @@ fn unchanged_dialect_with_unknown_nested_variant_is_a_future_shape_refusal() {
         "../../tests/fixtures/module-artifact-old.json"
     ))
     .expect("frozen fixture should be JSON");
-    raw["canonical_ir"]["main"] = serde_json::json!({"FutureExpr": null});
+    raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
 
     let error = ModuleArtifact::from_store_bytes(
         &serde_json::to_vec(&raw).expect("future fixture should encode"),
@@ -362,7 +364,7 @@ fn alpha_variant_cells_name_distinct_modules() {
 /// An ABI name is not a local: a process parameter still names itself in the
 /// stored artifact, and renaming one still moves the module ref.
 #[test]
-fn process_parameter_names_stay_in_the_canonical_ir() {
+fn process_parameter_names_stay_in_the_ir() {
     let event = process_typed_artifact("event");
     let encoded =
         String::from_utf8(event.to_store_bytes().expect("encodes")).expect("bytes are UTF-8");

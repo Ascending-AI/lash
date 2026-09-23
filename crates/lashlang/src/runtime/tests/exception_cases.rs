@@ -591,7 +591,7 @@ async fn effect_failure_catch_retry_is_a_new_occurrence() {
     ]);
     let linked = crate::LinkedModule::link(program, runtime_test_environment())
         .expect("exception program links");
-    let compiled = crate::compile_linked(&linked);
+    let compiled = crate::testing::harness::compile_linked_main(&linked);
     let host = ExceptionRecordingHost::default();
     assert_eq!(
         execute_compiled(&compiled, &mut State::new(), &host).await,
@@ -747,7 +747,7 @@ async fn malformed_exception_continuations_fail_closed() {
 fn compile_linked_exception_program(program: Program) -> CompiledProgram {
     let linked = crate::LinkedModule::link(program, runtime_test_environment())
         .expect("determinism program links");
-    crate::compile_linked(&linked)
+    crate::testing::harness::compile_linked_main(&linked)
 }
 
 async fn exception_effect_checkpoint(

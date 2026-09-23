@@ -682,7 +682,7 @@ proptest! {
             .enable_all()
             .build()
             .expect("test runtime")
-            .block_on(lashlang::execute(&program, &mut state, &host));
+            .block_on(lashlang::execute(&lashlang_compile_program(&program).expect("the program compiles"), &mut state, &host));
         let value = finished(outcome.expect("Type literal should execute"));
         let inner = lashlang::unwrap_type_value(&value).expect("wrapped type");
         let schema = inner.as_record().expect("schema record");
@@ -801,4 +801,15 @@ fn gen_type_expr(_max_depth: u32) -> BoxedStrategy<GenType> {
         ]
     })
     .boxed()
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, String> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())
+        .map_err(|error| error.to_string())?;
+    lashlang::compile(&artifact, lashlang::Entry::Main, Some(&program.spans))
+        .map_err(|error| error.to_string())
 }

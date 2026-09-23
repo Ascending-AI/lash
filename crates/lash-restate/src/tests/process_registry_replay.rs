@@ -97,9 +97,9 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
     let registration = ProcessRegistration::new(
         "process-1",
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: linked_module.module_ref.clone(),
+            module_ref: linked_module.artifact.module_ref.clone(),
             process_ref: process_ref.clone(),
-            host_requirements_ref: linked_module.host_requirements_ref.clone(),
+            host_requirements_ref: linked_module.artifact.host_requirements_ref.clone(),
             process_name: "scan".to_string(),
             args: args.clone(),
         }),
@@ -171,11 +171,11 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
     assert_eq!(kind, lash_lashlang_runtime::LASHLANG_ENGINE_KIND);
     let sent = lash_lashlang_runtime::LashlangProcessInput::from_payload(payload.clone())
         .expect("typed lashlang payload");
-    assert_eq!(sent.module_ref, linked_module.module_ref);
+    assert_eq!(sent.module_ref, linked_module.artifact.module_ref);
     assert_eq!(sent.process_ref, process_ref);
     assert_eq!(
         sent.host_requirements_ref,
-        linked_module.host_requirements_ref
+        linked_module.artifact.host_requirements_ref
     );
     assert_eq!(sent.process_name, "scan");
     assert_eq!(sent.args, args);

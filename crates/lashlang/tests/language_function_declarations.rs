@@ -91,7 +91,12 @@ fn link_error(program: Program) -> LinkError {
 )]
 async fn finish_value(program: Program) -> Value {
     let linked = link(program).expect("linking should succeed");
-    let compiled = lashlang::compile_linked(&linked);
+    let compiled = lashlang::compile(
+        &linked.artifact,
+        lashlang::Entry::Main,
+        Some(linked.spans()),
+    )
+    .expect("a module main entry compiles");
     let host = TestHost::default();
     let mut state = State::new();
     finished(
@@ -548,8 +553,17 @@ async fn a_function_may_be_called_from_a_process_body() {
     ))
     .expect("linking should succeed");
 
-    let compiled = lashlang::compile_linked_process(&linked, "greet")
-        .expect("the process chunk should compile");
+    let compiled = lashlang::compile(
+        &linked.artifact,
+        lashlang::Entry::Process(
+            linked
+                .artifact
+                .process_ref("greet")
+                .expect("the process is exported"),
+        ),
+        Some(linked.spans()),
+    )
+    .expect("the process chunk should compile");
     let host = TestHost::default();
     let mut state = State::new();
     let value = finished(

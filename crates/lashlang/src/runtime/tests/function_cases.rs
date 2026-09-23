@@ -138,9 +138,13 @@ async fn builtin_map_reenters_the_flat_vm_and_rejects_effectful_callbacks() {
         })),
     ]);
     assert_eq!(
-        execute(&pure, &mut State::new(), &Host)
-            .await
-            .expect("pure callback"),
+        execute(
+            &crate::compile_ast(&pure).expect("the program compiles"),
+            &mut State::new(),
+            &Host
+        )
+        .await
+        .expect("pure callback"),
         ExecutionOutcome::Finished(Value::List(
             vec![Value::Number(2.0), Value::Number(4.0), Value::Number(6.0)].into()
         ))
@@ -165,7 +169,12 @@ async fn builtin_map_reenters_the_flat_vm_and_rejects_effectful_callbacks() {
         },
     ]);
     assert!(matches!(
-        execute(&effectful, &mut State::new(), &Host).await,
+        execute(
+            &crate::compile_ast(&effectful).expect("the program compiles"),
+            &mut State::new(),
+            &Host
+        )
+        .await,
         Err(RuntimeError::EffectInBuiltinCallback)
     ));
 }
@@ -723,7 +732,12 @@ async fn frame_depth_is_a_typed_execution_bound_and_gc_stress_preserves_closures
         collect_every_allocation: false,
     };
     assert!(matches!(
-        execute(&factorial_program(10.0), &mut State::new(), &bounded).await,
+        execute(
+            &crate::compile_ast(&factorial_program(10.0)).expect("the program compiles"),
+            &mut State::new(),
+            &bounded
+        )
+        .await,
         Err(RuntimeError::FrameDepthExceeded { limit: 4 })
     ));
 
@@ -732,9 +746,13 @@ async fn frame_depth_is_a_typed_execution_bound_and_gc_stress_preserves_closures
         collect_every_allocation: true,
     };
     assert_eq!(
-        execute(&factorial_program(7.0), &mut State::new(), &stress)
-            .await
-            .expect("GC stress recursion"),
+        execute(
+            &crate::compile_ast(&factorial_program(7.0)).expect("the program compiles"),
+            &mut State::new(),
+            &stress
+        )
+        .await
+        .expect("GC stress recursion"),
         ExecutionOutcome::Finished(Value::Number(5_040.0))
     );
 }
@@ -747,7 +765,7 @@ async fn default_frame_depth_rejects_fifteen_hundred_recursive_calls() {
     };
 
     assert!(matches!(
-        execute(&factorial_program(1_500.0), &mut State::new(), &host).await,
+        execute(&crate::compile_ast(&factorial_program(1_500.0)).expect("the program compiles"), &mut State::new(), &host).await,
         Err(RuntimeError::FrameDepthExceeded { limit })
             if limit == DEFAULT_MAX_VM_FRAME_DEPTH.get()
     ));
@@ -941,7 +959,7 @@ async fn continuation_round_trip_mid_recursion_preserves_frames_heap_and_meter()
 async fn recursive_calls_keep_occurrence_counters_stable_across_resume() {
     let linked = crate::LinkedModule::link(factorial_program(8.0), runtime_test_environment())
         .expect("AST-only function program links");
-    let program = crate::compile_linked(&linked);
+    let program = crate::testing::harness::compile_linked_main(&linked);
     let continuation = find_instruction_continuation(&program, |continuation| {
         continuation.frame_stack.len() >= 3 && !continuation.occurrence_counters.is_empty()
     })
@@ -997,7 +1015,7 @@ async fn builtin_callback_continuation_preserves_reentry_and_occurrence_counters
         runtime_test_environment(),
     )
     .expect("AST-only callback program links");
-    let program = crate::compile_linked(&linked);
+    let program = crate::testing::harness::compile_linked_main(&linked);
     let continuation = find_instruction_continuation(&program, |continuation| {
         continuation.frame_stack.iter().any(|frame| {
             matches!(
@@ -1061,7 +1079,7 @@ async fn filter_shaped_callback_parks_inside_the_shared_driver_and_resumes() {
         runtime_test_environment(),
     )
     .expect("filter-shaped callback program links");
-    let program = crate::compile_linked(&linked);
+    let program = crate::testing::harness::compile_linked_main(&linked);
     let continuation = find_instruction_continuation(&program, |continuation| {
         continuation.frame_stack.iter().any(|frame| {
             matches!(

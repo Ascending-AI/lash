@@ -45,8 +45,8 @@ pub fn compile_module(
         .introspect()
         .map_err(ModuleCompileError::introspection)?;
     Ok(ModuleCompileOutput {
-        module_ref: linked.module_ref,
-        host_requirements_ref: linked.host_requirements_ref,
+        module_ref: linked.artifact.module_ref.clone(),
+        host_requirements_ref: linked.artifact.host_requirements_ref.clone(),
         artifact: linked.artifact,
         introspection,
     })

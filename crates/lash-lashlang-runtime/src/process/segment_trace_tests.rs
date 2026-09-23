@@ -481,7 +481,8 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
         17,
         "capture this fixture only from the version-17 predecessor writer"
     );
-    let compiled = lashlang::compile_ast(&bytecode_v17_loop_program()).expect("compile loop");
+    let compiled = lashlang::testing::harness::try_compile_program(&bytecode_v17_loop_program())
+        .expect("compile loop");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).process();
@@ -541,7 +542,8 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         10,
         "capture this fixture only from predecessor writer commit ccab40166"
     );
-    let program = lashlang::compile_ast(&finish_null()).expect("compile fixture program");
+    let program = lashlang::testing::harness::try_compile_program(&finish_null())
+        .expect("compile fixture program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
@@ -721,7 +723,8 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
 /// durable field with no producer is removed rather than round-tripped.
 #[test]
 fn the_current_envelope_carries_no_dead_send_ordinal() {
-    let program = lashlang::compile_ast(&finish_null()).expect("compile pinning program");
+    let program = lashlang::testing::harness::try_compile_program(&finish_null())
+        .expect("compile pinning program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
@@ -805,7 +808,8 @@ fn predecessor_segment_with_old_node_id_occurrence_counters_is_refused() {
 
 #[test]
 fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_change() {
-    let program = lashlang::compile_ast(&finish_null()).expect("compile pinning program");
+    let program = lashlang::testing::harness::try_compile_program(&finish_null())
+        .expect("compile pinning program");
     let mut state = lashlang::State::new();
     let host = SegmentFixtureHost;
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();

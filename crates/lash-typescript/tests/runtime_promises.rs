@@ -35,7 +35,7 @@ impl ExecutionHost for Host {
 }
 
 fn execute(source: &str) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
-    let compiled = lash_typescript::compile(source).expect(source);
+    let compiled = lash_typescript::testing::compile(source).expect(source);
     futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), &Host))
 }
 
@@ -227,7 +227,7 @@ fn a_pending_handle_passed_as_a_tool_argument_is_refused_before_dispatch() {
         "const p = web.fetch({id:1}); finish(await Promise.all([web.echo({ inner: p })]));",
     ] {
         let host = CountingHost::default();
-        let compiled = lash_typescript::compile(source).expect(source);
+        let compiled = lash_typescript::testing::compile(source).expect(source);
         let error =
             futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), &host))
                 .expect_err(source);

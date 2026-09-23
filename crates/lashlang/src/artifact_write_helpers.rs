@@ -12,14 +12,9 @@ pub(super) fn write_label_metadata(writer: &mut HashWriter, label: &LabelMetadat
     }
 }
 
-pub(super) fn write_unary_expr<'program>(
-    writer: &mut HashWriter,
-    tag: &'static str,
-    expr: &'program Expr,
-    normalizer: &NameNormalizer<'program>,
-) {
+pub(super) fn write_unary_expr(writer: &mut HashWriter, tag: &'static str, expr: &Expr) {
     writer.atom(tag);
-    write_expr(writer, expr, normalizer);
+    write_expr(writer, expr);
 }
 
 pub(super) fn write_resource_ref(writer: &mut HashWriter, resource: &ResourceRefExpr) {

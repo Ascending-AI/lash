@@ -847,14 +847,13 @@ pub async fn prepare_lashlang_process_start(
         &admission_input,
         LashlangHostEnvironmentCheck::OmitHostEnvironment,
     )?;
-    let process = artifact
-        .canonical_ir
-        .process(&start.process_name)
-        .ok_or_else(|| LashlangRuntimeError::ArtifactProcessMismatch {
+    let process = artifact.ir.process(&start.process_name).ok_or_else(|| {
+        LashlangRuntimeError::ArtifactProcessMismatch {
             module_ref: start.module_ref.to_string(),
             process: start.process_name.clone(),
             process_ref: format!("{:?}", start.process_ref),
-        })?;
+        }
+    })?;
     let args = match serde_json::to_value(lashlang::Value::Record(Arc::new(start.args)))
         .map_err(|source| LashlangRuntimeError::SerializeProcessArgs { source })?
     {
@@ -892,7 +891,7 @@ pub async fn prepare_lashlang_process_start(
         }
     }
     let signal_event_types = artifact
-        .canonical_ir
+        .ir
         .process(&start.process_name)
         .map(lashlang_process_signal_event_types)
         .unwrap_or_default();
@@ -1217,7 +1216,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
             .into_iter()
             .chain(
                 artifact
-                    .canonical_ir
+                    .ir
                     .process(&identity.process_name)
                     .map(lashlang_process_signal_event_types)
                     .unwrap_or_default(),

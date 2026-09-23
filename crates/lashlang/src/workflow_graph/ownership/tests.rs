@@ -127,7 +127,7 @@ fn a_direct_ir_process_body_is_projected_from_the_first_statement() {
         )],
         Vec::new(),
     ));
-    let program = &linked.artifact.canonical_ir;
+    let program = &linked.artifact.ir;
     let crate::Declaration::Process(process) = &program.declarations[0] else {
         panic!("one process")
     };

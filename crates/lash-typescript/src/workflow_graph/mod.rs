@@ -482,6 +482,7 @@ fn graph_to_program(graph: &WorkflowGraph) -> Result<Program, GraphRenderError> 
     let mut main = subgraph_to_block(&graph.main, context)?;
     splice_lifted_bodies(&mut main, &mut lifted.into_iter(), context)?;
     Ok(Program {
+        language: lashlang::SourceLanguage::new(crate::TYPESCRIPT_LANGUAGE),
         declarations,
         main,
         spans: Default::default(),

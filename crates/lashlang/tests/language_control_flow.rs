@@ -799,9 +799,13 @@ async fn format_resolves_positional_and_escaped_placeholders() {
         let mut state = State::new();
         let program = finish_program(call("format", args));
         let value = finished(
-            lashlang::execute(&program, &mut state, &host)
-                .await
-                .expect("format should run"),
+            lashlang::execute(
+                &lashlang_compile_program(&program).expect("the program compiles"),
+                &mut state,
+                &host,
+            )
+            .await
+            .expect("format should run"),
         );
         assert_eq!(value, Value::String(expected.to_string().into()));
     }
@@ -827,9 +831,13 @@ async fn format_rejects_malformed_templates_and_unused_arguments() {
         let host = TestHost::default();
         let mut state = State::new();
         let program = finish_program(call("format", args));
-        let error = lashlang::execute(&program, &mut state, &host)
-            .await
-            .expect_err("format should reject");
+        let error = lashlang::execute(
+            &lashlang_compile_program(&program).expect("the program compiles"),
+            &mut state,
+            &host,
+        )
+        .await
+        .expect_err("format should reject");
         assert_eq!(error, RuntimeError::Format(expected));
     }
 }
@@ -865,4 +873,17 @@ async fn tool_calls_return_values_and_throw_on_failure() {
     };
     assert_eq!(record["found"], Value::String("pub fn main() {}".into()));
     assert_eq!(record["missing"], Value::Bool(true));
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lashlang_compile_program(
+    program: &lashlang::Program,
+) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
+    Ok(lashlang::compile(
+        &artifact,
+        lashlang::Entry::Main,
+        Some(&program.spans),
+    )?)
 }

@@ -28,7 +28,7 @@ impl ModuleIntrospection {
                     .ok_or_else(|| ModuleIntrospectionError::MissingProcess {
                         process_name: process_name.clone(),
                     })?;
-            let process = artifact.canonical_ir.process(process_name).ok_or_else(|| {
+            let process = artifact.ir.process(process_name).ok_or_else(|| {
                 ModuleIntrospectionError::MissingProcess {
                     process_name: process_name.clone(),
                 }

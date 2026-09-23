@@ -112,7 +112,8 @@ fn the_durable_process_example_links_and_lifts_one_process() {
     let linked = lash_typescript::link(DURABLE_PROCESS, &parity_environment())
         .expect("durable-process.ts should link");
     let processes = linked
-        .program()
+        .artifact
+        .ir
         .declarations
         .iter()
         .filter_map(|declaration| match declaration {

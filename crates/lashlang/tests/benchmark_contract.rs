@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use bench_support::{
     BenchHost, Scenario, linked_benchmark_program, projected_bindings, seeded_state_for,
 };
-use lashlang::{ExecutionEnvironment, ExecutionOutcome, Value, compile_linked, execute};
+use lashlang::{ExecutionEnvironment, ExecutionOutcome, Value, execute};
 
 #[tokio::test(flavor = "current_thread")]
 async fn benchmark_scenarios_have_golden_outputs() {
@@ -15,7 +15,12 @@ async fn benchmark_scenarios_have_golden_outputs() {
 
     for scenario in Scenario::ALL {
         let linked = linked_benchmark_program(*scenario);
-        let compiled = compile_linked(&linked);
+        let compiled = lashlang::compile(
+            &linked.artifact,
+            lashlang::Entry::Main,
+            Some(linked.spans()),
+        )
+        .expect("a module main entry compiles");
         let mut state = seeded_state_for(*scenario);
         let projected = projected_bindings(*scenario);
         let env = ExecutionEnvironment::new(&host).with_projected_bindings(projected);

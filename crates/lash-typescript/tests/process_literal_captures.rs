@@ -90,7 +90,8 @@ fn a_lifted_process_registers_the_signals_its_body_waits_for() {
     let linked = lash_typescript::link(source, &process_environment())
         .unwrap_or_else(|error| panic!("the waiter program links: {error:?}"));
     let signals = linked
-        .program()
+        .artifact
+        .ir
         .declarations
         .iter()
         .find_map(|declaration| match declaration {

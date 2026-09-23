@@ -36,6 +36,7 @@ pub fn program(expressions: Vec<Expr>) -> Program {
 /// A program with declarations ahead of its top-level expressions.
 pub fn module(declarations: Vec<Declaration>, expressions: Vec<Expr>) -> Program {
     Program {
+        language: crate::SourceLanguage::ir(),
         declarations,
         main: Expr::Block(expressions),
         spans: Default::default(),

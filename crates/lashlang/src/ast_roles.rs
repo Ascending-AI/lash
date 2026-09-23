@@ -12,6 +12,32 @@ use super::{
     TryExpr,
 };
 
+/// The front end a [`Program`] was lowered from, recorded per artifact.
+///
+/// A front end names itself; the IR, the VM and every structural consumer are
+/// the same whichever name it is. [`SourceLanguage::ir`] names a program
+/// authored directly as IR.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(transparent)]
+pub struct SourceLanguage(AstString);
+
+impl SourceLanguage {
+    pub fn new(name: impl Into<AstString>) -> Self {
+        Self(name.into())
+    }
+
+    /// A program authored directly as IR, with no front end.
+    pub fn ir() -> Self {
+        Self::new("lashlang")
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 /// The origin of a [`super::ProcessDecl`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]

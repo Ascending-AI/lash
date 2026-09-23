@@ -26,7 +26,7 @@ impl ExecutionHost for Host {
 }
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
-    let program = lash_typescript::compile(source).expect("TypeScript should compile");
+    let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
 }
 

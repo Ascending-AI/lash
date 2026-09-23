@@ -18,7 +18,7 @@ impl ExecutionHost for Host {
 }
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
-    let program = lash_typescript::compile(source).expect("TypeScript should compile");
+    let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
 }
 
@@ -387,7 +387,7 @@ fn every_string_growth_path_is_bounded_before_allocation() {
         finished("try { Array.from({length: 4294967296}); } catch (error) { finish(error.name); }"),
         Value::String("RangeError".into())
     );
-    let program = lash_typescript::compile("finish(Array.from({length: 2000000}));")
+    let program = lash_typescript::testing::compile("finish(Array.from({length: 2000000}));")
         .expect("large array-like source compiles without allocating");
     let environment = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
         ExecutionBound::Unbounded,
@@ -441,7 +441,7 @@ fn for_of_strings_iterates_unicode_code_points() {
 
 #[test]
 fn classic_for_continue_crossing_finally_is_named_rejection() {
-    let error = lash_typescript::compile(
+    let error = lash_typescript::testing::compile(
         "let x=-1; for(let i=0;i<1;i++){try{continue;}finally{x=i;}} finish(x);",
     )
     .expect_err("unsupported continue/finally shape must reject");
@@ -776,7 +776,7 @@ fn array_end_mutators_are_node_exact_and_mutate_the_live_receiver() {
     }
 
     // The receiver must be an array; the methods are not a general surface.
-    lash_typescript::compile("finish('ab'.push('c'));")
+    lash_typescript::testing::compile("finish('ab'.push('c'));")
         .expect_err("a string receiver has no `push`");
     execute("const m = new Map(); finish(m.push(1));").expect_err("a Map receiver has no `push`");
 }
@@ -787,7 +787,7 @@ fn array_end_mutators_are_node_exact_and_mutate_the_live_receiver() {
 /// default host the same loop meets `DEFAULT_HOST_MEMORY_LIMIT_BYTES`.
 #[test]
 fn pushing_past_the_memory_budget_is_a_clean_refusal() {
-    let program = lash_typescript::compile(
+    let program = lash_typescript::testing::compile(
         "const xs: string[] = []; const chunk = 'x'.repeat(65536); for (let i = 0; i < 10000; i++) { xs.push(chunk); } finish(xs.length);",
     )
     .expect("an unbounded push loop compiles");
@@ -980,7 +980,7 @@ fn a_prototype_chain_key_refuses_when_a_tool_result_carries_it() {
     let linked = lash_typescript::link(r#"finish(await web.fetch({ url: "u" }));"#, &environment)
         .expect("TypeScript should link");
     let error = futures::executor::block_on(lashlang::execute(
-        &lash_typescript::compile_linked(&linked),
+        &lashlang::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &ProtoToolHost,
     ))

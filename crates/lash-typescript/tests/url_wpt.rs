@@ -33,7 +33,7 @@ impl ExecutionHost for Host {
 }
 
 fn run(source: &str) -> Result<Value, String> {
-    let program = lash_typescript::compile(source).map_err(|error| error.to_string())?;
+    let program = lash_typescript::testing::compile(source).map_err(|error| error.to_string())?;
     match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
         .map_err(|error| error.to_string())?
     {

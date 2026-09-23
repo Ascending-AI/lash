@@ -1727,8 +1727,8 @@ fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
             fixture["process_definition_identity"]
         );
 
-        let compiled =
-            lashlang::compile_ast(&artifact.canonical_ir).expect("the canonical IR compiles");
+        let compiled = lashlang::testing::harness::try_compile_program(&artifact.ir)
+            .expect("the canonical IR compiles");
         assert_eq!(
             serde_json::json!(format!("{compiled:?}")),
             fixture["compiled_program_debug"]
@@ -1788,8 +1788,8 @@ fn repin_trigger_inputs_retired_record_form() {
         .await
         .expect("the store is readable")
         .expect("the registered module was stored");
-        let compiled =
-            lashlang::compile_ast(&artifact.canonical_ir).expect("the canonical IR compiles");
+        let compiled = lashlang::testing::harness::try_compile_program(&artifact.ir)
+            .expect("the canonical IR compiles");
 
         fixture["artifact"] =
             serde_json::from_slice(&artifact.to_store_bytes().expect("artifact serializes"))

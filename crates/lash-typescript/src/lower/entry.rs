@@ -140,6 +140,7 @@ fn lower_with_ambient_kind(
     root_global_initializers.extend(expressions);
     let main = LashExpr::Block(root_global_initializers);
     let mut program = LashProgram {
+        language: lashlang::SourceLanguage::new(crate::TYPESCRIPT_LANGUAGE),
         declarations: lowerer.declarations,
         main,
         spans: Default::default(),

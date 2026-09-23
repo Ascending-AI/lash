@@ -70,7 +70,7 @@ async fn execute(source: &str) -> Result<(ExecutionOutcome, Vec<String>), Runtim
     let globals = BTreeSet::from(["text".to_string(), "count".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let program = lashlang::compile_ast(&program)
+    let program = lashlang::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let mut state = State::new();
     state
@@ -220,7 +220,7 @@ async fn execute_pending(
     let globals = BTreeSet::from(["pending".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let program = lashlang::compile_ast(&program)
+    let program = lashlang::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let projected = ProjectedValue::custom("pending", Arc::new(PendingDescriptor { value, state }));
     let mut runtime_state = State::new();
