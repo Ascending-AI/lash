@@ -817,8 +817,6 @@ pub(super) struct ReplayableRecordingContext {
     pub(super) events: Arc<RecordingContext>,
     pub(super) process_worker: Mutex<Option<lash_core_worker::DurableProcessWorker>>,
     pub(super) defer_process_workflows: AtomicBool,
-    pub(super) replay_process_workflow_starts_from_journal: AtomicBool,
-    pub(super) live_process_workflow_starts: AtomicUsize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -1677,11 +1675,6 @@ impl ReplayableRecordingContext {
     pub(super) fn install_process_worker(&self, worker: DurableProcessWorker) {
         *self.process_worker.lock_recover() = Some(worker);
     }
-
-    pub(super) fn replay_process_workflow_starts_from_journal(&self) {
-        self.replay_process_workflow_starts_from_journal
-            .store(true, Ordering::SeqCst);
-    }
 }
 
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
@@ -2095,19 +2088,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         let worker = self.process_worker.lock_recover().clone();
         let context = Arc::clone(self);
         Box::pin(async move {
-            if context.replaying.load(Ordering::SeqCst)
-                && context
-                    .replay_process_workflow_starts_from_journal
-                    .load(Ordering::SeqCst)
-            {
-                return Ok(format!("invocation-{}", registration.id));
-            }
             if context.defer_process_workflows.load(Ordering::SeqCst) {
                 return Ok(format!("invocation-{}", registration.id));
             }
-            context
-                .live_process_workflow_starts
-                .fetch_add(1, Ordering::SeqCst);
             let Some(worker) = worker else {
                 return Err(ProcessWorkflowStartFailure::Rejected(TerminalError::new(
                     "process workflow start is unsupported",

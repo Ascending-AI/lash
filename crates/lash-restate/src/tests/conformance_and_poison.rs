@@ -285,6 +285,44 @@ lash_conformance::turn_runner_tests!(
     }
 );
 
+// FIG-1293's migrated tools on the live endpoint: the turn runs in a probe
+// handler, `spawn_agent`'s child session runs in the endpoint's
+// LashProcessWorkflow on the law's worker, and the crash is a failed handler
+// attempt that Restate redelivers.
+lash_conformance::migrated_tools_redrive_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let registry = harness.process_registry();
+        // Restate state outlives a run: a fixed prefix would reopen the last
+        // run's workflows and groups, so each run names its own.
+        let prefix: &'static str =
+            Box::leak(format!("restate-migrated-tools-{}", harness.run_nonce()).into_boxed_str());
+        let orchestration: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
+            Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+            Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
+                lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                    lash_subagents::StaticCapability::new(
+                        "default",
+                        lash_core::facade_support::SessionSpec::inherit(),
+                    ),
+                )),
+            ))),
+        ];
+        (
+            harness,
+            prefix,
+            effect_host,
+            registry,
+            turn_runner,
+            orchestration,
+        )
+    }
+);
+
 lash_conformance::wake_delivery_ordering_tests!({
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
     let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
