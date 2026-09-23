@@ -1153,7 +1153,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
 /// matches no row and is left to its new holder.
 fn release_undelivered_turn_input_claims_conn(
     tx: &rusqlite::Connection,
-    claims: &[lash_core::TurnInputClaim],
+    claims: &[lash_core_execution::TurnInputClaim],
 ) -> Result<(), StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     for claim in claims {
@@ -1163,8 +1163,8 @@ fn release_undelivered_turn_input_claims_conn(
                 claim.session_id.as_str(),
                 claim.claim_id.as_str(),
                 claim.lease_token,
-                lash_core::TurnInputStateKind::PendingActive.as_str(),
-                lash_core::TurnInputStateKind::DeferredNextTurn.as_str(),
+                lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str(),
+                lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str(),
             ],
         )
         .map_err(sqlite_error)?;

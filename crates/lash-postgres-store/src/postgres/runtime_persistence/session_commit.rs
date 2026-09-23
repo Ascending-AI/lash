@@ -1113,7 +1113,7 @@ impl SessionCommitStore for PostgresSessionStore {
 /// matches no row and is left to its new holder.
 async fn release_undelivered_turn_input_claims_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    claims: &[lash_core::TurnInputClaim],
+    claims: &[lash_core_execution::TurnInputClaim],
 ) -> Result<(), StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     for claim in claims {
@@ -1121,8 +1121,8 @@ async fn release_undelivered_turn_input_claims_tx(
             .bind(claim.session_id.as_str())
             .bind(&claim.claim_id)
             .bind(&claim.lease_token)
-            .bind(lash_core::TurnInputStateKind::PendingActive.as_str())
-            .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
+            .bind(lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str())
+            .bind(lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str())
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
