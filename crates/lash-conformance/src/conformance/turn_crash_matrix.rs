@@ -609,6 +609,27 @@ impl SeamControl {
         self.mark_completed(operation);
         output
     }
+
+    /// `around` for a wait whose result is produced by work running beside
+    /// it: a group settlement is awaited while its child runs, so recording
+    /// the wait's entry would pin a race between the two. The boundary still
+    /// stops before the wait; the operation is recorded when the settlement
+    /// is returned, which is always after the child's own seam traffic.
+    async fn around_completion<T, F>(&self, operation: TurnSeamOperation, future: F) -> T
+    where
+        F: Future<Output = T>,
+    {
+        if self.matches(&operation, CrashPlacement::Boundary) {
+            self.stop_here().await;
+        }
+        let output = future.await;
+        self.record(operation.clone());
+        if self.matches(&operation, CrashPlacement::InsideCall) {
+            self.stop_here().await;
+        }
+        self.mark_completed(operation);
+        output
+    }
 }
 
 struct SeamStore {

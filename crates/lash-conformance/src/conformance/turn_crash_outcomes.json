@@ -76,16 +76,6 @@
     "effect_executions_l1": 2
   },
   {
-    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "boundary"},
-    "outcome": "The settlement wait never ran; the child's effect already executed and the receipt-less level-1 recovery re-executes it.",
-    "effect_executions_l1": 2
-  },
-  {
-    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "inside_call"},
-    "outcome": "The settlement read returned but its result was lost; the receipt-less level-1 recovery re-executes the child's external effect.",
-    "effect_executions_l1": 2
-  },
-  {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "boundary"},
     "outcome": "The tool attempt has not crossed the external boundary; recovery executes it once.",
     "effect_executions_l1": 1
@@ -99,6 +89,16 @@
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "inside_call"},
     "outcome": "The controller call returned but runtime progress was not durable; the receipt-less level-1 controller re-executes the external effect.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "boundary"},
+    "outcome": "The settlement wait never ran; the child's effect already executed and the receipt-less level-1 recovery re-executes it.",
+    "effect_executions_l1": 2
+  },
+  {
+    "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "inside_call"},
+    "outcome": "The settlement read returned but its result was lost; the receipt-less level-1 recovery re-executes the child's external effect.",
     "effect_executions_l1": 2
   },
   {
