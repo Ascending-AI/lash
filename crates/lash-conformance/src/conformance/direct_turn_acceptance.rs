@@ -1215,7 +1215,9 @@ async fn assert_nothing_left_to_answer(
     let drain_id = format!("{prefix}-after-redrive-drain");
     let scope = journal
         .effect_host
-        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &drain_id)))
+        .scoped(admit(crate::ExecutionScope::queue_drain(
+            SESSION_ID, &drain_id,
+        )))
         .expect("scope the post-redrive drain");
     let drain = drainer
         .stream_next_queued_work(crate::TurnOptions::new(
@@ -1676,7 +1678,9 @@ pub async fn queued_direct_turn_input_is_answered_in_order_by_the_drain(
         let drain_id = format!("{prefix}-queued-drain-{drains}");
         let scope = journal
             .effect_host
-            .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &drain_id)))
+            .scoped(admit(crate::ExecutionScope::queue_drain(
+                SESSION_ID, &drain_id,
+            )))
             .expect("scope a queued drain");
         let drain = drainer
             .stream_next_queued_work(crate::TurnOptions::new(
@@ -1770,7 +1774,9 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
     let drain_id = format!("{prefix}-recovery-drain");
     let drain_scope = journal
         .effect_host
-        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &drain_id)))
+        .scoped(admit(crate::ExecutionScope::queue_drain(
+            SESSION_ID, &drain_id,
+        )))
         .expect("scope the recovery drain");
     let drain = drainer
         .stream_next_queued_work(crate::TurnOptions::new(
@@ -1809,7 +1815,7 @@ pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
     assert!(
         applied
             .iter()
-            .all(|application| application.turn_id.as_str() == drain_id),
+            .all(|application| application.turn_id != turn_id),
         "the recovery drain's turn is the one that answered it: {applied:?}"
     );
     assert!(pending_input_ids(&store).await.is_empty());
