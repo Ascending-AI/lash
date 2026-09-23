@@ -859,10 +859,6 @@ impl LashlangProcessHost<'_> {
         call_id
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the TypeScript runtime receiver was checked in the match above, which the message states, and the journaled call is awaited in place"
-    )]
     async fn resource_operation(
         &self,
         operation: String,

@@ -3,6 +3,11 @@
 //! the write side, and recovered by redrive after a crash between the replay
 //! row and the summary append.
 
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 use lash_core::ProcessEffectOutcomeClass;
 
@@ -52,7 +57,18 @@ fn disable_missing_trigger() -> lashlang::Expr {
 #[derive(Clone)]
 enum SummaryBackend {
     Sqlite(DurableAdmissionPaths),
-    Postgres(String),
+    /// A database URL, and the directory attachments live in.
+    Postgres(String, std::path::PathBuf),
+}
+
+/// The durable stores one host is built over.
+struct SummaryStores {
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+    env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
+    trigger_store: Arc<dyn lash_core::TriggerStore>,
+    effect_host: Arc<dyn lash_core::EffectHost>,
+    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
+    attachments: std::path::PathBuf,
 }
 
 struct SummaryHost {
@@ -69,7 +85,7 @@ impl SummaryBackend {
                     .await
                     .expect("open SQLite artifact store"),
             ),
-            Self::Postgres(url) => Arc::new(
+            Self::Postgres(url, _) => Arc::new(
                 lash_postgres_store::PostgresStorage::connect(url)
                     .await
                     .expect("connect PostgreSQL storage")
@@ -85,16 +101,16 @@ impl SummaryBackend {
         let provider = mock_provider();
         let provider_id = provider.kind().to_string();
         let artifact = self.artifact_store().await;
-        let (registry, env_store, trigger_store, effect_host, store_factory, attachments): (
-            Arc<dyn lash_core::ProcessRegistry>,
-            Arc<dyn lash_core::ProcessExecutionEnvStore>,
-            Arc<dyn lash_core::TriggerStore>,
-            Arc<dyn lash_core::EffectHost>,
-            Arc<dyn lash_core::SessionStoreFactory>,
-            std::path::PathBuf,
-        ) = match self {
-            Self::Sqlite(paths) => (
-                Arc::new(
+        let SummaryStores {
+            registry,
+            env_store,
+            trigger_store,
+            effect_host,
+            store_factory,
+            attachments,
+        } = match self {
+            Self::Sqlite(paths) => SummaryStores {
+                registry: Arc::new(
                     lash_sqlite_store::SqliteProcessRegistry::open(
                         &paths.processes,
                         &paths.sessions,
@@ -102,41 +118,43 @@ impl SummaryBackend {
                     .await
                     .expect("open SQLite process registry"),
                 ),
-                Arc::new(
+                env_store: Arc::new(
                     lash_sqlite_store::Store::open(&paths.artifacts)
                         .await
                         .expect("open SQLite process-environment store"),
                 ),
-                Arc::new(
+                trigger_store: Arc::new(
                     lash_sqlite_store::SqliteTriggerStore::open(&paths.triggers)
                         .await
                         .expect("open SQLite trigger store"),
                 ),
-                Arc::new(
+                effect_host: Arc::new(
                     lash_sqlite_store::SqliteEffectHost::open(&paths.effects)
                         .await
                         .expect("open SQLite effect journal"),
                 ),
-                Arc::new(
+                store_factory: Arc::new(
                     lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
                         &paths.sessions,
                         &paths.processes,
                     ),
                 ),
-                paths.attachments.clone(),
-            ),
-            Self::Postgres(url) => {
+                attachments: paths.attachments.clone(),
+            },
+            Self::Postgres(url, attachments) => {
                 let storage = lash_postgres_store::PostgresStorage::connect(url)
                     .await
                     .expect("connect PostgreSQL storage");
-                (
-                    Arc::new(storage.process_registry()),
-                    Arc::new(storage.process_env_store()),
-                    Arc::new(storage.trigger_store()),
-                    Arc::new(storage.effect_host()),
-                    Arc::new(storage.session_store_factory_with_shared_process_registry()),
-                    std::env::temp_dir().join(format!("lash-effect-summary-{owner}")),
-                )
+                SummaryStores {
+                    registry: Arc::new(storage.process_registry()),
+                    env_store: Arc::new(storage.process_env_store()),
+                    trigger_store: Arc::new(storage.trigger_store()),
+                    effect_host: Arc::new(storage.effect_host()),
+                    store_factory: Arc::new(
+                        storage.session_store_factory_with_shared_process_registry(),
+                    ),
+                    attachments: attachments.join(owner),
+                }
             }
         };
         let (registry, faults) = match fault {
@@ -214,7 +232,7 @@ impl SummaryBackend {
                     .collect::<std::result::Result<BTreeMap<_, _>, _>>()
                     .expect("read replay rows")
             }
-            Self::Postgres(url) => {
+            Self::Postgres(url, _) => {
                 let storage = lash_postgres_store::PostgresStorage::connect(url)
                     .await
                     .expect("connect PostgreSQL storage");
@@ -298,7 +316,7 @@ async fn start_process(
         .processes()
         .start(
             start_request,
-            runtime_operation_scope(&host.core, &format!("start-{process_id}")),
+            runtime_operation_scope(&host.core, format!("start-{process_id}")),
         )
         .await
         .expect("start the effect-summary process");
@@ -777,7 +795,8 @@ async fn postgres_crash_between_replay_row_and_summary_append_redrives_once() ->
     .expect("reset PostgreSQL process change clock");
     drop(storage);
 
-    let backend = SummaryBackend::Postgres(database_url);
+    let attachments = tempfile::tempdir().expect("PostgreSQL attachment tempdir");
+    let backend = SummaryBackend::Postgres(database_url, attachments.path().to_path_buf());
     for batch_first in [false, true] {
         assert_crash_window_recovers_once(&backend, batch_first).await;
     }
