@@ -48,6 +48,7 @@ async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()
                             "clock",
                             b::module_call(&[TYPESCRIPT_RUNTIME_MODULE_PATH], "now", Vec::new()),
                         ),
+                        b::sleep_until(b::num(0.0)),
                         b::assign(
                             "listed",
                             b::module_call(&["triggers"], "list", vec![b::record(Vec::new())]),
@@ -136,8 +137,8 @@ async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()
         .collect::<Vec<_>>();
     assert_eq!(
         occurrences.len(),
-        4,
-        "tool, TypeScript and two trigger outcomes: {occurrences:?}; terminal={terminal:?}"
+        5,
+        "tool, TypeScript, sleep and two trigger outcomes: {occurrences:?}; terminal={terminal:?}"
     );
     assert_eq!(
         occurrences
@@ -195,6 +196,11 @@ async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()
                     lash_core::RuntimeEffectOutcome::LanguageRuntimeValue { .. }
                 ));
             }
+            "sleep_until" => {
+                assert_eq!(occurrence.outcome_class, ProcessEffectOutcomeClass::Success);
+                assert!(occurrence.code.is_none());
+                assert!(matches!(outcome, lash_core::RuntimeEffectOutcome::Sleep));
+            }
             "triggers.list" => {
                 assert_eq!(occurrence.outcome_class, ProcessEffectOutcomeClass::Success);
                 assert!(
@@ -211,6 +217,5 @@ async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()
             operation => panic!("unexpected effect operation {operation}"),
         }
     }
-    // TODO(FIG-3474): assert sleep rows here when Sleep carries a VM call site.
     Ok(())
 }

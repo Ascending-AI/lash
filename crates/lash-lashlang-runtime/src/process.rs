@@ -949,6 +949,10 @@ impl LashlangProcessHost<'_> {
 
     async fn sleep(&self, sleep: lashlang::Sleep) -> Result<lashlang::Value, ExecutionHostError> {
         let call_site = sleep.call_site;
+        let operation = match sleep.kind {
+            lashlang::SleepKind::For => "sleep_for",
+            lashlang::SleepKind::Until => "sleep_until",
+        };
         let sleep = process_sleep(sleep.kind, &sleep.value)?;
         if let Some(call_site) = &call_site {
             self.lashlang_execution_trace.emit_waiting(
@@ -963,12 +967,32 @@ impl LashlangProcessHost<'_> {
         }
         let sequence = self.ordinals.sleep_sequence.fetch_add(1, Ordering::Relaxed);
         let scope = format!("process:{}", self.process_id);
-        self.ctx
-            .sleep_process(&scope, sequence, sleep)
-            .await
-            .map_err(|error| LashlangHostError::SleepProcess {
-                message: error.to_string(),
-            })?;
+        let slept = self.ctx.sleep_process(&scope, sequence, sleep).await;
+        // The effect host journals the wake verdict, so a success or a
+        // recorded cancellation is replay-stable; any other error has no
+        // recorded outcome to summarise.
+        let outcome_class = match &slept {
+            Ok(()) => Some(lash_core::ProcessEffectOutcomeClass::Success),
+            Err(error)
+                if error.code == lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled =>
+            {
+                Some(lash_core::ProcessEffectOutcomeClass::Cancelled)
+            }
+            Err(_) => None,
+        };
+        if let (Some(call_site), Some(outcome_class)) = (&call_site, outcome_class) {
+            self.append_effect_outcome(
+                call_site,
+                operation,
+                outcome_class,
+                None,
+                &self.ctx.process_sleep_replay_key(&scope, sequence),
+            )
+            .await?;
+        }
+        slept.map_err(|error| LashlangHostError::SleepProcess {
+            message: error.to_string(),
+        })?;
         if let Some(call_site) = &call_site
             && !self.cancellation.is_cancelled()
         {

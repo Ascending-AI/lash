@@ -20,6 +20,20 @@ impl LashlangProcessHost<'_> {
                 (lash_core::ProcessEffectOutcomeClass::Cancelled, None)
             }
         };
+        self.append_effect_outcome(call_site, operation, outcome_class, code, replay_key)
+            .await
+    }
+
+    /// Records one replay-stable effect outcome under the effect's own replay
+    /// key, so a redrive recovers the same event instead of appending again.
+    pub(super) async fn append_effect_outcome(
+        &self,
+        call_site: &lashlang::LashlangExecutionCallSite,
+        operation: &str,
+        outcome_class: lash_core::ProcessEffectOutcomeClass,
+        code: Option<lash_core::FailureCode>,
+        replay_key: &str,
+    ) -> Result<(), ExecutionHostError> {
         self.ctx
             .append_process_event(
                 lash_core::ProcessEffectSummaryOccurrence::new(
