@@ -1247,6 +1247,12 @@ async fn recorded_intent_command_replays_after_live_terminal_mutation_on_postgre
     reset(&second_storage).await;
 }
 
+/// The redrive runs on a fresh runtime over a fresh in-memory session store:
+/// only the PostgreSQL effect journal survives. Every journaled step replays
+/// byte-identically, and the signal command crosses once. The commit then
+/// cedes with `accepted_turn_input_ceded`, because the journaled initial drive
+/// set claims a row this session store never held (ADR 0069 §6, FIG-3532). A
+/// redrive never re-admits the accepted input to answer it a second time.
 #[tokio::test(flavor = "multi_thread")]
 async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_postgres() {
     let Some(database_url) = database_url() else {
@@ -1406,7 +1412,7 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
     .await;
     let replay_scope =
         postgres_public_turn_scope(replay_host.as_ref(), Arc::clone(&signal_crossing_frames));
-    let replay_turn = replay
+    let replay_error = replay
         .stream_turn(
             public_runtime_input(),
             lash_core::facade_support::TurnOptions::new(
@@ -1415,11 +1421,13 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
             ),
         )
         .await
-        .expect("redrive PostgreSQL public signal-intent turn");
-    assert!(matches!(
-        replay_turn.outcome,
-        lash_core_execution::facade_support::TurnOutcome::Finished(_)
-    ));
+        .expect_err("a redrive over a session store without the claimed row cedes");
+    assert_eq!(
+        replay_error.code,
+        lash_core_execution::RuntimeErrorCode::AcceptedTurnInputCeded,
+        "the journaled drive claims a row this store never held, so the redrive cedes \
+         rather than re-admitting and answering the input again: {replay_error:?}"
+    );
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
     assert_eq!(model_calls.load(Ordering::SeqCst), 2);
     let replay_signal_frames: Vec<String> = sqlx::query_scalar(
