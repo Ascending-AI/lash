@@ -31,7 +31,6 @@ testing = []
 workspace = true
 
 [dependencies]
-lash-sansio = { workspace = true }
 lashlang = { workspace = true }
 ryu-js = { workspace = true }
 serde_json = { workspace = true }
@@ -44,6 +43,7 @@ thiserror = { workspace = true }
 futures = "0.3"
 jsonschema = { workspace = true, default-features = false }
 lashlang = { workspace = true, features = ["testing"] }
+lash-sansio = { workspace = true }
 lash-typescript = { package = "lash-internal-typescript", path = ".", features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"
