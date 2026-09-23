@@ -15,11 +15,14 @@ pub(super) fn streamed_text_finalizes_once_fact(
             "streamed-text finalization did not find a successful provider boundary with scheduler-owned provider-event release".to_string(),
         );
     };
-    let expected = provider
-        .payload
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let expected = crate::runtime_contracts::host_assistant_message(
+        provider
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    );
+    let expected = expected.as_str();
     let output = provider
         .observed
         .get("provider_output")

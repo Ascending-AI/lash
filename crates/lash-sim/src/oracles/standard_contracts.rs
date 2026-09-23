@@ -73,11 +73,14 @@ pub(super) fn initial_provider_projection_fact(
                 .to_string(),
         );
     };
-    let expected_text = provider
-        .payload
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let expected_text = crate::runtime_contracts::host_assistant_message(
+        provider
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    );
+    let expected_text = expected_text.as_str();
     let output = provider
         .observed
         .get("provider_output")

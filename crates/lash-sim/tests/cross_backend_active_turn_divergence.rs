@@ -27,7 +27,7 @@ use lash_core::{
 use lash_sim::ProviderWireScript;
 use lash_sim::ScriptedLlmHttpTransport;
 use lash_sim::runtime_providers::{
-    OPENAI_COMPATIBLE, runtime_provider_components, runtime_scripts_for_texts,
+    OPENAI_COMPATIBLE, runtime_provider_components, runtime_script_for_text,
 };
 
 const PROVIDER_KIND: &str = OPENAI_COMPATIBLE;
@@ -38,7 +38,11 @@ const PROVIDER_KIND: &str = OPENAI_COMPATIBLE;
 )]
 fn scripts(n: usize) -> Vec<ProviderWireScript> {
     let texts: Vec<String> = (1..=n).map(|i| format!("answer {i}")).collect();
-    runtime_scripts_for_texts(PROVIDER_KIND, &texts).expect("scripts")
+    texts
+        .iter()
+        .map(|text| runtime_script_for_text(PROVIDER_KIND, text))
+        .collect::<Result<Vec<_>, _>>()
+        .expect("scripts")
 }
 
 async fn build_core(

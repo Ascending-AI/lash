@@ -309,6 +309,21 @@ impl Serialize for RuntimeFinalValueInvariantFacts {
     }
 }
 
+/// The documented projection from the text a provider streamed to the
+/// host-facing assistant message (`TurnReport::assistant_message`): every line
+/// loses its trailing whitespace and carriage return, lines rejoin with `\n`,
+/// and the whole is trimmed. Written out here rather than borrowed so the
+/// contract states the projection instead of trusting lash's copy of it.
+pub fn host_assistant_message(streamed: &str) -> String {
+    streamed
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 pub fn runtime_turn_contract(
     observation: &RuntimeTurnObservation,
     expected_session_id: &SessionId,
@@ -334,6 +349,7 @@ pub fn runtime_turn_contract(
             ),
         );
     }
+    let expected_assistant_message = host_assistant_message(expected_assistant_message);
     if observation.assistant_message != expected_assistant_message {
         return OracleVerdict::failed(
             "runtime.turn_contract",

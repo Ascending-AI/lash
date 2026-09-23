@@ -6,6 +6,7 @@ use lash_llm_transport::LlmHttpTransport;
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::{OpenAiCompatibleProvider, OpenAiProvider};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::canonical_scripts::{
@@ -77,14 +78,100 @@ pub fn runtime_script_name_for_kind(
     })
 }
 
-pub fn runtime_scripts_for_texts(
-    provider_kind: &str,
-    texts: &[String],
-) -> Result<Vec<ProviderWireScript>, RuntimeProviderError> {
+/// The usage one scripted provider turn reports, in the ledger's buckets.
+/// [`runtime_script_value_for_turn`] encodes it in each provider's own wire
+/// convention; the durable-content oracle decodes it back from the wire.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScriptedUsage {
+    pub input_tokens: i64,
+    pub cache_read_input_tokens: i64,
+    pub output_tokens: i64,
+    /// Part of `output_tokens`, never more than it.
+    pub reasoning_output_tokens: i64,
+}
+
+/// One scripted provider turn: the text it streams and, when set, the usage it
+/// reports. `None` keeps the canonical script's fixed usage, which is what
+/// traces recorded before generated usage existed were run against.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScriptedTurn {
+    pub text: String,
+    pub usage: Option<ScriptedUsage>,
+}
+
+/// The scripted turns an ingress boundary declares: `provider_texts`, paired
+/// with `provider_usage` when the generator recorded it.
+pub fn scripted_turns_from_ingress(payload: &Value) -> Result<Vec<ScriptedTurn>, String> {
+    let texts = payload
+        .get("provider_texts")
+        .and_then(Value::as_array)
+        .ok_or("missing provider_texts")?;
+    if texts.is_empty() {
+        return Err("provided no runtime provider scripts".to_string());
+    }
+    let usage = match payload.get("provider_usage") {
+        None => vec![None; texts.len()],
+        Some(usage) => {
+            let usage = serde_json::from_value::<Vec<ScriptedUsage>>(usage.clone())
+                .map_err(|err| format!("provider_usage is malformed: {err}"))?;
+            if usage.len() != texts.len() {
+                return Err(format!(
+                    "provider_usage has {} entries for {} provider_texts",
+                    usage.len(),
+                    texts.len()
+                ));
+            }
+            usage.into_iter().map(Some).collect()
+        }
+    };
     texts
         .iter()
-        .map(|text| runtime_script_for_text(provider_kind, text))
+        .zip(usage)
+        .map(|(text, usage)| {
+            Ok(ScriptedTurn {
+                text: text
+                    .as_str()
+                    .ok_or("provider_texts holds a non-string entry")?
+                    .to_string(),
+                usage,
+            })
+        })
         .collect()
+}
+
+/// The scripted turn one provider boundary runs: its `text`, and its `usage`
+/// when the generator recorded one.
+pub fn scripted_turn_from_provider_boundary(payload: &Value) -> Result<ScriptedTurn, String> {
+    Ok(ScriptedTurn {
+        text: payload
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        usage: payload
+            .get("usage")
+            .map(|usage| serde_json::from_value(usage.clone()))
+            .transpose()
+            .map_err(|err| format!("usage is malformed: {err}"))?,
+    })
+}
+
+pub fn runtime_scripts_for_turns(
+    provider_kind: &str,
+    turns: &[ScriptedTurn],
+) -> Result<Vec<ProviderWireScript>, RuntimeProviderError> {
+    turns
+        .iter()
+        .map(|turn| runtime_script_for_turn(provider_kind, turn))
+        .collect()
+}
+
+pub fn runtime_script_for_turn(
+    provider_kind: &str,
+    turn: &ScriptedTurn,
+) -> Result<ProviderWireScript, RuntimeProviderError> {
+    let value = runtime_script_value_for_turn(provider_kind, &turn.text, turn.usage.as_ref())?;
+    Ok(ProviderWireScript::from_json_str(&value.to_string())?)
 }
 
 pub fn runtime_script_for_text(
@@ -125,6 +212,16 @@ pub fn google_runtime_script_for_text_with_explicit_zero_reasoning(
 pub fn runtime_script_value_for_text(
     provider_kind: &str,
     text: &str,
+) -> Result<Value, RuntimeProviderError> {
+    runtime_script_value_for_turn(provider_kind, text, None)
+}
+
+/// [`runtime_script_value_for_text`] reporting `usage` instead of the canonical
+/// script's fixed counts.
+pub fn runtime_script_value_for_turn(
+    provider_kind: &str,
+    text: &str,
+    usage: Option<&ScriptedUsage>,
 ) -> Result<Value, RuntimeProviderError> {
     let mut script: Value = match provider_kind {
         OPENAI_COMPATIBLE => serde_json::from_str(OPENAI_COMPAT_RUNTIME_TEXT)?,
@@ -244,8 +341,119 @@ pub fn runtime_script_value_for_text(
         _ => unreachable!("provider kind was validated above"),
     }
 
+    if let Some(usage) = usage {
+        encode_scripted_usage(provider_kind, &mut script, usage)?;
+    }
     script["expected_provider"]["text"] = Value::String(text.to_string());
     Ok(script)
+}
+
+/// Write `usage` into a runtime script in `provider_kind`'s wire convention:
+/// OpenAI reports prompt tokens inclusive of cached ones and reasoning inside
+/// the completion count; Anthropic splits input (`message_start`) from output
+/// (`message_delta`); Google reports candidates and thoughts separately.
+fn encode_scripted_usage(
+    provider_kind: &str,
+    script: &mut Value,
+    usage: &ScriptedUsage,
+) -> Result<(), RuntimeProviderError> {
+    let prompt = usage.input_tokens + usage.cache_read_input_tokens;
+    match provider_kind {
+        OPENAI_COMPATIBLE => {
+            // The canonical runtime stream carries no usage chunk; the usage
+            // chunk rides after the finish chunk, where OpenAI streams it.
+            let timeline = script
+                .get_mut("timeline")
+                .and_then(Value::as_array_mut)
+                .ok_or_else(|| RuntimeProviderError::new("runtime script has no timeline"))?;
+            let finish_at = timeline
+                .get(2)
+                .and_then(|event| event.get("at"))
+                .and_then(Value::as_u64)
+                .ok_or_else(|| RuntimeProviderError::new("runtime script has no finish chunk"))?;
+            // Every wire event keeps its own release instant: sharing one
+            // with the finish chunk would let task polling decide whether the
+            // transport was already parked on the usage gate.
+            let at = finish_at + 1;
+            for later in timeline.iter_mut().skip(3) {
+                if let Some(later_at) = later.get("at").and_then(Value::as_u64) {
+                    later["at"] = json!(later_at + 1);
+                }
+            }
+            timeline.insert(
+                3,
+                json!({
+                    "at": at,
+                    "event": "sse",
+                    "data": json!({
+                        "choices": [],
+                        "usage": {
+                            "prompt_tokens": prompt,
+                            "completion_tokens": usage.output_tokens,
+                            "prompt_tokens_details": {"cached_tokens": usage.cache_read_input_tokens},
+                            "completion_tokens_details": {"reasoning_tokens": usage.reasoning_output_tokens},
+                        },
+                    })
+                    .to_string(),
+                }),
+            );
+        }
+        OPENAI => {
+            let mut completed = sse_data(script, 4)?;
+            completed["response"]["usage"] = json!({
+                "input_tokens": prompt,
+                "output_tokens": usage.output_tokens,
+                "input_tokens_details": {"cached_tokens": usage.cache_read_input_tokens},
+                "output_tokens_details": {"reasoning_tokens": usage.reasoning_output_tokens},
+            });
+            set_sse_data(script, 4, completed)?;
+        }
+        ANTHROPIC => {
+            let mut start = sse_data(script, 1)?;
+            start["message"]["usage"] = json!({
+                "input_tokens": usage.input_tokens,
+                "cache_read_input_tokens": usage.cache_read_input_tokens,
+                "output_tokens": 0,
+            });
+            set_sse_data(script, 1, start)?;
+            let mut delta = sse_data(script, 5)?;
+            delta["usage"] = json!({
+                "output_tokens": usage.output_tokens,
+                "output_tokens_details": {"thinking_tokens": usage.reasoning_output_tokens},
+            });
+            set_sse_data(script, 5, delta)?;
+        }
+        GOOGLE_OAUTH => {
+            for timeline_index in [1, 2] {
+                let mut event = sse_data(script, timeline_index)?;
+                event["response"]["usageMetadata"] = json!({
+                    "promptTokenCount": prompt,
+                    "cachedContentTokenCount": usage.cache_read_input_tokens,
+                    "candidatesTokenCount": usage.output_tokens - usage.reasoning_output_tokens,
+                    "thoughtsTokenCount": usage.reasoning_output_tokens,
+                });
+                set_sse_data(script, timeline_index, event)?;
+            }
+        }
+        other => {
+            return Err(RuntimeProviderError::new(format!(
+                "unsupported generated runtime provider `{other}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn sse_data(script: &Value, timeline_index: usize) -> Result<Value, RuntimeProviderError> {
+    let encoded = script
+        .pointer(&format!("/timeline/{timeline_index}/data"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            RuntimeProviderError::new(format!(
+                "provider runtime script missing timeline[{timeline_index}].data"
+            ))
+        })?;
+    Ok(serde_json::from_str(encoded)?)
 }
 
 /// The distinct, non-vacuous prose a live failure script streams BEFORE its
@@ -332,6 +540,9 @@ pub fn live_failure_script(
     Ok(ProviderWireScript::from_json_str(&encoded)?)
 }
 
+/// The native tool-call id a suspend-roundtrip session's first exchange streams.
+pub const SUSPEND_TOOL_CALL_ID: &str = "suspend-call-1";
+
 /// Two real openai-compatible provider wire scripts for a suspend-roundtrip
 /// session: the first streams a native tool call for `tool_name` (which parks the
 /// live turn on the await key), the second streams the final `resumed` answer
@@ -346,7 +557,7 @@ pub fn suspend_roundtrip_scripts(
             "delta": {
                 "tool_calls": [{
                     "index": 0,
-                    "id": "suspend-call-1",
+                    "id": SUSPEND_TOOL_CALL_ID,
                     "type": "function",
                     "function": { "name": tool_name, "arguments": "{}" }
                 }]
@@ -492,6 +703,43 @@ mod tests {
             panic!("expected scripted SSE event");
         };
         serde_json::from_str(data).expect("scripted SSE payload is JSON")
+    }
+
+    /// The content oracle's own wire decoder reads back exactly the text and
+    /// usage each provider's encoding wrote, so a ledger mismatch is lash's.
+    #[test]
+    fn scripted_turn_encodings_decode_to_what_they_report() {
+        let usage = ScriptedUsage {
+            input_tokens: i64::from(u32::MAX) + 3,
+            cache_read_input_tokens: 1 << 40,
+            output_tokens: (1 << 53) - 2,
+            reasoning_output_tokens: 7,
+        };
+        let text = "caf\u{e9} \u{0}\r\n\u{1f980}e\u{301}";
+        for kind in MIGRATED_RUNTIME_PROVIDER_KINDS {
+            let script = runtime_script_for_turn(
+                kind,
+                &ScriptedTurn {
+                    text: text.to_string(),
+                    usage: Some(usage),
+                },
+            )
+            .expect("scripted turn");
+            let emitted = crate::content_oracle::emitted_attempt(&script).expect("decodes");
+            assert_eq!(emitted.text, text, "{kind}");
+            assert!(emitted.completed, "{kind}");
+            assert_eq!(
+                emitted.usage,
+                Some(crate::content_oracle::UsageBuckets {
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                    cache_read_input_tokens: usage.cache_read_input_tokens,
+                    cache_write_input_tokens: 0,
+                    reasoning_output_tokens: usage.reasoning_output_tokens,
+                }),
+                "{kind}"
+            );
+        }
     }
 
     #[test]

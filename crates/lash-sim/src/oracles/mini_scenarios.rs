@@ -243,11 +243,14 @@ pub(super) fn mini_standard_streamed_text_finalizes_once(
             "no streamed provider completion with multiple scheduler-owned SSE units was observed",
         );
     };
-    let expected = provider
-        .payload
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let expected = crate::runtime_contracts::host_assistant_message(
+        provider
+            .payload
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    );
+    let expected = expected.as_str();
     let output = provider
         .observed
         .get("provider_output")

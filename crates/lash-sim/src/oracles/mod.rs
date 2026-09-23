@@ -180,14 +180,23 @@ pub use semantic_laws::{
 };
 use standard_contracts::*;
 
+/// Generated-workload oracles evaluated from run-time evidence the trace does
+/// not serialize, in the order the runner evaluates them ahead of the trace
+/// battery: the live-provider failure turns, and the durable-content evidence
+/// (wire content read from the provider scripts and sessions read back through
+/// fresh store handles). Minimization carries their recorded verdicts forward
+/// but cannot re-evaluate them after a shrink.
+pub const RUN_ONLY_ORACLES: &[&str] = &[
+    LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE,
+    crate::content_oracle::DURABLE_CONTENT_ORACLE,
+];
+
 /// Evaluate every generated-workload oracle whose evidence is carried by a
 /// [`SimulationTrace`](crate::trace::SimulationTrace).
 ///
-/// The live-provider failure coverage oracle is intentionally absent: its live
-/// turn facts are not serialized into the trace, so minimization can carry its
-/// recorded verdict but cannot re-evaluate it after a shrink. Keeping the
-/// remaining battery here makes the runner and minimizer share one ordering and
-/// one definition instead of maintaining parallel lists.
+/// The [`RUN_ONLY_ORACLES`] are intentionally absent. Keeping the remaining
+/// battery here makes the runner and minimizer share one ordering and one
+/// definition instead of maintaining parallel lists.
 pub fn generated_trace_oracles(
     events: &[DeliveredBoundary],
     summary: &AbstractWorldSummary,

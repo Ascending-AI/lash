@@ -64,8 +64,9 @@ use crate::runtime_contracts::{
 };
 use crate::runtime_providers::{
     ANTHROPIC, LIVE_FAILURE_LEAK_PROSE, OPENAI_COMPATIBLE, live_failure_script,
-    runtime_provider_components, runtime_script_for_text,
-    runtime_scripts_for_texts as runtime_provider_scripts_for_texts, suspend_roundtrip_scripts,
+    runtime_provider_components, runtime_script_for_text, runtime_script_for_turn,
+    runtime_scripts_for_turns, scripted_turn_from_provider_boundary, scripted_turns_from_ingress,
+    suspend_roundtrip_scripts,
 };
 use crate::scheduler::{
     BoundaryDeliveryLog, BoundaryEvent, BoundaryKind, BoundaryScheduler, RuntimeCompletionFamily,
@@ -181,6 +182,7 @@ impl From<WorkloadProfileError> for FixedScriptRunnerError {
 }
 
 mod agent_contracts;
+mod attempt_probe;
 #[cfg(test)]
 mod contract_registry_tests;
 mod contract_support;
@@ -196,6 +198,8 @@ mod runtime_proofs;
 mod scenario_artifacts;
 mod scenario_evidence;
 mod scenario_facts;
+#[cfg(test)]
+mod sqlite_rerun_tests;
 mod standard_contracts;
 #[cfg(test)]
 mod tests;
@@ -205,8 +209,8 @@ pub(crate) use contract_support::replay_contract_execution;
 pub use fixed_script::run_fixed_script_profile;
 pub(crate) use generated_driver::run_generated_workload_for_fixture;
 pub use generated_driver::{
-    replay_workload_on_postgres, replay_workload_on_sqlite, replay_workload_serialized_reference,
-    run_generated_postgres_replay_for_seeds,
+    DurableRerun, replay_workload_on_postgres, replay_workload_on_sqlite,
+    replay_workload_serialized_reference, run_generated_postgres_replay_for_seeds,
 };
 pub use generated_profiles::{
     SimRunMode, SimRunModeError, SimSeedSource, WEEKLY_REGRESSION_CORPUS,
@@ -215,6 +219,7 @@ pub use generated_profiles::{
 pub use runtime_completion::SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS;
 
 use agent_contracts::*;
+use attempt_probe::*;
 use contract_support::*;
 use fixed_script::*;
 use generated_driver::*;

@@ -3,6 +3,7 @@ pub mod backend_fault;
 mod cache_regression;
 mod canonical_scripts;
 mod clock;
+pub mod content_oracle;
 mod lease;
 #[cfg(test)]
 mod native_substrate_scenarios;

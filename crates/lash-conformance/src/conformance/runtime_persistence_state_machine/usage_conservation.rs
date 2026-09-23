@@ -226,6 +226,17 @@ fn usage_entry(slot: u8, value: u8) -> crate::TokenLedgerEntry {
                 reasoning_output_tokens: edge + 4,
             }
         }
+        254 => {
+            // The u32 boundary: counters a 32-bit consumer would wrap.
+            let edge = i64::from(u32::MAX);
+            crate::TokenUsage {
+                input_tokens: edge,
+                output_tokens: edge + 1,
+                cache_read_input_tokens: edge - 1,
+                cache_write_input_tokens: edge + 2,
+                reasoning_output_tokens: edge,
+            }
+        }
         _ => {
             let base = i64::from(value);
             crate::TokenUsage {

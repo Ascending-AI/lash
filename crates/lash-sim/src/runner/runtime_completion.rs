@@ -315,12 +315,13 @@ pub(super) fn runtime_completion_units(
                     event.boundary_id
                 ))
             })?;
-        let text = event
-            .payload
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let script = runtime_script_for_text(provider_kind, text)
+        let turn = scripted_turn_from_provider_boundary(&event.payload).map_err(|err| {
+            FixedScriptRunnerError::Assertion(format!(
+                "provider runtime completion `{}` {err}",
+                event.boundary_id
+            ))
+        })?;
+        let script = runtime_script_for_turn(provider_kind, &turn)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         return Ok(script
             .timeline()
