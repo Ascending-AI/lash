@@ -790,25 +790,23 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         if handle.is_exhausted() {
             return Err(exhausted_group_error(handle));
         }
-        // The store's notifier — shared with every driver over this database —
-        // is what turns a settlement committed by *another* host into a wake
-        // here; `state.settled` still answers for the process-local signals a
-        // commit does not produce (a child task finishing, the group closing).
-        let settlement_notify = self
-            .row_store
-            .settlement_notifier(handle.group_key())
-            .await?;
+        // The journal's group wake — shared with every driver over this
+        // database — is what turns a settlement committed by *another* host
+        // into a wake here; `state.settled` still answers for the
+        // process-local signals a commit does not produce (a child task
+        // finishing, the group closing).
+        let watch = self
+            .watch_journal(EffectJournalSubject::Group {
+                group_key: handle.group_key(),
+            })
+            .await;
         loop {
-            let notified = settlement_notify.notified();
-            tokio::pin!(notified);
+            // Both enabled *before* the journal read, so a sibling that
+            // settles between the read and the park is caught rather than
+            // slept through: `notify_waiters` wakes listeners, not arrivals.
+            let armed = watch.arm();
             let settled = state.settled.notified();
             tokio::pin!(settled);
-            // Enabled *before* the journal read, so a sibling that settles
-            // between the read and the park is caught by this future rather
-            // than slept through: `Notify::notified()` only starts listening
-            // when it is first polled, and `notify_waiters` wakes listeners,
-            // not arrivals.
-            notified.as_mut().enable();
             settled.as_mut().enable();
             let closed = state.state.lock_recover().closed;
             if closed {
@@ -828,7 +826,7 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                 () = cancel.cancelled() => {
                     return Err(await_cancelled_error(handle.group_key(), rank));
                 }
-                () = &mut notified => {}
+                _ = armed.park(&*self.clock, None) => {}
                 () = &mut settled => {}
             }
         }

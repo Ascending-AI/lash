@@ -90,7 +90,6 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::{RuntimeError, RuntimeErrorCode};
@@ -118,9 +117,6 @@ pub use super::group_journal::{
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
 use lease_renewal::ClaimedExecution;
-
-/// Delay between polls while another owner holds a live claim.
-const BUSY_POLL: Duration = Duration::from_millis(25);
 
 /// Process-wide sequence making each driver's owner id distinct.
 static EFFECT_OWNER_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -996,8 +992,7 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     ///
     /// Monotonic in the caller's favour: the set of commit positions below
     /// `commit_seq` was fixed when it was allocated, so once this answers
-    /// `false` it cannot become `true` again, and a driver may poll it without
-    /// a notification channel.
+    /// `false` it cannot become `true` again.
     async fn drain_blocked(
         &self,
         group_key: &str,
@@ -1114,24 +1109,38 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         rank: usize,
     ) -> Result<Option<StoredGroupSettlement>, RuntimeEffectControllerError>;
 
-    /// The settlement notifier for `group_key`: one shared `Arc<Notify>` per
-    /// (store, group) that every committed rank write —
-    /// [`discharge_child`](Self::discharge_child),
-    /// [`decide_cancel`](Self::decide_cancel), and a grouped
-    /// [`finalize`](Self::finalize) — wakes after its commit lands, and that a
-    /// peer driver over the same database wakes the same way.
+    /// The change notification for `subject`, and whether a writer outside
+    /// its reach can change the subject unannounced — the one hook every wait
+    /// in the driver parks on (FIG-3579).
     ///
-    /// The caller enables [`Notify::notified`] *before* its journal read and
-    /// parks on it afterwards, so a settlement committed between the read and
-    /// the park is caught rather than slept through. Acquiring the notifier is
-    /// async so a backend whose wake-up rides an external subscription
-    /// (PostgreSQL `LISTEN`) can await the subscription's installation before
-    /// the caller's first read — the ordering the same guarantee needs across
-    /// processes.
-    async fn settlement_notifier(
+    /// The notifier is shared by every driver over the same journal, and is
+    /// woken after each commit that can change the subject:
+    ///
+    /// - a [`EffectJournalSubject::Row`] by [`finalize`](Self::finalize),
+    ///   [`release_uncommitted_derivation`](Self::release_uncommitted_derivation),
+    ///   [`decide_cancel`](Self::decide_cancel), a terminal-carrying
+    ///   [`discharge_child`](Self::discharge_child),
+    ///   [`discard_reexecuted_row`](Self::discard_reexecuted_row), and
+    ///   [`retire_journal`](Self::retire_journal);
+    /// - a [`EffectJournalSubject::Group`] by every committed rank write —
+    ///   [`discharge_child`](Self::discharge_child),
+    ///   [`decide_cancel`](Self::decide_cancel), a grouped
+    ///   [`finalize`](Self::finalize) — and
+    ///   [`retire_journal`](Self::retire_journal).
+    ///
+    /// The driver enables the notifier *before* its journal read and parks on
+    /// it afterwards, so a change committed between the read and the park is
+    /// caught rather than slept through. Acquiring it is async so a backend
+    /// whose wake-up rides an external subscription (PostgreSQL `LISTEN`) can
+    /// await the subscription's installation before the caller's first read —
+    /// the ordering the same guarantee needs across processes.
+    ///
+    /// The backend only reports; it never waits or sleeps. How long to park,
+    /// and what to race the notifier against, is the driver's alone.
+    async fn journal_wake(
         &self,
-        group_key: &str,
-    ) -> Result<Arc<Notify>, RuntimeEffectControllerError>;
+        subject: EffectJournalSubject<'_>,
+    ) -> Result<EffectJournalWake, RuntimeEffectControllerError>;
 
     /// The exact complement of [`read_group_settlement`](Self::read_group_settlement):
     /// that read filters `settlement_seq IS NOT NULL`, this one
@@ -1796,7 +1805,9 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         // pays nothing: every effect this driver runs passes through here, and
         // the overwhelming majority can never be cancelled.
         let cancel_membership = cancel.and_then(|_| envelope.group.clone());
+        let mut queue = journal_wait::ClaimQueue::default();
         loop {
+            let armed = queue.arm();
             match self
                 .prepare_effect(scope, &envelope, &reconstructed_envelope, binding)
                 .await?
@@ -1901,7 +1912,16 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                     };
                 }
                 PreparedEffect::Busy { retry_at_ms } => match busy {
-                    BusyPolicy::Queue => self.sleep_until_retry(retry_at_ms).await,
+                    BusyPolicy::Queue => {
+                        self.queue_claim(
+                            &mut queue,
+                            armed,
+                            scope,
+                            envelope.invocation.replay_key(),
+                            retry_at_ms,
+                        )
+                        .await?;
+                    }
                     BusyPolicy::Yield => return Ok(EffectRun::Busy),
                 },
             }
@@ -2121,7 +2141,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 // is admitted and discharged at once). The barrier still
                 // holds it behind lower-commit siblings; a sibling whose
                 // host died mid-drain is finished by the next drain pass,
-                // which this poll is the fallback for, not the driver of.
+                // whose discharge wakes this one's parked wait.
                 let Some(group_key) = &claim.group_key else {
                     return Ok(());
                 };
@@ -2175,7 +2195,14 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         group_key: &str,
         terminal: Option<EffectTerminal>,
     ) -> Result<(), RuntimeEffectControllerError> {
+        // Subscribed on the first `Blocked` and re-tried at once, so an
+        // unblocked discharge never touches the notifier table; after that
+        // each attempt listens from before its read and parks on the group,
+        // whose drains are what lift the barrier. No clock deadline: the
+        // barrier is lifted by a sibling's drain, never by time.
+        let mut watch = None;
         loop {
+            let armed = watch.as_ref().map(journal_wait::JournalWatch::arm);
             match self
                 .row_store
                 .discharge_child(&EffectDischargeRequest {
@@ -2188,9 +2215,17 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             {
                 EffectDischargeOutcome::Discharged { .. }
                 | EffectDischargeOutcome::AlreadyDischarged { .. } => return Ok(()),
-                EffectDischargeOutcome::Blocked => {
-                    self.clock.sleep(BUSY_POLL).await;
-                }
+                EffectDischargeOutcome::Blocked => match armed {
+                    Some(armed) => {
+                        armed.park(&*self.clock, None).await;
+                    }
+                    None => {
+                        watch = Some(
+                            self.watch_journal(EffectJournalSubject::Group { group_key })
+                                .await,
+                        );
+                    }
+                },
             }
         }
     }
@@ -2253,16 +2288,6 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 .sleep(Duration::from_millis(due_at_ms - now))
                 .await;
         }
-    }
-
-    async fn sleep_until_retry(&self, retry_at_ms: u64) {
-        let now = self.clock.timestamp_ms();
-        let delay = if retry_at_ms > now {
-            Duration::from_millis(retry_at_ms - now).min(BUSY_POLL)
-        } else {
-            BUSY_POLL
-        };
-        self.clock.sleep(delay).await;
     }
 }
 
@@ -2339,10 +2364,15 @@ mod drain;
 mod groups;
 #[cfg(feature = "testing")]
 mod journal_faults;
+mod journal_wait;
+mod journal_wake;
 mod lease_renewal;
 mod reexecution;
 #[cfg(feature = "testing")]
 pub use journal_faults::{EffectJournalFaultPoint, EffectJournalFaults};
+pub use journal_wake::{
+    EffectJournalNotifiers, EffectJournalSubject, EffectJournalWake, EffectJournalWriters,
+};
 
 #[cfg(test)]
 mod tests;

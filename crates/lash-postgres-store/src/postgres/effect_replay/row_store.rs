@@ -5,8 +5,6 @@
 //! type and the driver/host open paths.
 
 use super::*;
-use std::sync::Arc;
-use tokio::sync::Notify;
 
 mod decode;
 
@@ -18,14 +16,28 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         VOCABULARY
     }
 
-    /// The notifier for `group_key`, subscribed on this driver's dedicated
-    /// `LISTEN` connection before the call returns — the ordering the
-    /// caller's enable → read → park sequence needs across processes.
-    async fn settlement_notifier(
+    /// A group's notifier is subscribed on this driver's dedicated `LISTEN`
+    /// connection before the call returns — the ordering the caller's enable
+    /// → read → park sequence needs across processes — and every rank write
+    /// `NOTIFY`s it in its own transaction. That is the fast path, not a
+    /// guarantee: a notification can be lost across a listener reconnect, so
+    /// a group is still `Unannounced` and the driver's cross-process poll is
+    /// the safety net. A replay row's notifier is the in-process table's: row
+    /// writes carry no `NOTIFY`, so another process's are left to the poll.
+    async fn journal_wake(
         &self,
-        group_key: &str,
-    ) -> Result<Arc<Notify>, RuntimeEffectControllerError> {
-        self.notify_hub.settlement_notifier(group_key).await
+        subject: EffectJournalSubject<'_>,
+    ) -> Result<EffectJournalWake, RuntimeEffectControllerError> {
+        Ok(match subject {
+            EffectJournalSubject::Group { group_key } => EffectJournalWake {
+                notify: self.notify_hub.settlement_notifier(group_key).await?,
+                writers: EffectJournalWriters::Unannounced,
+            },
+            EffectJournalSubject::Row { .. } => EffectJournalWake {
+                notify: EffectJournalNotifiers::notifier(&self.journal, subject),
+                writers: EffectJournalWriters::Unannounced,
+            },
+        })
     }
 
     async fn claim(
@@ -69,13 +81,17 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         scope_id: &str,
         replay_key: &str,
     ) -> Result<(), RuntimeEffectControllerError> {
-        sqlx::query(effect_sql().replay.delete_ungrouped_by_key.sql())
+        let deleted = sqlx::query(effect_sql().replay.delete_ungrouped_by_key.sql())
             .bind(scope_id)
             .bind(replay_key)
             .execute(&self.pool)
             .await
-            .map(|_| ())
-            .map_err(effect_store_error)
+            .map_err(effect_store_error)?
+            .rows_affected();
+        if deleted > 0 {
+            self.announce_row(scope_id, replay_key);
+        }
+        Ok(())
     }
 
     /// Writes the terminal and, for a grouped child, takes its final-commit
@@ -117,6 +133,9 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         .await
         .map_err(effect_store_error)?
         .rows_affected();
+        if changed == 1 {
+            self.announce_row(&fence.scope_id, &fence.replay_key);
+        }
         Ok(changed == 1)
     }
 
@@ -166,6 +185,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 .await
                 .map_err(effect_store_error)?;
             tx.commit().await.map_err(effect_store_error)?;
+            self.announce_row(&fence.scope_id, &fence.replay_key);
             return Ok(EffectFinalizeOutcome::Written { commit_seq: None });
         };
         // The group row, then the replay row's commit-state CAS — the shared
@@ -214,6 +234,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .await
             .map_err(effect_store_error)?;
         tx.commit().await.map_err(effect_store_error)?;
+        self.announce_row(&fence.scope_id, &fence.replay_key);
         Ok(EffectFinalizeOutcome::Written {
             commit_seq: Some(u64::try_from(commit_seq).map_err(|_| {
                 effect_store_message(
@@ -387,6 +408,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .map_err(effect_store_error)?;
         }
         tx.commit().await.map_err(effect_store_error)?;
+        self.announce_row(&group.scope_id, &request.replay_key);
         Ok(EffectCancelOutcome::Decided {
             settlement_seq: u64::try_from(settlement_seq).map_err(|_| {
                 effect_store_message(
@@ -517,6 +539,9 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             )));
         }
         tx.commit().await.map_err(effect_store_error)?;
+        if request.terminal.is_some() {
+            self.announce_row(&request.scope_id, &request.replay_key);
+        }
         Ok(EffectDischargeOutcome::Discharged {
             settlement_seq: u64::try_from(settlement_seq).map_err(|_| {
                 effect_store_message(
@@ -991,6 +1016,86 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         Ok(changed == 1)
     }
 
+    /// Retires the rows and then wakes this process's waiters on this
+    /// journal: every replay-row notifier in the process-wide table, and every
+    /// group notifier the `LISTEN` hub holds, since the deletion carries no
+    /// `NOTIFY`.
+    async fn retire_journal(
+        &self,
+        retirement: &lash_core_execution::EffectJournalRetirement,
+    ) -> Result<usize, RuntimeError> {
+        let retired = self.retire_journal_rows(retirement).await;
+        if retired.is_ok() {
+            EffectJournalNotifiers::announce_journal(&self.journal);
+            self.notify_hub.wake_all();
+        }
+        retired
+    }
+
+    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError> {
+        let retirement_error = |error: sqlx::Error| {
+            RuntimeError::new(
+                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                error.to_string(),
+            )
+        };
+        let mut tx = self.pool.begin().await.map_err(retirement_error)?;
+        lock_scope(&mut tx, scope_id)
+            .await
+            .map_err(retirement_error)?;
+        sqlx::query(effect_sql().fence.delete_by_scope.sql())
+            .bind(scope_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(retirement_error)?;
+        tx.commit().await.map_err(retirement_error)
+    }
+
+    async fn pending_artifact_owner_retirements(
+        &self,
+    ) -> Result<Vec<lash_core_execution::ExecutionScope>, RuntimeError> {
+        let keys: Vec<String> = sqlx::query_scalar(
+            effect_sql()
+                .fence_postgres
+                .select_pending_artifact_cleanup
+                .sql(),
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|error| {
+            RuntimeError::new(
+                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                error.to_string(),
+            )
+        })?;
+        keys.into_iter()
+            .map(|key| {
+                lash_core_execution::ExecutionScope::from_journal_key(&key).ok_or_else(|| {
+                    RuntimeError::new(
+                        lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                        format!("invalid retired effect scope key `{key}`"),
+                    )
+                })
+            })
+            .collect()
+    }
+
+    async fn complete_artifact_owner_retirement(&self, scope_id: &str) -> Result<(), RuntimeError> {
+        sqlx::query(effect_sql().fence_postgres.complete_artifact_cleanup.sql())
+            .bind(scope_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })?;
+        Ok(())
+    }
+}
+
+impl PostgresEffectReplayRowStore {
     /// Deletes the named children **and their groups in the same transaction**
     /// (N3), so no partially-retired group is ever visible.
     ///
@@ -1003,7 +1108,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     ///
     /// The reported count stays the children, which is what this method has
     /// always reported and what a caller prunes against.
-    async fn retire_journal(
+    async fn retire_journal_rows(
         &self,
         retirement: &lash_core_execution::EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
@@ -1132,68 +1237,6 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .map_err(retirement_error)?;
         tx.commit().await.map_err(retirement_error)?;
         Ok(children as usize)
-    }
-
-    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError> {
-        let retirement_error = |error: sqlx::Error| {
-            RuntimeError::new(
-                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
-                error.to_string(),
-            )
-        };
-        let mut tx = self.pool.begin().await.map_err(retirement_error)?;
-        lock_scope(&mut tx, scope_id)
-            .await
-            .map_err(retirement_error)?;
-        sqlx::query(effect_sql().fence.delete_by_scope.sql())
-            .bind(scope_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(retirement_error)?;
-        tx.commit().await.map_err(retirement_error)
-    }
-
-    async fn pending_artifact_owner_retirements(
-        &self,
-    ) -> Result<Vec<lash_core_execution::ExecutionScope>, RuntimeError> {
-        let keys: Vec<String> = sqlx::query_scalar(
-            effect_sql()
-                .fence_postgres
-                .select_pending_artifact_cleanup
-                .sql(),
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|error| {
-            RuntimeError::new(
-                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
-                error.to_string(),
-            )
-        })?;
-        keys.into_iter()
-            .map(|key| {
-                lash_core_execution::ExecutionScope::from_journal_key(&key).ok_or_else(|| {
-                    RuntimeError::new(
-                        lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
-                        format!("invalid retired effect scope key `{key}`"),
-                    )
-                })
-            })
-            .collect()
-    }
-
-    async fn complete_artifact_owner_retirement(&self, scope_id: &str) -> Result<(), RuntimeError> {
-        sqlx::query(effect_sql().fence_postgres.complete_artifact_cleanup.sql())
-            .bind(scope_id)
-            .execute(&self.pool)
-            .await
-            .map_err(|error| {
-                RuntimeError::new(
-                    lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
-                    error.to_string(),
-                )
-            })?;
-        Ok(())
     }
 }
 

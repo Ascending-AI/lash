@@ -70,6 +70,12 @@ pub(crate) async fn reclaim(
         .map_err(store_sqlx_error)?
         .rows_affected() as usize;
         tx.commit().await.map_err(store_sqlx_error)?;
+        // Phase 0 deleted journal rows a parked claim in this process may be
+        // waiting on; wake them to re-read. Other processes see it on their
+        // cross-process poll.
+        lash_core_execution::facade_support::effect_replay_driver::EffectJournalNotifiers::announce_journal(
+            &effect_replay::journal_identity(&factory.await_event_signing_secret),
+        );
         Ok(lash_core_execution::store::RetentionReport {
             removed_receipt_count,
             removed_usage_delta_count,

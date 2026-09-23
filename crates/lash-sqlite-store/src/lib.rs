@@ -654,7 +654,7 @@ pub struct SqliteSessionStoreFactory {
     /// The bound effect host's journal: the retained-evidence sweep attaches
     /// it to retire quiescent operation scopes whose receipt this catalog
     /// holds (ADR 0067). Shared by every clone of the factory.
-    effect_journal: Arc<std::sync::Mutex<Option<DatabaseTarget>>>,
+    effect_journal: Arc<std::sync::Mutex<Option<DatabaseLocation>>>,
     turn_cancel_closure_owner:
         Arc<std::sync::Mutex<Option<lash_core_execution::TurnCancelClosureOwnerBinding>>>,
     effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
@@ -748,7 +748,7 @@ impl SqliteSessionStoreFactory {
     pub(crate) fn at(
         core: DatabaseLocation,
         process_registry: Option<DatabaseTarget>,
-        effect_journal: Option<DatabaseTarget>,
+        effect_journal: Option<DatabaseLocation>,
         options: StoreOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> Self {
@@ -938,7 +938,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 .effect_journal
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-                Some(DatabaseTarget::File(path));
+                Some(DatabaseLocation::standalone_file(&path));
         }
     }
 

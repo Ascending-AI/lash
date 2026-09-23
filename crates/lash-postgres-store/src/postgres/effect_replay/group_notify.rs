@@ -3,11 +3,14 @@
 //! connection per driver that fans the deliveries into the in-process
 //! [`Notify`]s its `settlement_notifier` hands out.
 //!
-//! The listener is a spawned task holding a [`PgListener`], which reconnects
-//! itself and re-issues every `LISTEN` on reconnect. A `try_recv` that reports
-//! the connection was lost wakes *every* parked waiter once — notifications
-//! received while disconnected are gone, so the waiters re-read the journal
-//! rather than strand on a settlement that already committed.
+//! The listener is a spawned task holding a [`PgListener`]. A `try_recv` that
+//! reports the connection was lost, or fails outright, wakes *every* parked
+//! waiter — notifications received while disconnected are gone, so the
+//! waiters re-read the journal rather than strand on a settlement that already
+//! committed — and a failure rebuilds the listener, waking them again once it
+//! listens. `LISTEN` is the fast path, not the guarantee: the driver still
+//! polls a group across processes on a bound, because a notification can
+//! be lost in ways no wake-all covers.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -137,6 +140,21 @@ impl GroupNotifyHub {
     }
 }
 
+impl GroupNotifyHub {
+    /// Stop the listener task, as a crashed or wedged `LISTEN` connection
+    /// would: notifiers already handed out are never woken again.
+    #[cfg(test)]
+    pub(crate) fn stop(&self) {
+        self.task.abort();
+    }
+
+    /// Wake every waiter parked on this hub, for a change that carried no
+    /// `NOTIFY` (a retirement deleting groups wholesale).
+    pub(crate) fn wake_all(&self) {
+        wake_all(&self.channels);
+    }
+}
+
 impl Drop for GroupNotifyHub {
     fn drop(&mut self) {
         self.task.abort();
@@ -164,15 +182,7 @@ async fn run_hub(
     channels: Arc<Mutex<HashMap<String, Weak<Notify>>>>,
     mut commands: mpsc::UnboundedReceiver<HubCommand>,
 ) {
-    let mut listener = loop {
-        match PgListener::connect_with(&pool).await {
-            Ok(listener) => break listener,
-            Err(error) => {
-                tracing::warn!(%error, "effect-group settlement listener failed to connect; retrying");
-                tokio::time::sleep(RECONNECT_PAUSE).await;
-            }
-        }
-    };
+    let mut listener = connect(&pool, &channels).await;
     loop {
         tokio::select! {
             command = commands.recv() => match command {
@@ -199,11 +209,48 @@ async fn run_hub(
                 // it cannot return is the notifications that window dropped,
                 // so every parked waiter wakes once and re-reads.
                 Ok(None) => wake_all(&channels),
+                // Any other failure may have dropped notifications too, and
+                // sqlx replaces the connection only for some I/O error kinds
+                // (not `ConnectionReset`), so the listener is rebuilt rather
+                // than retried: wake every waiter now, and again once the
+                // new listener is subscribed, so a settlement committed in
+                // the gap is re-read rather than slept through.
                 Err(error) => {
                     tracing::warn!(%error, "effect-group settlement listener receive failed; reconnecting");
+                    wake_all(&channels);
                     tokio::time::sleep(RECONNECT_PAUSE).await;
+                    listener = connect(&pool, &channels).await;
+                    wake_all(&channels);
                 }
             },
+        }
+    }
+}
+
+/// A fresh listener subscribed to every channel the hub has handed out,
+/// retried until one connects. Commands wait meanwhile; a caller whose
+/// subscription is not acknowledged in time parks on the driver's
+/// cross-process poll instead.
+async fn connect(
+    pool: &PgPool,
+    channels: &Arc<Mutex<HashMap<String, Weak<Notify>>>>,
+) -> PgListener {
+    loop {
+        let known: Vec<String> = lock_recover(channels).keys().cloned().collect();
+        let attempt = async {
+            let mut listener = PgListener::connect_with(pool).await?;
+            listener
+                .listen_all(known.iter().map(String::as_str))
+                .await?;
+            Ok::<_, sqlx::Error>(listener)
+        }
+        .await;
+        match attempt {
+            Ok(listener) => return listener,
+            Err(error) => {
+                tracing::warn!(%error, "effect-group settlement listener failed to connect; retrying");
+                tokio::time::sleep(RECONNECT_PAUSE).await;
+            }
         }
     }
 }

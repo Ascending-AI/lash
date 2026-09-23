@@ -19459,6 +19459,7 @@
       ],
       "dependencies": [
         "async-trait",
+        "chrono",
         "flate2",
         "lash-internal-conformance",
         "lash-internal-core",

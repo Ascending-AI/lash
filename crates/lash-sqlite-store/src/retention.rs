@@ -38,8 +38,11 @@ pub(crate) async fn reclaim(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
+    let journal_identity = effect_journal
+        .as_ref()
+        .map(|journal| Arc::clone(journal.identity()));
     let journal_attached = if let Some(journal) = effect_journal {
-        let name = journal.open_name();
+        let name = journal.target().open_name();
         store
             .conn
             .call(move |connection| {
@@ -138,6 +141,13 @@ pub(crate) async fn reclaim(
         })
         .await
         .map_err(|error| failed_before_any_work(sqlite_error(error)))
+        .inspect(|_| {
+            // Phase 0 deleted journal rows and fenced scopes a parked claim
+            // may be waiting on; wake this process's waiters to re-read.
+            if let Some(identity) = &journal_identity {
+                lash_core_execution::facade_support::effect_replay_driver::EffectJournalNotifiers::announce_journal(identity);
+            }
+        })
 }
 
 /// Retire every session-free runtime-operation scope in the attached journal

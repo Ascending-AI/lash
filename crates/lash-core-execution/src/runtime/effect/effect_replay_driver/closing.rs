@@ -415,9 +415,13 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
         let Some(state) = self.groups.get(group_key) else {
             return;
         };
-        let notified = state.settled.notified();
-        tokio::pin!(notified);
         loop {
+            // A fresh listener each pass, enabled before the running set is
+            // read: a `Notified` that already fired stays ready forever, so
+            // re-arming the previous pass's would return at once, every pass,
+            // without ever yielding.
+            let notified = state.settled.notified();
+            tokio::pin!(notified);
             notified.as_mut().enable();
             let deadline = {
                 let inner = state.state.lock_recover();

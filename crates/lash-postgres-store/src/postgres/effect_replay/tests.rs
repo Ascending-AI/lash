@@ -77,6 +77,7 @@ impl GroupFixture {
             store: PostgresEffectReplayRowStore {
                 pool: storage.pool().clone(),
                 notify_hub: group_notify::GroupNotifyHub::spawn(storage.pool()),
+                journal: super::journal_identity(&storage.await_event_signing_secret),
             },
             storage,
             scope_id,
@@ -1198,4 +1199,148 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
         .expect("read rank two")
         .expect("rank two is discharged");
     assert_eq!(second.replay_key, "k1");
+}
+
+/// How a waiter's `LISTEN` hub fails it.
+#[derive(Clone, Copy, Debug)]
+enum BrokenHub {
+    /// The hub never connects, so no subscription is ever acknowledged.
+    NeverGranted,
+    /// The hub subscribes, then dies: notifications stop arriving.
+    DropsNotifications,
+}
+
+/// `LISTEN` is the fast path for a group's changes, not the guarantee. A
+/// discharge the commit-order barrier holds must resume when its blocker
+/// drains even when the waiter's hub never grants the subscription (it falls
+/// back to a poll-only watch after the subscribe budget) or silently stops
+/// delivering (the group is `Unannounced`, so the cross-process poll re-reads
+/// it).
+async fn a_blocked_discharge_resumes_on_the_poll_when(hub: BrokenHub) {
+    let label = format!("broken-hub-{hub:?}");
+    let Some(fixture) = GroupFixture::open(&label).await else {
+        eprintln!("skipping broken-hub discharge: database URL is not set");
+        return;
+    };
+    // `k1` commits first and still owes its drain.
+    let blocker = fixture.claim("k1", "blocker").await;
+    allocated_commit_seq(
+        fixture
+            .store
+            .finalize(&blocker, &GroupFixture::terminal("k1"))
+            .await
+            .expect("commit k1"),
+    );
+
+    let pool = fixture.storage.pool().clone();
+    let notify_hub = match hub {
+        BrokenHub::NeverGranted => group_notify::GroupNotifyHub::spawn(
+            &sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://lash@127.0.0.1:1/unreachable")
+                .expect("a lazy pool to an unreachable server"),
+        ),
+        BrokenHub::DropsNotifications => group_notify::GroupNotifyHub::spawn(&pool),
+    };
+    let clock: Arc<dyn lash_core_execution::Clock> =
+        Arc::new(lash_core_execution::facade_support::SystemClock);
+    let driver: Arc<PostgresEffectReplay> = Arc::new(StoreEffectReplayDriver::new(
+        PostgresEffectReplayRowStore {
+            pool: pool.clone(),
+            notify_hub: Arc::clone(&notify_hub),
+            journal: journal_identity(&fixture.storage.await_event_signing_secret),
+        },
+        crate::await_event::postgres_await_events(
+            pool,
+            Arc::clone(&fixture.storage.await_event_signing_secret),
+            Arc::clone(&clock),
+        ),
+        clock,
+        lash_core_execution::facade_support::LeaseTimings::default(),
+        Default::default(),
+    ));
+    let scope = ExecutionScope::turn(fixture.session_id.clone(), format!("effect-group-{label}"));
+    let mut k2 = lash_core_execution::RuntimeEffectEnvelope::new(
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(scope.clone(), "k2")
+                .expect("valid child address"),
+            lash_core_execution::RuntimeAttribution::none(),
+            "k2",
+        ),
+        lash_core_execution::RuntimeEffectCommand::LanguageRuntimeValue {
+            operation: "broken-hub".to_string(),
+        },
+    );
+    k2.group = Some(Box::new(lash_core_execution::EffectGroupMembership {
+        group_key: fixture.group_key.clone(),
+        position: 1,
+        wake: lash_core_execution::GroupWakePolicy::All,
+        loser_disposition: lash_core_execution::LoserPolicy::RunToCompletion,
+    }));
+    let settling = tokio::spawn({
+        let driver = Arc::clone(&driver);
+        async move {
+            driver
+                .execute_effect(
+                    &scope,
+                    k2,
+                    lash_core_execution::RuntimeEffectLocalExecutor::testing(|_| async {
+                        Ok(
+                            lash_core_execution::RuntimeEffectOutcome::LanguageRuntimeValue {
+                                value: serde_json::json!("k2"),
+                            },
+                        )
+                    }),
+                    None,
+                )
+                .await
+        }
+    });
+
+    // `k2` commits behind `k1`, and its discharge parks on the barrier.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let arbitration = fixture
+                .store
+                .read_group_child_arbitration(&fixture.scope_id, "k2")
+                .await
+                .expect("read k2's arbitration");
+            if arbitration.is_some_and(|arbitration| {
+                matches!(arbitration.commit_state, EffectCommitState::Committed)
+            }) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("k2 commits behind k1");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    if matches!(hub, BrokenHub::DropsNotifications) {
+        notify_hub.stop();
+    }
+    assert!(!settling.is_finished(), "k2's discharge waits behind k1");
+
+    assert_eq!(fixture.discharge("k1").await, 1);
+    tokio::time::timeout(std::time::Duration::from_secs(5), settling)
+        .await
+        .expect("the poll re-reads the group and releases k2's discharge")
+        .expect("child task")
+        .expect("k2 settles");
+    let second = fixture
+        .store
+        .read_group_settlement(&fixture.group_key, 2)
+        .await
+        .expect("read rank two")
+        .expect("k2 took rank two");
+    assert_eq!(second.replay_key, "k2");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_blocked_discharge_resumes_when_its_subscription_is_never_granted() {
+    a_blocked_discharge_resumes_on_the_poll_when(BrokenHub::NeverGranted).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_blocked_discharge_resumes_when_its_notifications_are_dropped() {
+    a_blocked_discharge_resumes_on_the_poll_when(BrokenHub::DropsNotifications).await;
 }
