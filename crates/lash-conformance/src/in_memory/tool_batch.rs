@@ -20,11 +20,12 @@ crate::tool_batch_parallelism_tests!({
     (
         (),
         "native",
-        host,
+        Arc::clone(&host),
         // Every producer the native tier reaches from this crate. The RLM
         // `Promise.all` bridge and the Lashlang process bridge live above
         // lash-conformance in the dependency graph and register the same law
         // from their own crates.
         vec![crate::parallel_model_tool_calls_producer()],
+        crate::HostTurnRunner::shared(host),
     )
 });
