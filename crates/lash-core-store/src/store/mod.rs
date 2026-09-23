@@ -1674,6 +1674,20 @@ pub trait QueuedWorkStore: Send + Sync {
         session_id: &SessionId,
     ) -> Result<Option<QueuedRunAdmission>, StoreError>;
 
+    /// The admission recorded for the drain `scope`, pending or settled, or
+    /// `None` when that drain never admitted a run (or forgot an unworked
+    /// one).
+    ///
+    /// A read, never a claim: it takes no lane and admits nothing. A settled
+    /// run is a drain end (ADR 0094, FIG-3419/3559), so this is how the
+    /// parent-end recovery sweep tells a drain whose end is owed — `terminal`
+    /// is recorded but the end receipt is not — from one that is merely
+    /// interrupted and ends through its own retry (FIG-3563).
+    async fn queued_run(
+        &self,
+        scope: &crate::ExecutionScope,
+    ) -> Result<Option<QueuedRunAdmission>, StoreError>;
+
     /// Fenced disposition for an empty run or a failure before physical commit.
     async fn settle_queued_run(
         &self,

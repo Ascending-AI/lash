@@ -17,6 +17,16 @@
 //! children are swept like any other ended drain's. A host abandoning a
 //! pending run settles it `Failed` through the same method (FIG-3560).
 //!
+//! An end the epilogue withholds after a settlement is owed, not lost
+//! (FIG-3563). A settled run is never asked again by its own drain — a
+//! `Failed` one is never retried, and a completed one's caller has its
+//! answer — so the parent-end recovery sweep asks instead: a drain whose
+//! children name an owner with no receipt, and whose run reads terminally
+//! settled, gets this same epilogue through
+//! `LashRuntime::end_settled_queue_drain` once the owed closing work has
+//! settled. The rule is one: a terminally settled drain's end is written by
+//! this epilogue, whoever runs it and whenever nothing is still owed.
+//!
 //! What is *not* a drain end: the worker dying (nothing is written — the
 //! retry under the same `drain_id` ends it), a physical-turn commit inside
 //! the drain (one drain can run several; its owner end is its own write), a
@@ -42,7 +52,8 @@ impl LashRuntime {
     /// Never returns an error: the run the drain just committed is already
     /// the caller's result, and an epilogue failure is exactly the crash
     /// window recovery exists for — the sweep re-derives the ledger row from
-    /// the receipt, and a missing receipt leaves the drain for its retry.
+    /// the receipt, and a missing receipt leaves the drain for its retry or,
+    /// once its run is settled, for the sweep's owed-end pass.
     /// Every decline therefore only traces.
     pub(super) async fn end_queue_drain(
         &mut self,
@@ -104,8 +115,9 @@ impl LashRuntime {
         // `Pending`, and anything still live under the scope (an in-progress
         // row, an open group short of a journaled child, an unresolved
         // promise) is the quiescence read the `WhenQuiescent` retirement gate
-        // takes. Either answer withholds the end: the retried drain resumes
-        // the same finalizations and asks again.
+        // takes. Either answer withholds the end: the retried drain — or, for
+        // a settled run, the sweep's owed-end pass — resumes the same
+        // finalizations and asks again.
         let closing_seam = self.host.core.control.effect_host.effect_group_closing();
         if let Some(closing) = closing_seam {
             match closing

@@ -244,6 +244,22 @@ impl Store {
             .await
             .map_err(sqlite_error)?
     }
+    pub(super) async fn run_by_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<Option<QueuedRunAdmission>, StoreError> {
+        let Some(session_id) = scope.session_id().cloned() else {
+            return Ok(None);
+        };
+        let scope = scope.clone();
+        self.conn
+            .read(move |tx| {
+                Ok(ensure_session_not_deleted_conn(tx, &session_id)
+                    .and_then(|()| load_run_conn(tx, &session_id, Some(&scope))))
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
     pub(super) async fn settle_run(
         &self,
         fence: &SessionExecutionLeaseAuthority,

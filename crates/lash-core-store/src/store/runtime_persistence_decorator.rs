@@ -76,6 +76,7 @@ macro_rules! persistence_operations {
             QueuedWorkStore {
                 fn select_queued_run(&self, fence: &SessionExecutionLeaseAuthority, scope: &crate::ExecutionScope, owner: &LeaseOwnerIdentity, max_inputs: usize, configuration: &crate::PersistedSessionConfig, policy: crate::QueuedWorkClaimPolicy) -> Result<SelectedQueuedRun, StoreError>;
                 fn pending_queued_run(&self, session_id: &SessionId) -> Result<Option<QueuedRunAdmission>, StoreError>;
+                fn queued_run(&self, scope: &crate::ExecutionScope) -> Result<Option<QueuedRunAdmission>, StoreError>;
                 fn settle_queued_run(&self, fence: &SessionExecutionLeaseAuthority, settlement: QueuedRunCommit) -> Result<QueuedRunAdmission, StoreError>;
                 fn begin_or_resume_queued_run(&self, fence: &SessionExecutionLeaseAuthority, request: BeginQueuedRun) -> Result<QueuedRunAdmission, StoreError>;
                 fn enqueue_queued_work(&self, batch: crate::QueuedWorkBatchDraft) -> Result<crate::QueuedWorkBatch, StoreError>;

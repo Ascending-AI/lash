@@ -1353,6 +1353,15 @@ pub async fn queued_run_terminal_disposition_preserves_unassigned_work(
             .is_some(),
         "rejected disposition rolls back admission"
     );
+    assert_eq!(
+        store
+            .queued_run(&settlement.scope)
+            .await
+            .unwrap()
+            .map(|run| run.terminal),
+        Some(None),
+        "a pending run reads by its drain scope, unsettled"
+    );
     settlement.progress = QueuedRunProgress::Settle {
         terminal: QueuedRunTerminal::Failed {
             code: crate::RuntimeErrorCode::QueuedWork,
@@ -1369,6 +1378,26 @@ pub async fn queued_run_terminal_disposition_preserves_unassigned_work(
             .await
             .unwrap()
             .is_none()
+    );
+    assert_eq!(
+        store
+            .queued_run(&settlement.scope)
+            .await
+            .unwrap()
+            .map(|run| run.terminal),
+        Some(settled.terminal.clone()),
+        "a settled run stays readable by its drain scope with its terminal"
+    );
+    assert!(
+        store
+            .queued_run(&crate::ExecutionScope::queue_drain(
+                &session_id,
+                "never-admitted"
+            ))
+            .await
+            .unwrap()
+            .is_none(),
+        "a drain that never admitted a run reads nothing"
     );
     let next = store
         .claim_next_turn_inputs(&session_id, &lease.authority(), &lease.owner, 64)

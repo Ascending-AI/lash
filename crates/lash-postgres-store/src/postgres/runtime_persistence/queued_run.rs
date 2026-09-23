@@ -235,6 +235,18 @@ impl PostgresSessionStore {
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         load_run_tx(&mut tx, session_id, None).await
     }
+    pub(super) async fn run_by_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<Option<QueuedRunAdmission>, StoreError> {
+        let Some(session_id) = scope.session_id() else {
+            return Ok(None);
+        };
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
+        load_run_tx(&mut tx, session_id, Some(scope)).await
+    }
     pub(super) async fn settle_run(
         &self,
         fence: &SessionExecutionLeaseAuthority,

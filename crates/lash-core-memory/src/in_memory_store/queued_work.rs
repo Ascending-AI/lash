@@ -342,6 +342,17 @@ impl crate::store::QueuedWorkStore for InMemorySessionStore {
             .cloned())
     }
 
+    async fn queued_run(
+        &self,
+        scope: &crate::ExecutionScope,
+    ) -> Result<Option<crate::store::QueuedRunAdmission>, crate::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        if let Some(session_id) = scope.session_id() {
+            self.ensure_session_not_deleted(session_id)?;
+        }
+        Ok(self.queued_runs.lock_recover().get(scope).cloned())
+    }
+
     async fn select_queued_run(
         &self,
         fence: &crate::SessionExecutionLeaseAuthority,

@@ -738,7 +738,10 @@ obligation: the driver's finalizer runs on a `'static` host task and the
 execution context is `'run`-bound to the opener's turn. The queue-drain
 epilogue is the first production caller of `resume_closing_groups`: a drain
 resumes its scope's closing groups before writing its own end
-(FIG-3419, ADR 0094's amendment).
+(FIG-3419, ADR 0094's amendment). When a settled drain's end is withheld by a
+group whose work another host owes, the work driver's parent-end pass re-runs
+that epilogue once the work settles (FIG-3563), so the drain's closing groups
+are resumed from recovery as well as from the drain itself.
 
 ---
 
