@@ -693,6 +693,7 @@ macro_rules! effect_group_host_tests {
             (a_reopen_dispatches_the_retained_membership, "group-w1-membership", wired),
             (a_reopen_reissues_each_childs_original_identity, "group-w2-identity", wired),
             (a_losing_wait_stays_admitted_until_the_group_releases_it, "group-losing-wait", wired),
+            (a_wait_cancelled_before_it_parks_is_still_released, "group-unparked-wait", wired),
         ]);
     };
     (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {

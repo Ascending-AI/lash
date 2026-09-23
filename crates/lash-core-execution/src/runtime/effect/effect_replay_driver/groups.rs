@@ -655,6 +655,12 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
             let scope = scope.clone();
             let cancel = state.cancel.child_token();
             let replay_key = child.invocation.replay_key().to_string();
+            // The wait an `AwaitEvent` child parks on is the child's own, and
+            // the close that cancels the child releases it (ADR 0099 §12).
+            let wait_key = match &child.command {
+                RuntimeEffectCommand::AwaitEvent { key } => Some(key.clone()),
+                _ => None,
+            };
             // The child inherits its opener's process execution permit, as a
             // batch leaf did, so a nested process await releases and
             // reacquires the slot the worker granted this run.
@@ -672,6 +678,23 @@ impl<P: EffectReplayRowStore + 'static, A: AwaitEventBackend + 'static>
                         None,
                     ))
                     .await;
+                    // Released here, after the execution returned, however far
+                    // it got: a child the close cancelled while parked, and
+                    // one it cancelled before it ever claimed — whose
+                    // execution replays the recorded cancel terminal and
+                    // never parks — both leave a wait nothing else resolves
+                    // (FIG-3567). The token fires only on a `Cancel` close; a
+                    // wait that already holds its terminal (the child
+                    // resolved and committed first) refuses the release, so
+                    // this never overwrites a real outcome.
+                    if let Some(key) = &wait_key
+                        && cancel.is_cancelled()
+                    {
+                        let _ = driver
+                            .await_events
+                            .resolve(key, crate::Resolution::Cancelled)
+                            .await;
+                    }
                     driver
                         .group_child_finished(&group_key, &replay_key, &state)
                         .await;

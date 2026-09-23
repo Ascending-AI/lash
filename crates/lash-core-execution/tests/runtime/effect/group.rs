@@ -854,6 +854,40 @@ mod native_group_retention {
         );
     }
 
+    /// A rank read after the finalizer has reaped the closed group is served
+    /// from the retained record, as the journaled tiers serve it from the
+    /// journal: a post-close read must not depend on whether the spawned
+    /// finalizer has reaped yet (FIG-3567).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_rank_read_after_the_reap_serves_the_recorded_settlement() {
+        let world = world();
+        let admitted = lash_core_execution::AdmittedScope::turn("rank-read", "turn");
+        let group = group(admitted.scope(), "retention-rank-read");
+
+        let first = settle_and_close(&world.host, &admitted, group).await;
+        until_reaped(&world.host, "retention-rank-read").await;
+
+        let scoped = world.host.scoped(admitted).expect("the scope binds");
+        let read = scoped
+            .controller()
+            .read_group_settlement("retention-rank-read", 1)
+            .await
+            .expect("a reaped group's rank read is answered")
+            .expect("rank 1 is recorded");
+        assert_eq!(read.sequence, first.sequence);
+        assert_eq!(read.child_replay_key, "retention-rank-read:child:0");
+        assert!(matches!(read.outcome, Ok(RuntimeEffectOutcome::Sleep)));
+        assert!(
+            scoped
+                .controller()
+                .read_group_settlement("retention-rank-read", 2)
+                .await
+                .expect("a rank past the record is answered")
+                .is_none(),
+            "no rank is invented past the record"
+        );
+    }
+
     /// Retiring the owning session evicts the retained record: the next
     /// open of the same key is a fresh group, and its child runs again.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

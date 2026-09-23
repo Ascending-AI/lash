@@ -279,7 +279,11 @@ impl EffectGroupDispatch {
                 )
                 .await;
             }
-            EffectGroupAdmissionResponse::Refused | EffectGroupAdmissionResponse::Retired => {
+            EffectGroupAdmissionResponse::Refused => {
+                release_unadmitted_wait(ctx, self.authority_id.clone(), &request).await?;
+                return Ok(Json(()));
+            }
+            EffectGroupAdmissionResponse::Retired => {
                 return Ok(Json(()));
             }
             EffectGroupAdmissionResponse::NotYetRecorded => {
@@ -324,7 +328,11 @@ impl EffectGroupDispatch {
                 )
                 .await;
             }
-            EffectGroupAdmissionResponse::Refused | EffectGroupAdmissionResponse::Retired => {
+            EffectGroupAdmissionResponse::Refused => {
+                release_unadmitted_wait(ctx, self.authority_id.clone(), &request).await?;
+                return Ok(Json(()));
+            }
+            EffectGroupAdmissionResponse::Retired => {
                 return Ok(Json(()));
             }
             EffectGroupAdmissionResponse::NotYetRecorded => {
@@ -833,6 +841,36 @@ async fn record_child_settlement(
         ))
         .into()),
     }
+}
+
+/// A wait child whose admission the index refused — the close decided it
+/// `Cancel` before this invocation got as far as admitting — never runs the
+/// release arm a parked wait's cancellation takes, yet §12 still has the close
+/// release its wait (FIG-3567). Released here, idempotently: a wait that
+/// already holds a terminal answers the same way on a replay. A retired group
+/// is not released through this: its scope's waits went with the retirement.
+async fn release_unadmitted_wait(
+    ctx: SharedWorkflowContext<'_>,
+    authority_id: crate::ingress::RestateAuthorityId,
+    request: &EffectGroupChildRequest,
+) -> HandlerResult<()> {
+    let RuntimeEffectCommand::AwaitEvent { key } = &request.envelope.command else {
+        return Ok(());
+    };
+    let controller = RestateRuntimeEffectController::new(ctx, authority_id);
+    lash_core::AwaitEventResolver::resolve_await_event(
+        &controller,
+        key,
+        lash_core::Resolution::Cancelled,
+    )
+    .await
+    .map_err(|error| {
+        std::io::Error::other(format!(
+            "release the refused wait child of effect group {} position {}: {error}",
+            request.group_key, request.position
+        ))
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
