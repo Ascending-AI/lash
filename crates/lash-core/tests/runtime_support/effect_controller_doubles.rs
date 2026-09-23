@@ -438,6 +438,24 @@ impl RecordingEffectController {
 
     /// A replaying owner with no live cancel state: every canned gate
     /// resolution is off, so what replay sees comes from the journal alone.
+    /// A fresh double whose group operations land on `native`: the scoped
+    /// twin of a host-side recorder shares its substrate, where the host's
+    /// tool-child resolver is registered.
+    pub fn sharing_group_substrate(native: NativeRuntimeEffectController) -> Self {
+        Self {
+            native,
+            ..Self::default()
+        }
+    }
+
+    /// This double on a fresh group substrate: a new owner is a new process,
+    /// which shares the journal but not the previous owner's in-memory group
+    /// table or the tool-child resolver registered on it.
+    pub fn on_fresh_group_substrate(mut self) -> Self {
+        self.native = NativeRuntimeEffectController::default();
+        self
+    }
+
     pub fn without_canned_cancel(mut self) -> Self {
         self.cancel_after_llm = false;
         self.cancel_after_step = false;

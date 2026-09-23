@@ -244,10 +244,10 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
     // A new owner is a new process: it shares the journal, never the first
     // owner's in-memory group substrate and the tool-child resolver
     // registered there (FIG-3397).
-    let replaying = RecordingEffectController {
-        native: Default::default(),
-        ..recorder.clone().without_canned_cancel()
-    };
+    let replaying = recorder
+        .clone()
+        .without_canned_cancel()
+        .on_fresh_group_substrate();
     let mut replayed_runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EchoTool),

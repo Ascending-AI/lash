@@ -309,10 +309,8 @@ async fn tool_direct_completion_is_opaque_inside_scoped_attempt() {
     let default_recorder = RecordingEffectController::default();
     // The scoped double shares the host-side recorder's substrate: group opens
     // land there, where the host's tool-child resolver was registered.
-    let scoped_recorder = RecordingEffectController {
-        native: default_recorder.native.clone(),
-        ..Default::default()
-    };
+    let scoped_recorder =
+        RecordingEffectController::sharing_group_substrate(default_recorder.native.clone());
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
