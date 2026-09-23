@@ -517,6 +517,19 @@ class ParkedEntryTests(unittest.TestCase):
         )
         self.assertEqual(len(errors), 1)
 
+    def test_the_real_parked_restate_laws_are_skipped_by_name(self) -> None:
+        skips = MODULE.parked_skips("lash_restate", MODULE.load_macros())
+        self.assertEqual(
+            skips,
+            [
+                "--skip",
+                "tests::conformance_and_poison::turn_crash_matrix_error_return_fail_stop",
+                "--skip",
+                "tests::conformance_and_poison::turn_crash_matrix_level_1",
+            ],
+        )
+        self.assertEqual(MODULE.parked_skips("no_such_crate", MODULE.load_macros()), [])
+
     def test_a_live_entry_may_not_carry_a_ticket(self) -> None:
         entry = {"recipe": "effect-group-conformance-e2e", "ticket": "FIG-1"}
         self.assertEqual(len(MODULE.parked_entry_errors(self.KEY, entry)), 1)

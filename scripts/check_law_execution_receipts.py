@@ -578,6 +578,22 @@ def parked_entry_errors(key: tuple[str, str, str], entry: dict[str, str]) -> lis
     return errors
 
 
+def parked_skips(crate_name: str, macros: dict[str, Macro]) -> list[str]:
+    """libtest arguments that skip every law of a parked invocation in
+    ``crate_name``, one argument per line of output: a recipe that runs a
+    crate's ignored tests passes them so a parked law runs nowhere."""
+    arguments: list[str] = []
+    for entry in deferred_manifest():
+        if entry.get("recipe") != PARKED_RECIPE:
+            continue
+        crate, _, module = entry.get("claimant", "").partition("::")
+        if crate != crate_name:
+            continue
+        for law, _ in sorted(suite_expected(macros, entry.get("suite", ""))):
+            arguments.extend(["--skip", f"{module}::{law}" if module else law])
+    return arguments
+
+
 def manifest_check(errors: list[str]) -> dict[tuple[str, str, str], Invocation]:
     """Both directions of the deferred-law contract, always on.
 
@@ -871,7 +887,12 @@ def main() -> int:
     parser.add_argument("--crate-root", metavar="DIR")
     parser.add_argument("--deferred", action="append", default=[], metavar="RECIPE")
     parser.add_argument("--bazel-testlogs", action="append", default=[], metavar="DIR")
+    parser.add_argument("--parked-skips", metavar="CRATE")
     args = parser.parse_args()
+
+    if args.parked_skips:
+        print("\n".join(parked_skips(args.parked_skips, load_macros())))
+        return 0
 
     macros = load_macros()
 

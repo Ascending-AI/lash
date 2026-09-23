@@ -246,13 +246,16 @@ effect-group-conformance-e2e:
     live_effect_group_sdk_preconditions -- --ignored --nocapture --test-threads=1
 
   receipts="${LASH_LAW_RECEIPTS:-$(mktemp -t effect-group-law-receipts.XXXXXX)}"
+  # Parked invocations (scripts/deferred-law-invocations.toml) are ignored
+  # like deferred ones but run nowhere until their ticket lands.
+  mapfile -t parked_skips < <(python3 "{{repo}}/scripts/check_law_execution_receipts.py" --parked-skips lash_restate)
   RESTATE_INGRESS_URL="$ingress_url" \
   RESTATE_ADMIN_URL="$admin_url" \
   EG_RESTATE_ENDPOINT_BIND="$endpoint_bind" \
   EG_RESTATE_ENDPOINT_URL="$endpoint_url" \
   LASH_LAW_RECEIPTS="$receipts" \
   cargo test -p lash-internal-restate --locked \
-    tests::conformance_and_poison:: -- --ignored --nocapture --test-threads=1
+    tests::conformance_and_poison:: -- --ignored --nocapture --test-threads=1 "${parked_skips[@]}"
 
   python3 "{{repo}}/scripts/check_law_execution_receipts.py" \
     --deferred effect-group-conformance-e2e \
