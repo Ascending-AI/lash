@@ -87,6 +87,13 @@ the answer decided FIG-526, and it will decide the next one.
   a queued run once. A live fault aborts: an aborted direct turn returns its
   acceptance receipt, and a queued run stays pending for its retry budget.
   Every host settles the same failure the same way.
+- Decided 2026-09-24, not yet implemented (FIG-3600, [ADR 0101's
+  amendment](0101-one-session-ingress-carries-every-admitted-item.md#amendment-fig-3600-2026-09-24-one-send-ingress-the-driver-runs-every-turn)):
+  continuation is the substrate's for **every** turn, because no caller-driven
+  turn exists after that cutover. The backend's work driver runs each turn.
+  A live fault is re-driven under the substrate's policy with the same turn id,
+  and an exhausted budget parks the turn. The aborted direct turn in the
+  bullet above goes away on landing.
 
 ## Considered and rejected: durable partial assistant streams (2026-08-20)
 
