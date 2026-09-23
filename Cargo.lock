@@ -2703,6 +2703,7 @@ name = "lash-internal-sqlite-store"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "chrono",
  "flate2",
  "lash-internal-conformance",
  "lash-internal-core",

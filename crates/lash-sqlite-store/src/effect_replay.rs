@@ -22,7 +22,8 @@ use lash_core_execution::facade_support::effect_replay_driver::{
     EffectClaimObservation, EffectClaimRequest, EffectCommitState, EffectDischargeOutcome,
     EffectDischargeRequest, EffectFinalizeOutcome, EffectGroupChildCommitOutcome,
     EffectGroupChildCommitRequest, EffectGroupColumn, EffectGroupLifecycle,
-    EffectGroupLifecyclePhase, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp,
+    EffectGroupLifecyclePhase, EffectGroupRecord, EffectJournalNotifiers, EffectJournalSubject,
+    EffectJournalWake, EffectJournalWriters, EffectLeaseFence, EffectLeaseStamp,
     EffectReplayRowStore, EffectReplayVocabulary, EffectRowStatus, EffectTerminal,
     StoreEffectReplayDriver, StoredChildArbitration, StoredEffectRow, StoredGroupSettlement,
     UnsettledGroupChild, decide_effect_claim,
@@ -46,7 +47,6 @@ use crate::location::{DatabaseLocation, DatabaseTarget, validate_file_database_p
 use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema, fence_sql};
 
 mod row_store;
-mod settlement_notify;
 
 const VOCABULARY: EffectReplayVocabulary = EffectReplayVocabulary::sqlite();
 
@@ -685,7 +685,7 @@ async fn open_effect_replay_driver(
         clock,
         signing_secret,
         registry,
-        settlement_notify::SettlementNotifierKey::for_deployment(journal.identity()),
+        JournalWakeKey::for_journal(journal),
     )))
 }
 
@@ -695,7 +695,7 @@ fn build_effect_replay_driver(
     clock: Arc<dyn lash_core_execution::Clock>,
     signing_secret: Vec<u8>,
     registry: Arc<RegistryAttachment>,
-    settlement_key: settlement_notify::SettlementNotifierKey,
+    wake: JournalWakeKey,
 ) -> SqliteEffectReplay {
     let await_events = sqlite_await_events(
         conn.clone(),
@@ -708,7 +708,7 @@ fn build_effect_replay_driver(
             conn,
             clock: Arc::clone(&clock),
             registry,
-            settlement_key,
+            wake,
         },
         await_events,
         clock,
@@ -728,10 +728,37 @@ pub struct SqliteEffectReplayRowStore {
     clock: Arc<dyn lash_core_execution::Clock>,
     /// The bound process registry whose file holds process-scope fences.
     registry: Arc<RegistryAttachment>,
-    /// This store's identity in the process-wide settlement-notifier registry:
-    /// its deployment's identity, so two hosts over one deployment wake each
-    /// other's parked settlement readers.
-    settlement_key: settlement_notify::SettlementNotifierKey,
+    /// Where this journal's change notifications go.
+    wake: JournalWakeKey,
+}
+
+/// Where a SQLite journal's change notifications go: the process-wide
+/// notifier table under the deployment's identity (`sqlite:<canonical path>`
+/// or `sqlite-memory:<id>`, the identity the turn-control binding is keyed
+/// on), so two hosts over one deployment in one process wake each other; and
+/// whether a writer the table cannot reach exists.
+///
+/// SQLite has no `NOTIFY`. A memory deployment's databases exist only in this
+/// process, so every writer announces through the table. A file is open to
+/// any process, whose commits wake nothing here, so its waiters keep the
+/// driver's bounded cross-process poll.
+#[derive(Clone, Debug)]
+pub(crate) struct JournalWakeKey {
+    pub(crate) identity: Arc<str>,
+    pub(crate) writers: EffectJournalWriters,
+}
+
+impl JournalWakeKey {
+    /// The key for `journal`'s deployment.
+    pub(crate) fn for_journal(journal: &DatabaseLocation) -> Self {
+        Self {
+            identity: Arc::clone(journal.identity()),
+            writers: match journal.target() {
+                DatabaseTarget::Memory(_) => EffectJournalWriters::Announced,
+                DatabaseTarget::File(_) => EffectJournalWriters::Unannounced,
+            },
+        }
+    }
 }
 
 impl SqliteEffectReplayRowStore {
@@ -742,11 +769,17 @@ impl SqliteEffectReplayRowStore {
             .map_err(effect_sqlite_error)
     }
 
-    /// Wake every waiter parked on `group_key`'s next settlement — this
-    /// host's own awaiter or another host's on the same deployment. Called after
-    /// a rank write's commit has landed.
-    fn notify_group_settled(&self, group_key: &str) {
-        settlement_notify::notify_group_settled(&self.settlement_key, group_key);
+    /// Wake every waiter on `subject` — this host's or another host's on the
+    /// same deployment. Called after the commit that changed it has landed.
+    fn announce(&self, subject: EffectJournalSubject<'_>) {
+        EffectJournalNotifiers::announce(&self.wake.identity, subject);
+    }
+
+    fn announce_row(&self, scope_id: &str, replay_key: &str) {
+        self.announce(EffectJournalSubject::Row {
+            scope_id,
+            replay_key,
+        });
     }
 }
 
@@ -901,3 +934,5 @@ fn effect_sqlite_error(err: rusqlite::Error) -> RuntimeEffectControllerError {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wait_tests;

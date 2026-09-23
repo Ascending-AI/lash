@@ -49,9 +49,10 @@ async fn row_store() -> SqliteEffectReplayRowStore {
         conn,
         clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
-        settlement_key: super::settlement_notify::SettlementNotifierKey::for_deployment(
-            &Arc::from(location.identity()),
-        ),
+        wake: JournalWakeKey {
+            identity: Arc::from(location.identity()),
+            writers: EffectJournalWriters::Announced,
+        },
     }
 }
 
@@ -999,9 +1000,7 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
         clock.clone(),
         vec![0; 32],
         std::sync::Arc::new(crate::scope_fence::RegistryAttachment::default()),
-        super::settlement_notify::SettlementNotifierKey::for_deployment(
-            DatabaseLocation::standalone_file(&path).identity(),
-        ),
+        JournalWakeKey::for_journal(&DatabaseLocation::standalone_file(&path)),
     );
     let pause = injector.pause(SqliteFaultPoint::AfterBegin);
     let completing = tokio::spawn(async move {
@@ -1055,9 +1054,9 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
             conn,
             clock: clock.clone(),
             registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
-            settlement_key: super::settlement_notify::SettlementNotifierKey::for_deployment(
-                DatabaseLocation::standalone_file(&dir.path().join("effects.db")).identity(),
-            ),
+            wake: JournalWakeKey::for_journal(&DatabaseLocation::standalone_file(
+                &dir.path().join("effects.db"),
+            )),
         });
         let mut request = claim("queued-write", "owner");
         request.lease_ttl_ms = 300;
@@ -1350,9 +1349,7 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
             .expect("open the staging connection"),
         clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
-        settlement_key: super::settlement_notify::SettlementNotifierKey::for_deployment(
-            DatabaseLocation::standalone_file(&path).identity(),
-        ),
+        wake: JournalWakeKey::for_journal(&DatabaseLocation::standalone_file(&path)),
     };
     store
         .open_group(&group_record(), &membership())
@@ -1462,16 +1459,13 @@ async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row()
     );
 }
 
-/// Two hosts on one memory deployment park and wake on one settlement
+/// Two hosts on one memory deployment park and wake on one journal
 /// notifier: the notifier is keyed on the deployment's identity, which every
 /// host opened on the deployment shares, while a second deployment's hosts
-/// share nothing with the first (ADR 0102).
+/// share nothing with the first (ADR 0102). A memory deployment has no writer
+/// outside this process, so nothing about it is left to a poll.
 #[tokio::test]
 async fn hosts_on_one_memory_deployment_wake_each_other_and_no_other() {
-    use super::settlement_notify::{
-        SettlementNotifierKey, notify_group_settled, settlement_notifier,
-    };
-
     let deployment = crate::SqliteDeployment::memory()
         .await
         .expect("open the memory deployment");
@@ -1485,15 +1479,19 @@ async fn hosts_on_one_memory_deployment_wake_each_other_and_no_other() {
         .await
         .expect("open a second memory deployment")
         .effect_host();
-    let key =
-        |host: &SqliteEffectHost| SettlementNotifierKey::for_deployment(host.journal.identity());
+    let key = |host: &SqliteEffectHost| JournalWakeKey::for_journal(&host.journal);
+    let group = EffectJournalSubject::Group {
+        group_key: "group-wake",
+    };
 
-    let parked = settlement_notifier(&key(&parked_host), "group-wake");
+    let parked_key = key(&parked_host);
+    assert_eq!(parked_key.writers, EffectJournalWriters::Announced);
+    let parked = EffectJournalNotifiers::notifier(&parked_key.identity, group);
     let woken = parked.notified();
     tokio::pin!(woken);
     woken.as_mut().enable();
 
-    notify_group_settled(&key(&stranger_host), "group-wake");
+    EffectJournalNotifiers::announce(&key(&stranger_host).identity, group);
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(50), woken.as_mut())
             .await
@@ -1501,7 +1499,7 @@ async fn hosts_on_one_memory_deployment_wake_each_other_and_no_other() {
         "another deployment's settlement must not wake this deployment's waiter"
     );
 
-    notify_group_settled(&key(&settling_host), "group-wake");
+    EffectJournalNotifiers::announce(&key(&settling_host).identity, group);
     tokio::time::timeout(std::time::Duration::from_secs(1), woken)
         .await
         .expect("a settlement by a second host on the same deployment wakes the parked host");

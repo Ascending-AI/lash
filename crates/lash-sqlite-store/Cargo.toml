@@ -47,6 +47,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+chrono = { workspace = true }
 lash-conformance = { workspace = true, features = ["lashlang"] }
 lash-core = { workspace = true, features = ["testing"] }
 lashlang = { workspace = true, features = ["testing"] }

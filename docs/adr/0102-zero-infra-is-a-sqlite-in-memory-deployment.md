@@ -93,7 +93,8 @@ makes a contending writer wait.
   what keep it alive, and dropping the deployment releases them.
 - The deployment's identity is `sqlite-memory:<uuid>`, beside `sqlite:<canonical
   root>` for a file deployment. That one identity drives the turn-control
-  binding, the settlement-notifier key, and the registry and retention ATTACHes.
+  binding, the key of the journal notifiers the replay driver parks on, and the
+  registry and retention ATTACHes.
   The store and the host no longer mint their own. `validate_effect_host_path`
   keeps refusing raw `:memory:` and `file:` strings; the typed location is the
   only way in.

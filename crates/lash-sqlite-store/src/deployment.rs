@@ -233,7 +233,7 @@ impl SqliteDeployment {
         let factory = SqliteSessionStoreFactory::at(
             core,
             Some(registry.target().clone()),
-            Some(journal.target().clone()),
+            Some(journal.clone()),
             options.store,
             Arc::clone(&clock),
         );

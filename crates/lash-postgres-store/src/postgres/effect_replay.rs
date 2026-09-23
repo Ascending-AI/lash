@@ -26,7 +26,8 @@ use lash_core_execution::facade_support::effect_replay_driver::{
     EffectClaimObservation, EffectClaimRequest, EffectCommitState, EffectDischargeOutcome,
     EffectDischargeRequest, EffectFinalizeOutcome, EffectGroupChildCommitOutcome,
     EffectGroupChildCommitRequest, EffectGroupColumn, EffectGroupLifecycle,
-    EffectGroupLifecyclePhase, EffectGroupRecord, EffectLeaseFence, EffectLeaseStamp,
+    EffectGroupLifecyclePhase, EffectGroupRecord, EffectJournalNotifiers, EffectJournalSubject,
+    EffectJournalWake, EffectJournalWriters, EffectLeaseFence, EffectLeaseStamp,
     EffectReplayRowStore, EffectReplayVocabulary, EffectRowDefect, EffectRowStatus, EffectTerminal,
     StoreEffectReplayDriver, StoredChildArbitration, StoredEffectRow, StoredGroupSettlement,
     UnsettledGroupChild, decide_effect_claim,
@@ -479,10 +480,7 @@ impl PostgresEffectHost {
         Self {
             inner: Arc::new(build_effect_replay_driver(storage, options, clock)),
             pool: storage.pool.clone(),
-            turn_control_binding_id: Arc::from(format!(
-                "postgres:{}",
-                hex_digest(&storage.await_event_signing_secret)
-            )),
+            turn_control_binding_id: journal_identity(&storage.await_event_signing_secret),
         }
     }
 
@@ -532,6 +530,17 @@ fn hex_digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// The identity of a database: `postgres:<digest of its await-event signing
+/// secret>`, which one database holds and every process over it
+/// reads. The turn-control binding and the in-process journal notifiers are
+/// keyed on it.
+pub(crate) fn journal_identity(await_event_signing_secret: &[u8]) -> Arc<str> {
+    Arc::from(format!(
+        "postgres:{}",
+        hex_digest(await_event_signing_secret)
+    ))
+}
+
 impl PostgresRuntimeEffectController {
     pub fn new(storage: &PostgresStorage, scope: ExecutionScope) -> Self {
         Self::with_options(storage, scope, PostgresEffectReplayOptions::default())
@@ -561,10 +570,7 @@ impl PostgresRuntimeEffectController {
         Self {
             inner: Arc::new(build_effect_replay_driver(storage, options, clock)),
             scope,
-            turn_control_binding_id: Arc::from(format!(
-                "postgres:{}",
-                hex_digest(&storage.await_event_signing_secret)
-            )),
+            turn_control_binding_id: journal_identity(&storage.await_event_signing_secret),
         }
     }
 
@@ -600,6 +606,7 @@ fn build_effect_replay_driver(
         PostgresEffectReplayRowStore {
             pool: storage.pool.clone(),
             notify_hub: group_notify::GroupNotifyHub::spawn(&storage.pool),
+            journal: journal_identity(&storage.await_event_signing_secret),
         },
         await_events,
         clock,
@@ -617,6 +624,27 @@ pub struct PostgresEffectReplayRowStore {
     /// The driver's dedicated `LISTEN` connection and the in-process
     /// notifiers it fans group-settlement `NOTIFY`s into.
     notify_hub: Arc<group_notify::GroupNotifyHub>,
+    /// This database's identity in the process-wide journal notifier table,
+    /// under which replay-row changes are announced to waiters in this
+    /// process.
+    journal: Arc<str>,
+}
+
+impl PostgresEffectReplayRowStore {
+    /// Wake this process's waiters on the replay row at `(scope_id,
+    /// replay_key)`, after the commit that changed it. Replay-row writes
+    /// carry no `NOTIFY` — one on every finalize would serialize every
+    /// commit on the server's notification queue lock — so another
+    /// process's waiters see them on the driver's cross-process poll.
+    fn announce_row(&self, scope_id: &str, replay_key: &str) {
+        EffectJournalNotifiers::announce(
+            &self.journal,
+            EffectJournalSubject::Row {
+                scope_id,
+                replay_key,
+            },
+        );
+    }
 }
 
 impl effect_replay_driver::sealed::EffectReplayBackend for PostgresEffectReplayRowStore {}

@@ -5,7 +5,6 @@
 //! type and the driver/host open paths.
 
 use super::*;
-use tokio::sync::Notify;
 
 mod tx;
 
@@ -17,18 +16,18 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         VOCABULARY
     }
 
-    /// The process-wide notifier for this deployment and group: SQLite has
-    /// no `NOTIFY`, so two hosts over one deployment share one [`Notify`]
-    /// through the registry its identity keys.
-    async fn settlement_notifier(
+    /// The process-wide notifier for this deployment and subject; see
+    /// [`JournalWakeKey`] for which writers it reaches.
+    async fn journal_wake(
         &self,
-        group_key: &str,
-    ) -> Result<Arc<Notify>, RuntimeEffectControllerError> {
-        Ok(settlement_notify::settlement_notifier(
-            &self.settlement_key,
-            group_key,
-        ))
+        subject: EffectJournalSubject<'_>,
+    ) -> Result<EffectJournalWake, RuntimeEffectControllerError> {
+        Ok(EffectJournalWake {
+            notify: EffectJournalNotifiers::notifier(&self.wake.identity, subject),
+            writers: self.wake.writers,
+        })
     }
+
     async fn claim(
         &self,
         request: &EffectClaimRequest,
@@ -101,22 +100,24 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         scope_id: &str,
         replay_key: &str,
     ) -> Result<(), RuntimeEffectControllerError> {
-        let scope_id = scope_id.to_string();
-        let replay_key = replay_key.to_string();
-        self.conn
+        let (scope, key) = (scope_id.to_string(), replay_key.to_string());
+        let deleted = self
+            .conn
             .call(move |connection| {
-                connection
-                    .execute(
-                        effect_sql(Schema::Main)
-                            .replay
-                            .delete_ungrouped_by_key
-                            .sql(),
-                        params![scope_id, replay_key],
-                    )
-                    .map(|_| ())
+                connection.execute(
+                    effect_sql(Schema::Main)
+                        .replay
+                        .delete_ungrouped_by_key
+                        .sql(),
+                    params![scope, key],
+                )
             })
             .await
-            .map_err(effect_sqlite_error)
+            .map_err(effect_sqlite_error)?;
+        if deleted > 0 {
+            self.announce_row(scope_id, replay_key);
+        }
+        Ok(())
     }
 
     /// Writes the terminal and, for a grouped child, contests the group's §4
@@ -142,10 +143,12 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         &self,
         fence: &EffectLeaseFence,
     ) -> Result<bool, RuntimeEffectControllerError> {
-        let fence = fence.clone();
+        let released = fence.clone();
         let clock = Arc::clone(&self.clock);
-        self.conn
+        let released = self
+            .conn
             .write(move |tx| {
+                let fence = released;
                 let now = clock.timestamp_ms();
                 let changed = tx.execute(
                     effect_sql(Schema::Main)
@@ -164,7 +167,11 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 Ok(changed == 1)
             })
             .await
-            .map_err(effect_sqlite_error)
+            .map_err(effect_sqlite_error)?;
+        if released {
+            self.announce_row(&fence.scope_id, &fence.replay_key);
+        }
+        Ok(released)
     }
 
     async fn finalize(
@@ -172,7 +179,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         fence: &EffectLeaseFence,
         terminal: &EffectTerminal,
     ) -> Result<EffectFinalizeOutcome, RuntimeEffectControllerError> {
-        let fence = fence.clone();
+        let written = fence.clone();
         let status = terminal.status().column();
         let outcome_json = terminal.outcome_json().map(str::to_string);
         let error_json = terminal.error_json().map(str::to_string);
@@ -180,6 +187,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         let (settled_group, outcome) = self
             .conn
             .write_flow(move |tx| {
+                let fence = written;
                 let now = clock.timestamp_ms();
                 let claimed: Option<Option<String>> = tx
                     .query_row(
@@ -294,8 +302,13 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             })
             .await
             .map_err(effect_sqlite_error)?;
+        if matches!(outcome, EffectFinalizeOutcome::Written { .. }) {
+            self.announce_row(&fence.scope_id, &fence.replay_key);
+        }
         if let Some(group_key) = settled_group {
-            self.notify_group_settled(&group_key);
+            self.announce(EffectJournalSubject::Group {
+                group_key: &group_key,
+            });
         }
         Ok(outcome)
     }
@@ -317,7 +330,8 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         let request = request.clone();
         let group_key = request.group_key.clone();
         let clock = Arc::clone(&self.clock);
-        let outcome = self
+        let replay_key = request.replay_key.clone();
+        let (decided_scope, outcome) = self
             .conn
             .write_flow(move |tx| {
                 let now = clock.timestamp_ms();
@@ -325,16 +339,18 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     Some(EffectCommitState::Committed) | Some(EffectCommitState::Drained) => {
                         let commit_seq =
                             read_child_commit_seq(tx, &request.group_key, &request.replay_key)?;
-                        return Ok(TxOutcome::Commit(EffectCancelOutcome::FinalCommitted {
-                            commit_seq,
-                        }));
+                        return Ok(TxOutcome::Commit((
+                            None,
+                            EffectCancelOutcome::FinalCommitted { commit_seq },
+                        )));
                     }
                     Some(EffectCommitState::CancelDecided) => {
                         let settlement_seq =
                             read_child_settlement_seq(tx, &request.group_key, &request.replay_key)?;
-                        return Ok(TxOutcome::Commit(EffectCancelOutcome::AlreadyDecided {
-                            settlement_seq,
-                        }));
+                        return Ok(TxOutcome::Commit((
+                            None,
+                            EffectCancelOutcome::AlreadyDecided { settlement_seq },
+                        )));
                     }
                     // `pending` is the contestable state; `None` is an
                     // accepted-but-never-claimed child — its membership row
@@ -426,7 +442,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                             )));
                         }
                     };
-                    return Ok(TxOutcome::Rollback(outcome));
+                    return Ok(TxOutcome::Rollback((None, outcome)));
                 }
                 // The CAS won, so the row read `pending` when the speculative
                 // write ran: a terminal replay row then is a committed final
@@ -463,14 +479,24 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                         ],
                     )?;
                 }
-                Ok(TxOutcome::Commit(EffectCancelOutcome::Decided {
-                    settlement_seq: u64_from_sql("RuntimeEffectGroup", "next_seq", settlement_seq)?,
-                }))
+                Ok(TxOutcome::Commit((
+                    Some(group.scope_id),
+                    EffectCancelOutcome::Decided {
+                        settlement_seq: u64_from_sql(
+                            "RuntimeEffectGroup",
+                            "next_seq",
+                            settlement_seq,
+                        )?,
+                    },
+                )))
             })
             .await
             .map_err(effect_sqlite_error)?;
-        if matches!(outcome, EffectCancelOutcome::Decided { .. }) {
-            self.notify_group_settled(&group_key);
+        if let Some(scope_id) = decided_scope {
+            self.announce_row(&scope_id, &replay_key);
+            self.announce(EffectJournalSubject::Group {
+                group_key: &group_key,
+            });
         }
         Ok(outcome)
     }
@@ -482,7 +508,12 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         request: &EffectDischargeRequest,
     ) -> Result<EffectDischargeOutcome, RuntimeEffectControllerError> {
         let request = request.clone();
-        let group_key = request.group_key.clone();
+        let (group_key, scope_id, replay_key) = (
+            request.group_key.clone(),
+            request.scope_id.clone(),
+            request.replay_key.clone(),
+        );
+        let seats_terminal = request.terminal.is_some();
         let clock = Arc::clone(&self.clock);
         let outcome = self
             .conn
@@ -615,7 +646,12 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .await
             .map_err(effect_sqlite_error)?;
         if matches!(outcome, EffectDischargeOutcome::Discharged { .. }) {
-            self.notify_group_settled(&group_key);
+            if seats_terminal {
+                self.announce_row(&scope_id, &replay_key);
+            }
+            self.announce(EffectJournalSubject::Group {
+                group_key: &group_key,
+            });
         }
         Ok(outcome)
     }
@@ -1248,6 +1284,100 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .map_err(effect_sqlite_error)
     }
 
+    /// Retires the rows and then wakes every waiter on this journal: a
+    /// retirement deletes rows and whole groups a parked claim or discharge
+    /// may be waiting on.
+    async fn retire_journal(
+        &self,
+        retirement: &EffectJournalRetirement,
+    ) -> Result<usize, RuntimeError> {
+        let retired = self.retire_journal_rows(retirement).await;
+        if retired.is_ok() {
+            EffectJournalNotifiers::announce_journal(&self.wake.identity);
+        }
+        retired
+    }
+
+    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError> {
+        let scope_id = scope_id.to_string();
+        let fences = self
+            .registry
+            .ensure_attached(&self.conn)
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })?;
+        self.conn
+            .write(move |tx| fences.lift(tx, &scope_id))
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })
+    }
+
+    async fn pending_artifact_owner_retirements(
+        &self,
+    ) -> Result<Vec<ExecutionScope>, RuntimeError> {
+        self.conn
+            .call(|conn| {
+                let mut statement = conn.prepare(
+                    fence_sql(Schema::Main)
+                        .sqlite
+                        .select_pending_artifact_cleanup
+                        .sql(),
+                )?;
+                let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+                let mut scopes = Vec::new();
+                for row in rows {
+                    let key = row?;
+                    let scope = ExecutionScope::from_journal_key(&key).ok_or_else(|| {
+                        rusqlite::Error::InvalidParameterName(format!(
+                            "invalid retired effect scope key `{key}`"
+                        ))
+                    })?;
+                    scopes.push(scope);
+                }
+                Ok(scopes)
+            })
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })
+    }
+
+    async fn complete_artifact_owner_retirement(&self, scope_id: &str) -> Result<(), RuntimeError> {
+        let scope_id = scope_id.to_string();
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    fence_sql(Schema::Main)
+                        .sqlite
+                        .complete_artifact_cleanup
+                        .sql(),
+                    params![scope_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    error.to_string(),
+                )
+            })
+    }
+}
+
+impl SqliteEffectReplayRowStore {
     /// Deletes the named children **and their groups in the same transaction**
     /// (N3), so no partially-retired group is ever visible.
     ///
@@ -1271,7 +1401,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
     /// follows is an idempotent cleanup a crash may lose — the fenced scope
     /// then admits nothing and the next bind or retention sweep purges its
     /// rows (ADR 0049).
-    async fn retire_journal(
+    async fn retire_journal_rows(
         &self,
         retirement: &EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
@@ -1429,83 +1559,5 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .write(move |tx| delete_scope_rows(tx, Schema::Main, &scope_id, &scope_json))
             .await
             .map_err(retirement_error)
-    }
-
-    async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError> {
-        let scope_id = scope_id.to_string();
-        let fences = self
-            .registry
-            .ensure_attached(&self.conn)
-            .await
-            .map_err(|error| {
-                RuntimeError::new(
-                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
-                    error.to_string(),
-                )
-            })?;
-        self.conn
-            .write(move |tx| fences.lift(tx, &scope_id))
-            .await
-            .map_err(|error| {
-                RuntimeError::new(
-                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
-                    error.to_string(),
-                )
-            })
-    }
-
-    async fn pending_artifact_owner_retirements(
-        &self,
-    ) -> Result<Vec<ExecutionScope>, RuntimeError> {
-        self.conn
-            .call(|conn| {
-                let mut statement = conn.prepare(
-                    fence_sql(Schema::Main)
-                        .sqlite
-                        .select_pending_artifact_cleanup
-                        .sql(),
-                )?;
-                let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-                let mut scopes = Vec::new();
-                for row in rows {
-                    let key = row?;
-                    let scope = ExecutionScope::from_journal_key(&key).ok_or_else(|| {
-                        rusqlite::Error::InvalidParameterName(format!(
-                            "invalid retired effect scope key `{key}`"
-                        ))
-                    })?;
-                    scopes.push(scope);
-                }
-                Ok(scopes)
-            })
-            .await
-            .map_err(|error| {
-                RuntimeError::new(
-                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
-                    error.to_string(),
-                )
-            })
-    }
-
-    async fn complete_artifact_owner_retirement(&self, scope_id: &str) -> Result<(), RuntimeError> {
-        let scope_id = scope_id.to_string();
-        self.conn
-            .write(move |tx| {
-                tx.execute(
-                    fence_sql(Schema::Main)
-                        .sqlite
-                        .complete_artifact_cleanup
-                        .sql(),
-                    params![scope_id],
-                )?;
-                Ok(())
-            })
-            .await
-            .map_err(|error| {
-                RuntimeError::new(
-                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
-                    error.to_string(),
-                )
-            })
     }
 }
