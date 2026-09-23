@@ -113,6 +113,9 @@ const SETTLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const USAGE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-104-f1d0c1d5f/sqlite-expected.json",
 ];
+const RECEIPT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-107-061de77f7/sqlite-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/sqlite-expected.json",
 ];
@@ -268,7 +271,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 75"),
+        message.contains("supports schema version 76"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -293,7 +296,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 75"),
+        message.contains("supports schema version 76"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(
@@ -353,7 +356,7 @@ async fn sqlite_v73_envelope_database_is_refused_before_blob_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 75"),
+        message.contains("supports schema version 76"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(

@@ -12,7 +12,9 @@ use crate::{BaseRenderCache, ClockWallTime, Message, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
 use lash_sansio::core_support::MessageCoreSupport;
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct RealizedNodeTimestamp {
     pub node_id: NodeId,
     pub timestamp: String,
@@ -455,7 +457,7 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
     }
 }
 
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct PersistedTurnState {
     pub turn_index: usize,
     #[serde(default)]

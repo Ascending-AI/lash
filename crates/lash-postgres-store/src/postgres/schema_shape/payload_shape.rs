@@ -47,7 +47,10 @@ pub(crate) struct PayloadShape {
 
 impl PayloadShape {
     /// Derives a payload shape from the Rust type rather than from a sample row.
-    #[cfg(test)]
+    #[expect(
+        clippy::expect_used,
+        reason = "`schemars::RootSchema` is a derived-`Serialize` type over plain data, so encoding it cannot fail"
+    )]
     pub(super) fn of<T: JsonSchema>() -> Self {
         let schema = serde_json::to_value(schemars::schema_for!(T))
             .expect("schemars root schemas are serializable");
@@ -195,6 +198,35 @@ fn registered_payloads() -> BTreeMap<PayloadCarrier, PayloadRegistration> {
             "scope_json",
         ),
         PayloadRegistration::of::<lash_core::ExecutionScope>(),
+    );
+    // FIG-3537: the turn-commit receipt is one serialized type on both SQL
+    // backends, so the PostgreSQL block carries the SQLite column's projection
+    // and the SQLite carrier registers its own fingerprint. A receipt shape
+    // change then owes both component versions.
+    let mut receipt = PayloadRegistration::of::<lash_core::store::RuntimeCommitReceipt>();
+    receipt.include_persisted_projection(
+        PayloadCarrier::new(
+            PayloadBackend::Sqlite,
+            "runtime_turn_commits",
+            "result_json",
+        ),
+        PayloadShape::of::<lash_core::store::RuntimeCommitReceipt>(),
+    );
+    payloads.insert(
+        PayloadCarrier::new(
+            PayloadBackend::Postgres,
+            "lash_runtime_turn_commits",
+            "result_json",
+        ),
+        receipt,
+    );
+    payloads.insert(
+        PayloadCarrier::new(
+            PayloadBackend::Sqlite,
+            "runtime_turn_commits",
+            "result_json",
+        ),
+        PayloadRegistration::of::<lash_core::store::RuntimeCommitReceipt>(),
     );
     payloads
 }
@@ -739,8 +771,10 @@ mod tests {
         assert_eq!(
             identities,
             std::collections::BTreeSet::from([
+                String::from("postgres lash_runtime_turn_commits.result_json"),
                 String::from("postgres lash_turn_cancel_closure_participants.scope_json"),
                 String::from("postgres lash_turn_cancellation_bindings.admitted_scope_json"),
+                String::from("sqlite runtime_turn_commits.result_json"),
             ])
         );
 

@@ -469,6 +469,7 @@ impl<'a> RuntimeCommitPlan<'a> {
         enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     ) -> RuntimeCommitReceipt {
         RuntimeCommitReceipt {
+            schema_version: super::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
             head_revision: self.next_head_revision,
             checkpoint_ref,
             manifest,

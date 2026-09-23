@@ -2207,6 +2207,7 @@ dependencies = [
  "lash-internal-http-transport",
  "lash-internal-sansio",
  "lash-internal-trace",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "thiserror",

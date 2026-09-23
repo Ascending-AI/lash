@@ -413,7 +413,9 @@ pub struct TurnInputAcceptanceReceipt {
 /// (admission) and the terminal turn commit (settlement). It deliberately
 /// carries identity only: hosts correlate an input to its canonical turn and
 /// committed message without parsing or retaining display text.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct TurnInputApplication {
     pub input_id: crate::InputId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -927,7 +929,7 @@ pub fn ingress_message_id(input_id: &str) -> String {
 }
 
 /// Host-provided per-turn input.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InputItem {
     Text { text: String },
@@ -943,7 +945,7 @@ impl InputItem {
     }
 }
 /// Host-provided per-turn input.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TurnInput {
     pub items: Vec<InputItem>,
     /// Per-turn override for protocol-owned turn options.

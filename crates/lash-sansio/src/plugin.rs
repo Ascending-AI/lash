@@ -35,7 +35,19 @@ impl PluginMessage {
 
 /// Gate on Tool Catalog membership: a contribution is kept when at least one
 /// of `tools` is a member of the catalog. There is no minimum-tier dimension.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 pub struct PromptContributionGate {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<String>,
@@ -47,7 +59,9 @@ impl PromptContributionGate {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct PromptContribution {
     pub slot: crate::PromptSlot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,7 +82,9 @@ pub struct PromptContribution {
 ///     body.slot = PromptSlot::Guidance;
 /// }
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct PromptContributionBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -203,7 +219,7 @@ pub enum PluginRuntimeEvent {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckpointKind {
     AfterWork,

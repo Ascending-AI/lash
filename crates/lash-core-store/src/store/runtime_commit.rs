@@ -3,6 +3,7 @@
 use super::{
     BlobRef, GraphAppend, HydratedSessionCheckpoint, OperationId, RealizedNodeTimestamp,
     SessionCheckpoint, SessionExecutionLeaseAuthority, StoreError, commit_identity,
+    ensure_supported_record_schema_version, ensure_supported_schema_version,
 };
 use crate::SessionId;
 use crate::TurnId;
@@ -339,7 +340,9 @@ impl RuntimeCommit {
 /// a store schema bump. Cross-version retry continuity is bounded by that
 /// policy: Lash does not claim that usage identities survive store recreation
 /// or deduplicate across encoder versions.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct RuntimeUsageDeltaIdentity {
     /// Canonical [`OperationId::storage_key`] of the operation that first
     /// staged this row.
@@ -644,8 +647,9 @@ impl RuntimeUsageDelta {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct RuntimeCommitReceipt {
+    pub schema_version: u32,
     pub head_revision: u64,
     pub checkpoint_ref: BlobRef,
     pub manifest: SessionCheckpoint,
@@ -691,6 +695,61 @@ pub struct RuntimeCommitReceipt {
     /// it is stored as `false` in the receipt itself.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub receipt_replayed: bool,
+}
+
+/// The durable `result_json` receipt schema this build writes.
+///
+/// Version 1 is the first stamped encoding. Receipts written before the field
+/// existed carry no `schema_version` at all and are refused as
+/// [`StoreError::MissingRecordSchemaVersion`], matching the exact-version
+/// refusal every other durable record follows.
+pub const RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION: u32 = 1;
+
+/// Stable record-kind label the receipt's decode refusals carry.
+pub const RUNTIME_COMMIT_RECEIPT_RECORD_KIND: &str = "RuntimeCommitReceipt";
+
+/// Decode one persisted `result_json` receipt body for a session's operation.
+///
+/// Every read of the receipt column fails closed through this one codec: a
+/// payload that is not valid JSON, a missing or invalid `schema_version`, a
+/// version this binary does not support, or a body outside the current shape
+/// is a refusal, never a skipped row. `turn_id` is the row's operation storage
+/// key, named so a refusal identifies the exact durable record.
+pub fn decode_runtime_commit_receipt(
+    session_id: &SessionId,
+    turn_id: &str,
+    json: &str,
+) -> Result<RuntimeCommitReceipt, StoreError> {
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+            message: format!(
+                "session `{session_id}` receipt `{turn_id}` is not valid JSON: {error}"
+            ),
+        })?;
+    ensure_supported_record_schema_version(
+        RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+        &value,
+        RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
+    )?;
+    serde_json::from_value(value).map_err(|error| StoreError::StoredDataCorrupt {
+        record_kind: RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+        message: format!(
+            "session `{session_id}` receipt `{turn_id}` does not match the supported shape: {error}"
+        ),
+    })
+}
+
+/// Enforce the receipt version contract on an already-typed receipt.
+///
+/// Backends that hold the receipt as a value rather than serialized bytes
+/// apply the same refusal the JSON codec does.
+pub fn ensure_supported_receipt_version(receipt: &RuntimeCommitReceipt) -> Result<(), StoreError> {
+    ensure_supported_schema_version(
+        RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+        receipt.schema_version,
+        RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
+    )
 }
 
 /// Replay identity carried by one runtime commit.

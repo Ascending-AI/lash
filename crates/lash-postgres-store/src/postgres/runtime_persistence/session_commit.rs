@@ -101,19 +101,11 @@ impl SessionCommitStore for PostgresSessionStore {
         for row in turn_failure_rows {
             let turn_id = row.get::<String, _>("turn_id");
             let result_json = row.get::<String, _>("result_json");
-            let receipt: RuntimeCommitReceipt = match serde_json::from_str(&result_json) {
-                Ok(receipt) => receipt,
-                Err(error) => {
-                    tracing::warn!(
-                        target: "lash_postgres_store::runtime_persistence",
-                        session_id = session_id.as_str(),
-                        turn_id = turn_id.as_str(),
-                        error = %error,
-                        "skipping corrupt runtime turn receipt while loading failure evidence"
-                    );
-                    continue;
-                }
-            };
+            let receipt = lash_core::store::decode_runtime_commit_receipt(
+                session_id,
+                &turn_id,
+                &result_json,
+            )?;
             if !receipt.failure_evidence.is_empty() {
                 turn_failure_settlements.push(lash_core::TurnFailureSettlement {
                     turn_id,
@@ -331,7 +323,11 @@ impl SessionCommitStore for PostgresSessionStore {
                         stored_version.map(i64::from),
                         stored_requested_node_count,
                     )?;
-                let result = store_decode_json(&result_json, "runtime turn commit result")?;
+                let result = lash_core::store::decode_runtime_commit_receipt(
+                    &commit.session_id,
+                    planner.operation_key(),
+                    &result_json,
+                )?;
                 let prior = lash_core::store::RuntimeCommitReceiptRecord {
                     turn_commit_hash: hash,
                     result,

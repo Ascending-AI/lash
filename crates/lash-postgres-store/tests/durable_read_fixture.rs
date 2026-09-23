@@ -114,6 +114,9 @@ const SETTLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const USAGE_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-104-f1d0c1d5f/postgres-expected.json",
 ];
+const RECEIPT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-107-061de77f7/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -258,7 +261,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 116);
+    assert_eq!(PostgresStorage::schema_version(), 117);
     let fixture_database_url = fixture_database_url(&database_url);
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await

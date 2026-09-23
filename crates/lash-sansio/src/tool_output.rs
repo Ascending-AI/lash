@@ -60,7 +60,7 @@ macro_rules! define_tool_intent_kind {
 
 crate::tool_intent_variants!(define_tool_intent_kind);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ToolIntentIdentity {
     pub session_id: SessionId,
     /// The enclosing execution-scope id: a turn id for turn scope and a

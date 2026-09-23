@@ -87,7 +87,7 @@ impl RuntimeEffectKind {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RuntimeAttribution {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
@@ -170,7 +170,7 @@ impl RuntimeAttribution {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RuntimeReplay {
     pub key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,13 +178,13 @@ pub struct RuntimeReplay {
 }
 
 /// Structural attribution for a durable replay entry.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "identity", rename_all = "snake_case")]
 pub enum RuntimeReplayAttribution {
     ToolIntent(crate::ToolIntentIdentity),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeSubject {
     Effect {
@@ -218,7 +218,7 @@ pub enum RuntimeSubject {
 
 pub(crate) const PROCESS_TRANSFER_FAMILY_VERSION: u8 = 1;
 /// Canonical lineage for a runtime-side invocation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RuntimeInvocation {
     pub attribution: RuntimeAttribution,
     pub subject: RuntimeSubject,

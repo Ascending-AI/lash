@@ -40,7 +40,7 @@ impl TurnAddress {
     }
 }
 /// One undelivered active-turn input affected by cancellation repair.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TurnCancelAffectedInput {
     pub input_id: crate::InputId,
     pub payload: crate::TurnInput,
@@ -55,7 +55,7 @@ impl PartialEq for TurnCancelAffectedInput {
 }
 impl Eq for TurnCancelAffectedInput {}
 /// Durable outcome accumulated on a turn-cancel request.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TurnCancelInputOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub affected_inputs: Vec<TurnCancelAffectedInput>,

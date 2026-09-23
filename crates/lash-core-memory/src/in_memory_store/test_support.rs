@@ -385,6 +385,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn receipt_reads_refuse_a_newer_receipt_version() {
+        let factory = super::super::InMemorySessionStoreFactory::new();
+        let session_id = "receipt-version-refusal";
+        let store = factory
+            .create_store(&SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::from(session_id.to_string()),
+                relation: crate::SessionRelation::Root,
+                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("create in-memory session store");
+        let concrete = factory
+            .stores
+            .lock_recover()
+            .get(session_id)
+            .cloned()
+            .expect("concrete in-memory session store");
+        let mut state = RuntimeSessionState {
+            session_id: SessionId::from(session_id.to_string()),
+            ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+        };
+        state.ensure_agent_frame_initialized();
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.failure_evidence = vec![
+            lash_core_store::turn_failure_evidence::TurnFailureEvidence {
+                partial_output: None,
+                billed_usage: Default::default(),
+                refusal: lash_core_store::turn_failure_evidence::ChargeSafetyRefusalEvidence {
+                    code: "unsafe_retry_after_output_started".to_string(),
+                    denial_reason:
+                        lash_sansio::llm::types::ChargeSafetyDenialReason::GuaranteeRequired,
+                    protocol_position: lash_sansio::llm::types::ProtocolPosition::OutputStarted,
+                    attempt_number: 1,
+                    attempt_count: 1,
+                },
+            },
+        ];
+        store
+            .commit_runtime_state(commit)
+            .await
+            .expect("seed one failure-evidence receipt");
+
+        let newer = crate::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION + 1;
+        for record in concrete.runtime_turn_commits.lock_recover().values_mut() {
+            record.result.schema_version = newer;
+        }
+
+        let error = store
+            .load_session()
+            .await
+            .expect_err("a newer receipt version must refuse the whole load");
+        assert!(
+            matches!(
+                error,
+                StoreError::UnsupportedRecordSchemaVersion {
+                    record_kind: "RuntimeCommitReceipt",
+                    actual,
+                    expected,
+                } if actual == newer
+                    && expected == crate::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
+            ),
+            "expected the typed version refusal, got {error:?}"
+        );
+
+        let error = store
+            .list_turn_input_applications(&SessionId::from(session_id.to_string()))
+            .await
+            .expect_err("application listing must refuse a newer receipt version");
+        assert!(
+            matches!(
+                error,
+                StoreError::UnsupportedRecordSchemaVersion {
+                    record_kind: "RuntimeCommitReceipt",
+                    ..
+                }
+            ),
+            "expected the typed version refusal, got {error:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn factory_rejects_occupied_global_node_id_without_partial_usage() {
         let factory = super::super::InMemorySessionStoreFactory::new();
         let request = |session_id: &SessionId| SessionStoreCreateRequest {

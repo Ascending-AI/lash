@@ -445,7 +445,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // and recreated.
 // Version 116 adds durable queued-run admissions and normalized membership.
 // Component-115 catalogs require recreation.
-const SCHEMA_VERSION: i32 = 116;
+// Version 117 (FIG-3537) stamps RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION onto
+// `lash_runtime_turn_commits.result_json` and enrolls the receipt in the
+// payload-shape gate. Every receipt read now fails closed on missing,
+// invalid, or unsupported versions instead of skipping the row; receipts
+// written before the field existed are refused as pre-versioned state.
+// Component-116 catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 117;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -126,16 +126,21 @@ const POST_FLOOR_ARTIFACTS: [&str; 2] = [
 /// the *current* catalog, so these are exactly the artifacts its refusal must
 /// enumerate.
 ///
-/// The retained 114 -> 115 generation introduced these constraints. The
-/// component-116 queued-run cutover has no migration path from 115.
-const DIVERGENT_ARTIFACTS: [&str; 5] = [
-    "ck_runtime_effect_replay_outcome_json",
-    "ck_runtime_effect_replay_error_json",
-    "ck_runtime_effect_replay_settlement_seq",
-    "fk_runtime_effect_replay_group",
-    "fk_runtime_effect_group_child_group",
+/// The retained 115 -> 116 generation introduced these relations: the
+/// queued-run admission and membership tables and the pending-run index. The
+/// component-116 queued-run cutover and the component-117 receipt-versioning
+/// cutover are both destructive, so no migration path from a predecessor
+/// stamp exists.
+const DIVERGENT_ARTIFACTS: [&str; 3] = [
+    "lash_queued_run_members",
+    "lash_queued_runs",
+    "lash_queued_runs_pending",
 ];
-/// Queued-run admission has no migration from a predecessor stamp.
+/// A destructive generation has no migration arm, so a predecessor stamp over
+/// the current catalog is refused at the ordinary reject-and-recreate
+/// boundary. Component 117 is destructive: no 116 → 117 arm exists, so the
+/// component-116 stamp over the current catalog is refused for having no
+/// applicable migration.
 const PRE_CUTOVER_REFUSAL_KIND: RefusalKind = RefusalKind::NoApplicableMigration;
 /// Sessions a live pre-bump deployment owned. `health` reopens the same ids on
 /// the recreated store: identifiers are host-chosen and must survive a bump even
@@ -657,11 +662,10 @@ async fn seed(database_url: &str) -> Result<()> {
     // that a boot gate on every restart cannot.
     let probe_before_rewind = probe(database_url, PreflightOptions::deep()).await?;
 
-    // Rewind only the ledger stamp: the immediate predecessor's published
-    // catalog is this build's own catalog minus the five component-114
-    // constraints — so the divergent fixture is the current catalog wearing
-    // the previous component version, and the refusal must enumerate the
-    // constraint artifacts it cannot own.
+    // Rewind only the ledger stamp: this is a destructive generation with no
+    // migration arm, so the divergent fixture is the current catalog wearing
+    // the previous component version, refused at the ordinary
+    // reject-and-recreate boundary rather than as migration divergence.
     let recorded = expected_version - 1;
     stamp_version(&pool, recorded).await?;
     // The walk now sees the exact predecessor stamp over the current shape.

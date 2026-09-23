@@ -37,6 +37,7 @@ lash-trace = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

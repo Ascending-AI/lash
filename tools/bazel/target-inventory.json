@@ -17795,6 +17795,7 @@
         "lash-internal-http-transport",
         "lash-internal-sansio",
         "lash-internal-trace",
+        "schemars",
         "serde",
         "serde_json",
         "thiserror",

@@ -476,19 +476,20 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<crate::TurnInputApplication>, crate::store::StoreError> {
-        let mut commits = self
-            .runtime_turn_commits
-            .lock_recover()
-            .iter()
-            .filter(|((stored_session_id, _), _)| stored_session_id == session_id)
-            .map(|((_, turn_id), record)| {
-                (
-                    record.result.head_revision,
-                    turn_id.clone(),
-                    record.result.turn_input_applications.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let mut commits = Vec::new();
+        for ((stored_session_id, turn_id), record) in
+            self.runtime_turn_commits.lock_recover().iter()
+        {
+            if stored_session_id != session_id {
+                continue;
+            }
+            crate::store::ensure_supported_receipt_version(&record.result)?;
+            commits.push((
+                record.result.head_revision,
+                turn_id.clone(),
+                record.result.turn_input_applications.clone(),
+            ));
+        }
         commits.sort_by(|left, right| (left.0, left.1.as_str()).cmp(&(right.0, right.1.as_str())));
         Ok(commits
             .into_iter()

@@ -4,6 +4,33 @@
 pub struct ProtocolTurnOptions {
     pub payload: serde_json::Value,
 }
+
+/// Wire mirror of [`ProtocolTurnOptions`] used only for its schemars shape.
+/// The manual serde impls below keep validation total; the schema records the
+/// field names, that `schema_version` is required and `payload` optional, and
+/// that each may be any JSON value (the version's exact-match refusal is
+/// `parse_protocol_turn_options_schema_version`'s job, beyond what a shape can
+/// express). It is distinct from the accept-side `ProtocolTurnOptionsWire`
+/// inside `deserialize`, which tolerates a missing version so the typed
+/// refusal below can name it.
+#[derive(schemars::JsonSchema)]
+#[allow(dead_code)]
+struct ProtocolTurnOptionsSchemaWire {
+    schema_version: serde_json::Value,
+    #[serde(default)]
+    payload: serde_json::Value,
+}
+
+impl schemars::JsonSchema for ProtocolTurnOptions {
+    fn schema_name() -> String {
+        "ProtocolTurnOptions".to_string()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        ProtocolTurnOptionsSchemaWire::json_schema(generator)
+    }
+}
+
 impl serde::Serialize for ProtocolTurnOptions {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

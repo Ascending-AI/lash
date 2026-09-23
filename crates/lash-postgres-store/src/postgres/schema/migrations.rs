@@ -3,11 +3,12 @@
 
 use super::*;
 
-/// These declarations retain the component-115 endpoint, including the five
-/// effect-replay constraints its 114 -> 115 migration installed. Component
-/// 116 adds durable queued-run admission and normalized membership. No old
-/// catalog carries their replay ownership, so the current build offers no
-/// migration and refuses every predecessor, including 115. Source-shape
+/// These declarations retain the component-116 endpoint, including the five
+/// effect-replay constraints component 115 installed and the durable
+/// queued-run admission component 116 adds. Component 117 versions the
+/// runtime-commit receipt payload. No old catalog carries the queued-run
+/// ownership or the receipt version stamp, so the current build offers no
+/// migration and refuses every predecessor, including 116. Source-shape
 /// declarations remain keyed to this build's catalog for precise older-store
 /// fixture construction.
 const ARBITRATION_GUARDS: &[DeclaredGuard] = &[
@@ -65,7 +66,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         // The lists are keyed to the floor, not to one generation: a relation,
         // column, or constraint introduced after 105 belongs here too, so the
         // fixture rebuilds the published component-101 catalog by removing them.
-        to: 115,
+        to: 116,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -102,7 +103,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // further the endpoint carries.
     SchemaMigration {
         from: 102,
-        to: 115,
+        to: 116,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -130,7 +131,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // those columns the endpoint carries.
     SchemaMigration {
         from: 103,
-        to: 115,
+        to: 116,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -157,7 +158,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // models, so a component-104 catalog lacks exactly those columns.
     SchemaMigration {
         from: 104,
-        to: 115,
+        to: 116,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -185,7 +186,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // parent payload, and the arbitration state alone.
     SchemaMigration {
         from: 105,
-        to: 115,
+        to: 116,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -213,7 +214,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // to its siblings.
     SchemaMigration {
         from: 106,
-        to: 115,
+        to: 116,
         source_missing_tables: &[
             "lash_queued_run_members",
             "lash_queued_runs",
@@ -243,7 +244,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // 108 added no relational DDL of its own.
     SchemaMigration {
         from: 107,
-        to: 115,
+        to: 116,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
@@ -266,7 +267,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // guards a component-107 catalog does against this build.
     SchemaMigration {
         from: 108,
-        to: 115,
+        to: 116,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_parent_end_plans", "parent_payload"),
@@ -299,7 +300,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // columns and guards plus the five effect-replay constraints.
     SchemaMigration {
         from: 109,
-        to: 115,
+        to: 116,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[
             ("lash_runtime_effect_group", "next_commit_seq"),
@@ -326,7 +327,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     // All are refused at the queued-run cutover.
     SchemaMigration {
         from: 110,
-        to: 115,
+        to: 116,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -337,7 +338,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 111,
-        to: 115,
+        to: 116,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -348,7 +349,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 112,
-        to: 115,
+        to: 116,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -359,7 +360,7 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     SchemaMigration {
         from: 113,
-        to: 115,
+        to: 116,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
@@ -370,16 +371,35 @@ pub(super) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
     },
     // Component 114 lacked the five effect-replay constraints installed at
     // 115. The retained declaration records their historical shape while the
-    // current component-116 cutover offers no executable migration.
+    // current component-117 cutover offers no executable migration.
     SchemaMigration {
         from: 114,
-        to: 115,
+        to: 116,
         source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
         source_missing_columns: &[],
         source_missing_guards: &[],
         source_missing_foreign_keys: EFFECT_REPLAY_FOREIGN_KEYS,
         introduced_relations: &[],
         introduced_constraints: EFFECT_REPLAY_CONSTRAINT_NAMES,
+        statements: &[],
+    },
+    // A component-115 catalog predates the queued-run cutover wholesale: it
+    // lacks the admission and membership tables and the pending-run index the
+    // component-116 endpoint carries, and nothing else. Their constraints and
+    // foreign key ride the table drops, so only the relations are enumerated.
+    SchemaMigration {
+        from: 115,
+        to: 116,
+        source_missing_tables: &["lash_queued_run_members", "lash_queued_runs"],
+        source_missing_columns: &[],
+        source_missing_guards: &[],
+        source_missing_foreign_keys: &[],
+        introduced_relations: &[
+            "lash_queued_run_members",
+            "lash_queued_runs",
+            "lash_queued_runs_pending",
+        ],
+        introduced_constraints: &[],
         statements: &[],
     },
 ];

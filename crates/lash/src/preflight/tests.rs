@@ -389,6 +389,13 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             ),
         ),
         (
+            DurableFormat::RuntimeCommitReceipt,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: one row per committed turn, each receipt refused at decode \
+                 rather than at rest",
+            ),
+        ),
+        (
             DurableFormat::Bytecode,
             SurfaceRelation::Walk {
                 surface: DurableSurface::ParkedSegment,
@@ -467,7 +474,7 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         ),
     ];
 
-    assert_eq!(relations.len(), 34);
+    assert_eq!(relations.len(), 35);
     for (format, expected) in relations {
         assert_eq!(
             format_surface(format),
@@ -495,6 +502,7 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         DurableFormat::ToolAttemptCapture,
         DurableFormat::ToolPresentation,
         DurableFormat::TurnCheckpoint,
+        DurableFormat::RuntimeCommitReceipt,
         DurableFormat::WorkflowGraphSchema,
         DurableFormat::WorkflowTypeFacet,
         DurableFormat::NativeRlmDriverState,

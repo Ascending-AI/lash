@@ -103,23 +103,21 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         graph
             .validate_resident_integrity()
             .map_err(map_graph_corruption)?;
-        let mut turn_failure_settlements = self
-            .runtime_turn_commits
-            .lock_recover()
-            .iter()
-            .filter_map(|((owner_session_id, turn_id), record)| {
-                (owner_session_id == meta.session_id && !record.result.failure_evidence.is_empty())
-                    .then(|| {
-                        (
-                            record.committed_at_ms,
-                            crate::TurnFailureSettlement {
-                                turn_id: turn_id.clone(),
-                                evidence: record.result.failure_evidence.clone(),
-                            },
-                        )
-                    })
-            })
-            .collect::<Vec<_>>();
+        let mut turn_failure_settlements = Vec::new();
+        for ((owner_session_id, turn_id), record) in self.runtime_turn_commits.lock_recover().iter()
+        {
+            if *owner_session_id != meta.session_id || record.result.failure_evidence.is_empty() {
+                continue;
+            }
+            crate::store::ensure_supported_receipt_version(&record.result)?;
+            turn_failure_settlements.push((
+                record.committed_at_ms,
+                crate::TurnFailureSettlement {
+                    turn_id: turn_id.clone(),
+                    evidence: record.result.failure_evidence.clone(),
+                },
+            ));
+        }
         turn_failure_settlements.sort_by(|(left_at, left), (right_at, right)| {
             left_at
                 .cmp(right_at)
@@ -245,6 +243,7 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
         planner.validate_node_derivation()?;
         let key = (session_id.clone(), planner.operation_key().to_string());
         if let Some(stored) = self.runtime_turn_commits.lock_recover().get(&key).cloned() {
+            crate::store::ensure_supported_receipt_version(&stored.result)?;
             let prior = crate::store::RuntimeCommitReceiptRecord {
                 turn_commit_hash: stored.turn_commit_hash,
                 result: stored.result,
