@@ -1094,3 +1094,149 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         Err(lash_core::StoreError::IncompleteCheckpointComponentSet)
     ));
 }
+
+// A turn commit whose reply is lost after the store applied it must not keep
+// its staged usage pending: the durable journal already carries those rows,
+// and a live ledger that adds both counts the turn twice.
+#[tokio::test]
+async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
+    struct LostCommitReplyStore {
+        inner: Arc<RecordingStore>,
+        armed: AtomicBool,
+    }
+    #[async_trait::async_trait]
+    impl lash_core::store::RuntimePersistenceDecorator for LostCommitReplyStore {
+        fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+            self.inner.as_ref()
+        }
+        async fn commit_runtime_state(
+            &self,
+            commit: lash_core::store::RuntimeCommit,
+        ) -> Result<lash_core::store::RuntimeCommitReceipt, lash_core::StoreError> {
+            let is_turn_final = commit.turn_commit.operation.key == "final";
+            let result = self.inner.commit_runtime_state(commit).await;
+            if is_turn_final && result.is_ok() && self.armed.swap(false, Ordering::SeqCst) {
+                return Err(lash_core::StoreError::Backend(
+                    "injected lost commit reply".to_string(),
+                ));
+            }
+            result
+        }
+    }
+    let usage_call = |input_tokens: i64, output_tokens: i64| MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            parts: vec![LlmOutputPart::Text {
+                text: "accounted".to_string(),
+                response_meta: None,
+            }],
+            usage: LlmUsage {
+                input_tokens,
+                output_tokens,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 0,
+            },
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    };
+    let inner_store = Arc::new(RecordingStore::default());
+    let store = Arc::new(LostCommitReplyStore {
+        inner: Arc::clone(&inner_store),
+        armed: AtomicBool::new(true),
+    });
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(vec![usage_call(12, 4), usage_call(5, 2)]),
+        test_host_config(),
+        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+    )
+    .await;
+
+    let error = runtime
+        .run_turn_assembled(
+            TurnInput::text("account this turn"),
+            CancellationToken::new(),
+            named_turn_scope(
+                &SessionId::from("root"),
+                &TurnId::from("ambiguous-commit-turn"),
+            ),
+        )
+        .await
+        .expect_err("the landed commit's reply is lost");
+    assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
+
+    // The commit landed: the durable journal already holds the turn's usage.
+    let durable = inner_store.raw_usage_deltas_for_testing();
+    assert_eq!(
+        durable
+            .iter()
+            .map(|entry| entry.usage.input_tokens)
+            .sum::<i64>(),
+        12
+    );
+    // Its staged copies are gone: nothing pending can count them again.
+    assert!(
+        runtime.shared_token_ledger.lock_recover().is_empty(),
+        "a landed commit's staged rows must be discarded: {:?}",
+        runtime.shared_token_ledger.lock_recover()
+    );
+
+    runtime
+        .refresh_session_graph_from_store()
+        .await
+        .expect("reload the landed head");
+    let report = runtime.usage_report();
+    assert_eq!(report.usage.usage.input_tokens, 12);
+    assert_eq!(report.usage.usage.output_tokens, 4);
+
+    let handle = RuntimeHandle::new(runtime);
+    let observation = handle.observe();
+    assert_eq!(observation.usage_report.usage.usage.input_tokens, 12);
+    assert_eq!(observation.usage_report.usage.usage.output_tokens, 4);
+
+    {
+        let mut runtime = handle.runtime.lock().await;
+        runtime
+            .run_turn_assembled(
+                TurnInput::text("account the next turn"),
+                CancellationToken::new(),
+                named_turn_scope(
+                    &SessionId::from("root"),
+                    &TurnId::from("after-ambiguous-commit-turn"),
+                ),
+            )
+            .await
+            .expect("the next turn commits normally");
+        handle.publish_from(&runtime);
+        // The resident ledger matches the durable journal exactly: the lost
+        // reply's usage is not folded in a second time.
+        let resident_input = runtime
+            .state
+            .token_ledger
+            .iter()
+            .map(|entry| entry.usage.input_tokens)
+            .sum::<i64>();
+        assert_eq!(resident_input, 17);
+        let resident_output = runtime
+            .state
+            .token_ledger
+            .iter()
+            .map(|entry| entry.usage.output_tokens)
+            .sum::<i64>();
+        assert_eq!(resident_output, 6);
+    }
+    let observation = handle.observe();
+    assert_eq!(observation.usage_report.usage.usage.input_tokens, 17);
+    assert_eq!(observation.usage_report.usage.usage.output_tokens, 6);
+    let durable = inner_store.raw_usage_deltas_for_testing();
+    assert_eq!(
+        durable
+            .iter()
+            .map(|entry| entry.usage.input_tokens)
+            .sum::<i64>(),
+        17
+    );
+}

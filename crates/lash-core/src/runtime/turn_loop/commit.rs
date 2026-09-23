@@ -177,6 +177,11 @@ impl PreparedTurn {
             turn_cancel_closure_settlement,
             turn_control_resolver,
         } = request;
+        // The staged usage deltas ride the same atomic commit as the turn's
+        // final operation, so `turn_is_committed` also proves whether those
+        // deltas are durable. The store is captured before `final_commit`
+        // consumes the session borrow, for the lost-reply branch below.
+        let history_store = session.as_deref().and_then(Session::history_store);
         let accepted = Box::pin(
             self.turn_pipeline.final_commit(
                 &mut self.turn,
@@ -199,7 +204,36 @@ impl PreparedTurn {
                     .flatten(),
             ),
         )
-        .await?;
+        .await;
+        let accepted = match accepted {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                // A reply lost after the store applied the commit leaves the
+                // staged usage already durable: keeping the pending rows would
+                // count this turn's usage twice once the resident ledger
+                // reloads. Discard them only on a confirmed landing — on a
+                // clean failure, or when the probe cannot answer, they stay
+                // pending for the next boundary.
+                if let Some(store) = history_store.as_deref() {
+                    let operation = self.turn_pipeline.final_operation();
+                    if let (Some(session_id), Some(turn_id)) =
+                        (operation.scope.session_id(), operation.scope.turn_id())
+                        && matches!(
+                            store
+                                .turn_is_committed(&crate::TurnAddress::new(
+                                    session_id.clone(),
+                                    turn_id.clone(),
+                                ))
+                                .await,
+                            Ok(true)
+                        )
+                    {
+                        staged_usage.discard_staged();
+                    }
+                }
+                return Err(error);
+            }
+        };
         Ok(CommittedTurn {
             turn: self.turn,
             events: self.events,
