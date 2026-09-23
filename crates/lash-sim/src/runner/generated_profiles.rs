@@ -364,8 +364,16 @@ async fn run_generated_evidence_profile(
         // summary in `trace.final_summary` runs a different scheduling discipline
         // and is not directly comparable to the serialized durable re-run.)
         let serialized_reference = replay_workload_serialized_reference(&sqlite_workload).await?;
-        let sqlite_summary =
+        let sqlite_rerun =
             replay_workload_on_sqlite(&sqlite_workload, &sqlite_database_path).await?;
+        if !sqlite_rerun.content.is_passed() {
+            return Err(FixedScriptRunnerError::Assertion(format!(
+                "SQLite re-run for seed {seed} ({profile}) broke durable content: {}",
+                sqlite_rerun.content.message
+            )));
+        }
+        oracle_verdicts.push(sqlite_rerun.content);
+        let sqlite_summary = sqlite_rerun.summary;
         let backend_verdict = replay_determinism(&serialized_reference, &sqlite_summary);
         oracle_verdicts.push(backend_verdict.clone());
         let sqlite_report = if backend_verdict.is_passed() {

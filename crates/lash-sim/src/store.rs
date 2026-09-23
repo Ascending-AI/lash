@@ -580,12 +580,12 @@ impl ModelStore {
                     .sessions
                     .get(&event.actor_alias)
                     .map_or(1, |session| session.provider_turns.len() + 1);
-                let text = event
+                let streamed = event
                     .payload
                     .get("text")
                     .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
+                    .unwrap_or("");
+                let text = crate::runtime_contracts::host_assistant_message(streamed);
                 let provider_exchange_count = event
                     .payload
                     .get("expected_provider_exchange_count")
@@ -619,7 +619,7 @@ impl ModelStore {
                     },
                     &SessionId::from(event.actor_alias.clone()),
                     turn_index,
-                    &text,
+                    streamed,
                     provider_exchange_count,
                 );
                 let provider_kind = event
@@ -627,23 +627,30 @@ impl ModelStore {
                     .get("provider_kind")
                     .and_then(Value::as_str)
                     .unwrap_or("openai-compatible");
-                let (input_tokens, output_tokens, reasoning_output_tokens): (i64, i64, i64) =
-                    match provider_kind {
-                        "openai" => (5, 2, 0),
-                        "anthropic" => (7, 4, 0),
-                        "google_oauth" => (6, 4, 1),
-                        _ => (0, 0, 0),
-                    };
-                let usage = |multiplier: i64| {
-                    RuntimeUsageTotals::new(
-                        input_tokens.saturating_mul(multiplier),
-                        output_tokens.saturating_mul(multiplier),
-                        0,
-                        0,
-                        reasoning_output_tokens.saturating_mul(multiplier),
+                // Generated turns carry the usage their script reports; turns
+                // recorded before generated usage ran the canonical scripts'
+                // fixed counts.
+                let turn_usage =
+                    match crate::runtime_providers::scripted_turn_from_provider_boundary(
+                        &event.payload,
                     )
-                };
-                let turn_usage = usage(1);
+                    .ok()
+                    .and_then(|turn| turn.usage)
+                    {
+                        Some(usage) => RuntimeUsageTotals::new(
+                            usage.input_tokens,
+                            usage.output_tokens,
+                            usage.cache_read_input_tokens,
+                            0,
+                            usage.reasoning_output_tokens,
+                        ),
+                        None => match provider_kind {
+                            "openai" => RuntimeUsageTotals::new(5, 2, 0, 0, 0),
+                            "anthropic" => RuntimeUsageTotals::new(7, 4, 0, 0, 0),
+                            "google_oauth" => RuntimeUsageTotals::new(6, 4, 0, 0, 1),
+                            _ => RuntimeUsageTotals::default(),
+                        },
+                    };
                 let (prior_usage, prior_ledger_keys) =
                     self.sessions.get(&event.actor_alias).map_or_else(
                         || (RuntimeUsageTotals::default(), BTreeSet::new()),
@@ -656,7 +663,7 @@ impl ModelStore {
                     );
                 let total_usage = prior_usage.saturating_add(&turn_usage);
                 let mut ledger_keys = prior_ledger_keys;
-                if input_tokens != 0 || output_tokens != 0 || reasoning_output_tokens != 0 {
+                if turn_usage != RuntimeUsageTotals::default() {
                     ledger_keys.insert(provider_kind.to_string());
                 }
                 let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")

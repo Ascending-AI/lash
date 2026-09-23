@@ -17,6 +17,9 @@ pub(super) struct GeneratedRuntimeWorld {
     provider_mutations: SimProviderMutationHarness,
     trigger_harness: SimTriggerHarness,
     store_factory: Arc<dyn SessionStoreFactory>,
+    /// The backend factory underneath the commit observer, for reading the
+    /// in-memory lane back through a fresh handle once the run is over.
+    reopen_factory: Arc<dyn SessionStoreFactory>,
     durable_writes: CheckpointWriteCollector,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
@@ -43,6 +46,8 @@ pub(super) struct GeneratedRuntimeWorld {
     /// a seed, however early or late its task happened to get polled.
     staged_admissions: BTreeMap<String, BoundaryEvent>,
     suspends_spawned: u64,
+    /// Resolved suspend sessions, kept for the durable-content oracle.
+    finished_suspends: Vec<FinishedSuspend>,
     /// When set, the driver admits at most one live provider turn at a time
     /// (see `RuntimeCompletionState::serialize_provider_turns`). Enabled for the
     /// cross-backend durable re-run; left off for the in-memory reference/search.
@@ -74,6 +79,19 @@ struct SuspendingTurn {
     /// pass that later notices the parked await key would make it a function of
     /// how fast the host polled the turn (see `staged_admissions`).
     resolution_at: u64,
+    transport: Arc<ScriptedLlmHttpTransport>,
+    scripts: Vec<ProviderWireScript>,
+    store_factory: Arc<dyn SessionStoreFactory>,
+}
+
+/// What the durable-content oracle needs from a suspend session after its
+/// resumed turn finished.
+struct FinishedSuspend {
+    session: String,
+    transport: Arc<ScriptedLlmHttpTransport>,
+    scripts: Vec<ProviderWireScript>,
+    tool_result: crate::content_oracle::ToolResultContent,
+    store_factory: Arc<dyn SessionStoreFactory>,
 }
 
 struct GeneratedRuntimeSession {
@@ -131,6 +149,7 @@ impl GeneratedRuntimeWorld {
         clock: Arc<SimClock>,
     ) -> Self {
         let durable_writes = CheckpointWriteCollector::default();
+        let reopen_factory = Arc::clone(&store_factory);
         let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
             ObservedSessionStoreFactory::new(store_factory, durable_writes.clone()),
         );
@@ -148,12 +167,14 @@ impl GeneratedRuntimeWorld {
                 clock,
             ),
             store_factory,
+            reopen_factory,
             durable_writes,
             attachment_store,
             process_env_store,
             suspending_turns: BTreeMap::new(),
             staged_admissions: BTreeMap::new(),
             suspends_spawned: 0,
+            finished_suspends: Vec::new(),
             serialize_provider_turns,
         }
     }
@@ -164,6 +185,49 @@ impl GeneratedRuntimeWorld {
 
     pub(super) fn checkpoint_write_collector(&self) -> CheckpointWriteCollector {
         self.durable_writes.clone()
+    }
+
+    pub(super) fn reopen_factory(&self) -> Arc<dyn SessionStoreFactory> {
+        Arc::clone(&self.reopen_factory)
+    }
+
+    /// Emitted, committed and reopened content for every runtime and suspend
+    /// session. Runtime sessions are read back through `reopen`; suspend
+    /// sessions own an in-memory store and are read back through a fresh
+    /// handle on it.
+    pub(super) async fn content_evidence(
+        &self,
+        reopen: &dyn SessionStoreFactory,
+    ) -> Result<Vec<crate::content_oracle::SessionContent>, FixedScriptRunnerError> {
+        let writes = self.checkpoint_write_events();
+        let mut sessions = Vec::new();
+        for (alias, session) in &self.sessions {
+            sessions.push(
+                session_content(
+                    alias,
+                    session.transport.as_ref(),
+                    &session.provider_scripts,
+                    Vec::new(),
+                    &writes,
+                    reopen,
+                )
+                .await?,
+            );
+        }
+        for suspend in &self.finished_suspends {
+            sessions.push(
+                session_content(
+                    &suspend.session,
+                    suspend.transport.as_ref(),
+                    &suspend.scripts,
+                    vec![suspend.tool_result.clone()],
+                    &writes,
+                    suspend.store_factory.as_ref(),
+                )
+                .await?,
+            );
+        }
+        Ok(sessions)
     }
 
     pub(super) async fn advance_time_for_boundary(&self, event: &BoundaryEvent) {
@@ -232,29 +296,12 @@ impl GeneratedRuntimeWorld {
         &mut self,
         event: &BoundaryEvent,
     ) -> Result<Value, FixedScriptRunnerError> {
-        let provider_texts = event
-            .payload
-            .get("provider_texts")
-            .and_then(Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
-            .ok_or_else(|| {
-                FixedScriptRunnerError::Assertion(format!(
-                    "ingress boundary `{}` missing provider_texts",
-                    event.boundary_id
-                ))
-            })?;
-        if provider_texts.is_empty() {
-            return Err(FixedScriptRunnerError::Assertion(format!(
-                "ingress boundary `{}` provided no runtime provider scripts",
+        let provider_turns = scripted_turns_from_ingress(&event.payload).map_err(|err| {
+            FixedScriptRunnerError::Assertion(format!(
+                "ingress boundary `{}` {err}",
                 event.boundary_id
-            )));
-        }
+            ))
+        })?;
         let provider_kind = event
             .payload
             .get("provider_kind")
@@ -265,7 +312,7 @@ impl GeneratedRuntimeWorld {
                     event.boundary_id
                 ))
             })?;
-        let scripts = runtime_provider_scripts_for_texts(provider_kind, &provider_texts)
+        let scripts = runtime_scripts_for_turns(provider_kind, &provider_turns)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let provider_scripts = scripts.clone();
         let provider_schedule = ScriptedTransportSchedule::new();
@@ -955,6 +1002,7 @@ impl GeneratedRuntimeWorld {
             "suspend_kind": suspend_kind_label,
             "session": session_alias,
             "resolved_by": "lash-sim-boundary-scheduler",
+            "payload": event.payload.get("tool_output_text").cloned().unwrap_or(Value::Null),
         });
 
         let key_slot = Arc::new(tokio::sync::Mutex::new(None));
@@ -965,7 +1013,12 @@ impl GeneratedRuntimeWorld {
         // wire parsing.
         let suspend_scripts = suspend_roundtrip_scripts(&tool_name)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(suspend_scripts)?);
+        let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(
+            suspend_scripts.clone(),
+        )?);
+        let suspend_store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
+            lash::persistence::InMemorySessionStoreFactory::with_clock(self.clock.clone()),
+        );
         let (provider_handle, model, _provider_kind) =
             runtime_provider_components(OPENAI_COMPATIBLE, &transport)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -982,9 +1035,7 @@ impl GeneratedRuntimeWorld {
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))
             .store_factory(Arc::new(ObservedSessionStoreFactory::new(
-                Arc::new(lash::persistence::InMemorySessionStoreFactory::with_clock(
-                    self.clock.clone(),
-                )),
+                Arc::clone(&suspend_store_factory),
                 self.durable_writes.clone(),
             )))
             .clock(self.clock.clone())
@@ -1032,6 +1083,9 @@ impl GeneratedRuntimeWorld {
                 resolution_scheduled: false,
                 completed_before_resolution: 0,
                 resolution_at,
+                transport,
+                scripts: suspend_scripts,
+                store_factory: suspend_store_factory,
             },
         );
         Ok(json!({
@@ -1164,6 +1218,17 @@ impl GeneratedRuntimeWorld {
                 )
             );
         let resolve_accepted = matches!(accepted, lash_core::ResolveOutcome::Accepted);
+        self.finished_suspends.push(FinishedSuspend {
+            session: event.actor_alias.clone(),
+            transport: Arc::clone(&turn.transport),
+            scripts: turn.scripts.clone(),
+            tool_result: crate::content_oracle::ToolResultContent::from_tool_value(
+                crate::runtime_providers::SUSPEND_TOOL_CALL_ID,
+                &turn.tool_name,
+                &resolution,
+            ),
+            store_factory: Arc::clone(&turn.store_factory),
+        });
         Ok(json!({
             "session": event.actor_alias,
             "tool_output": resolution,
@@ -1189,6 +1254,41 @@ impl GeneratedRuntimeWorld {
             },
         }))
     }
+}
+
+/// Emitted, committed and reopened content for one session whose provider ran
+/// `scripts` in order over `transport`.
+pub(super) async fn session_content(
+    session: &str,
+    transport: &ScriptedLlmHttpTransport,
+    scripts: &[ProviderWireScript],
+    emitted_tool_results: Vec<crate::content_oracle::ToolResultContent>,
+    writes: &[CheckpointWriteEvent],
+    reopen: &dyn SessionStoreFactory,
+) -> Result<crate::content_oracle::SessionContent, FixedScriptRunnerError> {
+    let exchanged = transport.exchanges()?.len();
+    let emitted_attempts = scripts
+        .get(..exchanged)
+        .ok_or_else(|| {
+            FixedScriptRunnerError::Assertion(format!(
+                "`{session}` recorded {exchanged} provider exchanges for {} scripts",
+                scripts.len()
+            ))
+        })?
+        .iter()
+        .map(crate::content_oracle::emitted_attempt)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(FixedScriptRunnerError::Assertion)?;
+    Ok(crate::content_oracle::SessionContent {
+        session: session.to_string(),
+        emitted_attempts,
+        emitted_tool_results,
+        committed_usage: crate::content_oracle::committed_usage(writes, session)
+            .map_err(FixedScriptRunnerError::Assertion)?,
+        reopened: crate::content_oracle::reopen_session(reopen, session)
+            .await
+            .map_err(FixedScriptRunnerError::Assertion)?,
+    })
 }
 
 fn boundary_kind_label(kind: BoundaryKind) -> &'static str {

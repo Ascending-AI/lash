@@ -16,7 +16,7 @@ use crate::runtime_contracts::{
     runtime_graph_invariant_facts, runtime_turn_contract, runtime_usage_invariant_facts,
 };
 use crate::runtime_providers::{
-    runtime_provider_components, runtime_scripts_for_texts as runtime_provider_scripts_for_texts,
+    runtime_provider_components, runtime_scripts_for_turns, scripted_turns_from_ingress,
 };
 use crate::scheduler::{BoundaryEvent, BoundaryKind, QueuedIngressMode};
 use crate::store::{
@@ -362,29 +362,9 @@ impl<B: ReplayBackend> RuntimeReplayWorld<B> {
     }
 
     async fn open_runtime_session(&mut self, event: &BoundaryEvent) -> Result<Value, B::Error> {
-        let provider_texts = event
-            .payload
-            .get("provider_texts")
-            .and_then(Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>()
-            })
-            .ok_or_else(|| {
-                B::Error::assertion(format!(
-                    "ingress boundary `{}` missing provider_texts",
-                    event.boundary_id
-                ))
-            })?;
-        if provider_texts.is_empty() {
-            return Err(B::Error::assertion(format!(
-                "ingress boundary `{}` provided no runtime provider scripts",
-                event.boundary_id
-            )));
-        }
+        let provider_turns = scripted_turns_from_ingress(&event.payload).map_err(|err| {
+            B::Error::assertion(format!("ingress boundary `{}` {err}", event.boundary_id))
+        })?;
         let provider_kind = event
             .payload
             .get("provider_kind")
@@ -395,7 +375,7 @@ impl<B: ReplayBackend> RuntimeReplayWorld<B> {
                     event.boundary_id
                 ))
             })?;
-        let scripts = runtime_provider_scripts_for_texts(provider_kind, &provider_texts)
+        let scripts = runtime_scripts_for_turns(provider_kind, &provider_turns)
             .map_err(|err| B::Error::runtime(err.to_string()))?;
         let provider_schedule = ScriptedTransportSchedule::new();
         let (core, transport, provider_kind) = runtime_core_for_scripts(

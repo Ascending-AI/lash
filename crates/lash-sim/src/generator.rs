@@ -5,13 +5,14 @@ use sha2::{Digest, Sha256};
 
 use crate::provider_mutations::{TRANSPORT_PROVIDER_MUTATIONS, is_transport_provider_mutation};
 use crate::runtime_providers::{
-    MIGRATED_RUNTIME_PROVIDER_KINDS, runtime_provider_kind_for_session,
+    MIGRATED_RUNTIME_PROVIDER_KINDS, ScriptedUsage, runtime_provider_kind_for_session,
     runtime_script_name_for_kind,
 };
 use crate::scheduler::{BoundaryEvent, BoundaryKind, QueuedIngressMode, next_seed};
 use crate::trace::{StableAliases, WorkloadExpectations};
+use lash_core::testing::adversarial_text::{TextBudget, adversarial_count, adversarial_text};
 
-pub const GENERATOR_VERSION: &str = "lash-sim.generated-workload.v9";
+pub const GENERATOR_VERSION: &str = "lash-sim.generated-workload.v10";
 pub const WORKLOAD_FAMILY: &str = "deterministic-runtime-state-machine";
 const ACTIVE_TURN_QUEUE_OFFSET: u64 = 15;
 pub const VALID_WORKLOAD_PROFILES: &[&str] = &[
@@ -321,13 +322,16 @@ impl SessionPlan {
     fn next_provider_turn(&mut self, seed: u64, profile: &str, rng: &mut u64) -> ProviderTurnRef {
         let turn_index = self.provider_turns.len() + 1;
         let discriminator = next_seed(rng) & 0xffff;
-        let text = format!(
-            "answer {turn_index} for {} seed {seed} profile {profile} path {discriminator:04x}",
+        let tag = format!(
+            "answer {turn_index} for {} seed {seed} profile {profile} path {discriminator:04x} ",
             self.alias
         );
+        let text = generated_text(seed, &tag);
+        let usage = generated_usage(seed, &tag);
         self.provider_turns.push(ProviderTurnPlan {
             turn_index,
             text,
+            usage,
             provider_kind: self.provider_kind,
             script: self.provider_script,
         });
@@ -399,6 +403,7 @@ impl SessionPlan {
 struct ProviderTurnPlan {
     turn_index: usize,
     text: String,
+    usage: ScriptedUsage,
     provider_kind: &'static str,
     script: &'static str,
 }
@@ -813,6 +818,11 @@ impl StateMachinePlanner {
                 .iter()
                 .map(|turn| turn.text.clone())
                 .collect::<Vec<_>>();
+            let provider_usage = session
+                .provider_turns
+                .iter()
+                .map(|turn| turn.usage)
+                .collect::<Vec<_>>();
             let provider_runtime_scripts = session
                 .provider_turns
                 .iter()
@@ -836,6 +846,7 @@ impl StateMachinePlanner {
                     "provider_kind": session.provider_kind,
                     "provider_script": session.provider_script,
                     "provider_texts": provider_texts,
+                    "provider_usage": provider_usage,
                     "provider_runtime_scripts": provider_runtime_scripts,
                     "state_machine": {
                         "seed": self.seed,
@@ -863,6 +874,10 @@ impl StateMachinePlanner {
                 json!({
                     "suspend_kind": suspend_kind,
                     "raw_session_id": alias,
+                    "tool_output_text": generated_text(
+                        self.seed,
+                        &format!("{alias} resolution "),
+                    ),
                 }),
             ));
         }
@@ -956,6 +971,7 @@ impl StateMachinePlanner {
                         "provider_kind": provider_turn.provider_kind,
                         "script": provider_turn.script,
                         "text": provider_turn.text,
+                        "usage": provider_turn.usage,
                         "turn_index": turn_index,
                         "expected_provider_exchange_count": turn_index,
                         "expected_graph_node_count": turn_index * 2 + 1,
@@ -1013,7 +1029,10 @@ impl StateMachinePlanner {
                     at,
                     "queued-ingress.next-turn",
                     json!({
-                        "text": format!("queued follow-up {queue_index} for {}", session.alias),
+                        "text": generated_text(
+                            self.seed,
+                            &format!("queued follow-up {queue_index} for {} ", session.alias),
+                        ),
                         "source_key": format!("{}:queued-follow-up:{queue_index:03}", session.alias),
                         "ingress_mode": mode.as_str(),
                         "active_turn_id": active_turn_id,
@@ -1115,7 +1134,10 @@ impl StateMachinePlanner {
                     "tool.result.success",
                     json!({
                         "tool": "sim_lookup",
-                        "output": format!("tool result {tool_index} for {}", session.alias),
+                        "output": generated_text(
+                            self.seed,
+                            &format!("tool result {tool_index} for {} ", session.alias),
+                        ),
                     }),
                 )
             }
@@ -1136,7 +1158,10 @@ impl StateMachinePlanner {
                         "exec-code.result.data-error"
                     },
                     json!({
-                        "output": format!("exec result {exec_index} for {}", session.alias),
+                        "output": generated_text(
+                            self.seed,
+                            &format!("exec result {exec_index} for {} ", session.alias),
+                        ),
                         "exit_code": exit_code,
                     }),
                 )
@@ -1286,6 +1311,47 @@ const PROVIDER_MUTATIONS: &[&str] = &[
     "retryable_server_error_sequence",
 ];
 
+/// Generated payload text: `tag` followed by a draw from the adversarial text
+/// domain, sized around the tool-output truncation budget so multi-byte
+/// scalars land on the boundaries the stores, codecs and truncation cut at.
+/// The draw hashes the seed with the tag rather than advancing the planner's
+/// rng, so widening the payload domain leaves every seed's workload shape
+/// unchanged.
+pub(crate) fn generated_text(seed: u64, tag: &str) -> String {
+    let budget = lash::plugins::ToolOutputBudgetConfig::default();
+    adversarial_text(
+        tag,
+        content_draw(seed, tag, 0),
+        TextBudget {
+            bytes: budget.limit,
+            lines: budget.max_lines,
+        },
+    )
+}
+
+/// Generated provider-reported usage, drawn at small, `u32`-boundary and
+/// `i64` scales. Reasoning is part of output, so it never exceeds it.
+pub(crate) fn generated_usage(seed: u64, tag: &str) -> ScriptedUsage {
+    let output_tokens = adversarial_count(content_draw(seed, tag, 2));
+    ScriptedUsage {
+        input_tokens: adversarial_count(content_draw(seed, tag, 1)),
+        cache_read_input_tokens: adversarial_count(content_draw(seed, tag, 3)),
+        output_tokens,
+        reasoning_output_tokens: adversarial_count(content_draw(seed, tag, 4)).min(output_tokens),
+    }
+}
+
+fn content_draw(seed: u64, tag: &str, lane: u8) -> u64 {
+    let mut hasher = Sha256::new();
+    hasher.update(seed.to_le_bytes());
+    hasher.update([lane]);
+    hasher.update(tag.as_bytes());
+    let digest = hasher.finalize();
+    let mut draw = [0_u8; 8];
+    draw.copy_from_slice(&digest[..8]);
+    u64::from_le_bytes(draw)
+}
+
 fn queued_boundary_id(session: &SessionPlan, queue_index: usize) -> String {
     format!("{}:queued-ingress:{queue_index:03}", session.alias)
 }
@@ -1327,6 +1393,61 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.sessions.len(), MIGRATED_RUNTIME_PROVIDER_KINDS.len());
         assert_eq!(first.generator_version, GENERATOR_VERSION);
+    }
+
+    /// The widened payload domain reaches every class it exists for across a
+    /// small seed batch, and the drawn usage keeps reasoning inside output.
+    #[test]
+    fn generated_payloads_reach_unicode_controls_budget_edges_and_large_usage() {
+        let budget = lash::plugins::ToolOutputBudgetConfig::default();
+        let mut texts = Vec::new();
+        let mut usages = Vec::new();
+        for seed in 0..32 {
+            let max = default_max_boundaries("fast-random").expect("fast max");
+            let workload = generate_workload(seed, "fast-random", max).expect("workload");
+            assert_eq!(
+                workload,
+                generate_workload(seed, "fast-random", max).expect("workload"),
+                "seed {seed} must generate the same payloads twice"
+            );
+            for boundary in &workload.boundaries {
+                for key in ["text", "output", "tool_output_text"] {
+                    if let Some(text) = boundary.payload.get(key).and_then(Value::as_str) {
+                        texts.push(text.to_string());
+                    }
+                }
+                if let Some(usage) = boundary.payload.get("usage") {
+                    usages.push(
+                        serde_json::from_value::<ScriptedUsage>(usage.clone()).expect("usage"),
+                    );
+                }
+            }
+        }
+        let any = |predicate: &dyn Fn(&str) -> bool| texts.iter().any(|text| predicate(text));
+        assert!(any(&|text| text.contains('\u{0}')), "NUL");
+        assert!(
+            any(&|text| text.chars().any(|c| c.len_utf8() == 4)),
+            "4-byte scalar"
+        );
+        assert!(any(&|text| text.contains('\u{301}')), "combining mark");
+        assert!(
+            any(&|text| text.len() > budget.limit && !text.is_char_boundary(budget.limit)),
+            "a scalar straddling the tool-output byte budget"
+        );
+        assert!(
+            any(&|text| text.lines().count() > budget.max_lines),
+            "past the tool-output line budget"
+        );
+        assert!(
+            usages
+                .iter()
+                .any(|usage| usage.input_tokens > i64::from(u32::MAX))
+        );
+        assert!(
+            usages
+                .iter()
+                .all(|usage| usage.reasoning_output_tokens <= usage.output_tokens)
+        );
     }
 
     #[test]

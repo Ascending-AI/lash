@@ -1446,9 +1446,25 @@ fn turn_input_draft(slot: u8, value: u8) -> PendingTurnInputDraft {
     PendingTurnInputDraft::new(
         SESSION_ID,
         TurnInputIngress::next_turn(),
-        TurnInput::text(format!("runtime property input {value}")),
+        TurnInput::text(turn_input_text(value)),
     )
     .with_source_key(format!("runtime-property-input-{slot}"))
+}
+
+/// Turn-input text for a generated `value`: a distinct ASCII tag followed by a
+/// draw from the adversarial text domain (multi-byte and 4-byte scalars,
+/// combining marks, NUL and other controls, lengths around the tool-output
+/// truncation budget). A pure function of `value`, so generated cases and the
+/// persisted regression corpus replay identically.
+fn turn_input_text(value: u8) -> String {
+    lash_core::testing::adversarial_text::adversarial_text(
+        &format!("runtime property input {value} "),
+        u64::from(value),
+        lash_core::testing::adversarial_text::TextBudget {
+            bytes: lash_plugin_tool_output_budget::DEFAULT_TOOL_OUTPUT_BUDGET_LIMIT_BYTES,
+            lines: lash_plugin_tool_output_budget::DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+        },
+    )
 }
 
 fn pending_work(model: &ReferenceModel) -> Vec<QueuedWorkBatch> {

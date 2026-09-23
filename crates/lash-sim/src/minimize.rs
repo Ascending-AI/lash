@@ -6,9 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::generator::generate_workload;
 use crate::oracles::{
-    LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE,
-    ScenarioFactMemo, combine_oracles, generated_trace_oracles, passed_battery_verdict,
-    walk_generated_trace_oracles,
+    RUN_ONLY_ORACLES, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE, ScenarioFactMemo, combine_oracles,
+    generated_trace_oracles, passed_battery_verdict, walk_generated_trace_oracles,
 };
 use crate::replay::{ReplayError, replay_trace};
 use crate::runner::run_generated_workload_for_fixture;
@@ -232,9 +231,9 @@ pub fn minimize_trace(
         status: &target_status,
         reason: target_oracle_reason.as_str(),
     };
-    if target.oracle_id == LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE {
+    if RUN_ONLY_ORACLES.contains(&target.oracle_id) {
         return Err(MinimizeError::Target(format!(
-            "oracle `{}` cannot be re-evaluated from a serialized trace because its live provider failure facts are not recorded; no minimized package was written",
+            "oracle `{}` cannot be re-evaluated from a serialized trace because its run-time evidence is not recorded; no minimized package was written",
             target.oracle_id
         )));
     }
@@ -428,17 +427,10 @@ fn refresh_trace_verdicts(
     trace: &mut SimulationTrace,
     target: Option<TargetFailure<'_>>,
 ) -> Result<bool, MinimizeError> {
-    let carried_live_provider_oracle = trace
-        .oracles
-        .iter()
-        .find(|oracle| oracle.oracle_id == LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE)
-        .cloned();
+    let carried_run_only_oracles = carried_run_only_oracles(trace);
     retain_causally_supported_checkpoint_writes(trace);
     let final_summary = summary_for_trace(trace)?;
-    let mut oracles = Vec::new();
-    if let Some(verdict) = carried_live_provider_oracle {
-        oracles.push(verdict);
-    }
+    let mut oracles = carried_run_only_oracles;
     oracles.extend(generated_trace_oracles(
         &trace.events,
         &final_summary,
@@ -503,18 +495,14 @@ fn refresh_trace_verdicts(
 /// reads a candidate's `oracles`, and `minimize_trace` rebuilds them with a full
 /// `refresh_trace_verdicts` over the final survivor before anything is written.
 /// The one field a later refresh does read out of `oracles` is the carried
-/// live-provider verdict, which every refresh copies forward unchanged, so the
-/// vector left in place carries the same one.
+/// run-only verdicts, which every refresh copies forward unchanged, so the
+/// vector left in place carries the same ones.
 fn candidate_preserves_target(
     trace: &mut SimulationTrace,
     target: TargetFailure<'_>,
     memo: &ScenarioFactMemo,
 ) -> Result<bool, MinimizeError> {
-    let carried_live_provider_oracle = trace
-        .oracles
-        .iter()
-        .find(|oracle| oracle.oracle_id == LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE)
-        .cloned();
+    let carried_run_only_oracles = carried_run_only_oracles(trace);
     retain_causally_supported_checkpoint_writes(trace);
     let final_summary = summary_for_trace(trace)?;
 
@@ -537,10 +525,9 @@ fn candidate_preserves_target(
         }
         true
     };
-    let settled = match carried_live_provider_oracle {
-        Some(verdict) => !consider(verdict),
-        None => false,
-    };
+    let settled = carried_run_only_oracles
+        .into_iter()
+        .any(|verdict| !consider(verdict));
     if !settled {
         walk_generated_trace_oracles(
             &trace.events,
@@ -570,6 +557,22 @@ fn candidate_preserves_target(
     let preserved = verdict_matches_target(&combined, target);
     trace.oracle = combined;
     Ok(preserved)
+}
+
+/// The recorded verdicts of oracles whose evidence the trace does not carry
+/// ([`RUN_ONLY_ORACLES`]), in battery order. A shrink cannot re-derive them, so
+/// every refresh carries them forward unchanged.
+fn carried_run_only_oracles(trace: &SimulationTrace) -> Vec<OracleVerdict> {
+    RUN_ONLY_ORACLES
+        .iter()
+        .filter_map(|oracle_id| {
+            trace
+                .oracles
+                .iter()
+                .find(|oracle| oracle.oracle_id == *oracle_id)
+                .cloned()
+        })
+        .collect()
 }
 
 fn find_target_oracle<'a>(
@@ -1161,11 +1164,16 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_live_provider_target_is_diagnosed_without_artifacts() {
-        let target = OracleVerdict::failed(
-            LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE,
-            "recorded live provider failure",
-        );
+    fn unsupported_run_only_target_is_diagnosed_without_artifacts() {
+        for oracle_id in RUN_ONLY_ORACLES {
+            assert_run_only_target_is_unsupported(OracleVerdict::failed(
+                *oracle_id,
+                "recorded run-time failure",
+            ));
+        }
+    }
+
+    fn assert_run_only_target_is_unsupported(target: OracleVerdict) {
         let trace = SimulationTrace::new(
             1,
             "test-generator",

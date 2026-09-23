@@ -184,10 +184,33 @@ pub async fn replay_workload_serialized_reference(
 /// independent of the store's async timing — there is no fixed-order,
 /// exchange-count-gated re-drive to deadlock, and no concurrency- or
 /// async-timing-induced divergence.
+/// A durable-backend re-run: its abstract summary for the cross-backend
+/// comparison, and the durable-content verdict for its sessions read back
+/// through a store handle opened after the run.
+#[derive(Debug)]
+pub struct DurableRerun {
+    pub summary: AbstractWorldSummary,
+    pub content: OracleVerdict,
+}
+
+async fn durable_rerun(
+    world: &mut GeneratedRuntimeWorld,
+    workload: &GeneratedWorkload,
+    reopen: impl FnOnce() -> Arc<dyn SessionStoreFactory>,
+) -> Result<DurableRerun, FixedScriptRunnerError> {
+    let (_events, summary) = drive_generated_workload(world, workload).await?;
+    let reopen = reopen();
+    let content = world.content_evidence(reopen.as_ref()).await?;
+    Ok(DurableRerun {
+        summary,
+        content: crate::content_oracle::durable_content(&content),
+    })
+}
+
 pub async fn replay_workload_on_sqlite(
     workload: &GeneratedWorkload,
     db_root: &Path,
-) -> Result<AbstractWorldSummary, FixedScriptRunnerError> {
+) -> Result<DurableRerun, FixedScriptRunnerError> {
     if db_root.exists() {
         if db_root.is_dir() {
             std::fs::remove_dir_all(db_root)?;
@@ -227,10 +250,16 @@ pub async fn replay_workload_on_sqlite(
         // interleaving cannot change committed outcomes vs the sync in-memory
         // reference; the comparison is then a well-posed durable-state equivalence.
         true,
-        clock,
+        clock.clone(),
     );
-    let (_events, final_summary) = drive_generated_workload(&mut world, workload).await?;
-    Ok(final_summary)
+    // A fresh factory on the same database files: the content read is cold.
+    durable_rerun(&mut world, workload, || {
+        Arc::new(
+            lash_sqlite_store::SqliteSessionStoreFactory::new(db_root.to_path_buf())
+                .with_clock(clock),
+        )
+    })
+    .await
 }
 
 /// Cross-backend check for Postgres using the same dynamic generated workload
@@ -241,7 +270,7 @@ pub async fn replay_workload_on_postgres(
     workload: &GeneratedWorkload,
     database_url: &str,
     artifact_root: &Path,
-) -> Result<AbstractWorldSummary, FixedScriptRunnerError> {
+) -> Result<DurableRerun, FixedScriptRunnerError> {
     let storage = Arc::new(
         lash_postgres_store::PostgresStorage::connect(database_url)
             .await
@@ -269,10 +298,12 @@ pub async fn replay_workload_on_postgres(
         attachment_store,
         process_env_store,
         true,
-        clock,
+        clock.clone(),
     );
-    let (_events, final_summary) = drive_generated_workload(&mut world, workload).await?;
-    Ok(final_summary)
+    durable_rerun(&mut world, workload, || {
+        Arc::new(storage.session_store_factory().with_clock(clock))
+    })
+    .await
 }
 
 pub async fn run_generated_postgres_replay_for_seeds(
@@ -300,8 +331,15 @@ pub async fn run_generated_postgres_replay_for_seeds(
         let reference = replay_workload_serialized_reference(&workload).await?;
         let case_dir = artifact_root.join(format!("seed-{seed:016x}"));
         std::fs::create_dir_all(&case_dir)?;
-        let actual = replay_workload_on_postgres(&workload, database_url, &case_dir).await?;
-        let verdict = replay_determinism(&reference, &actual);
+        let rerun = replay_workload_on_postgres(&workload, database_url, &case_dir).await?;
+        let actual = rerun.summary;
+        // The reported verdict is the first failure: durable content read back
+        // from Postgres, then equivalence with the in-memory reference.
+        let verdict = if rerun.content.is_passed() {
+            replay_determinism(&reference, &actual)
+        } else {
+            rerun.content
+        };
         let report_path = case_dir.join("postgres-generated-rerun.json");
         let matches_reference = verdict.is_passed();
         let case_report = if matches_reference {
@@ -404,7 +442,17 @@ pub(super) async fn run_generated_workload(
     // stream valid prose then a non-retryable malformed chunk, released through a
     // real BoundaryScheduler, across >1 provider kind and >1 fault position.
     let live_failure_facts = drive_live_provider_failure_turns(workload.seed).await?;
-    let mut oracles = vec![live_provider_failure_coverage(&live_failure_facts)];
+    // Content evidence is read back through fresh store handles after the run
+    // and carries provider-emitted wire content, so it is evaluated here, not
+    // from the serialized trace (see `RUN_ONLY_ORACLES`).
+    let mut content = world
+        .content_evidence(world.reopen_factory().as_ref())
+        .await?;
+    content.extend(drive_attempt_usage_probe(workload.seed).await?);
+    let mut oracles = vec![
+        live_provider_failure_coverage(&live_failure_facts),
+        crate::content_oracle::durable_content(&content),
+    ];
     oracles.extend(crate::oracles::generated_trace_oracles(
         &events,
         &final_summary,

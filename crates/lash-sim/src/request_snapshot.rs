@@ -8,16 +8,16 @@ use serde_json::{Value, json};
 
 use crate::provider::ScriptedLlmHttpTransport;
 use crate::runtime_providers::{
-    OPENAI_COMPATIBLE, runtime_provider_components, runtime_scripts_for_texts,
+    OPENAI_COMPATIBLE, runtime_provider_components, runtime_script_for_text,
 };
 
 #[tokio::test]
 async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_request() {
-    let scripts = runtime_scripts_for_texts(
-        OPENAI_COMPATIBLE,
-        &["first reply".to_string(), "second reply".to_string()],
-    )
-    .expect("runtime scripts");
+    let scripts = ["first reply", "second reply"]
+        .into_iter()
+        .map(|text| runtime_script_for_text(OPENAI_COMPATIBLE, text))
+        .collect::<Result<Vec<_>, _>>()
+        .expect("runtime scripts");
     let transport = Arc::new(
         ScriptedLlmHttpTransport::from_scripts(scripts).expect("valid runtime provider scripts"),
     );

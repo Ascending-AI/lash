@@ -21,6 +21,7 @@ pub use lash_core_execution::testing::*;
 // reader or editor following the merged doc comment — including the
 // submodule's own intra-doc links — would resolve it against *this* module's
 // scope, where none of the linked items exist.
+pub mod adversarial_text;
 pub mod checkpoint_observer;
 pub mod conformance_support;
 mod live_replay;
