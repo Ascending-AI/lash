@@ -391,7 +391,14 @@ lash_conformance::wake_delivery_crash_tests!({
     )
 });
 
-lash_conformance::turn_crash_matrix_tests!({
+/// The Restate crash-matrix fixture: a SQLite state carrier per scenario and
+/// the recording-context controller.
+fn restate_turn_crash_fixture() -> (
+    tempfile::TempDir,
+    impl Fn(&str) -> Arc<dyn lash_core::RuntimePersistence>,
+    impl Fn(&str) -> lash_conformance::ConformanceInvocation,
+    impl Fn(&str, ExecutionScope) -> lash_conformance::ConformanceInvocation,
+) {
     let dir = tempfile::tempdir().expect("Restate turn-crash conformance tempdir");
     let root = dir.path().to_path_buf();
     (
@@ -411,7 +418,19 @@ lash_conformance::turn_crash_matrix_tests!({
         // journal: only the tool-attempt error-return placement runs here.
         |scenario: &str, _scope: ExecutionScope| crash_redrive_conformance_invocation(scenario),
     )
-});
+}
+
+lash_conformance::turn_crash_trace_tests!({ restate_turn_crash_fixture() });
+
+// The crash-and-recover laws drive a turn whose tool call opens an effect
+// group, which the recording context cannot host; they move to the live
+// harness under FIG-3561.
+lash_conformance::turn_crash_recovery_tests!(
+    #[ignore = "parked: needs the live Restate harness for effect groups (FIG-3561)"]
+    {
+        restate_turn_crash_fixture()
+    }
+);
 
 lash_conformance::effect_group_host_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]

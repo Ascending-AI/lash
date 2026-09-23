@@ -552,6 +552,32 @@ def deferred_manifest() -> list[dict[str, str]]:
     return list(data.get("deferred", []))
 
 
+PARKED_RECIPE = "parked"
+TICKET = re.compile(r"FIG-[0-9]+")
+
+
+def parked_entry_errors(key: tuple[str, str, str], entry: dict[str, str]) -> list[str]:
+    """A parked entry runs nowhere, so it must say why and which ticket
+    brings it back: ``ticket`` names a ``FIG-n`` and ``reason`` is non-empty.
+    Only a parked entry may carry a ticket, so a live recipe cannot hide one."""
+    parked = entry.get("recipe") == PARKED_RECIPE
+    if not parked:
+        if "ticket" in entry or "reason" in entry:
+            return [
+                f"deferred-law manifest entry {key} carries a ticket or reason "
+                f"but is not parked (recipe `{entry.get('recipe')}`)"
+            ]
+        return []
+    errors = []
+    if not TICKET.fullmatch(entry.get("ticket", "")):
+        errors.append(
+            f"parked deferred-law manifest entry {key} must name its ticket as `FIG-n`"
+        )
+    if not entry.get("reason", "").strip():
+        errors.append(f"parked deferred-law manifest entry {key} must give a reason")
+    return errors
+
+
 def manifest_check(errors: list[str]) -> dict[tuple[str, str, str], Invocation]:
     """Both directions of the deferred-law contract, always on.
 
@@ -567,6 +593,7 @@ def manifest_check(errors: list[str]) -> dict[tuple[str, str, str], Invocation]:
     crate_invocations: dict[Path, list[Invocation]] = {}
     for entry in entries:
         key = (entry.get("file", ""), entry.get("claimant", ""), entry.get("suite", ""))
+        errors.extend(parked_entry_errors(key, entry))
         rel = Path(entry.get("file", ""))
         file = ROOT / rel
         if not file.is_file():

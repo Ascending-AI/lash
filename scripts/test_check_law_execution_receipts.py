@@ -502,6 +502,26 @@ recipe = "deferred-e2e"
         )
 
 
+class ParkedEntryTests(unittest.TestCase):
+    KEY = ("crates/x/src/tests.rs", "x::tests", "demo_tests")
+
+    def test_a_parked_entry_names_its_ticket_and_reason(self) -> None:
+        entry = {"recipe": "parked", "ticket": "FIG-1", "reason": "why"}
+        self.assertEqual(MODULE.parked_entry_errors(self.KEY, entry), [])
+
+    def test_a_parked_entry_without_ticket_or_reason_is_refused(self) -> None:
+        errors = MODULE.parked_entry_errors(self.KEY, {"recipe": "parked"})
+        self.assertEqual(len(errors), 2)
+        errors = MODULE.parked_entry_errors(
+            self.KEY, {"recipe": "parked", "ticket": "someday", "reason": "why"}
+        )
+        self.assertEqual(len(errors), 1)
+
+    def test_a_live_entry_may_not_carry_a_ticket(self) -> None:
+        entry = {"recipe": "effect-group-conformance-e2e", "ticket": "FIG-1"}
+        self.assertEqual(len(MODULE.parked_entry_errors(self.KEY, entry)), 1)
+
+
 class RealTreeTests(unittest.TestCase):
     """The real macros.rs keeps its delegation invariants under the census."""
 
@@ -598,7 +618,7 @@ class RealTreeTests(unittest.TestCase):
         errors: list[str] = []
         manifest_set = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
-        self.assertEqual(len(manifest_set), 6)
+        self.assertEqual(len(manifest_set), 7)
         self.assertIn(
             (
                 "crates/lash-restate/src/tests/conformance_and_poison.rs",
@@ -672,6 +692,10 @@ class DeferredWiringTests(unittest.TestCase):
 
     def test_each_entry_is_wired(self) -> None:
         for entry in self.entries:
+            if entry["recipe"] == MODULE.PARKED_RECIPE:
+                # A parked entry runs nowhere by construction; its ticket and
+                # reason are checked by manifest_check.
+                continue
             with self.subTest(entry=entry):
                 recipe = entry["recipe"]
                 body = recipe_block(self.justfile, recipe)

@@ -3,6 +3,10 @@
 # entry that carry the recipe, and the artifact the lane's receipts land in.
 # The census fails both ways: an ignored invocation with no row is an
 # unchecked exemption, and a row naming no real ignored invocation is stale.
+#
+# A row whose recipe is "parked" runs nowhere yet: it must name the `ticket`
+# (FIG-n) that brings the invocation back and the `reason` it is parked, and
+# no other row may carry either field.
 
 [[deferred]]
 file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
@@ -57,3 +61,11 @@ recipe = "effect-group-conformance-e2e"
 ci_job = "functional-e2e"
 ci_matrix_name = "effect-group-conformance"
 receipt_artifact = "target/functional-e2e-artifacts/effect-group-conformance/law-receipts.txt"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison"
+suite = "turn_crash_recovery_tests"
+recipe = "parked"
+ticket = "FIG-3561"
+reason = "the recording context cannot host effect groups; the crash matrix and error-return sweep move to the live Restate harness"
