@@ -45,36 +45,33 @@ pub(super) async fn prune_terminal_processes(
         lash_core_execution::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence()),
         lash_core_execution::ProjectionWatermark::NoProjector => None,
     };
-    if let Some(root) = registry.process_session_store_root.as_ref() {
-        let selection_filter = filter.clone();
-        let prunable = registry
-            .conn
-            .call(move |conn| {
-                crate::process_registry_change::prunable_terminal_process_ids_conn(
-                    conn,
-                    cutoff,
-                    selection_filter,
-                    max_change_seq,
-                )
-                .map_err(|err| {
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
-                        err.to_string(),
-                    )))
-                })
+    let catalog = &registry.process_session_catalog;
+    let selection_filter = filter.clone();
+    let prunable = registry
+        .conn
+        .call(move |conn| {
+            crate::process_registry_change::prunable_terminal_process_ids_conn(
+                conn,
+                cutoff,
+                selection_filter,
+                max_change_seq,
+            )
+            .map_err(|err| {
+                rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                    err.to_string(),
+                )))
             })
-            .await
-            .map_err(process_sqlite_error)?;
-        // If this fails, the terminal process row remains and the prune leaks conservatively;
-        // the final transaction below revalidates eligibility before it removes any process
-        // row.
-        for process_id in prunable {
-            for session_id in facade_support::process_runtime_session_ids(&process_id) {
-                delete_session_from_catalog(root, &session_id, SqliteConnectionPolicy::default())
-                    .await
-                    .map_err(|error| {
-                        lash_core_execution::PluginError::Session(error.to_string())
-                    })?;
-            }
+        })
+        .await
+        .map_err(process_sqlite_error)?;
+    // If this fails, the terminal process row remains and the prune leaks conservatively;
+    // the final transaction below revalidates eligibility before it removes any process
+    // row.
+    for process_id in prunable {
+        for session_id in facade_support::process_runtime_session_ids(&process_id) {
+            delete_session_from_catalog(catalog, &session_id, SqliteConnectionPolicy::default())
+                .await
+                .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))?;
         }
     }
     registry

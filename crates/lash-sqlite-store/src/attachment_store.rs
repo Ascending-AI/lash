@@ -28,6 +28,7 @@ use rusqlite::{OptionalExtension, params};
 
 use crate::Store;
 use crate::conn::SqliteConnection;
+use crate::location::DatabaseTarget;
 use crate::scope_fence::Schema;
 
 lash_store_sql::statements! {
@@ -89,31 +90,19 @@ pub struct SqliteAttachmentStore {
 impl SqliteAttachmentStore {
     /// The attachment store over `store`'s catalog: the same database, reached
     /// through the same connection, stamped by the same clock.
-    pub async fn for_store(store: &Store) -> tokio_rusqlite::Result<Self> {
-        Self::over_connection(store.conn.clone(), Arc::clone(&store.clock)).await
-    }
-
-    /// The attachment store over the catalog `conn` is open on.
     ///
-    /// SQLite reports an empty file name for a database with no file behind
-    /// it (`:memory:` or the `memdb` VFS), which is what the declared
-    /// persistence is read from.
-    pub(crate) async fn over_connection(
-        conn: SqliteConnection,
-        clock: Arc<dyn lash_core_execution::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        let file_backed = conn
-            .call(|connection| Ok(connection.path().is_some_and(|path| !path.is_empty())))
-            .await?;
-        Ok(Self {
-            conn,
-            clock,
-            persistence: if file_backed {
-                AttachmentStorePersistence::Durable
-            } else {
-                AttachmentStorePersistence::Ephemeral
+    /// Its persistence is the catalog's location: bytes in a file catalog are
+    /// durable; bytes in a memory deployment's catalog live as long as the
+    /// deployment does.
+    pub fn for_store(store: &Store) -> Self {
+        Self {
+            conn: store.conn.clone(),
+            clock: Arc::clone(&store.clock),
+            persistence: match store.location.target() {
+                DatabaseTarget::File(_) => AttachmentStorePersistence::Durable,
+                DatabaseTarget::Memory(_) => AttachmentStorePersistence::Ephemeral,
             },
-        })
+        }
     }
 }
 

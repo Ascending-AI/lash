@@ -11,8 +11,9 @@
 //!
 //! * **WAL + busy-timeout setup.** Real SQLite WAL (the entire point of the
 //!   rusqlite swap) needs `PRAGMA journal_mode=WAL` plus a generous
-//!   `busy_timeout` so contending processes wait instead of failing. [`open`]
-//!   and [`open_in_memory`] apply these once on the connection thread.
+//!   `busy_timeout` so contending processes wait instead of failing.
+//!   [`SqliteConnection::open`] applies these once on the connection thread,
+//!   for a file and for a named `memdb` database alike.
 //!
 //! * **`IMMEDIATE` write transactions.** rusqlite's `Connection::transaction`
 //!   opens `BEGIN DEFERRED`, which only takes the write lock on the first write
@@ -30,6 +31,8 @@
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use std::time::Duration;
 use tokio_rusqlite::Connection as AsyncConnection;
+
+use crate::location::DatabaseTarget;
 
 // Fault points are syntax declarations in the transaction code. With the
 // `testing` feature disabled, the invocation and all of its arguments expand
@@ -207,18 +210,18 @@ impl SqliteConnection {
             .expect("close SQLite test connection");
     }
 
-    /// Open (or create) a file-backed database, applying WAL + busy-timeout
-    /// PRAGMAs on the connection thread.
-    pub(crate) async fn open(path: &std::path::Path) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_policy(path, SqliteConnectionPolicy::default()).await
+    /// Open (or create) `target`, applying WAL + busy-timeout PRAGMAs on the
+    /// connection thread.
+    pub(crate) async fn open(target: &DatabaseTarget) -> tokio_rusqlite::Result<Self> {
+        Self::open_with_policy(target, SqliteConnectionPolicy::default()).await
     }
 
     pub(crate) async fn open_with_policy(
-        path: &std::path::Path,
+        target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_configured(
-            path,
+            target,
             policy,
             #[cfg(feature = "testing")]
             None,
@@ -228,19 +231,22 @@ impl SqliteConnection {
 
     #[cfg(feature = "testing")]
     pub(crate) async fn open_with_fault_injector(
-        path: &std::path::Path,
+        target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
         fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_configured(path, policy, fault_injector).await
+        Self::open_configured(target, policy, fault_injector).await
     }
 
+    /// One open path for every target: a `memdb` database answers the WAL
+    /// switch with its own `memory` journal mode, so the file and memory
+    /// forms differ only in the name opened.
     async fn open_configured(
-        path: &std::path::Path,
+        target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
-        let inner = AsyncConnection::open(path).await?;
+        let inner = AsyncConnection::open(target.open_name()).await?;
         let pragmas = crate::connection_sql::open_pragmas(policy);
         inner
             .call(move |c| {
@@ -262,43 +268,10 @@ impl SqliteConnection {
         })
     }
 
-    /// WAL is skipped because `:memory:` does not support it.
-    pub(crate) async fn open_in_memory() -> tokio_rusqlite::Result<Self> {
-        Self::open_in_memory_with_policy(SqliteConnectionPolicy::default()).await
-    }
-
-    pub(crate) async fn open_in_memory_with_policy(
-        policy: SqliteConnectionPolicy,
-    ) -> tokio_rusqlite::Result<Self> {
-        let inner = AsyncConnection::open_in_memory().await?;
-        // `:memory:` databases cannot use WAL, so only the tuning pragmas apply.
-        let pragmas = crate::connection_sql::open_pragmas(policy);
-        inner
-            .call(move |c| {
-                c.busy_timeout(policy.busy_timeout)?;
-                c.execute_batch(&pragmas)?;
-                install_perf_statement_witness(c);
-                Ok(())
-            })
-            .await?;
-        Ok(Self {
-            inner,
-            #[cfg(feature = "testing")]
-            fault_injector: None,
-        })
-    }
-
     /// Used by the export/resume call sites that must never mutate the source database.
-    pub(crate) async fn open_readonly(path: &std::path::Path) -> tokio_rusqlite::Result<Self> {
-        let path = path
-            .to_str()
-            .ok_or_else(|| rusqlite::Error::InvalidPath(path.to_path_buf()))?
-            .replace('%', "%25")
-            .replace('?', "%3F")
-            .replace('#', "%23");
-        let path = format!("file:{path}?mode=ro");
+    pub(crate) async fn open_readonly(target: &DatabaseTarget) -> tokio_rusqlite::Result<Self> {
         let inner = AsyncConnection::open_with_flags(
-            path,
+            target.read_only_uri(),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
                 | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
                 | rusqlite::OpenFlags::SQLITE_OPEN_URI,

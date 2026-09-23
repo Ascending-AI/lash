@@ -79,9 +79,10 @@ async fn read_user_version(path: &Path) -> Result<Option<i64>, String> {
     }
     // A failed read-only open is an undecided database, never a reason to reach for a
     // connection that can write.
-    let conn = SqliteConnection::open_readonly(path)
-        .await
-        .map_err(|err| err.to_string())?;
+    let conn =
+        SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(path.to_path_buf()))
+            .await
+            .map_err(|err| err.to_string())?;
     let probe = conn
         .call(|c| {
             // The engine enforces the promise the module documents: any
@@ -120,7 +121,11 @@ async fn read_release_state(path: &Path) -> StoreReleaseState {
     if !path.exists() {
         return StoreReleaseState::Unstamped;
     }
-    let conn = match SqliteConnection::open_readonly(path).await {
+    let conn = match SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(
+        path.to_path_buf(),
+    ))
+    .await
+    {
         Ok(conn) => conn,
         Err(err) => {
             return StoreReleaseState::Unreadable {

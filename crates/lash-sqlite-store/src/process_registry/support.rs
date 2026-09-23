@@ -361,7 +361,17 @@ impl SqliteProcessRegistry {
         clock: Arc<dyn lash_core_execution::Clock>,
         session_store_root: impl Into<PathBuf>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_configured(path, clock, session_store_root.into()).await
+        crate::location::validate_file_database_path(path, "SqliteProcessRegistry")?;
+        Self::open_at(
+            &DatabaseLocation::standalone_file(path),
+            clock,
+            DatabaseLocation::standalone_file(
+                &session_store_root.into().join(crate::DURABLE_CORE_DB_FILE),
+            ),
+            #[cfg(feature = "testing")]
+            None,
+        )
+        .await
     }
 
     #[cfg(feature = "testing")]
@@ -370,59 +380,44 @@ impl SqliteProcessRegistry {
         session_store_root: impl Into<PathBuf>,
         fault_injector: crate::testing::SqliteFaultInjector,
     ) -> tokio_rusqlite::Result<Self> {
-        let conn = SqliteConnection::open_with_fault_injector(
-            path,
-            SqliteConnectionPolicy::default(),
+        crate::location::validate_file_database_path(path, "SqliteProcessRegistry")?;
+        Self::open_at(
+            &DatabaseLocation::standalone_file(path),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
+            DatabaseLocation::standalone_file(
+                &session_store_root.into().join(crate::DURABLE_CORE_DB_FILE),
+            ),
             Some(fault_injector),
         )
+        .await
+    }
+
+    /// The registry at `location`, pruning process-owned sessions out of
+    /// `process_session_catalog`.
+    pub(crate) async fn open_at(
+        location: &DatabaseLocation,
+        clock: Arc<dyn lash_core_execution::Clock>,
+        process_session_catalog: DatabaseLocation,
+        #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
+    ) -> tokio_rusqlite::Result<Self> {
+        #[cfg(feature = "testing")]
+        let conn = SqliteConnection::open_with_fault_injector(
+            location.target(),
+            SqliteConnectionPolicy::default(),
+            fault_injector,
+        )
         .await?;
+        #[cfg(not(feature = "testing"))]
+        let conn = SqliteConnection::open(location.target()).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry).await?;
-        apply_pragmas(&conn, StoreBacking::File).await?;
-        Ok(Self {
-            conn,
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            process_session_store_root: Some(session_store_root.into()),
-            wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
-            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
-            path: Some(path.to_path_buf()),
-        })
-    }
-
-    async fn open_configured(
-        path: &Path,
-        clock: Arc<dyn lash_core_execution::Clock>,
-        process_session_store_root: PathBuf,
-    ) -> tokio_rusqlite::Result<Self> {
-        let conn = SqliteConnection::open(path).await?;
-        ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry).await?;
-        apply_pragmas(&conn, StoreBacking::File).await?;
+        apply_pragmas(&conn).await?;
         Ok(Self {
             conn,
             clock,
-            process_session_store_root: Some(process_session_store_root),
+            process_session_catalog,
             wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
-            path: Some(path.to_path_buf()),
-        })
-    }
-
-    pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_clock(Arc::new(lash_core_execution::facade_support::SystemClock)).await
-    }
-
-    pub async fn memory_with_clock(
-        clock: Arc<dyn lash_core_execution::Clock>,
-    ) -> tokio_rusqlite::Result<Self> {
-        let conn = SqliteConnection::open_in_memory().await?;
-        ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry).await?;
-        apply_pragmas(&conn, StoreBacking::Memory).await?;
-        Ok(Self {
-            conn,
-            clock,
-            process_session_store_root: None,
-            wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
-            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
-            path: None,
+            location: location.clone(),
         })
     }
 

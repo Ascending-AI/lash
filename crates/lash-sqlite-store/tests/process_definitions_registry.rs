@@ -17,11 +17,10 @@ fn clock() -> Arc<dyn lash_core_execution::Clock> {
 fn sqlite_registration_is_cas_fenced_and_durable() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async move {
-        let registry = Arc::new(
-            lash_sqlite_store::SqliteProcessDefinitionRegistry::memory_with_clock(clock())
-                .await
-                .unwrap(),
-        );
+        let registry = lash_sqlite_store::SqliteDeployment::memory_with_clock(clock())
+            .await
+            .unwrap()
+            .process_definition_registry();
         let scope = TriggerOwnerScope::session(SessionId::from("session-a"));
         let admitted = match registry
             .register_definition(

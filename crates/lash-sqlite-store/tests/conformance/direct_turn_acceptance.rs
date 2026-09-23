@@ -8,12 +8,13 @@ use std::sync::Arc;
 
 use lash_core_execution::SessionStoreFactory as _;
 use lash_core_execution::store::RuntimePersistence;
-use lash_sqlite_store::SqliteSessionStoreFactory;
-use tempfile::TempDir;
 
-async fn sqlite_direct_turn_store(dir: &TempDir) -> Arc<dyn RuntimePersistence> {
-    let factory = SqliteSessionStoreFactory::new(dir.path().to_path_buf());
-    factory
+use super::SUBSTRATE;
+use crate::deployment_fixture::TestDeployment;
+
+async fn sqlite_direct_turn_store(deployment: &TestDeployment) -> Arc<dyn RuntimePersistence> {
+    deployment
+        .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
@@ -27,7 +28,7 @@ async fn sqlite_direct_turn_store(dir: &TempDir) -> Arc<dyn RuntimePersistence> 
 }
 
 lash_conformance::direct_turn_acceptance_tests!({
-    let dir = tempfile::tempdir().expect("direct-turn acceptance tempdir");
-    let store = sqlite_direct_turn_store(&dir).await;
-    (dir, "sqlite", store)
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let store = sqlite_direct_turn_store(&deployment).await;
+    (deployment, "sqlite", store)
 });

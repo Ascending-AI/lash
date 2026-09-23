@@ -103,25 +103,16 @@ async fn assert_waiting_process_is_live_not_prunable(
 /// agreeing with it and a live waiting process becomes prune-eligible.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_waiting_processes_are_live_not_prunable() {
-    let dir = tempfile::tempdir().expect("waiting retention tempdir");
-    let registry = SqliteProcessRegistry::open(
-        &dir.path().join("processes.db"),
-        dir.path().join("sessions"),
-    )
-    .await
-    .expect("open waiting retention registry");
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let registry = deployment.process_registry();
     let process_id = ProcessId::from(format!("waiting-retention:{}", uuid::Uuid::new_v4()));
-    assert_waiting_process_is_live_not_prunable(&registry, &process_id).await;
+    assert_waiting_process_is_live_not_prunable(registry.as_ref(), &process_id).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_prune_cleanup_evidence_survives_reopen_until_acknowledged() {
-    let dir = tempfile::tempdir().expect("process cleanup tempdir");
-    let database = dir.path().join("processes.db");
-    let sessions = dir.path().join("sessions");
-    let registry = SqliteProcessRegistry::open(&database, &sessions)
-        .await
-        .expect("open process registry");
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let registry = deployment.process_registry();
     let registered = registry
         .register_process(
             lash_core_execution::ProcessRegistration::new(
@@ -163,9 +154,7 @@ async fn sqlite_prune_cleanup_evidence_survives_reopen_until_acknowledged() {
         .expect("prune with atomic cleanup evidence");
     drop(registry);
 
-    let reopened = SqliteProcessRegistry::open(&database, &sessions)
-        .await
-        .expect("reopen process registry");
+    let reopened = deployment.reopen().await.process_registry();
     let pending = reopened
         .pending_process_artifact_cleanup()
         .await

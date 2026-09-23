@@ -102,7 +102,11 @@ pub(super) async fn scan_durable(
 
     // A failed read-only open is a database nobody could read, never a reason to reach for a
     // connection that can write.
-    let conn = match SqliteConnection::open_readonly(path).await {
+    let conn = match SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(
+        path.to_path_buf(),
+    ))
+    .await
+    {
         Ok(conn) => conn,
         Err(error) => return Ok(not_scanned(error.to_string())),
     };

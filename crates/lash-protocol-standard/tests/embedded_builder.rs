@@ -5,7 +5,7 @@ use lash_core::{
     Message, MessageRole, ModelSpec, Part, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
     SessionCommitStore, SessionPolicy, TokenUsage, facade_support::LashRuntime,
 };
-use lash_sqlite_store::Store;
+use lash_sqlite_store::SqliteDeployment;
 
 #[expect(
     clippy::expect_used,
@@ -29,7 +29,14 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 
 #[tokio::test]
 async fn embedded_runtime_builder_loads_state_from_store() {
-    let store = Arc::new(Store::memory().await.expect("store"));
+    let store = Arc::new(
+        SqliteDeployment::memory()
+            .await
+            .expect("memory deployment")
+            .open_store()
+            .await
+            .expect("store"),
+    );
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("stored-session"),
         policy: SessionPolicy {
@@ -90,7 +97,14 @@ async fn embedded_runtime_builder_loads_state_from_store() {
 
 #[tokio::test]
 async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() {
-    let store = Arc::new(Store::memory().await.expect("store"));
+    let store = Arc::new(
+        SqliteDeployment::memory()
+            .await
+            .expect("memory deployment")
+            .open_store()
+            .await
+            .expect("store"),
+    );
     let state = RuntimeSessionState {
         session_id: SessionId::from("alpha"),
         policy: SessionPolicy {

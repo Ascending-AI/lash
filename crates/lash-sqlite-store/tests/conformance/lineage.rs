@@ -1,14 +1,13 @@
 use super::*;
 
 struct SqliteLineageConformanceInjector {
-    path: PathBuf,
-    _dir: TempDir,
+    deployment: TestDeployment,
 }
 
 #[async_trait::async_trait]
 impl LineageConformanceInjector for SqliteLineageConformanceInjector {
     async fn force_lineage(&self, session_id: &SessionId, ancestor_node_id: &str) {
-        let conn = rusqlite::Connection::open(&self.path).expect("open SQLite lineage catalog");
+        let conn = self.deployment.raw(SqliteDatabase::DurableCore);
         let (ancestor_session_id, generation): (String, i64) = conn
             .query_row(
                 "SELECT session_id, generation FROM graph_nodes WHERE node_id = ?1",
@@ -31,7 +30,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
     }
 
     async fn tombstone_node(&self, node_id: &str) {
-        let conn = rusqlite::Connection::open(&self.path).expect("open SQLite lineage catalog");
+        let conn = self.deployment.raw(SqliteDatabase::DurableCore);
         assert_eq!(
             conn.execute(
                 "UPDATE graph_nodes SET tombstoned = 1 WHERE node_id = ?1",
@@ -46,7 +45,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
         &self,
         session_id: &SessionId,
     ) -> Vec<lash_core_execution::store::ForkLineageAncestor> {
-        let conn = rusqlite::Connection::open(&self.path).expect("open SQLite lineage catalog");
+        let conn = self.deployment.raw(SqliteDatabase::DurableCore);
         let mut stmt = conn
             .prepare(
                 "SELECT ancestor_session_id, fork_node_id, fork_generation FROM fork_lineage
@@ -68,7 +67,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
 
     async fn edge_path(&self, session_id: &SessionId) -> Vec<GraphFactObservation> {
         let mut facts = self.all_graph_facts().await;
-        let conn = rusqlite::Connection::open(&self.path).expect("open SQLite lineage catalog");
+        let conn = self.deployment.raw(SqliteDatabase::DurableCore);
         let mut current = conn
             .query_row(
                 "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
@@ -95,7 +94,7 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
     }
 
     async fn all_graph_facts(&self) -> Vec<GraphFactObservation> {
-        let conn = rusqlite::Connection::open(&self.path).expect("open SQLite lineage catalog");
+        let conn = self.deployment.raw(SqliteDatabase::DurableCore);
         let mut stmt = conn
             .prepare(
                 "SELECT node.node_id, node.parent_node_id, node.session_id,
@@ -124,11 +123,10 @@ impl LineageConformanceInjector for SqliteLineageConformanceInjector {
 }
 
 fn sqlite_lineage_handles() -> LineageConformanceHandles {
-    let dir = tempfile::tempdir().expect("SQLite lineage tempdir");
-    let path = dir.path().join("durable-core.db");
+    let deployment = TestDeployment::blocking(SUBSTRATE);
     LineageConformanceHandles {
-        factory: Arc::new(SqliteSessionStoreFactory::new(dir.path())),
-        injector: Arc::new(SqliteLineageConformanceInjector { path, _dir: dir }),
+        factory: deployment.session_store_factory(),
+        injector: Arc::new(SqliteLineageConformanceInjector { deployment }),
     }
 }
 

@@ -67,6 +67,11 @@ path = "tests/conformance.rs"
 required-features = ["testing"]
 
 [[test]]
+name = "conformance_memory"
+path = "tests/conformance_memory.rs"
+required-features = ["testing"]
+
+[[test]]
 name = "fencing_backstop"
 path = "tests/fencing_backstop.rs"
 

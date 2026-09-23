@@ -1,12 +1,12 @@
 lash_conformance::append_receipt_identity_corruption_tests!({
-    let dir = tempfile::tempdir().expect("corrupt-identity-version tempdir");
-    let path = dir.path().join("append-receipt-corrupt-version.db");
-    let store = Arc::new(Store::open(&path).await.expect("open store"));
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let store = deployment.store().await;
+    let mutation = deployment.clone();
     (
-        dir,
+        deployment,
         store as Arc<dyn RuntimePersistence>,
         move || async move {
-            let conn = rusqlite::Connection::open(path).expect("open raw SQLite receipt fixture");
+            let conn = mutation.raw(SqliteDatabase::DurableCore);
             conn.execute(
                 "UPDATE runtime_turn_commits
                  SET identity_encoding_version = ?1

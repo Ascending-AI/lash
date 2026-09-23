@@ -2,11 +2,13 @@ use lash_core_execution::{
     SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, TurnBudget,
 };
 use lash_sansio::SessionId;
-use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
+
+use super::SUBSTRATE;
+use crate::deployment_fixture::TestDeployment;
 
 lash_conformance::unbound_session_meta_tests!({
-    let dir = tempfile::tempdir().expect("unbound-session-meta tempdir");
-    let factory = SqliteSessionStoreFactory::new(dir.path());
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let factory = deployment.session_store_factory();
     for session_id in ["unbound-session-meta-a", "unbound-session-meta-b"] {
         factory
             .create_store(&SessionStoreCreateRequest {
@@ -18,12 +20,8 @@ lash_conformance::unbound_session_meta_tests!({
             .await
             .unwrap_or_else(|error| panic!("admit `{session_id}`: {error}"));
     }
-    let unbound = Store::open(&factory.catalog_path())
-        .await
-        .expect("open unbound SQLite store");
-    (
-        dir,
-        "SQLite",
-        async move { unbound.load_session_meta().await },
-    )
+    let unbound = deployment.store().await;
+    (deployment, "SQLite", async move {
+        unbound.load_session_meta().await
+    })
 });

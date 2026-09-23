@@ -16,14 +16,15 @@
 //! * the **store-backed driver** — this module. It absorbs *all* of the
 //!   semantics: leases, claim arbitration, replay decisions, journal payload
 //!   encoding, group membership, and the loser drain. Backends plug into it
-//!   through [`EffectReplayRowStore`], which is dumb row storage plus the
-//!   fixed fact in [`EffectReplayCapabilities`], and nothing more; PostgreSQL
-//!   and SQLite are two sets of rows under one state machine. The
+//!   through [`EffectReplayRowStore`], which is dumb row storage and nothing
+//!   more; PostgreSQL and SQLite are two sets of rows under one state machine.
+//!   Every backend's await-event rows live as long as its deployment, so every
+//!   one issues completion keys. The
 //!   [`EffectHost`](super::executor::EffectHost) and
 //!   [`RuntimeEffectController`](super::executor::RuntimeEffectController)
 //!   surface over the driver is shared too — one [`StoreReplayAdapter`]
 //!   family, implemented once in this module — so a store contributes its
-//!   rows, its capabilities, and its constructors, and nothing else.
+//!   rows and its constructors, and nothing else.
 //! * the **engine-backed host** — `lash-restate`, which implements the same
 //!   ports directly against the engine's own journal. It has no replay ledger,
 //!   no Lash lease, and no drain, because the engine already owns retention and
@@ -78,9 +79,7 @@
 use crate::SessionId;
 use crate::runtime::effect::ProcessCommand;
 mod adapter;
-pub use adapter::{
-    StoreReplayAdapter, StoreReplayController, StoreReplayHost, store_replay_capabilities,
-};
+pub use adapter::{StoreReplayAdapter, StoreReplayController, StoreReplayHost};
 #[doc(hidden)]
 pub use tokio_util::sync::CancellationToken as ReplayCancellationToken;
 
@@ -140,37 +139,6 @@ pub struct EffectReplayVocabulary {
 enum EffectReplayBackend {
     Sqlite,
     Postgres,
-}
-
-/// The fact about a backend that the shared [`EffectHost`] /
-/// [`RuntimeEffectController`] adapter (see [`StoreReplayAdapter`]) needs and
-/// cannot derive from the row operations.
-///
-/// Before the adapter was shared, each store carried its own copy of the
-/// adapter to encode its answers; now a backend states them once, here, and
-/// the one adapter reads them. They are fixed at construction: none can change
-/// while a driver is alive.
-///
-/// [`EffectHost`]: super::executor::EffectHost
-/// [`RuntimeEffectController`]: super::executor::RuntimeEffectController
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EffectReplayCapabilities {
-    pub completion_keys: CompletionKeys,
-}
-
-/// Whether a backend's await-event rows can back a completion key handed out
-/// of the process — the answer
-/// [`AwaitEventResolver::prepare_completion_key`](super::executor::AwaitEventResolver::prepare_completion_key)
-/// gives when the caller may defer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CompletionKeys {
-    /// Promise rows outlive the process, so a key minted here stays routable:
-    /// the preparation is [`Issued`](super::executor::CompletionKeyPreparation::Issued).
-    Issued,
-    /// Promise rows die with the process (SQLite's testing-only memory
-    /// backing), so no key is handed out: the preparation is
-    /// [`Unsupported`](super::executor::CompletionKeyPreparation::Unsupported).
-    Unsupported,
 }
 
 /// What a caller of the shared claim loop wants a live competing claim to mean.
@@ -823,10 +791,6 @@ pub mod sealed;
 pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     /// The error vocabulary hosts already match on for this backend.
     fn vocabulary(&self) -> EffectReplayVocabulary;
-
-    /// The fixed facts about this backend the shared host and controller
-    /// adapter answers from. See [`EffectReplayCapabilities`].
-    fn capabilities(&self) -> EffectReplayCapabilities;
 
     /// Claim `(scope_id, replay_key)`, or report why it could not be claimed.
     ///

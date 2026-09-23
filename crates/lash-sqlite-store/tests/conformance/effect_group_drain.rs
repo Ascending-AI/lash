@@ -2,33 +2,34 @@
 //! (FIG-1536).
 //!
 //! The suite lives in `lash-core` so both SQL tiers answer one set of laws. All
-//! this file supplies is the wiring the laws are about: a host over a fixed
-//! database file, built with the lease window the law asked for, registered with
-//! the resolver the law supplied, and the drain that host hands out over the
-//! same journal and the same resolver.
+//! this file supplies is the wiring the laws are about: a host over one
+//! deployment's journal, built with the lease window the law asked for,
+//! registered with the resolver the law supplied, and the drain that host hands
+//! out over the same journal and the same resolver.
 //!
-//! Its own integration test rather than a case in the group-contract file: the
-//! drain laws destroy Tokio runtimes on purpose, and a law that kills the
-//! runtime it is running on cannot share a test binary's fixture with laws that
-//! do not.
+//! Its own module rather than a case in the group-contract file: the drain laws
+//! destroy Tokio runtimes on purpose, and a law that kills the runtime it is
+//! running on cannot share a fixture with laws that do not.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use lash_conformance::{DrainWorld, DrainWorldFactory, DrainWorldSpec};
 use lash_core_execution::EffectHost;
-use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
+use lash_sqlite_store::{SqliteDeploymentOptions, SqliteEffectReplayOptions};
 
-/// A world over one database file.
+use super::SUBSTRATE;
+use crate::deployment_fixture::{TestDeployment, system_clock};
+
+/// A world over one deployment's journal.
 ///
 /// The host is opened *inside* the returned future rather than cloned from an
 /// outer one, because a crash law calls this factory from the runtime it is
 /// about to destroy: the SQLite connection must belong to that runtime so it
 /// dies with it.
-async fn world(path: PathBuf, spec: DrainWorldSpec) -> DrainWorld {
+async fn world(deployment: TestDeployment, spec: DrainWorldSpec) -> DrainWorld {
     let ttl = Duration::from_millis(spec.lease_ttl_ms);
-    let options = SqliteEffectReplayOptions {
+    let effect_replay = SqliteEffectReplayOptions {
         lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
             .expect("the suite asks for a ttl at least three renew intervals wide"),
         drain_budget: spec
@@ -36,9 +37,16 @@ async fn world(path: PathBuf, spec: DrainWorldSpec) -> DrainWorld {
             .map(lash_core_execution::EffectGroupDrainBudget::new)
             .unwrap_or_default(),
     };
-    let host = SqliteEffectHost::open_with_options(&path, options)
+    let host = deployment
+        .reopen_with(
+            move |options| SqliteDeploymentOptions {
+                effect_replay,
+                ..options
+            },
+            system_clock(),
+        )
         .await
-        .expect("SQLite effect host");
+        .effect_host();
     // `None` is a law's request for a host with no resolver at all, not a
     // default for this file to fill in: the drain such a host hands out is what
     // one of the laws is about.
@@ -48,30 +56,26 @@ async fn world(path: PathBuf, spec: DrainWorldSpec) -> DrainWorld {
     }
     let drain = host.group_drain();
     DrainWorld {
-        host: Arc::new(host) as Arc<dyn EffectHost>,
+        host: host as Arc<dyn EffectHost>,
         drain,
     }
 }
 
 // The durable SQLite tier answers the loser-drain contract (FIG-1536).
 lash_conformance::store_effect_group_drain_tests!({
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("effect-group-drain.db");
-    let make: DrainWorldFactory = Arc::new(move |spec: DrainWorldSpec| {
-        let path = path.clone();
-        Box::pin(async move { world(path, spec).await })
-    });
-    (dir, make)
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let worlds = deployment.clone();
+    let make: DrainWorldFactory =
+        Arc::new(move |spec: DrainWorldSpec| Box::pin(world(worlds.clone(), spec)));
+    (deployment, make)
 });
 
 // The durable SQLite tier answers the §7 durable-closing contract (FIG-3410) —
 // the same world factory, the closing seam beside the drain on the same host.
 lash_conformance::store_effect_group_closing_tests!({
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("effect-group-closing.db");
-    let make: DrainWorldFactory = Arc::new(move |spec: DrainWorldSpec| {
-        let path = path.clone();
-        Box::pin(async move { world(path, spec).await })
-    });
-    (dir, make)
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let worlds = deployment.clone();
+    let make: DrainWorldFactory =
+        Arc::new(move |spec: DrainWorldSpec| Box::pin(world(worlds.clone(), spec)));
+    (deployment, make)
 });

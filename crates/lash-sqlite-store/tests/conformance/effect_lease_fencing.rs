@@ -1,12 +1,11 @@
 lash_conformance::effect_controller_lease_fencing_tests!({
-    let dirs = Arc::new(Mutex::new(Vec::new()));
-    let path = fresh_db_path(&dirs, "effect-lease-fencing.db");
-    let make_path = path.clone();
-    let steal_path = path.clone();
-    let expire_path = path.clone();
-    let fail_path = path.clone();
-    let stall_path = path.clone();
-    let heal_path = path.clone();
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let make_deployment = deployment.clone();
+    let steal_deployment = deployment.clone();
+    let expire_deployment = deployment.clone();
+    let fail_deployment = deployment.clone();
+    let stall_deployment = deployment.clone();
+    let heal_deployment = deployment.clone();
     // A stall is a second connection holding the database write lock, so the
     // controller's renewal waits in SQLite's busy handler until it is lifted.
     type WriteLockHolder = (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>);
@@ -14,23 +13,23 @@ lash_conformance::effect_controller_lease_fencing_tests!({
     let stall_lock = Arc::clone(&write_lock);
     let heal_lock = Arc::clone(&write_lock);
     (
-        dirs,
+        deployment,
         lash_conformance::EffectLeaseFencingBackend {
             make_controller: Box::new(move |ttl, clock| {
-                let path = make_path.clone();
+                let deployment = make_deployment.clone();
                 Box::pin(async move {
-                    let controller = SqliteRuntimeEffectController::open_with_options_and_clock(
-                        &path,
-                        durable_turn_scope("session", "turn"),
-                        SqliteEffectReplayOptions {
-                            lease_timings: lash_core_execution::facade_support::LeaseTimings::from_ttl(ttl)
-                                .expect("conformance lease timings"),
-                            drain_budget: Default::default(),
-                        },
-                        clock,
-                    )
-                    .await
-                    .expect("controller");
+                    let controller = deployment
+                        .reopen_with(
+                            with_lease_timings(
+                                lash_core_execution::facade_support::LeaseTimings::from_ttl(ttl)
+                                    .expect("conformance lease timings"),
+                            ),
+                            clock,
+                        )
+                        .await
+                        .open_effect_controller(durable_turn_scope("session", "turn"))
+                        .await
+                        .expect("controller");
                     let for_replay = controller.clone();
                     lash_conformance::LeaseFencingController {
                         controller: Arc::new(controller),
@@ -39,10 +38,10 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                 })
             }),
             steal_lease: Box::new(move |replay_key| {
-                let path = steal_path.clone();
+                let deployment = steal_deployment.clone();
                 Box::pin(async move {
                     let stolen_until = current_epoch_ms_for_test().saturating_add(10_000);
-                    let conn = rusqlite::Connection::open(&path).expect("open sqlite");
+                    let conn = deployment.raw(SqliteDatabase::EffectReplay);
                     let changed = conn
                         .execute(
                             "UPDATE runtime_effect_replay
@@ -57,9 +56,9 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                 })
             }),
             expire_lease: Box::new(move |replay_key| {
-                let path = expire_path.clone();
+                let deployment = expire_deployment.clone();
                 Box::pin(async move {
-                    let conn = rusqlite::Connection::open(&path).expect("open sqlite");
+                    let conn = deployment.raw(SqliteDatabase::EffectReplay);
                     let changed = conn
                         .execute(
                             "UPDATE runtime_effect_replay
@@ -75,9 +74,9 @@ lash_conformance::effect_controller_lease_fencing_tests!({
             // under the same lease token while moving its expiry; a takeover
             // changes the token and a finalize changes the status.
             fail_renewals: Box::new(move |replay_key| {
-                let path = fail_path.clone();
+                let deployment = fail_deployment.clone();
                 Box::pin(async move {
-                    let conn = rusqlite::Connection::open(&path).expect("open sqlite");
+                    let conn = deployment.raw(SqliteDatabase::EffectReplay);
                     conn.execute_batch(&format!(
                         "CREATE TRIGGER lash_conformance_fail_effect_renewal
                          BEFORE UPDATE OF lease_expires_at_ms ON runtime_effect_replay
@@ -92,13 +91,13 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                 })
             }),
             stall_renewals: Box::new(move |_replay_key| {
-                let path = stall_path.clone();
+                let deployment = stall_deployment.clone();
                 let write_lock = Arc::clone(&stall_lock);
                 Box::pin(async move {
                     let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
                     let (locked_tx, locked_rx) = tokio::sync::oneshot::channel();
                     let holder = std::thread::spawn(move || {
-                        let conn = rusqlite::Connection::open(&path).expect("open sqlite");
+                        let conn = deployment.raw(SqliteDatabase::EffectReplay);
                         conn.execute_batch("BEGIN IMMEDIATE")
                             .expect("hold the write lock");
                         let _ = locked_tx.send(());
@@ -111,7 +110,7 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                 })
             }),
             heal_renewals: Box::new(move |_replay_key| {
-                let path = heal_path.clone();
+                let deployment = heal_deployment.clone();
                 let write_lock = Arc::clone(&heal_lock);
                 Box::pin(async move {
                     let holder = write_lock.lock_recover().take();
@@ -122,7 +121,7 @@ lash_conformance::effect_controller_lease_fencing_tests!({
                             .expect("join the write-lock holder")
                             .expect("write-lock holder exits cleanly");
                     }
-                    let conn = rusqlite::Connection::open(&path).expect("open sqlite");
+                    let conn = deployment.raw(SqliteDatabase::EffectReplay);
                     conn.execute_batch(
                         "DROP TRIGGER IF EXISTS lash_conformance_fail_effect_renewal;",
                     )

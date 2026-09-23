@@ -1011,7 +1011,11 @@ async fn caller_supplied_scope_survives_the_reclaim_sweep(pg: bool) {
             .expect("SQLite effect host");
         let factory =
             lash_sqlite_store::SqliteSessionStoreFactory::new(dir.path().join("sessions"));
-        catalog = Some(factory.catalog_path());
+        catalog = Some(
+            dir.path()
+                .join("sessions")
+                .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+        );
         (Arc::new(host), Journal::Sqlite(path), Arc::new(factory))
     };
     let _postgres = postgres.take();
@@ -1212,7 +1216,8 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant(pg: bool) {
             .await
             .expect("SQLite effect host");
         let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&catalog_root);
-        sqlite_catalog = Some(factory.catalog_path());
+        sqlite_catalog =
+            Some(catalog_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()));
         (
             Arc::new(host),
             Journal::Sqlite(effect_path),

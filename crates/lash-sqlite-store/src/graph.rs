@@ -374,7 +374,9 @@ mod tests {
     /// a non-manifest namespace cannot inherit the module label (FIG-1949).
     #[tokio::test]
     async fn pointer_table_roots_derive_labels_from_their_namespace() {
-        let store = Store::memory().await.expect("open store");
+        let store = crate::test_support::memory_store()
+            .await
+            .expect("open store");
         store
             .conn
             .call(|conn| {
@@ -413,7 +415,9 @@ mod tests {
     /// with a sibling namespace's kind.
     #[tokio::test]
     async fn pointer_table_root_with_unknown_namespace_fails_closed() {
-        let store = Store::memory().await.expect("open store");
+        let store = crate::test_support::memory_store()
+            .await
+            .expect("open store");
         store
             .conn
             .call(|conn| {
@@ -431,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn healthy_non_empty_whole_graph_validates_without_resident_leaf() {
-        let store = Store::memory()
+        let store = crate::test_support::memory_store()
             .await
             .expect("open healthy whole-graph store");
         let session_id = "healthy-leafless-whole-graph";

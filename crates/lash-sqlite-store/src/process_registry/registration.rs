@@ -142,7 +142,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         self.scope_fence_hosts.bind(
             effect_host,
             lash_core_execution::ProcessRegistryBinding {
-                fence_database: self.path.clone(),
+                fence_database: self.location.target().file_path().map(Path::to_path_buf),
                 registrations: Arc::new(support::SqliteRegistrationProbe {
                     conn: self.conn.clone(),
                 }),

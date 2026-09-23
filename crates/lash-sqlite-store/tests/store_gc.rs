@@ -61,7 +61,12 @@ async fn factory_state(
 
 #[tokio::test]
 async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
-    let store = Store::memory().await.expect("store");
+    let store = lash_sqlite_store::SqliteDeployment::memory()
+        .await
+        .expect("memory deployment")
+        .open_store()
+        .await
+        .expect("store");
     let tool_state = persisted_tool_state_at_generation(7);
     let plugin_state = PluginState {
         plugins: Default::default(),
@@ -140,26 +145,6 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     );
 }
 
-#[test]
-fn sqlite_factory_uses_one_deterministic_catalog_path() {
-    let root = unique_temp_dir("paths");
-    let factory = SqliteSessionStoreFactory::new(&root);
-
-    let first = factory.catalog_path();
-    let second = factory.catalog_path();
-
-    assert_eq!(first, second);
-    assert_eq!(first.parent(), Some(root.as_path()));
-    assert!(
-        first
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .ends_with(".db")
-    );
-    assert!(!first.file_name().unwrap().to_string_lossy().contains('/'));
-}
-
 #[tokio::test]
 async fn sqlite_catalog_indexes_usage_by_session() {
     let root = unique_temp_dir("usage-index");
@@ -173,7 +158,7 @@ async fn sqlite_catalog_indexes_usage_by_session() {
         })
         .await
         .expect("create store");
-    let conn = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
+    let conn = rusqlite::Connection::open(factory.catalog_uri()).expect("open catalog");
     let indexed: bool = conn
         .query_row(
             "SELECT EXISTS(
@@ -290,7 +275,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .await
         .expect("commit deleted session checkpoint");
     {
-        let conn = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
+        let conn = rusqlite::Connection::open(factory.catalog_uri()).expect("open catalog");
         conn.execute(
             "INSERT INTO blobs (hash, content) VALUES ('host-artifact-blob', X'02')",
             [],
@@ -313,7 +298,10 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .await
         .expect("delete session again");
 
-    assert!(factory.catalog_path().exists());
+    assert!(
+        root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name())
+            .exists()
+    );
     assert!(
         factory
             .open_existing_store(&request(&SessionId::from("delete/me")))
@@ -328,7 +316,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
             .expect("probe retained session")
             .is_some()
     );
-    let conn = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
+    let conn = rusqlite::Connection::open(factory.catalog_uri()).expect("open catalog");
     let host_ref_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM artifact_refs
@@ -582,7 +570,7 @@ async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit head");
-    rusqlite::Connection::open(factory.catalog_path())
+    rusqlite::Connection::open(factory.catalog_uri())
         .expect("open catalog")
         .execute("DROP TABLE graph_nodes", [])
         .expect("drop graph table");
@@ -619,7 +607,7 @@ async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit graph");
-    rusqlite::Connection::open(factory.catalog_path())
+    rusqlite::Connection::open(factory.catalog_uri())
         .expect("open catalog")
         .execute(
             "UPDATE graph_nodes
@@ -665,7 +653,7 @@ async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit head");
-    rusqlite::Connection::open(factory.catalog_path())
+    rusqlite::Connection::open(factory.catalog_uri())
         .expect("open catalog")
         .execute("DROP TABLE usage_deltas", [])
         .expect("drop usage table");
@@ -740,9 +728,10 @@ async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
         .expect("delete");
     factory.unpin(&leaf).await.expect("unpin");
 
-    let unbound = Store::open(&factory.catalog_path())
-        .await
-        .expect("open unbound store");
+    let unbound =
+        Store::open(&root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()))
+            .await
+            .expect("open unbound store");
     let err = unbound
         .vacuum()
         .await
@@ -779,7 +768,7 @@ fn resident_tombstoned_node_ids(factory: &SqliteSessionStoreFactory) -> Vec<Stri
 }
 
 fn raw_node_ids(factory: &SqliteSessionStoreFactory, sql: &str) -> Vec<String> {
-    let conn = rusqlite::Connection::open(factory.catalog_path()).expect("open catalog");
+    let conn = rusqlite::Connection::open(factory.catalog_uri()).expect("open catalog");
     let mut statement = conn.prepare(sql).expect("prepare node id probe");
     statement
         .query_map([], |row| row.get::<_, String>(0))

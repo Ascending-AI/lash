@@ -38,9 +38,11 @@ pub async fn inspect_required_constraints_at(
     path: impl AsRef<Path>,
     database: SqliteDatabase,
 ) -> Result<RequiredConstraintReport, StoreError> {
-    let connection = SqliteConnection::open_readonly(path.as_ref())
-        .await
-        .map_err(sqlite_async_error)?;
+    let connection = SqliteConnection::open_readonly(&crate::location::DatabaseTarget::File(
+        path.as_ref().to_path_buf(),
+    ))
+    .await
+    .map_err(sqlite_async_error)?;
     let tables = connection
         .call(|connection| {
             let mut statement = connection.prepare(crate::connection_sql::SELECT_TABLE_DDL)?;

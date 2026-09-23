@@ -55,12 +55,13 @@ async fn punctuation_worklist_pagination_matches_all_three_backends() {
     };
     reset(storage.pool()).await;
     let memory = TestLocalProcessRegistry::default();
-    let sqlite = lash_sqlite_store::SqliteProcessRegistry::memory()
+    let sqlite = lash_sqlite_store::SqliteDeployment::memory()
         .await
-        .expect("SQLite registry");
+        .expect("SQLite registry")
+        .process_registry();
     for (name, registry) in [
         ("memory", &memory as &dyn ProcessRegistry),
-        ("sqlite", &sqlite as &dyn ProcessRegistry),
+        ("sqlite", sqlite.as_ref() as &dyn ProcessRegistry),
         (
             "postgres",
             &storage.process_registry() as &dyn ProcessRegistry,

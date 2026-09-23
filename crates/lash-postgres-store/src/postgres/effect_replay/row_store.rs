@@ -18,12 +18,6 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         VOCABULARY
     }
 
-    fn capabilities(&self) -> EffectReplayCapabilities {
-        EffectReplayCapabilities {
-            completion_keys: CompletionKeys::Issued,
-        }
-    }
-
     /// The notifier for `group_key`, subscribed on this driver's dedicated
     /// `LISTEN` connection before the call returns — the ordering the
     /// caller's enable → read → park sequence needs across processes.

@@ -2,8 +2,8 @@ use super::*;
 
 #[tokio::test]
 async fn sqlite_sleep_replay_returns_after_recorded_due_time() {
-    let (_controller_dir, controller) =
-        open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
+    let (_deployment, controller) =
+        open_effect_controller(durable_turn_scope("session", "turn")).await;
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
             lash_core_execution::EffectAddress::new(
@@ -43,8 +43,8 @@ async fn sqlite_sleep_replay_returns_after_recorded_due_time() {
 
 #[tokio::test]
 async fn sqlite_sleep_until_replay_does_not_mismatch_its_recorded_deadline() {
-    let (_controller_dir, controller) =
-        open_ephemeral_effect_controller(durable_turn_scope("session", "turn")).await;
+    let (_deployment, controller) =
+        open_effect_controller(durable_turn_scope("session", "turn")).await;
     let deadline_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock after epoch")

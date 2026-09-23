@@ -118,10 +118,12 @@ fn commit_count_entropy_seed() -> u64 {
     let (high, low) = uuid::Uuid::new_v4().as_u64_pair();
     (high ^ low) & (u64::MAX >> 1)
 }
+mod deployment;
 mod effect_replay;
 mod forks;
 mod graph;
 mod lifecycle;
+mod location;
 mod pending_turn_inputs;
 mod persistence;
 mod preflight;
@@ -148,6 +150,9 @@ mod turn_ingress;
 
 pub use attachment_store::SqliteAttachmentStore;
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
+pub use deployment::{SqliteDeployment, SqliteDeploymentOptions};
+pub use location::SqliteLocation;
+use location::{DatabaseLocation, DatabaseTarget};
 
 /// File name of the one durable-core database under a session-store root.
 ///
@@ -176,7 +181,7 @@ pub use schema::SqliteDatabase;
 use forks::*;
 use pending_turn_inputs::*;
 use queued_work::*;
-use schema::{StoreBacking, apply_pragmas, ensure_versioned_schema};
+use schema::{apply_pragmas, ensure_versioned_schema};
 
 /// The SQLite durable-core session schema version stamped in `PRAGMA user_version`.
 ///
@@ -196,6 +201,9 @@ pub use triggers::SqliteTriggerStore;
 /// tokio-rusqlite handle to one database thread).
 pub struct Store {
     conn: SqliteConnection,
+    /// The durable-core database this store is open on. Held so a store
+    /// opened on a memory deployment keeps its database alive.
+    location: DatabaseLocation,
     turn_cancellation_authority: Option<lash_core_execution::TurnCancellationAuthority>,
     turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
     session_id: Arc<OnceLock<SessionId>>,
@@ -229,14 +237,16 @@ impl Store {
 pub struct SqliteProcessRegistry {
     conn: SqliteConnection,
     clock: Arc<dyn lash_core_execution::Clock>,
-    process_session_store_root: Option<PathBuf>,
+    /// The durable-core catalog holding the two process-owned sessions of
+    /// each process, which the terminal-retention prune deletes before the
+    /// process row.
+    process_session_catalog: DatabaseLocation,
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     /// Effect hosts whose scope fence registration lifts (ADR 0049).
     scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
-    /// This registry's file: bound effect hosts attach it and keep their
+    /// This registry's database: bound effect hosts attach it and keep their
     /// process-scope fences in it, beside the process rows (ADR 0049).
-    /// `None` for an in-memory registry.
-    path: Option<PathBuf>,
+    location: DatabaseLocation,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {
@@ -633,16 +643,18 @@ type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
 /// host-owned decisions.
 #[derive(Clone)]
 pub struct SqliteSessionStoreFactory {
-    root: PathBuf,
-    process_registry_path: Option<PathBuf>,
+    /// The one durable-core catalog every session of this factory lives in.
+    core: DatabaseLocation,
+    /// The process registry maintenance attaches beside the catalog.
+    process_registry: Option<DatabaseTarget>,
     options: StoreOptions,
     clock: Arc<dyn lash_core_execution::Clock>,
     #[cfg(feature = "testing")]
     fault_injector: Option<testing::SqliteFaultInjector>,
-    /// The bound effect host's journal file: the retained-evidence sweep
-    /// attaches it to retire quiescent operation scopes whose receipt this
-    /// catalog holds (ADR 0067). Shared by every clone of the factory.
-    effect_journal_path: Arc<std::sync::Mutex<Option<PathBuf>>>,
+    /// The bound effect host's journal: the retained-evidence sweep attaches
+    /// it to retire quiescent operation scopes whose receipt this catalog
+    /// holds (ADR 0067). Shared by every clone of the factory.
+    effect_journal: Arc<std::sync::Mutex<Option<DatabaseTarget>>>,
     turn_cancel_closure_owner:
         Arc<std::sync::Mutex<Option<lash_core_execution::TurnCancelClosureOwnerBinding>>>,
     effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
@@ -691,37 +703,13 @@ impl SqliteSessionStoreFactory {
     }
 
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        let root = root.into();
         warn_process_registry_not_wired("SqliteSessionStoreFactory::new");
-        Self {
-            root,
-            process_registry_path: None,
-            options: StoreOptions::default(),
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            #[cfg(feature = "testing")]
-            fault_injector: None,
-            effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
-            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            effect_host: Arc::new(std::sync::Mutex::new(None)),
-            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
-        }
+        Self::for_root(root.into(), StoreOptions::default(), None)
     }
 
     pub fn with_options(root: impl Into<PathBuf>, options: StoreOptions) -> Self {
-        let root = root.into();
         warn_process_registry_not_wired("SqliteSessionStoreFactory::with_options");
-        Self {
-            root,
-            process_registry_path: None,
-            options,
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            #[cfg(feature = "testing")]
-            fault_injector: None,
-            effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
-            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            effect_host: Arc::new(std::sync::Mutex::new(None)),
-            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
-        }
+        Self::for_root(root.into(), options, None)
     }
 
     /// This is the warning-free durable constructor when the deployment uses a Lash SQLite
@@ -730,18 +718,11 @@ impl SqliteSessionStoreFactory {
         root: impl Into<PathBuf>,
         process_registry_path: impl Into<PathBuf>,
     ) -> Self {
-        Self {
-            root: root.into(),
-            process_registry_path: Some(process_registry_path.into()),
-            options: StoreOptions::default(),
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            #[cfg(feature = "testing")]
-            fault_injector: None,
-            effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
-            turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
-            effect_host: Arc::new(std::sync::Mutex::new(None)),
-            artifact_stores: Arc::new(std::sync::Mutex::new(None)),
-        }
+        Self::for_root(
+            root.into(),
+            StoreOptions::default(),
+            Some(process_registry_path.into()),
+        )
     }
 
     pub fn with_options_and_process_registry(
@@ -749,14 +730,36 @@ impl SqliteSessionStoreFactory {
         options: StoreOptions,
         process_registry_path: impl Into<PathBuf>,
     ) -> Self {
-        Self {
-            root: root.into(),
-            process_registry_path: Some(process_registry_path.into()),
+        Self::for_root(root.into(), options, Some(process_registry_path.into()))
+    }
+
+    fn for_root(root: PathBuf, options: StoreOptions, process_registry: Option<PathBuf>) -> Self {
+        Self::at(
+            DatabaseLocation::standalone_file(&root.join(DURABLE_CORE_DB_FILE)),
+            process_registry.map(DatabaseTarget::File),
+            None,
             options,
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
+        )
+    }
+
+    /// The factory over `core` in one deployment, with its registry and
+    /// effect journal already known rather than learned from a later bind.
+    pub(crate) fn at(
+        core: DatabaseLocation,
+        process_registry: Option<DatabaseTarget>,
+        effect_journal: Option<DatabaseTarget>,
+        options: StoreOptions,
+        clock: Arc<dyn lash_core_execution::Clock>,
+    ) -> Self {
+        Self {
+            core,
+            process_registry,
+            options,
+            clock,
             #[cfg(feature = "testing")]
             fault_injector: None,
-            effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
+            effect_journal: Arc::new(std::sync::Mutex::new(effect_journal)),
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
@@ -775,10 +778,10 @@ impl SqliteSessionStoreFactory {
         self
     }
 
-    /// Path to the one durable-core database shared by every session created
-    /// through this factory.
-    pub fn catalog_path(&self) -> PathBuf {
-        self.root.join(DURABLE_CORE_DB_FILE)
+    /// The URI a raw SQLite connection opens this factory's durable-core
+    /// catalog through, file or memory.
+    pub fn catalog_uri(&self) -> String {
+        self.core.target().uri()
     }
 
     /// Open and project one committed session through SQLite's read-only mode.
@@ -797,11 +800,10 @@ impl SqliteSessionStoreFactory {
         session_id: &SessionId,
     ) -> Result<Option<lash_core_execution::SessionReadView>, lash_core_execution::StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
-        let path = self.catalog_path();
-        if !path.exists() {
+        if !self.core.target().exists() {
             return Ok(None);
         }
-        let store = Store::open_bound_readonly(&path, session_id)
+        let store = Store::open_bound_readonly(&self.core, session_id)
             .await
             .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
         lash_core_execution::store::load_persisted_session_read_view(&store).await
@@ -820,15 +822,15 @@ impl SqliteSessionStoreFactory {
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<Store>, StoreError> {
         lash_core_execution::store::validate_session_id(&request.session_id)?;
-        std::fs::create_dir_all(&self.root).map_err(|err| StoreError::Backend(err.to_string()))?;
-        let path = self.catalog_path();
+        if let Some(root) = self.core.target().file_path().and_then(Path::parent) {
+            std::fs::create_dir_all(root).map_err(|err| StoreError::Backend(err.to_string()))?;
+        }
         let store = Arc::new(
-            Store::open_bound_with_options_clock_and_process_registry(
-                &path,
+            Store::open_bound_at(
+                &self.core,
                 &request.session_id,
                 self.options,
                 Arc::clone(&self.clock),
-                None,
                 self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
@@ -883,17 +885,15 @@ impl SqliteSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<Store>>, String> {
-        let path = self.catalog_path();
-        if !path.exists() {
+        if !self.core.target().exists() {
             return Ok(None);
         }
         let store = Arc::new(
-            Store::open_bound_with_options_clock_and_process_registry(
-                &path,
+            Store::open_bound_at(
+                &self.core,
                 &request.session_id,
                 self.options,
                 Arc::clone(&self.clock),
-                None,
                 self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
@@ -916,7 +916,7 @@ impl SqliteSessionStoreFactory {
 #[async_trait::async_trait]
 impl SessionStoreFactory for SqliteSessionStoreFactory {
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
-        let catalog = lifecycle::canonical_catalog_identity(&self.catalog_path());
+        let catalog = self.core.target().canonical_name();
         *self
             .turn_cancel_closure_owner
             .lock()
@@ -925,7 +925,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             == lash_core_execution::TurnControlAuthorityOwner::EffectHost)
             .then(|| {
                 lash_core_execution::TurnCancelClosureOwnerBinding::new(
-                    format!("sqlite-catalog:{}", catalog.display()),
+                    format!("sqlite-catalog:{catalog}"),
                     Arc::clone(effect_host),
                 )
             });
@@ -935,9 +935,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::clone(effect_host));
         if let Some(path) = effect_host.effect_scope_fence_database() {
             *self
-                .effect_journal_path
+                .effect_journal
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(path);
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                Some(DatabaseTarget::File(path));
         }
     }
 
@@ -998,11 +999,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         filter: &SessionListFilter,
     ) -> Result<Vec<SessionSummary>, StoreError> {
-        let path = self.catalog_path();
-        if !path.exists() {
+        if !self.core.target().exists() {
             return Ok(Vec::new());
         }
-        let conn = SqliteConnection::open_readonly(&path)
+        let conn = SqliteConnection::open_readonly(self.core.target())
             .await
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         let filter = filter.clone();
@@ -1016,17 +1016,15 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         session_id: &SessionId,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
         lash_core_execution::store::validate_session_id(session_id)?;
-        let path = self.catalog_path();
-        if !path.exists() {
+        if !self.core.target().exists() {
             return Ok(None);
         }
         let store = Arc::new(
-            Store::open_bound_with_options_clock_and_process_registry(
-                &path,
+            Store::open_bound_at(
+                &self.core,
                 session_id,
                 self.options,
                 Arc::clone(&self.clock),
-                None,
                 self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
@@ -1131,11 +1129,10 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         now_epoch_ms: u64,
     ) -> Result<Option<bool>, StoreError> {
         lash_core_execution::store::validate_session_id(&request.session_id)?;
-        let path = self.catalog_path();
-        if !path.exists() {
+        if !self.core.target().exists() {
             return Ok(Some(false));
         }
-        let conn = SqliteConnection::open_readonly(&path)
+        let conn = SqliteConnection::open_readonly(self.core.target())
             .await
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         let session_id = request.session_id.clone();
@@ -1157,13 +1154,13 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
         lash_core_execution::store::validate_session_id(session_id)
             .map_err(|error| error.to_string())?;
-        let path = self.catalog_path();
-        if !path.exists() {
+        if !self.core.target().exists() {
             return Ok(false);
         }
-        let conn = SqliteConnection::open_with_policy(&path, self.options.connection_policy)
-            .await
-            .map_err(|err| err.to_string())?;
+        let conn =
+            SqliteConnection::open_with_policy(self.core.target(), self.options.connection_policy)
+                .await
+                .map_err(|err| err.to_string())?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
             .await
             .map_err(|err| err.to_string())?;
@@ -1191,11 +1188,11 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         lash_core_execution::store::validate_session_id(session_id)
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
         let report =
-            delete_session_from_catalog(&self.root, session_id, self.options.connection_policy)
+            delete_session_from_catalog(&self.core, session_id, self.options.connection_policy)
                 .await?;
-        if let Some(process_registry_path) = self.process_registry_path.as_deref() {
+        if let Some(process_registry) = self.process_registry.as_ref() {
             delete_wake_allocation_floors_from_process_registry(
-                process_registry_path,
+                process_registry,
                 session_id,
                 self.options.connection_policy,
             )
@@ -1214,17 +1211,17 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         node_id: &str,
     ) -> Result<lash_core_execution::ForkPoint, lash_core_execution::StoreError> {
-        pin_in_catalog(&self.root, node_id, self.options.connection_policy).await
+        pin_in_catalog(&self.core, node_id, self.options.connection_policy).await
     }
 
     async fn unpin(&self, node_id: &str) -> Result<(), lash_core_execution::StoreError> {
-        unpin_in_catalog(&self.root, node_id, self.options.connection_policy).await
+        unpin_in_catalog(&self.core, node_id, self.options.connection_policy).await
     }
 
     async fn fork_points(
         &self,
     ) -> Result<Vec<lash_core_execution::ForkPoint>, lash_core_execution::StoreError> {
-        fork_points_in_catalog(&self.root, self.options.connection_policy).await
+        fork_points_in_catalog(&self.core, self.options.connection_policy).await
     }
 
     async fn fork_at(
@@ -1232,7 +1229,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         request: &lash_core_execution::ForkSessionRequest,
     ) -> Result<lash_core_execution::ForkSessionReceipt, lash_core_execution::StoreError> {
         fork_at_in_catalog(
-            &self.root,
+            &self.core,
             request,
             self.clock.timestamp_ms(),
             self.options.connection_policy,
@@ -1301,7 +1298,7 @@ fn list_session_summaries(
 #[async_trait::async_trait]
 impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
     fn can_prove_process_owner_death(&self) -> bool {
-        self.process_registry_path.is_some()
+        self.process_registry.is_some()
     }
 
     async fn live_attachment_refs(
@@ -1311,18 +1308,17 @@ impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
         std::collections::BTreeSet<lash_core_execution::AttachmentId>,
         lash_core_execution::StoreError,
     > {
-        let path = self.catalog_path();
-        if !path.exists() {
+        let catalog = self.core.target();
+        if !catalog.exists() {
             return Err(lash_core_execution::StoreError::Backend(format!(
-                "attachment GC aborted: durable-core catalog {} does not exist, so live attachment refs cannot be enumerated",
-                path.display()
+                "attachment GC aborted: durable-core catalog {catalog} does not exist, so live attachment refs cannot be enumerated"
             )));
         }
-        let store = Store::open_with_options_clock_and_process_registry(
-            &path,
+        let store = Store::open_at(
+            &self.core,
             self.options,
             Arc::clone(&self.clock),
-            self.process_registry_path.as_deref(),
+            self.process_registry.as_ref(),
             self.turn_cancel_closure_owner_binding(),
             #[cfg(feature = "testing")]
             self.fault_injector.clone(),
@@ -1330,8 +1326,7 @@ impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
         .await
         .map_err(|err| {
             lash_core_execution::StoreError::Backend(format!(
-                "attachment GC aborted: durable-core catalog {} could not be opened: {err}",
-                path.display()
+                "attachment GC aborted: durable-core catalog {catalog} could not be opened: {err}"
             ))
         })?;
         lash_core_execution::AttachmentManifest::forget_aged_uncommitted_intents(

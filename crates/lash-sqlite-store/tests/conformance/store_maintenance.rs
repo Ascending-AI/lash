@@ -1,29 +1,31 @@
 //! SQLite's answer to the store maintenance outcome contract (ADR 0067 §4).
 
 use lash_sansio::SessionId;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use lash_core_execution::SessionStoreFactory;
 use lash_sansio::sync::MutexExt;
-use lash_sqlite_store::SqliteSessionStoreFactory;
+use lash_sqlite_store::SqliteDatabase;
+
+use super::Retained;
+use crate::deployment_fixture::TestDeployment;
 
 /// Corrupt the live checkpoint manifest so the mark phase cannot decode the
 /// root it must follow. The sweep then has a real failure to report, which is
 /// the arm SQLite used to swallow into `GcReport::default()`.
 struct SqliteCorruptRootedManifest {
-    catalog: Arc<Mutex<Option<PathBuf>>>,
+    deployment: Arc<Mutex<Option<TestDeployment>>>,
 }
 
 #[async_trait::async_trait]
 impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedManifest {
     async fn break_gc_scope(&self, _session_id: &SessionId) {
-        let catalog = self
-            .catalog
+        let conn = self
+            .deployment
             .lock_recover()
             .clone()
-            .expect("the law makes a factory before breaking it");
-        let conn = rusqlite::Connection::open(&catalog).expect("open catalog for corruption");
+            .expect("the law makes a factory before breaking it")
+            .raw(SqliteDatabase::DurableCore);
         let corrupted = conn
             .execute(
                 "UPDATE blobs SET content = X'FFFFFFFF'
@@ -40,32 +42,24 @@ impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedMani
 }
 
 lash_conformance::store_maintenance_tests!({
-    let dirs = Arc::new(Mutex::new(Vec::new()));
-    let retained_dirs = Arc::clone(&dirs);
-    (retained_dirs, "sqlite", move || {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let factory =
-            Arc::new(SqliteSessionStoreFactory::new(dir.path())) as Arc<dyn SessionStoreFactory>;
-        dirs.lock_recover().push(dir);
-        factory
+    let retained = Retained::default();
+    (retained.clone(), "sqlite", move || {
+        retained.open_blocking().session_store_factory() as Arc<dyn SessionStoreFactory>
     })
 });
 
 lash_conformance::store_maintenance_fault_tests!({
-    let dirs = Arc::new(Mutex::new(Vec::new()));
-    let catalog = Arc::new(Mutex::new(None));
-    let make_catalog = Arc::clone(&catalog);
+    let retained = Retained::default();
+    let deployment = Arc::new(Mutex::new(None));
+    let make_deployment = Arc::clone(&deployment);
     (
-        Arc::clone(&dirs),
+        retained.clone(),
         "sqlite",
         move || {
-            let dir = tempfile::tempdir().expect("tempdir");
-            *make_catalog.lock_recover() = Some(dir.path().join("durable-core.db"));
-            let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
-                as Arc<dyn SessionStoreFactory>;
-            dirs.lock_recover().push(dir);
-            factory
+            let opened = retained.open_blocking();
+            *make_deployment.lock_recover() = Some(opened.clone());
+            opened.session_store_factory() as Arc<dyn SessionStoreFactory>
         },
-        Arc::new(SqliteCorruptRootedManifest { catalog }),
+        Arc::new(SqliteCorruptRootedManifest { deployment }),
     )
 });

@@ -1287,8 +1287,9 @@ pub struct ProcessRegistryBinding {
     /// fence beside the process rows, so registration deletes the fence and
     /// inserts the row in one single-file commit and retirement's fence
     /// insert is its one commit point. `None` for a registry with no file of
-    /// its own (in memory, or a database the host reaches through its own
-    /// connection).
+    /// its own (a database the host reaches through its own connection, or a
+    /// SQLite memory deployment, whose host is wired to its registry by the
+    /// deployment's location rather than by this binding).
     pub fence_database: Option<std::path::PathBuf>,
     /// The registry's registration truth.
     pub registrations: Arc<dyn ProcessRegistrationProbe>,

@@ -328,6 +328,8 @@ mod listing_plan_tests;
 
 pub struct SqliteTriggerStore {
     conn: SqliteConnection,
+    /// Held so a store opened on a memory deployment keeps its database alive.
+    _location: crate::location::DatabaseLocation,
     clock: Arc<dyn lash_core_execution::Clock>,
     fixed_incarnation: Option<String>,
 }
@@ -345,28 +347,24 @@ impl SqliteTriggerStore {
         path: &Path,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        let conn = SqliteConnection::open(path).await?;
-        ensure_versioned_schema(&conn, SqliteDatabase::Triggers).await?;
-        apply_pragmas(&conn, StoreBacking::File).await?;
-        Ok(Self {
-            conn,
+        crate::location::validate_file_database_path(path, "SqliteTriggerStore")?;
+        Self::open_at(
+            &crate::location::DatabaseLocation::standalone_file(path),
             clock,
-            fixed_incarnation: None,
-        })
+        )
+        .await
     }
 
-    pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_clock(Arc::new(lash_core_execution::facade_support::SystemClock)).await
-    }
-
-    pub async fn memory_with_clock(
+    pub(crate) async fn open_at(
+        location: &crate::location::DatabaseLocation,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        let conn = SqliteConnection::open_in_memory().await?;
+        let conn = SqliteConnection::open(location.target()).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::Triggers).await?;
-        apply_pragmas(&conn, StoreBacking::Memory).await?;
+        apply_pragmas(&conn).await?;
         Ok(Self {
             conn,
+            _location: location.clone(),
             clock,
             fixed_incarnation: None,
         })

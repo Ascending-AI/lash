@@ -467,7 +467,9 @@ async fn catalog_participant_identity_survives_precreation_symlink_reopen() {
     let alias_factory = SqliteSessionStoreFactory::new(&alias_root);
     alias_factory.bind_effect_host(&effect_host);
     assert!(
-        !alias_factory.catalog_path().exists(),
+        !alias_root
+            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name())
+            .exists(),
         "binding precedes first catalog creation"
     );
     let scope = ExecutionScope::runtime_operation("aliased-catalog-owner");

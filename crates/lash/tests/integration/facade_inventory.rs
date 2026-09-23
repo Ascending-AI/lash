@@ -237,6 +237,8 @@ mod rlm_testing_inventory {
 mod sqlite_inventory {
     use lash::sqlite::SqliteDatabase as _;
     use lash::sqlite::SqliteSessionStoreFactory as _;
+    // ADR 0102's zero-infra entry point: one deployment, file or memory.
+    use lash::sqlite::{SqliteDeployment as _, SqliteDeploymentOptions as _, SqliteLocation as _};
 }
 
 #[cfg(feature = "postgres")]

@@ -1,5 +1,5 @@
-//! `SqliteAttachmentStore`: the shared attachment-store suite on a file and on
-//! an in-memory catalog, and the GC agreeing with the manifest over it.
+//! `SqliteAttachmentStore`: the shared attachment-store suite on the
+//! deployment's catalog, and the GC agreeing with the manifest over it.
 
 use super::*;
 
@@ -10,45 +10,39 @@ use lash_core_execution::{
     EmptyRootSetPolicy, Message, MessageRole, Part, RuntimeSessionState, SessionRelation,
 };
 use lash_sansio::MediaType;
-use lash_sqlite_store::SqliteAttachmentStore;
 
-fn open_attachment_store(path: &Path) -> Arc<dyn AttachmentStore> {
-    let path = path.to_path_buf();
-    Arc::new(sync_await(async move {
-        let catalog = Store::open(&path).await.expect("file catalog");
-        SqliteAttachmentStore::for_store(&catalog)
-            .await
-            .expect("file attachment store")
-    })) as Arc<dyn AttachmentStore>
-}
+/// What the catalog's bytes outlive: a file, or the memory deployment.
+const PERSISTENCE: AttachmentStorePersistence = match SUBSTRATE {
+    crate::deployment_fixture::Substrate::File => AttachmentStorePersistence::Durable,
+    crate::deployment_fixture::Substrate::Memory => AttachmentStorePersistence::Ephemeral,
+};
 
 lash_conformance::attachment_store_reopenable_tests!({
-    let dirs = Arc::new(Mutex::new(Vec::new()));
+    let retained = Retained::default();
     (
-        Arc::clone(&dirs),
+        retained.clone(),
         move || {
-            let path = fresh_db_path(&dirs, "durable-core.db");
+            let deployment = retained.open_blocking();
+            let reopened = sync_await({
+                let deployment = deployment.clone();
+                async move { deployment.reopen().await }
+            });
+            retained.keep(&reopened);
             lash_conformance::ReopenableAttachmentStore {
-                open: open_attachment_store(&path),
-                reopen: open_attachment_store(&path),
+                open: deployment.attachment_store() as Arc<dyn AttachmentStore>,
+                reopen: reopened.attachment_store() as Arc<dyn AttachmentStore>,
             }
         },
-        AttachmentStorePersistence::Durable,
+        PERSISTENCE,
     )
 });
 
 lash_conformance::attachment_store_tests!({
+    let retained = Retained::default();
     (
-        (),
-        || {
-            Arc::new(sync_await(async {
-                let catalog = Store::memory().await.expect("in-memory catalog");
-                SqliteAttachmentStore::for_store(&catalog)
-                    .await
-                    .expect("in-memory attachment store")
-            })) as Arc<dyn AttachmentStore>
-        },
-        AttachmentStorePersistence::Ephemeral,
+        retained.clone(),
+        move || retained.open_blocking().attachment_store() as Arc<dyn AttachmentStore>,
+        PERSISTENCE,
     )
 });
 
@@ -88,15 +82,15 @@ fn state_referencing(session_id: &SessionId, reference: &AttachmentRef) -> Runti
     state
 }
 
-fn checkpoint_blob_count(catalog: &Path) -> i64 {
-    rusqlite::Connection::open(catalog)
-        .expect("open catalog to count checkpoint blobs")
+fn checkpoint_blob_count(deployment: &TestDeployment) -> i64 {
+    deployment
+        .raw(SqliteDatabase::DurableCore)
         .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
         .expect("count checkpoint blobs")
 }
 
 async fn sweep(
-    factory: &SqliteSessionStoreFactory,
+    factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     backend: &Arc<dyn AttachmentStore>,
 ) -> lash_core_execution::attachments::AttachmentReclamationReport {
     reclaim_unreferenced_attachments(
@@ -119,8 +113,8 @@ async fn sweep(
 /// go too.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let factory = SqliteSessionStoreFactory::new(dir.path());
+    let deployment = TestDeployment::open(SUBSTRATE).await;
+    let factory = deployment.session_store_factory();
     let session_id = SessionId::from("attachment-gc-holder");
     let session = factory
         .create_store(
@@ -132,14 +126,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         )
         .await
         .expect("create holding session");
-    let catalog = Store::open(&factory.catalog_path())
-        .await
-        .expect("open the session catalog");
-    let backend: Arc<dyn AttachmentStore> = Arc::new(
-        SqliteAttachmentStore::for_store(&catalog)
-            .await
-            .expect("attachment store over the session catalog"),
-    );
+    let backend: Arc<dyn AttachmentStore> = deployment.attachment_store();
 
     let held = SessionAttachmentStore::new(Arc::clone(&backend), session.clone(), &session_id)
         .put(b"held by a committed turn".to_vec(), octet_meta())
@@ -158,7 +145,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         .put(b"no manifest row holds this".to_vec(), octet_meta())
         .await
         .expect("store an unreferenced blob");
-    let checkpoint_blobs = checkpoint_blob_count(&factory.catalog_path());
+    let checkpoint_blobs = checkpoint_blob_count(&deployment);
     assert!(
         checkpoint_blobs > 0,
         "the committed turn must have written checkpoint bytes for the sweep to spare"
@@ -195,7 +182,7 @@ async fn sqlite_attachment_gc_never_collects_a_blob_a_manifest_row_holds() {
         "a blob no manifest row holds is collected"
     );
     assert_eq!(
-        checkpoint_blob_count(&factory.catalog_path()),
+        checkpoint_blob_count(&deployment),
         checkpoint_blobs,
         "the attachment sweep never touches checkpoint bytes"
     );

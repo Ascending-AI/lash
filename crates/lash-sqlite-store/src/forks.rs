@@ -6,12 +6,14 @@ use crate::session_sql::session_sql;
     reason = "the sqlite store factory ensures the host-supplied store root exists before opening (FIG-2971)"
 )]
 async fn open_factory_catalog(
-    root: &Path,
+    catalog: &DatabaseLocation,
     policy: SqliteConnectionPolicy,
 ) -> Result<SqliteConnection, lash_core_execution::StoreError> {
-    std::fs::create_dir_all(root)
-        .map_err(|err| lash_core_execution::StoreError::Backend(err.to_string()))?;
-    let conn = SqliteConnection::open_with_policy(&root.join(DURABLE_CORE_DB_FILE), policy)
+    if let Some(root) = catalog.target().file_path().and_then(Path::parent) {
+        std::fs::create_dir_all(root)
+            .map_err(|err| lash_core_execution::StoreError::Backend(err.to_string()))?;
+    }
+    let conn = SqliteConnection::open_with_policy(catalog.target(), policy)
         .await
         .map_err(|err| lash_core_execution::StoreError::Backend(err.to_string()))?;
     ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
@@ -62,11 +64,11 @@ fn retained_fork_config_conn(
 }
 
 pub(super) async fn pin_in_catalog(
-    root: &Path,
+    catalog: &DatabaseLocation,
     node_id: &str,
     policy: SqliteConnectionPolicy,
 ) -> Result<lash_core_execution::ForkPoint, lash_core_execution::StoreError> {
-    let conn = open_factory_catalog(root, policy).await?;
+    let conn = open_factory_catalog(catalog, policy).await?;
     let node_id = node_id.to_string();
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core_execution::ForkPoint, lash_core_execution::StoreError> =
@@ -145,11 +147,11 @@ pub(super) async fn pin_in_catalog(
 }
 
 pub(super) async fn unpin_in_catalog(
-    root: &Path,
+    catalog: &DatabaseLocation,
     node_id: &str,
     policy: SqliteConnectionPolicy,
 ) -> Result<(), lash_core_execution::StoreError> {
-    let conn = open_factory_catalog(root, policy).await?;
+    let conn = open_factory_catalog(catalog, policy).await?;
     let node_id = node_id.to_string();
     conn.write_flow(move |tx| {
         let outcome: Result<(), lash_core_execution::StoreError> = (|| {
@@ -171,10 +173,10 @@ pub(super) async fn unpin_in_catalog(
 }
 
 pub(super) async fn fork_points_in_catalog(
-    root: &Path,
+    catalog: &DatabaseLocation,
     policy: SqliteConnectionPolicy,
 ) -> Result<Vec<lash_core_execution::ForkPoint>, lash_core_execution::StoreError> {
-    let conn = open_factory_catalog(root, policy).await?;
+    let conn = open_factory_catalog(catalog, policy).await?;
     conn.call(|conn| {
         let tx = conn.transaction()?;
         let outcome: Result<Vec<lash_core_execution::ForkPoint>, lash_core_execution::StoreError> =
@@ -219,12 +221,12 @@ pub(super) async fn fork_points_in_catalog(
 }
 
 pub(super) async fn fork_at_in_catalog(
-    root: &Path,
+    catalog: &DatabaseLocation,
     request: &lash_core_execution::ForkSessionRequest,
     created_at_ms: u64,
     policy: SqliteConnectionPolicy,
 ) -> Result<lash_core_execution::ForkSessionReceipt, lash_core_execution::StoreError> {
-    let conn = open_factory_catalog(root, policy).await?;
+    let conn = open_factory_catalog(catalog, policy).await?;
     let request = request.clone();
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core_execution::ForkSessionReceipt, lash_core_execution::StoreError> = (|| {
@@ -469,9 +471,14 @@ mod tests {
             wal_autocheckpoint_pages: 17,
             cache_size: -4096,
         };
-        let conn = open_factory_catalog(dir.path(), policy)
-            .await
-            .expect("open factory catalog with connection policy");
+        let conn = open_factory_catalog(
+            &crate::location::DatabaseLocation::standalone_file(
+                &dir.path().join(crate::DURABLE_CORE_DB_FILE),
+            ),
+            policy,
+        )
+        .await
+        .expect("open factory catalog with connection policy");
 
         let pragmas = conn
             .call(|connection| {

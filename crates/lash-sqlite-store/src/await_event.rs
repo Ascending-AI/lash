@@ -280,10 +280,22 @@ impl AwaitEventBackend for SqliteAwaitEventBackend {
         let fences = self.fence_locations().await?;
         self.conn
             .call(move |connection| {
+                // One journal snapshot for the journal's own fence and the
+                // row; the attached registry's fence is read after it, in a
+                // statement of its own. A read never holds the journal while
+                // it waits for the registry: a writer takes them the other
+                // way round (journal, then registry, then commits the
+                // journal), and a `memdb` reader waits on any writer, so the
+                // two would wait out the busy timeout on each other. A fence
+                // that lands between the two reads is still seen, and a
+                // fence always wins over the row.
                 let tx = connection.transaction()?;
-                let revoked = identity_is_fenced(&tx, fences, &identity)?;
+                let revoked_in_journal = identity_is_fenced(&tx, fences.journal_only(), &identity)?;
                 let stored = select_wait_row(&tx, &key_id)?;
                 tx.commit()?;
+                let revoked = revoked_in_journal
+                    || (identity.session_id.is_none()
+                        && fences.is_fenced_in_registry(connection, &identity.scope_id)?);
                 if revoked {
                     return Ok(PersistedPromise::UnknownOrRevoked);
                 }

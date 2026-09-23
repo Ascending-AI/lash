@@ -17,15 +17,9 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
         VOCABULARY
     }
 
-    fn capabilities(&self) -> EffectReplayCapabilities {
-        EffectReplayCapabilities {
-            completion_keys: self.completion_keys,
-        }
-    }
-
-    /// The process-wide notifier for this file and group: SQLite has no
-    /// `NOTIFY`, so two hosts over the same database file share one
-    /// [`Notify`] through the registry the canonical path keys.
+    /// The process-wide notifier for this deployment and group: SQLite has
+    /// no `NOTIFY`, so two hosts over one deployment share one [`Notify`]
+    /// through the registry its identity keys.
     async fn settlement_notifier(
         &self,
         group_key: &str,

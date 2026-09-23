@@ -2,13 +2,12 @@ use super::*;
 
 lash_conformance::session_delete_blob_reclaim_tests!({
     ((), "sqlite", || {
-        let dir = Arc::new(tempfile::tempdir().expect("tempdir"));
-        let path = dir.path().join("durable-core.db");
-        let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()));
+        let deployment = TestDeployment::blocking(SUBSTRATE);
+        let factory = deployment.session_store_factory();
         let probe = Arc::new(crate::blob_probe::SqliteBlobProbe::new(
-            path,
+            deployment.database_uri(SqliteDatabase::DurableCore),
             "fail_session_blob_delete",
-            Some(dir),
+            Some(Arc::new(deployment)),
         ));
         lash_conformance::SessionDeleteBlobHandles {
             factory: factory as Arc<dyn SessionStoreFactory>,
