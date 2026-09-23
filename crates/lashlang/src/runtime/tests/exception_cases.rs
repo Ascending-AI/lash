@@ -134,6 +134,7 @@ impl ExecutionHost for StructuredToolFailureHost {
                     },
                     raw: None,
                 },
+                "test-effect-key",
             ));
         }
         Host.perform(op).await

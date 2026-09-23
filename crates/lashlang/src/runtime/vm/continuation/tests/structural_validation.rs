@@ -199,14 +199,17 @@ fn awaited_settled_value_survives_a_finally_origin_wire_roundtrip() {
 
 #[test]
 fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
-    let source = ExecutionHostError::from_tool_failure(&lash_sansio::ToolFailure {
-        class: lash_sansio::ToolFailureClass::PermissionDenied,
-        code: "approval_denied".to_string(),
-        message: "approval was denied".to_string(),
-        source: lash_sansio::ToolFailureSource::Policy,
-        retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
-        raw: None,
-    });
+    let source = ExecutionHostError::from_tool_failure(
+        &lash_sansio::ToolFailure {
+            class: lash_sansio::ToolFailureClass::PermissionDenied,
+            code: "approval_denied".to_string(),
+            message: "approval was denied".to_string(),
+            source: lash_sansio::ToolFailureSource::Policy,
+            retry: lash_sansio::ToolRetryStatus::Exhausted { attempts: 3 },
+            raw: None,
+        },
+        "test-effect-key",
+    );
     let origin = VmPendingErrorOriginContinuation {
         error: RuntimeError::UnwrappedHostToolResultFailed { source },
         instruction_pointer: 0,
@@ -226,7 +229,7 @@ fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
     validate_continuation(&continuation).unwrap();
 
     let wire = serde_json::to_value(&continuation).unwrap();
-    assert_eq!(wire["format_version"], serde_json::json!(16));
+    assert_eq!(wire["format_version"], serde_json::json!(17));
     assert_eq!(
         wire["finally_stack"][0]["completion"]["origin"]["error"],
         serde_json::json!({
@@ -237,7 +240,8 @@ fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
                         "class": "permission_denied",
                         "code": "approval_denied",
                         "source": "policy",
-                        "retry": { "type": "exhausted", "attempts": 3 }
+                        "retry": { "type": "exhausted", "attempts": 3 },
+                        "replay_key": "test-effect-key"
                     }
                 }
             }

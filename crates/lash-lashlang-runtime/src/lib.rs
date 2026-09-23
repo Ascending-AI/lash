@@ -10,7 +10,7 @@ pub use error::{
 mod host_identity;
 pub use host_identity::LashlangHostIdentities;
 mod language_trace_host;
-pub use language_trace_host::LanguageTraceHost;
+pub use language_trace_host::{LanguageTraceHost, trace_failure};
 mod process_identity;
 pub use process_identity::deterministic_lashlang_process_id;
 mod trigger_commands;
@@ -22,12 +22,12 @@ pub use typescript_runtime::{
 };
 
 pub use lash_trace::{
-    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionGeneration,
-    TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
-    TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
-    TraceLashlangEdgeSelection, TraceLashlangGraph, TraceLashlangGraphChildLink,
-    TraceLashlangGraphEdge, TraceLashlangGraphNode, TraceLashlangGraphStore,
-    TraceLashlangNodeObservation,
+    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,
+    TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
+    TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
+    TraceLanguageExecutionStatus, TraceLashlangEdgeSelection, TraceLashlangGraph,
+    TraceLashlangGraphChildLink, TraceLashlangGraphEdge, TraceLashlangGraphNode,
+    TraceLashlangGraphStore, TraceLashlangNodeObservation,
 };
 pub use lashlang::{
     CompiledProcessCache, InMemoryLashlangArtifactStore, LASH_TYPE_KEY, LashlangAbilities,

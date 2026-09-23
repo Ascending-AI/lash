@@ -1,5 +1,25 @@
 use lash_trace::{TraceBranchSelection, TraceLanguageExecutionPayload, TraceRuntimeScope};
 
+pub fn trace_failure(
+    failure: lashlang::LashlangExecutionFailure,
+) -> lash_trace::TraceLanguageExecutionFailure {
+    match failure {
+        lashlang::LashlangExecutionFailure::Effect(effect) => {
+            lash_trace::TraceLanguageExecutionFailure::Effect {
+                class: effect.class,
+                code: effect.code,
+                message: effect.message,
+                replay_key: effect.replay_key,
+                source: effect.source,
+                retry: effect.retry,
+            }
+        }
+        lashlang::LashlangExecutionFailure::Runtime { code, message } => {
+            lash_trace::TraceLanguageExecutionFailure::Runtime { code, message }
+        }
+    }
+}
+
 /// Adapts the VM's internal execution observations to the public language
 /// trace payload consumed by hosts. The wrapped host never receives an
 /// internal execution-site descriptor.
@@ -101,14 +121,14 @@ where
             lashlang::LashlangExecutionObservation::NodeFailed {
                 site,
                 occurrence,
-                error,
+                failure,
             } => TraceLanguageExecutionPayload::NodeFailed {
                 node_id: site.node_id,
                 node_kind: site.node_kind,
                 label: site.label,
                 occurrence,
                 call_id: None,
-                error,
+                failure: trace_failure(failure),
             },
             lashlang::LashlangExecutionObservation::BranchSelected {
                 site,

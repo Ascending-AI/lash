@@ -13,6 +13,7 @@ pub(super) struct ExecutionHostToolFailure {
     pub(super) code: String,
     pub(super) source: lash_sansio::ToolFailureSource,
     pub(super) retry: lash_sansio::ToolRetryStatus,
+    pub(super) replay_key: String,
 }
 
 /// A failure while interpolating arguments into a format template.
@@ -489,6 +490,9 @@ pub enum RuntimeError {
 }
 
 impl RuntimeError {
+    /// Stable observation code for the explicit guest `fail` terminal.
+    pub const PROCESS_FAILED_CODE: &'static str = "ProcessFailed";
+
     /// Terminals which are structurally forbidden from consulting guest
     /// handlers. This is intentionally the only taxonomy classification used
     /// by the VM's error exit.

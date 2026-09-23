@@ -807,6 +807,15 @@ pub(super) fn recovery_worker_with_plugins(
     store_factory: Arc<dyn lash_core::SessionStoreFactory>,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
+    recovery_worker_with_plugins_and_trace(registry, store_factory, extra_plugins, None)
+}
+
+pub(super) fn recovery_worker_with_plugins_and_trace(
+    registry: Arc<dyn ProcessRegistry>,
+    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
+    extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+    trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
+) -> DurableProcessWorker {
     let watched = lash_core::facade_support::watch_process_registry(registry);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(RecoveryProcessTool);
     let mut plugins = vec![
@@ -830,7 +839,8 @@ pub(super) fn recovery_worker_with_plugins(
         lash_lashlang_runtime::lashlang_process_engine_registration(
             lash_lashlang_runtime::LashlangProcessEngine::in_memory(
                 lash_lashlang_runtime::LashlangSurface::default(),
-            ),
+            )
+            .with_execution_trace(trace_sink, lash_trace::TraceContext::default()),
         ),
     );
     DurableProcessWorker::new(
@@ -945,15 +955,26 @@ pub(super) async fn segmented_child_await_registration(
 
 #[tokio::test]
 pub(super) async fn lashlang_process_retains_child_possession_across_restate_segments() {
+    run_segmented_lashlang_process(false).await;
+}
+
+#[tokio::test]
+pub(super) async fn lashlang_non_initial_restate_redrive_opens_new_trace_attempt() {
+    run_segmented_lashlang_process(true).await;
+}
+
+async fn run_segmented_lashlang_process(redrive_non_initial: bool) {
     let (registry, continuations) = process_stores();
+    let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
     // The cell starts its child through `processes.start`, which is a plugin
     // tool now, so the worker that runs the parent has to serve it.
-    let worker = recovery_worker_with_plugins(
+    let worker = recovery_worker_with_plugins_and_trace(
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
         vec![Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
         )],
+        Some(graphs.clone()),
     );
     let workflow = Arc::new(
         LashProcessWorkflowImpl::new_for_test(
@@ -964,7 +985,11 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
         .with_segment_effect_budget_selector(|_| 1),
     );
     let registration = segmented_child_await_registration(
-        &ProcessId::from("segmented-child-await-parent"),
+        &ProcessId::from(if redrive_non_initial {
+            "segmented-child-await-redrive"
+        } else {
+            "segmented-child-await-parent"
+        }),
         persist_recovery_env_ref().await,
     )
     .await;
@@ -1006,7 +1031,7 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
             .run_registration(
                 registration.clone(),
                 ProcessExecutionContext::default()
-                    .with_execution_write_authority(execution_authority),
+                    .with_execution_write_authority(execution_authority.clone()),
                 controller
                     .scoped_effect_controller(durable_admission(&ExecutionScope::process(
                         &registration.id,
@@ -1022,6 +1047,49 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
             lash_core::ProcessRunOutcome::SegmentBoundary(boundary) => {
                 boundary_count += 1;
                 let next = ordinal + 1;
+                if !redrive_non_initial && next == 1 {
+                    let before = graphs
+                        .graphs()
+                        .into_iter()
+                        .find(|graph| {
+                            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
+                                if process_id == registration.id)
+                        })
+                        .expect("parent attempt graph before replay");
+                    context.start_replay();
+                    let replay = workflow
+                        .run_registration(
+                            registration.clone(),
+                            ProcessExecutionContext::default()
+                                .with_execution_write_authority(execution_authority),
+                            controller
+                                .scoped_effect_controller(durable_admission(
+                                    &ExecutionScope::process(&registration.id),
+                                ))
+                                .expect("replayed segment scope"),
+                            ordinal,
+                            None,
+                            pending_process_cancel_signal(),
+                        )
+                        .await
+                        .expect("replay the same Restate invocation");
+                    assert!(matches!(
+                        replay,
+                        lash_core::ProcessRunOutcome::SegmentBoundary(_)
+                    ));
+                    let after = graphs
+                        .graphs()
+                        .into_iter()
+                        .find(|graph| {
+                            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
+                                if process_id == registration.id)
+                        })
+                        .expect("parent attempt graph after replay");
+                    assert_eq!(
+                        after.history, before.history,
+                        "replay must not duplicate parent node events"
+                    );
+                }
                 continuations
                     .put_segment_handover(
                         &registration.id,
@@ -1040,6 +1108,9 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                         .expect("stored segmented child-await handover")
                         .handover,
                 );
+                if redrive_non_initial && next == 1 {
+                    execution_id = None;
+                }
                 ordinal = next;
             }
             lash_core::ProcessRunOutcome::Terminal { output, .. } => {
@@ -1055,6 +1126,28 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
     assert_eq!(
         boundary_count, 2,
         "start and await each cross an effect-count segment boundary"
+    );
+    let parent_graphs = graphs
+        .graphs()
+        .into_iter()
+        .filter(|graph| {
+            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
+            if process_id == registration.id)
+        })
+        .collect::<Vec<_>>();
+    let mut attempts = parent_graphs
+        .iter()
+        .map(|graph| graph.history[0].event.identity.attempt().expect("attempt"))
+        .collect::<Vec<_>>();
+    attempts.sort_unstable();
+    assert_eq!(
+        attempts,
+        if redrive_non_initial {
+            vec![1, 2]
+        } else {
+            vec![1]
+        },
+        "a fresh non-initial invocation opens a new attempt; continued segments do not"
     );
 }
 

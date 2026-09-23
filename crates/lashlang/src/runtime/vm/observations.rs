@@ -1,4 +1,5 @@
 use super::*;
+use crate::LashlangExecutionFailure;
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
     pub(super) fn record_instruction_profile(
@@ -117,13 +118,29 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     pub(super) fn fail_lashlang_execution(
         &self,
         active: &ActiveLashlangExecutionNode,
-        error: impl Into<String>,
+        error: &RuntimeError,
+    ) {
+        let failure = error
+            .execution_host_error()
+            .and_then(|source| source.tool_failure())
+            .map(LashlangExecutionFailure::Effect)
+            .unwrap_or_else(|| LashlangExecutionFailure::Runtime {
+                code: error.code().to_owned(),
+                message: error.to_string(),
+            });
+        self.emit_lashlang_execution_failure(active, failure);
+    }
+
+    pub(super) fn emit_lashlang_execution_failure(
+        &self,
+        active: &ActiveLashlangExecutionNode,
+        failure: LashlangExecutionFailure,
     ) {
         self.host
             .observe_lashlang_execution(LashlangExecutionObservation::NodeFailed {
                 site: active.site.clone(),
                 occurrence: active.occurrence,
-                error: error.into(),
+                failure,
             });
     }
 

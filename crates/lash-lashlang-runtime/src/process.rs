@@ -788,15 +788,6 @@ async fn wait_since_ms(
 type ProcessHostAbilityFuture<'a> =
     Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;
 
-enum PreparedResourceInvocation {
-    Trigger {
-        operation: lashlang::TriggerHostOperation,
-        payload: serde_json::Value,
-        effect_id: String,
-    },
-    Tool(lash_core::facade_support::ToolInvocation),
-}
-
 impl LashlangProcessHost<'_> {
     fn resource_payload(
         &self,
@@ -835,61 +826,6 @@ impl LashlangProcessHost<'_> {
         self.lashlang_execution_trace
             .record_resource_call(call_site, &call_id);
         call_id
-    }
-
-    fn prepare_resource_invocation(
-        &self,
-        operation: String,
-        receiver: lashlang::Value,
-        args: Vec<lashlang::Value>,
-        call_site: Option<lashlang::LashlangExecutionCallSite>,
-        batch_index: Option<usize>,
-    ) -> Result<PreparedResourceInvocation, ExecutionHostError> {
-        let receiver = match &receiver {
-            lashlang::Value::Resource(receiver) => receiver,
-            _ => {
-                return Err(LashlangHostError::ModuleAuthorityRequired { operation }.into());
-            }
-        };
-        let host_operation =
-            resolve_lashlang_module_operation(&self.host_environment, receiver, &operation)?;
-        let payload = self.resource_payload(&args)?;
-        let call_site = call_site.ok_or_else(|| {
-            ExecutionHostError::from(LashlangHostError::OperationCallSiteMissing {
-                operation: operation.clone(),
-                host_operation: host_operation.clone(),
-            })
-        })?;
-        let call_id = self.resource_tool_call_id(&host_operation, &call_site, batch_index);
-        if let Some(operation) =
-            lashlang::TriggerHostOperation::from_host_operation(&host_operation)
-        {
-            return Ok(PreparedResourceInvocation::Trigger {
-                operation,
-                payload,
-                effect_id: call_id,
-            });
-        }
-        let tool_id = lash_core::ToolId::from(host_operation.as_str());
-        let manifest = self
-            .ctx
-            .callable_tool_manifest_by_id(&tool_id)
-            .ok_or_else(|| {
-                ExecutionHostError::from(LashlangHostError::ResolvedOperationUnavailable {
-                    operation,
-                    host_operation,
-                })
-            })?;
-        let mut invocation =
-            lash_core::facade_support::ToolInvocation::new(call_id, manifest.id.clone(), payload)
-                .with_issuing_language_node_id(call_site.site.node_id.clone());
-        if let Some(hook) = self
-            .lashlang_execution_trace
-            .tool_child_execution_trace_hook(call_site)
-        {
-            invocation = invocation.with_child_execution_trace_hook(hook);
-        }
-        Ok(PreparedResourceInvocation::Tool(invocation))
     }
 
     #[expect(
@@ -944,6 +880,7 @@ impl LashlangProcessHost<'_> {
         let tool_ctx = issuing_language_node_id
             .map(|node_id| self.ctx.clone().with_issuing_language_node_id(node_id))
             .unwrap_or_else(|| self.ctx.clone());
+        let replay_key = id.clone();
         let reply = if let Some(call_site) = child_execution_trace_hook {
             tool_ctx
                 .call_tool_by_id_with_child_execution_trace_hook(id, tool_id, args, 0, call_site)
@@ -951,7 +888,7 @@ impl LashlangProcessHost<'_> {
         } else {
             Box::pin(tool_ctx.call_tool_by_id(id, tool_id, args, 0)).await
         };
-        protocol_tool_reply_to_lashlang_value(reply, &self.cancellation)
+        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
     }
 
     #[expect(
@@ -1024,6 +961,10 @@ impl LashlangProcessHost<'_> {
             }
         }
 
+        let replay_keys = invocations
+            .iter()
+            .map(|invocation| invocation.id.clone())
+            .collect::<Vec<_>>();
         let batch = self
             .ctx
             .call_tool_batch(
@@ -1031,9 +972,14 @@ impl LashlangProcessHost<'_> {
                 lash_core::session::ToolBatchOccurrence::Opener(occurrence),
             )
             .await;
-        for (index, reply) in positions.iter().copied().zip(batch.replies) {
+        for ((index, replay_key), reply) in positions
+            .iter()
+            .copied()
+            .zip(replay_keys)
+            .zip(batch.replies)
+        {
             results[index] = Some(lashlang::ResourceOperationResult::from_result(
-                protocol_tool_reply_to_lashlang_value(reply, &self.cancellation),
+                protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation),
             ));
         }
 
@@ -1066,16 +1012,14 @@ impl LashlangProcessHost<'_> {
         &self,
         handle: lashlang::Value,
     ) -> Result<lashlang::Value, ExecutionHostError> {
+        let replay_key = uuid::Uuid::new_v4().to_string();
         let reply = {
             let _phase = self.ctx.named_phase("rlm_process.await_handle");
             self.ctx
-                .await_tool_handle(
-                    uuid::Uuid::new_v4().to_string(),
-                    lashlang_value_to_json(&handle)?,
-                )
+                .await_tool_handle(replay_key.clone(), lashlang_value_to_json(&handle)?)
                 .await
         };
-        protocol_tool_reply_to_lashlang_value(reply, &self.cancellation)
+        protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation)
     }
 
     async fn process_event(&self, event: lashlang::ProcessEvent) -> Result<(), ExecutionHostError> {
@@ -1403,7 +1347,7 @@ impl LashlangProcessExecutionTrace {
             lashlang::LashlangExecutionObservation::NodeFailed {
                 site,
                 occurrence,
-                error,
+                failure,
             } => {
                 let call_id = self.finish_resource_call(&site, occurrence);
                 (
@@ -1414,7 +1358,7 @@ impl LashlangProcessExecutionTrace {
                         label: site.label,
                         occurrence,
                         call_id,
-                        error,
+                        failure: crate::language_trace_host::trace_failure(failure),
                     },
                 )
             }
@@ -1655,6 +1599,10 @@ pub use trace_map::{
     TraceLanguageExecutionMapError, trace_lashlang_main_map, trace_lashlang_process_map,
     trace_lashlang_process_map_snapshot, trace_lashlang_source_identity,
 };
+
+#[path = "process/resource_invocation.rs"]
+mod resource_invocation;
+use resource_invocation::PreparedResourceInvocation;
 
 #[cfg(test)]
 #[path = "process/segment_trace_tests.rs"]

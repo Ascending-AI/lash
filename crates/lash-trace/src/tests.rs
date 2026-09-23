@@ -341,7 +341,10 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                 label: "node".to_string(),
                 occurrence: 1,
                 call_id: None,
-                error: "failed".to_string(),
+                failure: TraceLanguageExecutionFailure::Runtime {
+                    code: "test_failure".to_string(),
+                    message: "failed".to_string(),
+                },
             }),
         ),
         (

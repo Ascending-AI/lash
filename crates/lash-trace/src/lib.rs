@@ -34,13 +34,14 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 mod jsonl_records;
+mod language_execution_failure;
 mod lashlang_graph;
 #[cfg(feature = "otel")]
 pub mod otel;
 
 use jsonl_records::truncate_torn_tail;
 pub use jsonl_records::{JsonlTraceReadError, parse_jsonl_records};
-
+pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_sansio::llm::types::GenerationReceipt;
 pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
@@ -133,7 +134,8 @@ pub use lashlang_graph::{
 /// Version 29 (FIG-1961) renames the compaction decision fields from
 /// `context_budget_tokens` to `used_tokens`: the value is now the checked
 /// provider-reported usage, not a derived budget snapshot.
-pub const TRACE_SCHEMA_VERSION: u32 = 29;
+/// Version 30 (FIG-3463) adds typed failure provenance to language observations.
+pub const TRACE_SCHEMA_VERSION: u32 = 30;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1629,7 +1631,7 @@ pub enum TraceLanguageExecutionPayload {
         occurrence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_id: Option<String>,
-        error: String,
+        failure: TraceLanguageExecutionFailure,
     },
     BranchSelected {
         node_id: String,
