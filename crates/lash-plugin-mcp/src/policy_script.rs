@@ -2,7 +2,7 @@
 use super::*;
 use crate::service_lifecycle::{LifecycleEvent, LifecycleObserver};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
@@ -210,16 +210,21 @@ impl Lifecycle {
     }
 }
 
+/// The control channel is a Unix socket inside the test's own temporary
+/// directory. A loopback TCP port is reachable by any local process, so a
+/// port prober (an editor's port forwarder, an HTTP health check) could win
+/// the accept and feed the test its bytes instead of the mock's events.
 pub(super) struct Mock {
-    listener: TcpListener,
-    stream: BufReader<TcpStream>,
+    listener: UnixListener,
+    stream: BufReader<UnixStream>,
 }
 impl Mock {
     pub(super) async fn connect(
         root: &Path,
         options: MockOptions,
     ) -> (Arc<McpConnectionPool>, Self) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let control = root.join("control.sock");
+        let listener = UnixListener::bind(&control).unwrap();
         let mut config = mock_config(root, options);
         let McpTransport::Stdio(transport) = &mut config.transport else {
             unreachable!()
@@ -227,8 +232,8 @@ impl Mock {
         transport.args = vec!["-u".into(), "-c".into(), SERVER.into()];
         let env = &mut transport.env;
         env.insert(
-            "CONTROL_PORT".into(),
-            listener.local_addr().unwrap().port().to_string(),
+            "CONTROL_SOCKET".into(),
+            control.to_str().unwrap().to_string(),
         );
         let pool = McpConnectionPool::connect(BTreeMap::from([("mock".into(), config)]))
             .await
@@ -286,7 +291,8 @@ import json, os, signal, socket, sys, threading
 # The mock ignores SIGTERM so scripted tests deterministically reach the
 # SIGKILL stage of forced shutdown; graceful stdin-EOF exit is unchanged.
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
-control = socket.create_connection(('127.0.0.1', int(os.environ['CONTROL_PORT'])))
+control = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+control.connect(os.environ['CONTROL_SOCKET'])
 output_lock = threading.Lock()
 event_lock = threading.Lock()
 current = None
