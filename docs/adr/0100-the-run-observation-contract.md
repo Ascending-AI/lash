@@ -117,17 +117,25 @@ emitter in `crates/lash-protocol-rlm/src/executor`, use the same shape.
 The mechanism is one executable program and one structural walk (FIG-3571).
 `ModuleArtifact::ir` is the linked program, names verbatim and spans stripped;
 it is the only executable carrier, and `lashlang::compile` compiles an entry
-(`Entry::Main` or `Entry::Process`) from it and nothing else. The trace map,
-the editor's runnable view and the VM's sites all come from that artifact:
-`lashlang::workflow_graph_from_artifact` projects it, and the compiler mints
-each site from the same owner and AST path. Front ends mark generated
-structure with the language-neutral `StructuralRole`s (`Scope`, `Completion`,
-`AttributeAssign`, `CollectionTransform`, `ProcessWrapper`), a `for` loop's
-per-element destructuring is its `bind`, and a lifted process carries
-`ProcessOrigin::Lifted`. The walk (`WorkflowProjection`) reads only those
-forms, so no reader recognises a front end's generated names, and every site
-the compiler can emit has its node in the map (law L1, including a
-second, test-only front end with no TypeScript dependency, law L12).
+(`Entry::Main` or `Entry::Process`) from it and nothing else. An artifact is
+admitted by construction: its fields are private, and it is obtained only from
+the linker, the validating builder or the verifying store decoder. The trace
+map, the editor's runnable view and the VM's sites all come from that
+artifact: `lashlang::workflow_graph_from_artifact` projects it, and the
+compiler mints each site from the same owner and AST path. Front ends mark
+generated structure with the language-neutral `StructuralRole`s (`Scope`,
+`Completion`, `AttributeAssign` for plain and compound member assignment,
+`CollectionTransform`, `ProcessWrapper`), a `for` loop's per-element
+destructuring is its `bind`, a lifted process carries its derived
+`ProcessOrigin::Lifted`, and a binding's visibility (session-visible or the
+front end's private slot) is part of the program. The walk
+(`WorkflowProjection`) reads only those forms, so no reader recognises a front
+end's generated names. Law L1 checks the complete compiled site inventory (the
+instruction table and the aggregate batch tables) against the map by id, kind
+and owner path on both production paths: an RLM cell through the executor, and
+a TypeScript process, with a literal nested in it, through the process engine
+after its module is read back through a SQLite store's decoder. Law L12 checks
+the same for a second, test-only front end with no TypeScript dependency.
 
 ### R2: process-scoped subscription with epochs
 
@@ -200,16 +208,19 @@ twice.
 
 ### R6: expose the admitted artifact's identity
 
-`WorkflowGraph::source_identity` is `ModuleArtifact::source_identity`: the
-`lash-workflow-source/v4` digest of the artifact's deterministic, span-free
-encoding of its linked IR. It is never a digest of printed text, and there is
-no serialized-program fallback. A draft projected from source for editing
-(`workflow_graph_from_source`) claims no runtime identity: its
-`source_identity` is absent until the source is admitted. A runnable view is
-projected from the admitted artifact (`workflow_graph_from_artifact`), whose
-node ids, lifted owners and identity equal the draft's (law L4). The trace
-identity reads the same method at the `lash-lashlang-runtime` and RLM
-integration boundaries; there is no separate trace projection of it.
+`WorkflowGraph::source_identity` is `ModuleArtifact::source_identity`: a
+digest, under `lash-workflow-source/v4`, of the same deterministic atom stream
+the module ref hashes for the program (its language and its span-free linked
+IR, names verbatim, number literals by the one IR number rule: distinct `-0`,
+one canonical NaN, lossless non-finite values). It is never a digest of
+printed text or of a serializer's spelling, and there is no fallback. A draft
+projected from source for editing (`workflow_graph_from_source`) claims no
+runtime identity: its `source_identity` is always absent. A runnable view, and
+a faceted view of source that admits, is projected from the admitted artifact
+(`workflow_graph_from_artifact`) and carries the artifact's identity; its node
+ids, node kinds, execution sites and lifted owners equal the draft's (law L4).
+The trace identity reads the same method at the `lash-lashlang-runtime` and
+RLM integration boundaries; there is no separate trace projection of it.
 
 Reconciliation only checks a submitted graph against its own canonical
 reprojection. It reports pairs, unmatched nodes, and ambiguous nodes for real

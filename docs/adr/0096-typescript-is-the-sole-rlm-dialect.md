@@ -16,8 +16,12 @@ binder names along with its structure and hidden process arguments. Two
 alpha-variant cells are therefore two distinct modules with two refs, each
 stored immutably (law L9); the earlier normalizer that made them share a ref is
 deleted. The program's `language` (the front end that lowered it) is part of
-the identity, so two front ends never share a module ref. The measured cost on
-a multi-session corpus was about 1.3% more artifacts and stored bytes.
+the identity, so two front ends never share a module ref, and so is each
+binding's visibility role (a front end's private slots never reach session
+globals). Number literals follow one rule in identity and storage: `0` and
+`-0` are distinct, every NaN is one, and non-finite values store losslessly.
+The measured cost on a multi-session corpus was about 1.3% more artifacts and
+stored bytes.
 
 ## Context
 
