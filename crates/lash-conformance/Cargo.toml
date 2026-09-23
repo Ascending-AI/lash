@@ -14,9 +14,8 @@ doctest = false
 workspace = true
 
 [features]
-# Lashlang artifact-store laws. The `lash` facade re-exports the store laws
-# without this feature so `lash-runtime`'s dependency boundary keeps
-# `lash-internal-lashlang` out of the `testing` resolution.
+# Lashlang artifact-store laws, enabled only by the store crates that certify
+# a Lashlang artifact store.
 lashlang = ["dep:lashlang"]
 
 [dependencies]

@@ -215,22 +215,14 @@ mod testing_inventory {
     use lash::testing::mock_tool_context_with_execution_binding as _;
     use lash::testing::store_fixtures::authorize_completion_deferral_for_test as _;
     use lash::testing::tool_registry_with_live_provider as _;
-    // The durable-backend certification laws ride the facade: a host certifies
-    // its store through `lash::testing::conformance` alone.
-    use lash::testing::conformance::ReopenableAttachmentStore as _;
-    use lash::testing::conformance::ReopenableProcessExecutionEnvStore as _;
-    use lash::testing::conformance::ReopenableProcessRegistry as _;
-    use lash::testing::conformance::ReopenableRuntimePersistence as _;
-    use lash::testing::conformance::ReopenableTriggerStore as _;
 }
 
 #[cfg(all(feature = "rlm", feature = "testing"))]
 mod rlm_testing_inventory {
-    // `lash_core::testing::conformance`: the runtime rebuild certification the
-    // host runs, reached through the facade's own `testing` module.
-    use lash::testing::conformance::{
-        RuntimeRebuildBackend as _, runtime_rebuild_and_worker_recovery as _,
-    };
+    // The runtime rebuild certification the host runs, reached through the
+    // facade's own `testing` module. The durable-store laws are not facade
+    // surface: a host depends on `lash-internal-conformance` directly.
+    use lash::testing::{RuntimeRebuildBackend as _, runtime_rebuild_and_worker_recovery as _};
 
     use lash::rlm::lang::testing::conformance::ReopenableLashlangArtifactStore as _;
     use lash::testing::deferred_resolution_link_key as _;

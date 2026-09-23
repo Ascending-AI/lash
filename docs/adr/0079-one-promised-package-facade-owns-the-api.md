@@ -90,7 +90,11 @@ Those contracts acquire complete homes by deepening existing facade modules:
 * Engine extension points live under `lash::plugins`, including the three
   currently absent protocol-plugin traits: `ProtocolSessionPlugin`,
   `CodeExecutorPlugin`, and `ProtocolDriverPlugin`.
-* Conformance suites live under `lash::testing::conformance`.
+* Conformance suites live under `lash::testing::conformance`. *(Superseded on
+  this point on 2026-09-23: the durable-store laws left the facade so the
+  80k-line law crate is off `lash-runtime`'s dependency edge. A host depends on
+  `lash-internal-conformance` directly; only the RLM runtime rebuild suite
+  stays in the facade, at `lash::testing::runtime_rebuild_and_worker_recovery`.)*
 
 There is no new `lash::integrate` namespace. An internal path found to be
 required by one of the four classes is a facade gap to close in the appropriate
@@ -101,6 +105,9 @@ existing domain module, not a second supported package.
 The store, registry, effect-host, trigger, attachment, and recovery conformance
 suites are available when the facade's `testing` feature is enabled. They do
 not also require `rlm`. Only RLM-specific suites remain gated by `rlm`.
+*(Superseded on this point on 2026-09-23: the store suites are no longer
+reached through the facade; see section 2. The RLM rebuild suite remains
+gated by `rlm`.)*
 
 This separates the executable contracts for the four integrator classes from a
 specific process mode. The current placement of the entire conformance module

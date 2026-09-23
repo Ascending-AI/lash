@@ -12,7 +12,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use crate::testing::conformance::{RuntimeRebuildBackend, runtime_rebuild_and_worker_recovery};
+use crate::testing::{RuntimeRebuildBackend, runtime_rebuild_and_worker_recovery};
 
 fn sync_await<T, F>(future: F) -> T
 where
