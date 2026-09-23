@@ -478,121 +478,43 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     assert_fig1293_literal_outputs(&postgres_turn).await;
     assert_eq!(postgres_model_calls.load(Ordering::SeqCst), 3);
 
-    let envelope_json: Vec<String> = sqlx::query_scalar(
-        "SELECT envelope_json FROM lash_runtime_effect_replay
+    // A batch is a durable effect group now (FIG-3397): each call is a group
+    // child with its own journal rows, and no parent-level ToolBatch frame,
+    // launch list or nested-batch causal edge exists to pin. What the journal
+    // still states is the attempt set and that the redrive refused none of the
+    // migrated public intents.
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT envelope_json, outcome_json FROM lash_runtime_effect_replay
          WHERE session_id = $1 ORDER BY replay_key",
     )
     .bind("fig1293-restate-migrated-tools")
     .fetch_all(storage.pool())
     .await
     .expect("read FIG-1293 PostgreSQL journal rows");
-    let envelopes = envelope_json
+    for (_, outcome_json) in &rows {
+        if let Some(outcome_json) = outcome_json {
+            assert!(
+                !outcome_json.contains(r#""status":"refused""#),
+                "every migrated PostgreSQL public intent must execute: {outcome_json}",
+            );
+        }
+    }
+    let mut attempt_names = rows
         .into_iter()
-        .map(|json| {
+        .filter_map(|(json, _)| {
             let canonical: serde_json::Value =
                 serde_json::from_str(&json).expect("decode FIG-1293 PostgreSQL canonical envelope");
-            serde_json::from_str::<RuntimeEffectEnvelope>(
+            let envelope = serde_json::from_str::<RuntimeEffectEnvelope>(
                 canonical
                     .get("json")
                     .and_then(serde_json::Value::as_str)
                     .expect("FIG-1293 canonical envelope json"),
             )
-            .expect("decode FIG-1293 PostgreSQL envelope")
-        })
-        .collect::<Vec<_>>();
-    let outer_batch = envelopes
-        .iter()
-        .find(|envelope| {
-            envelope.invocation.caused_by.is_none()
-                && matches!(
-                    &envelope.command,
-                    RuntimeEffectCommand::ToolBatch { batch }
-                        if batch.calls.iter().any(|child| child.call.tool_name == "spawn_agent")
-                )
-        })
-        .expect("outer FIG-1293 tool-batch frame");
-    let outer_causal_ref = outer_batch.invocation.causal_ref();
-    let outer_outcome_json: String = sqlx::query_scalar(
-        "SELECT outcome_json FROM lash_runtime_effect_replay
-         WHERE session_id = $1 AND replay_key = $2",
-    )
-    .bind("fig1293-restate-migrated-tools")
-    .bind(outer_batch.invocation.replay_key())
-    .fetch_one(storage.pool())
-    .await
-    .expect("read outer FIG-1293 PostgreSQL outcome");
-    let outer_outcome: RuntimeEffectOutcome =
-        serde_json::from_str(&outer_outcome_json).expect("decode outer FIG-1293 outcome");
-    let RuntimeEffectOutcome::ToolBatch { launches, .. } = outer_outcome else {
-        panic!("outer FIG-1293 PostgreSQL outcome must be a tool batch")
-    };
-    assert_eq!(launches.len(), 3);
-    assert!(
-        !outer_outcome_json.contains(r#""status":"refused""#),
-        "every migrated PostgreSQL public intent must execute: {outer_outcome_json}",
-    );
-    let executed_intent_kinds = [
-        (
-            "start_process",
-            outer_outcome_json
-                .matches(r#""kind":"start_process""#)
-                .count(),
-        ),
-        (
-            "signal_process",
-            outer_outcome_json
-                .matches(r#""kind":"signal_process""#)
-                .count(),
-        ),
-        (
-            "cancel_process",
-            outer_outcome_json
-                .matches(r#""kind":"cancel_process""#)
-                .count(),
-        ),
-    ];
-    assert_eq!(
-        executed_intent_kinds,
-        [
-            ("start_process", 0),
-            ("signal_process", 0),
-            ("cancel_process", 1),
-        ],
-    );
-    let direct_orchestration_children = envelopes
-        .iter()
-        .filter(|envelope| {
-            let is_spawn_command = match &envelope.command {
-                RuntimeEffectCommand::Process { command } => match command.as_ref() {
-                    lash_core::ProcessCommand::Start { registration, .. } => {
-                        registration.id == "process:subagent:fig1293-spawn-agent"
-                    }
-                    lash_core::ProcessCommand::Await { process_ref } => {
-                        process_ref.process_id == "process:subagent:fig1293-spawn-agent"
-                    }
-                    _ => false,
-                },
-                _ => false,
-            };
-            let is_nested_batch = matches!(
-                &envelope.command,
-                RuntimeEffectCommand::ToolBatch { batch }
-                    if batch.calls.iter().any(|child| child.call.tool_name == "fig1293_echo")
-            );
-            (is_spawn_command || is_nested_batch)
-                && envelope.invocation.caused_by.as_ref() == Some(&outer_causal_ref)
-        })
-        .count();
-    assert_eq!(
-        direct_orchestration_children, 3,
-        "spawn start/await and protocol batch must be direct children of the process-replayed outer invocation",
-    );
-
-    let mut attempt_names = envelopes
-        .into_iter()
-        .filter_map(|envelope| match envelope.command {
-            RuntimeEffectCommand::ToolAttempt { call, .. } => Some(call.tool_name),
-            _ => None,
+            .expect("decode FIG-1293 PostgreSQL envelope");
+            match envelope.command {
+                RuntimeEffectCommand::ToolAttempt { call, .. } => Some(call.tool_name),
+                _ => None,
+            }
         })
         .collect::<Vec<_>>();
     attempt_names.sort();
@@ -603,7 +525,7 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
             "fig1293_echo".to_string(),
             "fig1293_echo".to_string(),
         ],
-        "cancel_process and batch children are attempts; spawn_agent and the parent batch are not",
+        "cancel_process and the protocol batch's leaves are attempts; spawn_agent and the groups are not",
     );
 }
 
@@ -646,11 +568,12 @@ async fn assert_fig1293_postgres_crash_boundary(crash_after: CrashAfter, force_s
     let (model, model_calls) = fig1293_model();
     let base_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
     let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let effect_host: Arc<dyn EffectHost> = Arc::new(CrashingEffectHost {
+    let effect_host: Arc<dyn EffectHost> = Arc::new(CrossingEffectHost {
         inner: base_effect_host,
-        crash_after,
+        crash_after: Some(crash_after),
         force_serial,
         fired: Arc::clone(&fired),
+        signal_frames: Arc::new(Mutex::new(Vec::new())),
     });
     let policy = fig1293_policy();
     let state = fig1293_state(&policy);

@@ -61,15 +61,22 @@ enum CrashAfter {
     FirstProtocolBatchChild,
 }
 
-struct CrashingEffectHost {
+/// A PostgreSQL host whose every scoped controller — the turn's and each
+/// group child's — is a [`CrossingController`]: it captures signal crossings
+/// into `signal_frames` and, when `crash_after` names a boundary, parks the
+/// host task after that commit. A group child's commands cross the host's
+/// bound child controller, so the crossing is observed here rather than on
+/// the turn's controller alone (FIG-3397).
+struct CrossingEffectHost {
     inner: Arc<dyn EffectHost>,
-    crash_after: CrashAfter,
+    crash_after: Option<CrashAfter>,
     force_serial: bool,
     fired: Arc<std::sync::atomic::AtomicBool>,
+    signal_frames: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for CrashingEffectHost {
+impl lash_core::AwaitEventResolver for CrossingEffectHost {
     fn await_event_authority_binding_id(&self) -> Option<String> {
         Some(self.inner.turn_control_binding_id())
     }
@@ -127,7 +134,7 @@ impl lash_core::AwaitEventResolver for CrashingEffectHost {
 }
 
 #[async_trait::async_trait]
-impl EffectHost for CrashingEffectHost {
+impl EffectHost for CrossingEffectHost {
     fn turn_control_binding_id(&self) -> String {
         self.inner.turn_control_binding_id()
     }
@@ -175,8 +182,8 @@ impl EffectHost for CrashingEffectHost {
         lash_core::ScopedEffectController::shared(
             Arc::new(CrossingController {
                 inner: Arc::new(ScopedControllerAdapter(inner)),
-                signal_frames: Arc::new(Mutex::new(Vec::new())),
-                crash_after: Some(self.crash_after),
+                signal_frames: Arc::clone(&self.signal_frames),
+                crash_after: self.crash_after,
                 cancel_after_batch_failure: None,
                 interrupt_after_batch_failure: false,
                 force_serial: self.force_serial,
@@ -196,8 +203,8 @@ impl EffectHost for CrashingEffectHost {
         lash_core::ScopedEffectController::shared(
             Arc::new(CrossingController {
                 inner: Arc::new(ScopedControllerAdapter(inner)),
-                signal_frames: Arc::new(Mutex::new(Vec::new())),
-                crash_after: Some(self.crash_after),
+                signal_frames: Arc::clone(&self.signal_frames),
+                crash_after: self.crash_after,
                 cancel_after_batch_failure: None,
                 interrupt_after_batch_failure: false,
                 force_serial: self.force_serial,
@@ -206,6 +213,15 @@ impl EffectHost for CrashingEffectHost {
             admitted,
         )
         .map(Some)
+    }
+
+    /// The tool-child resolver registers on the PostgreSQL host's driver,
+    /// where this wrapper's group operations land.
+    fn install_tool_child_host(
+        &self,
+        candidate: Arc<lash_core::facade_support::ToolChildHost>,
+    ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
+        self.inner.install_tool_child_host(candidate)
     }
 
     fn scoped_for_group_child(
@@ -220,8 +236,8 @@ impl EffectHost for CrashingEffectHost {
         lash_core::ScopedEffectController::shared(
             Arc::new(CrossingController {
                 inner: Arc::new(ScopedControllerAdapter(inner)),
-                signal_frames: Arc::new(Mutex::new(Vec::new())),
-                crash_after: Some(self.crash_after),
+                signal_frames: Arc::clone(&self.signal_frames),
+                crash_after: self.crash_after,
                 cancel_after_batch_failure: None,
                 interrupt_after_batch_failure: false,
                 force_serial: self.force_serial,
@@ -546,12 +562,34 @@ impl lash_core::RuntimeEffectController for CrossingController {
         self.inner.native_effect_groups_substrate()
     }
 
+    /// A group child's commands are still this turn's crossings: its bound
+    /// controller is wrapped so its attempts reach the crash boundaries and
+    /// its signal commands land in the same captured frames.
     fn group_child_scoped_controller(
         &self,
         admitted: lash_core::AdmittedScope,
         binding: lash_core::GroupChildBinding,
     ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
-        self.inner.group_child_scoped_controller(admitted, binding)
+        let Some(bound) = self
+            .inner
+            .group_child_scoped_controller(admitted, binding)?
+        else {
+            return Ok(None);
+        };
+        let admitted = bound.admitted_scope().clone();
+        lash_core::ScopedEffectController::shared(
+            Arc::new(CrossingController {
+                inner: Arc::new(ScopedControllerAdapter(bound)),
+                signal_frames: Arc::clone(&self.signal_frames),
+                crash_after: self.crash_after,
+                cancel_after_batch_failure: self.cancel_after_batch_failure.clone(),
+                interrupt_after_batch_failure: self.interrupt_after_batch_failure,
+                force_serial: self.force_serial,
+                fired: Arc::clone(&self.fired),
+            }),
+            admitted,
+        )
+        .map(Some)
     }
 
     async fn await_next_settlement(
@@ -1257,8 +1295,19 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let model_calls = Arc::new(AtomicUsize::new(0));
     let signal_crossing_frames = Arc::new(Mutex::new(Vec::new()));
+    // The signal command runs on the group child's bound controller, which
+    // the runtime's host hands out, so the crossing is captured there.
+    let crossing_host = |inner: Arc<dyn EffectHost>| -> Arc<dyn EffectHost> {
+        Arc::new(CrossingEffectHost {
+            inner,
+            crash_after: None,
+            force_serial: false,
+            fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            signal_frames: Arc::clone(&signal_crossing_frames),
+        })
+    };
     let mut first = public_signal_runtime(
-        first_host.clone(),
+        crossing_host(first_host.clone()),
         Arc::clone(&registry),
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
@@ -1327,7 +1376,7 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
     let replay_host = Arc::new(storage.effect_host());
     replay_host.start_replay();
     let mut replay = public_signal_runtime(
-        replay_host.clone(),
+        crossing_host(replay_host.clone()),
         Arc::clone(&registry),
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
@@ -1369,14 +1418,18 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
         let crossing_frames = signal_crossing_frames
             .lock()
             .expect("redriven signal crossing frame lock");
+        // A batch is a durable effect group (FIG-3397): the redrive reopens
+        // it and is served the child's retained settlement, so the signal
+        // command crosses once, live. The journal rows above are what the
+        // redrive reconstructs byte-identically.
         assert_eq!(
             crossing_frames.len(),
-            2,
-            "the production signal command must cross once live and once on redrive"
+            1,
+            "the production signal command crosses once, live; the redrive is served the retained settlement"
         );
         assert_eq!(
-            crossing_frames[1], first_crossing_frame,
-            "the redriven production signal command frame must be byte-identical"
+            crossing_frames[0], first_crossing_frame,
+            "the live production signal command frame is the one captured"
         );
     }
 
