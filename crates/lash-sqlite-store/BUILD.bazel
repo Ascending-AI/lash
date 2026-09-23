@@ -29,9 +29,6 @@ lash_rust_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -428,9 +425,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -456,9 +450,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -486,9 +477,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -515,9 +503,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -545,9 +530,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -573,9 +555,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -601,9 +580,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",
@@ -627,9 +603,6 @@ lash_rust_feature_library(
         "testing",
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "3145728"},
-    compile_data_patterns = [
-        "Cargo.toml",
-    ],
     extra_compile_data = [],
     manifest_dir = "crates/lash-sqlite-store",
     package_name = "lash-internal-sqlite-store",

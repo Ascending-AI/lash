@@ -31,19 +31,26 @@ def _cargo_env(package_name, manifest_dir, version, extra = {}):
     env.update(extra)
     return env
 
-def _all_package_files():
+# Non-Rust inputs are declared, not globbed wholesale. A library or binary
+# compiles in only the package files `tools/bazel/source-ownership.json` lists
+# under `compile_data` (none by default), so a snapshot, trybuild pin or
+# fixture edit does not rebuild the crate and everything above it. Test targets
+# see every package file except those another test target of the package owns
+# (`test_data`), which arrive here as `data_exclude`.
+
+def _all_package_files(exclude = []):
     return native.glob(
         ["**"],
         allow_empty = True,
-        exclude = _IGNORED_FILES,
+        exclude = _IGNORED_FILES + exclude,
         exclude_directories = 1,
     )
 
-def _compile_data(patterns = ["**"]):
+def _compile_data(patterns = ["**"], exclude = []):
     return native.glob(
         patterns,
         allow_empty = True,
-        exclude = _IGNORED_FILES + ["**/*.rs"],
+        exclude = _IGNORED_FILES + ["**/*.rs"] + exclude,
         exclude_directories = 1,
     )
 
@@ -132,7 +139,7 @@ def lash_rust_library(
         build_script = None,
         exec_properties = {},
         test_srcs = [],
-        compile_data_patterns = ["**"],
+        compile_data_patterns = [],
         extra_compile_data = []):
     deps = all_crate_deps(normal = True)
     if build_script:
@@ -173,6 +180,8 @@ def lash_rust_binary(
         include_dev_deps = False,
         library = None,
         library_crate_name = None,
+        compile_data_patterns = [],
+        data_exclude = [],
         extra_compile_data = [],
         rustc_env = {},
         tags = []):
@@ -182,11 +191,11 @@ def lash_rust_binary(
     rust_binary(
         name = name,
         aliases = _aliases_for(deps, library, library_crate_name),
-        compile_data = _compile_data() + extra_compile_data,
+        compile_data = _compile_data(compile_data_patterns) + extra_compile_data,
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = crate_root,
-        data = _compile_data() + extra_compile_data,
+        data = _compile_data(exclude = data_exclude) + extra_compile_data,
         deps = deps,
         edition = "2024",
         exec_properties = exec_properties,
@@ -220,6 +229,7 @@ def lash_rust_unit_test(
         build_script = None,
         exec_properties = {},
         srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"],
+        data_exclude = [],
         extra_compile_data = [],
         extra_data = [],
         library = None,
@@ -237,11 +247,11 @@ def lash_rust_unit_test(
         name = name,
         args = args,
         aliases = _aliases_for(deps, library, library_crate_name),
-        compile_data = _compile_data() + extra_compile_data,
+        compile_data = _compile_data(exclude = data_exclude) + extra_compile_data,
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = crate_root,
-        data = _all_package_files() + extra_compile_data + extra_data,
+        data = _all_package_files(data_exclude) + extra_compile_data + extra_data,
         deps = deps,
         edition = "2024",
         env = _test_env(test_env),
@@ -271,6 +281,7 @@ def lash_rust_integration_test(
         args = [],
         exec_properties = {},
         srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+        data_exclude = [],
         library = None,
         library_crate_name = None,
         extra_compile_data = [],
@@ -286,11 +297,11 @@ def lash_rust_integration_test(
         name = name,
         aliases = _aliases_for(deps, library, library_crate_name),
         args = args,
-        compile_data = _compile_data() + extra_compile_data,
+        compile_data = _compile_data(exclude = data_exclude) + extra_compile_data,
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = crate_root,
-        data = _all_package_files() + extra_compile_data + extra_data,
+        data = _all_package_files(data_exclude) + extra_compile_data + extra_data,
         deps = deps,
         edition = "2024",
         env = _test_env(test_env),
@@ -375,7 +386,7 @@ def lash_rust_feature_library(
         build_script = None,
         exec_properties = {},
         test_srcs = [],
-        compile_data_patterns = ["**"],
+        compile_data_patterns = [],
         extra_compile_data = [],
         extra_deps = {},
         tags = [],
@@ -425,6 +436,8 @@ def lash_rust_feature_binary(
         include_dev_deps = False,
         library = None,
         library_crate_name = None,
+        compile_data_patterns = [],
+        data_exclude = [],
         extra_compile_data = [],
         rustc_env = {},
         tags = [],
@@ -439,11 +452,11 @@ def lash_rust_feature_binary(
     rust_binary(
         name = name,
         aliases = dep_aliases,
-        compile_data = _compile_data() + extra_compile_data,
+        compile_data = _compile_data(compile_data_patterns) + extra_compile_data,
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = crate_root,
-        data = _compile_data() + extra_compile_data,
+        data = _compile_data(exclude = data_exclude) + extra_compile_data,
         deps = deps,
         edition = "2024",
         exec_properties = exec_properties,
@@ -476,6 +489,7 @@ def lash_rust_feature_test(
         args = [],
         build_script = None,
         exec_properties = {},
+        data_exclude = [],
         extra_compile_data = [],
         extra_data = [],
         extra_deps = {},
@@ -500,11 +514,11 @@ def lash_rust_feature_test(
         name = name,
         args = args,
         aliases = dep_aliases,
-        compile_data = _compile_data() + extra_compile_data,
+        compile_data = _compile_data(exclude = data_exclude) + extra_compile_data,
         crate_features = crate_features,
         crate_name = crate_name,
         crate_root = crate_root,
-        data = _all_package_files() + extra_compile_data + extra_data,
+        data = _all_package_files(data_exclude) + extra_compile_data + extra_data,
         deps = deps,
         edition = "2024",
         env = _test_env(test_env),
