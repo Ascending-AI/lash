@@ -1947,11 +1947,17 @@ kind = "rust_items"
 paths = ["crates/lashlang/src/artifact_dialect.rs"]
 symbols = ["module_ref"]
 
+# FIG-3571: a number literal's identity is its canonical bits.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lashlang/src/ast_number.rs"]
+symbols = ["canonical_bits"]
+
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lashlang/src/artifact.rs"]
 symbols = [
-  "host_requirements_ref",
+  "hash_host_requirements",
   "process_component_hash",
   "write_exports",
   "write_host_requirements",

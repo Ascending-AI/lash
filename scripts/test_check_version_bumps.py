@@ -941,12 +941,14 @@ class VersionBumpFixtureTest(unittest.TestCase):
         symbols = [{symbols}]
         """
         source = """
-        fn workflow_graph_from_source_with_facets() { select("canonical source"); }
-        fn workflow_graph_from_program() { select("serialized program"); }
+        fn workflow_graph_from_source_with_facets() { select("admitted artifact"); }
+        fn workflow_graph_from_program() { select("program"); }
+        fn workflow_graph_from_artifact() {}
+        fn project_process() {}
+        fn project_literal_process() {}
+        fn project_node() {}
         fn source_identity() {}
-        fn node_id() {}
         fn edge() {}
-        fn hex_digest() {}
         """
         for selector in selectors:
             with self.subTest(selector=selector):
@@ -991,22 +993,19 @@ class VersionBumpFixtureTest(unittest.TestCase):
             "indices",
             "path_for_ast",
             "for_main",
-            "visible_expression",
-            "ast_root",
+            "for_process",
             "ownership_map",
             "into_ownership_map",
-            "main_workflow_projection",
-            "process_workflow_projection",
             "workflow_projection",
-            "process_execution_body_path",
-            "push_child_index",
-            "collect_workflow_block_paths",
-            "collect_workflow_statement_paths",
-            "collect_workflow_node_paths",
-            "map_workflow_node_subtree",
-            "workflow_block_wrapper_inner",
-            "authored_workflow_statement",
-            "is_lowered_member_assignment",
+            "statement_list",
+            "push_statement_list",
+            "is_statement_list",
+            "collect_body",
+            "collect_statement",
+            "statement_value",
+            "map_node_subtree",
+            "check_shape",
+            "process_wrapper_run_path",
             "execution_sites",
             "collect_execution_sites",
             "push_execution_site_descriptor",
