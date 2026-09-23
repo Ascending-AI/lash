@@ -121,6 +121,14 @@ const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
          WHERE batch.session_id = ?1",
     ),
     (
+        "queued_runs",
+        "SELECT * FROM queued_runs WHERE session_id = ?1",
+    ),
+    (
+        "queued_run_members",
+        "SELECT * FROM queued_run_members WHERE session_id = ?1",
+    ),
+    (
         "checkpoint_blob_refs",
         "SELECT * FROM checkpoint_blob_refs
          WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1)",
@@ -210,6 +218,14 @@ const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
         "SELECT to_jsonb(item)::text FROM lash_queued_work_items AS item
          JOIN lash_queued_work_batches AS batch ON batch.batch_id = item.batch_id
          WHERE batch.session_id = $1",
+    ),
+    (
+        "queued_runs",
+        "SELECT to_jsonb(t)::text FROM lash_queued_runs t WHERE session_id = $1",
+    ),
+    (
+        "queued_run_members",
+        "SELECT to_jsonb(t)::text FROM lash_queued_run_members t WHERE session_id = $1",
     ),
     (
         "checkpoint_blob_refs",

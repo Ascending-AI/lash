@@ -1610,7 +1610,41 @@ impl SurfaceRunner {
             "effect_group_close",
             GroupOpCommand::Close { disposition },
         )
-        .await
+        .await?;
+        self.wait_group_lifecycle_settled(group).await
+    }
+
+    /// ADR 0099 §7: `close` records `closing` and returns; the opener's
+    /// finalizer then runs the four steps on a spawned task and CASes the
+    /// lifecycle to `settled`. Observing the row the instant `close` returns
+    /// would compare how far each backend's finalizer task had got, which is
+    /// a scheduler fact, so the step waits for the durable end state.
+    ///
+    /// Every close in the generated catalog leaves obligations this host can
+    /// discharge — a cancel-decided child's parked body is dropped with its
+    /// token and a `RunToCompletion` close follows the release of every
+    /// child — so `settled` is owed. A backend whose finalizer does not get
+    /// there within the bound refuses the step, and that refusal diverges
+    /// from the in-memory reference's `Ok`.
+    async fn wait_group_lifecycle_settled(&mut self, group: u8) -> Result<(), String> {
+        let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
+        loop {
+            if self.reader.group_lifecycle_settled(&group_key(group)).await {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                self.record_group(
+                    group,
+                    "effect_group_close",
+                    serde_json::json!({"error": "finalization_not_settled"}),
+                );
+                return Err(format!(
+                    "effect group {group} recorded `closing` but its finalization never \
+                     settled the lifecycle"
+                ));
+            }
+            tokio::time::sleep(GROUP_POLL).await;
+        }
     }
 
     async fn group_commit(&mut self, group: u8, position: u8) -> Result<(), String> {

@@ -37,6 +37,7 @@ pub(super) struct SurfaceScratch {
     pub(super) batch_id: Option<String>,
     pub(super) queued_work_claim: Option<QueuedWorkClaim>,
     pub(super) turn_input_claim: Option<TurnInputClaim>,
+    pub(super) queued_run: Option<lash_core::store::QueuedRunAdmission>,
 }
 
 /// One fallible store-trait method, driven as a compared differential step.
@@ -72,6 +73,13 @@ pub(super) enum SurfaceMethod {
     OrphanedActiveTurnIds,
     CommittedTurnExists,
     UncommittedTurnExists,
+    PendingQueuedRun,
+    QueuedRun,
+    BeginOrResumeQueuedRun,
+    SelectQueuedRun,
+    SettleQueuedRun,
+    CommitDrainEnd,
+    DrainEndExists,
     AbortUnknownAttachmentWrite,
     CommitUnknownAttachmentRefs,
     ForgetUnknownAttachment,
@@ -113,6 +121,13 @@ impl SurfaceMethod {
             Self::OrphanedActiveTurnIds => "surface:orphaned_active_turn_ids",
             Self::CommittedTurnExists => "surface:committed_turn_exists_committed",
             Self::UncommittedTurnExists => "surface:committed_turn_exists_uncommitted",
+            Self::PendingQueuedRun => "surface:pending_queued_run",
+            Self::QueuedRun => "surface:queued_run",
+            Self::BeginOrResumeQueuedRun => "surface:begin_or_resume_queued_run",
+            Self::SelectQueuedRun => "surface:select_queued_run",
+            Self::SettleQueuedRun => "surface:settle_queued_run",
+            Self::CommitDrainEnd => "surface:commit_drain_end_receipt",
+            Self::DrainEndExists => "surface:drain_end_exists",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
             Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
             Self::ForgetUnknownAttachment => "surface:forget_attachment_unknown",
@@ -156,6 +171,53 @@ const SURFACE_COMMITTED_TURN_ID: &str = "fig-2841-surface-committed-turn";
 /// and whatever a backend answers, the no-residue law still applies.
 const UNKNOWN_ATTACHMENT_ID: &str = "fig-2841-unknown-attachment";
 const UNKNOWN_INPUT_ID: &str = "fig-2841-unknown-input";
+/// The queue drain the sweep admits, selects, settles and ends. Its scope is
+/// the run's caller-supplied identity, so every backend admits the same
+/// `QueueDrain` scope and the reads before admission ask about a drain that
+/// genuinely does not exist yet.
+const SURFACE_DRAIN_ID: &str = "fig-2841-surface-drain";
+
+fn surface_drain_scope(session_id: &SessionId) -> lash_core::ExecutionScope {
+    lash_core::ExecutionScope::queue_drain(session_id.clone(), SURFACE_DRAIN_ID)
+}
+
+fn surface_queued_run_configuration(session_id: &SessionId) -> lash_core::PersistedSessionConfig {
+    let state = RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    RuntimeCommit::persisted_state_for_test(&state, &[]).config
+}
+
+/// A coarse, backend-neutral summary of a queued-run admission: the drain id
+/// a backend mints is compared as "is it the scope we named", never by value.
+fn queued_run_summary(
+    admission: &lash_core::store::QueuedRunAdmission,
+    session_id: &SessionId,
+) -> String {
+    let terminal = match &admission.terminal {
+        None => "none",
+        Some(lash_core::store::QueuedRunTerminal::Completed { .. }) => "completed",
+        Some(lash_core::store::QueuedRunTerminal::Empty) => "empty",
+        Some(lash_core::store::QueuedRunTerminal::Failed { .. }) => "failed",
+    };
+    format!(
+        "named_scope={} origin={:?} request={:?} revision={} physical_ordinal={} turn_index={} \
+         members={:?} initial_members={:?} withheld={} assigned={} terminal={terminal}",
+        admission.scope == surface_drain_scope(session_id),
+        admission.origin,
+        admission.request,
+        admission.revision,
+        admission.position.physical_ordinal,
+        admission.position.turn_index,
+        admission.members.as_ref().map(Vec::len),
+        admission.initial_members.as_ref().map(Vec::len),
+        admission.withheld_members.len(),
+        admission.assigned_members.len(),
+    )
+}
 
 /// Every fallible method in the inventory, driven against a live session.
 pub(super) fn surface_sweep_case() -> GeneratedCase {
@@ -210,6 +272,23 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::OrphanedActiveTurnIds),
             surface(SurfaceMethod::CommittedTurnExists),
             surface(SurfaceMethod::UncommittedTurnExists),
+            // One queue drain end to end (FIG-3419): nothing pending and the
+            // named drain unknown, then admission, selection, a Failed
+            // settlement, and the end receipt. `drain_end_exists` is driven
+            // on both sides of that receipt, so a backend that answers
+            // `false` without looking cannot agree.
+            surface(SurfaceMethod::PendingQueuedRun),
+            surface(SurfaceMethod::QueuedRun),
+            surface(SurfaceMethod::BeginOrResumeQueuedRun),
+            surface(SurfaceMethod::PendingQueuedRun),
+            surface(SurfaceMethod::BeginOrResumeQueuedRun),
+            surface(SurfaceMethod::SelectQueuedRun),
+            surface(SurfaceMethod::SettleQueuedRun),
+            surface(SurfaceMethod::QueuedRun),
+            surface(SurfaceMethod::PendingQueuedRun),
+            surface(SurfaceMethod::DrainEndExists),
+            surface(SurfaceMethod::CommitDrainEnd),
+            surface(SurfaceMethod::DrainEndExists),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::CancelPendingTurnInputSuffix),
             surface(SurfaceMethod::CancelPendingTurnInputs),
@@ -255,6 +334,10 @@ pub(super) fn refused_surface_on_deleted_session_case() -> GeneratedCase {
             surface(SurfaceMethod::EnqueueQueuedWorkWithOutcome),
             surface(SurfaceMethod::ClaimLeadingReadySessionCommand),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
+            surface(SurfaceMethod::PendingQueuedRun),
+            surface(SurfaceMethod::QueuedRun),
+            surface(SurfaceMethod::BeginOrResumeQueuedRun),
+            surface(SurfaceMethod::DrainEndExists),
             surface(SurfaceMethod::CancelQueuedWorkBatch),
             surface(SurfaceMethod::AbortUnknownAttachmentWrite),
             surface(SurfaceMethod::CommitUnknownAttachmentRefs),
@@ -557,6 +640,142 @@ impl BackendRunner {
                 let exists = store
                     .committed_turn_exists(&lash_core::TurnId::from(UNCOMMITTED_TURN_ID))
                     .await?;
+                format!("exists={exists}")
+            }
+            SurfaceMethod::PendingQueuedRun => match store.pending_queued_run(&session_id).await? {
+                Some(admission) => {
+                    format!("pending={}", queued_run_summary(&admission, &session_id))
+                }
+                None => "pending=none".to_string(),
+            },
+            SurfaceMethod::QueuedRun => {
+                match store.queued_run(&surface_drain_scope(&session_id)).await? {
+                    Some(admission) => {
+                        format!("recorded={}", queued_run_summary(&admission, &session_id))
+                    }
+                    None => "recorded=none".to_string(),
+                }
+            }
+            SurfaceMethod::BeginOrResumeQueuedRun => {
+                // The head the admission is fenced against is read, not
+                // assumed: the second drive of this step is a resume, which
+                // must answer the same admission whatever the head is.
+                let expected_head_revision = store
+                    .load_session_head_meta()
+                    .await?
+                    .map_or(0, |head| head.head_revision);
+                let admission = store
+                    .begin_or_resume_queued_run(
+                        &lease_fence,
+                        lash_core::store::BeginQueuedRun {
+                            session_id: session_id.clone(),
+                            identity: Some(surface_drain_scope(&session_id)),
+                            request: lash_core::store::QueuedRunRequest::Automatic,
+                            configuration: surface_queued_run_configuration(&session_id),
+                            expected_head_revision,
+                            initial_turn_index: 1,
+                        },
+                    )
+                    .await?;
+                let summary = queued_run_summary(&admission, &session_id);
+                self.surface.queued_run = Some(admission);
+                summary
+            }
+            SurfaceMethod::SelectQueuedRun => {
+                let selected = store
+                    .select_queued_run(
+                        &lease_fence,
+                        &surface_drain_scope(&session_id),
+                        &lease_owner,
+                        1,
+                        &surface_queued_run_configuration(&session_id),
+                        lash_core::testing::queued_work_claim_policy(1),
+                    )
+                    .await?;
+                let summary = format!(
+                    "input_claims={} input_rows={} queued_claims={} queued_batches={} \
+                     already_satisfied={} refused={} admission={}",
+                    selected.inputs.len(),
+                    selected
+                        .inputs
+                        .iter()
+                        .map(|claim| claim.inputs.len())
+                        .sum::<usize>(),
+                    selected.queued.len(),
+                    selected
+                        .queued
+                        .iter()
+                        .map(|claim| claim.batches.len())
+                        .sum::<usize>(),
+                    selected.already_satisfied.len(),
+                    selected.refusal.is_some(),
+                    queued_run_summary(&selected.admission, &session_id),
+                );
+                self.surface.queued_run = Some(selected.admission);
+                summary
+            }
+            SurfaceMethod::SettleQueuedRun => {
+                let expected_revision = self
+                    .surface
+                    .queued_run
+                    .as_ref()
+                    .map_or(0, |admission| admission.revision);
+                let admission = store
+                    .settle_queued_run(
+                        &lease_fence,
+                        lash_core::store::QueuedRunCommit {
+                            scope: surface_drain_scope(&session_id),
+                            expected_revision,
+                            progress: lash_core::store::QueuedRunProgress::Settle {
+                                terminal: lash_core::store::QueuedRunTerminal::Failed {
+                                    code: lash_core::RuntimeErrorCode::QueuedWork,
+                                    message: "fig-2841 surface sweep settles its drain".into(),
+                                },
+                            },
+                        },
+                    )
+                    .await?;
+                let summary = queued_run_summary(&admission, &session_id);
+                self.surface.queued_run = Some(admission);
+                summary
+            }
+            SurfaceMethod::CommitDrainEnd => {
+                // The drain epilogue's end fact, built the way the runtime
+                // builds it: a state-preserving commit receipted under the
+                // drain's own scope at the reserved `final` key, borrowing
+                // the held lane, claiming the committed head's frame and leaf.
+                let head = store.load_session_head_meta().await?;
+                let mut commit = runtime_commit(
+                    &session_id,
+                    head.as_ref().map_or(0, |head| head.head_revision),
+                    &append(Vec::new(), None),
+                    None,
+                    None,
+                    HydratedSessionCheckpoint::default(),
+                    Vec::new(),
+                    Vec::new(),
+                );
+                let (frame, leaf) = head
+                    .map(|head| {
+                        (
+                            head.current_frame_node_id
+                                .filter(|_| head.leaf_node_id.is_some()),
+                            head.leaf_node_id,
+                        )
+                    })
+                    .unwrap_or_default();
+                commit.current_frame_node_id = frame;
+                commit.graph_base_leaf_node_id = leaf;
+                commit.turn_commit = RuntimeTurnCommitStamp::new(
+                    lash_core::store::OperationId::new(surface_drain_scope(&session_id), "final"),
+                );
+                commit.session_execution_lease_fence = Some(lease_fence.clone());
+                let result = store.commit_runtime_state(commit).await?;
+                self.surface.answer = Some("committed".to_string());
+                return Ok(Some(result.into()));
+            }
+            SurfaceMethod::DrainEndExists => {
+                let exists = store.drain_end_exists(SURFACE_DRAIN_ID).await?;
                 format!("exists={exists}")
             }
             SurfaceMethod::AbortUnknownAttachmentWrite => {

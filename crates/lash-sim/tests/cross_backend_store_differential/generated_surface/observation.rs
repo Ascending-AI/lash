@@ -112,6 +112,40 @@ impl SurfaceReader {
         }
     }
 
+    /// Whether `group_key`'s durable lifecycle has reached `settled` — the
+    /// witness `EffectGroupClose` polls, because a close records `closing`
+    /// and returns while this host's finalizer runs the §7 steps on a
+    /// spawned task.
+    pub(super) async fn group_lifecycle_settled(&self, group_key: &str) -> bool {
+        let phase = match self {
+            Self::InMemory { .. } => return true,
+            Self::Sqlite { group_path, .. } => {
+                let Ok(connection) = rusqlite::Connection::open(group_path) else {
+                    return false;
+                };
+                connection
+                    .query_row(
+                        "SELECT json_extract(lifecycle, '$.type') FROM runtime_effect_group
+                         WHERE group_key = ?1",
+                        rusqlite::params![group_key],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                    .ok()
+                    .flatten()
+            }
+            Self::Postgres { pool } => sqlx::query_scalar::<_, String>(
+                "SELECT lifecycle->>'type' FROM lash_runtime_effect_group WHERE group_key = $1",
+            )
+            .bind(group_key)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten(),
+        };
+        phase.as_deref() == Some("settled")
+    }
+
     /// Whether the `(group_scope_id, replay_key)` journal row already holds
     /// a settlement rank — the witness `EffectGroupRelease` polls so a
     /// prefix ending on a release observes a quiesced row.
