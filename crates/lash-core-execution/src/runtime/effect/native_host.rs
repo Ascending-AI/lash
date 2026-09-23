@@ -374,11 +374,15 @@ impl EffectHost for NativeEffectHost {
     }
 
     /// The in-memory host keeps no effect journal, so no journal rows are ever
-    /// deleted here (the count is always 0). A scope-exact retirement still
-    /// performs the promise half: the scope's in-process promises are dropped
-    /// and the scope is fenced, mirroring what the durable hosts do in one
-    /// transaction. Session retirements stay a no-op: session promises are
-    /// revoked through the session lever the host already calls.
+    /// deleted here (the count is always 0). Every retirement evicts the
+    /// settled effect-group records the controller retains for a reopen after
+    /// close (FIG-3548) — this tier's analogue of deleting the journaled group
+    /// rows: exactly the retired scope's, or every scope of a retired session.
+    /// A scope-exact retirement also performs the promise half: the scope's
+    /// in-process promises are dropped and the scope is fenced, mirroring what
+    /// the durable hosts do in one transaction. A session retirement does
+    /// nothing else: session promises are revoked through the session lever
+    /// the host already calls.
     ///
     /// A `WhenQuiescent` retirement is refused with `effect_scope_not_quiescent`
     /// while an effect is executing, a group is open, or a grouped child under
@@ -391,6 +395,9 @@ impl EffectHost for NativeEffectHost {
         retirement: EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
         let Some(scope) = retirement.retired_scope() else {
+            if let EffectJournalRetirement::Session { session_id } = &retirement {
+                self.evict_retained_groups(|scope| scope.session_id() == Some(session_id));
+            }
             return Ok(0);
         };
         if retirement.gate() == Some(super::EffectRetirementGate::WhenQuiescent) {
@@ -408,11 +415,13 @@ impl EffectHost for NativeEffectHost {
             {
                 return Err(super::effect_replay_driver::scope_not_quiescent(&key));
             }
+            self.evict_retained_groups(|retiring| *retiring == scope);
             return Ok(0);
         }
         self.controller
             .retire_await_events_for_scope(&scope)
             .await?;
+        self.evict_retained_groups(|retiring| *retiring == scope);
         Ok(0)
     }
 
@@ -422,6 +431,14 @@ impl EffectHost for NativeEffectHost {
 }
 
 impl NativeEffectHost {
+    /// Drop the group records retained under the scopes a retirement covers,
+    /// once that retirement has been admitted.
+    fn evict_retained_groups(&self, retiring: impl Fn(&ExecutionScope) -> bool) {
+        if let Some(groups) = &self.groups_admin {
+            groups.evict_retired(retiring);
+        }
+    }
+
     fn fenced_controller(
         &self,
         scope: ExecutionScope,
