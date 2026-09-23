@@ -245,7 +245,8 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         .run_turn_assembled(
             TurnInput::text("switch frames"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("post-commit-restore-failure"),
             ),
@@ -349,7 +350,8 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         .run_turn_assembled(
             TurnInput::text("use the reloaded state"),
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("after-post-commit-restore-failure"),
             ),
@@ -1109,7 +1111,8 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     let committed = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("follow-on-capture-failure"),
             ),
@@ -1138,7 +1141,8 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     let recovered = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_turn_scope(
+            host_turn_scope(
+                &runtime.host.core,
                 &SessionId::from("root"),
                 &TurnId::from("retry-safe-committed-handoff"),
             ),
@@ -1388,7 +1392,8 @@ pub(super) async fn continue_as_frame_rotation_reconciles_newly_advertised_tool(
             TurnInput::text("rotate the frame"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                host_turn_scope(
+                    &runtime.host.core,
                     &SessionId::from("root"),
                     &TurnId::from("live-surface-frame-rotation"),
                 ),
