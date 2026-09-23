@@ -659,9 +659,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # The matrix now comes from `scripts/ci_plan.py postgres-matrix`, so the
         # bracket is asserted where it is decided. PG16 is the sole primary lane
         # and runs on every event; the PG14/PG18 compatibility lanes only compare
-        # the live catalog artifact, so they are deferred off the pull-request
-        # critical path and run on merge_group and workflow_dispatch —
-        # nothing reaches trunk without all three majors. The focused contract
+        # the live catalog artifact, so they never run on a pull request and
+        # run on a schema merge group and on workflow_dispatch — no schema
+        # change reaches trunk without all three majors. The focused contract
         # tests in test_ci_plan.py evaluate per-role step selection.
         postgres = workflow_job_block(workflow, "postgres-store")
         self.assertIn("include: ${{ fromJSON(needs.plan.outputs.postgres_matrix) }}", postgres)
@@ -679,6 +679,21 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     [
                         (leg["postgres"], leg["role"])
                         for leg in plan["postgres_matrix"](event)
+                    ],
+                )
+        for event, expected in (
+            ("pull_request", [("16", "primary")]),
+            (
+                "merge_group",
+                [("14", "compatibility"), ("16", "primary"), ("18", "compatibility")],
+            ),
+        ):
+            with self.subTest(event=event, schema=True):
+                self.assertEqual(
+                    expected,
+                    [
+                        (leg["postgres"], leg["role"])
+                        for leg in plan["postgres_matrix"](event, True)
                     ],
                 )
 

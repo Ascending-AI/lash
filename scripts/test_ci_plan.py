@@ -598,7 +598,7 @@ class PostgresMatrixTests(unittest.TestCase):
         self.assertIn("scripts/ci_plan.py postgres-matrix", step["run"])
 
     def test_compatibility_lanes_are_deferred_off_the_pull_request_path(self) -> None:
-        """PG16 runs on rust PRs/queues; PG14/PG18 run on schema diffs or dispatch."""
+        """PG16 alone on PRs; PG14/PG18 on schema merge groups or dispatch."""
         self.assertEqual(
             [{"postgres": "16", "role": "primary"}],
             ci_plan.postgres_matrix("pull_request"),
@@ -621,6 +621,11 @@ class PostgresMatrixTests(unittest.TestCase):
                 {"postgres": "16", "role": "primary"},
                 {"postgres": "18", "role": "compatibility"},
             ],
+            ci_plan.postgres_matrix("merge_group", schema=True),
+        )
+        # A pull request gets fast signal: one major even for a schema diff.
+        self.assertEqual(
+            [{"postgres": "16", "role": "primary"}],
             ci_plan.postgres_matrix("pull_request", schema=True),
         )
 

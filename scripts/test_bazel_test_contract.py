@@ -441,7 +441,7 @@ class BazelTestContractTests(unittest.TestCase):
         setup = shared_cache_action()
         flags = job_step(setup, "Export shared cache flags")["run"]
         bazel_command = job_step(
-            jobs["bazel-tests"], "Test deterministic PR selection or merge-group suite"
+            jobs["bazel-tests"], "Test the workspace core suite with shared cache"
         )["run"]
         bazelrc = (ROOT / ".bazelrc").read_text(encoding="utf-8")
         self.assertIn("test --cache_test_results=yes", bazelrc)
@@ -928,8 +928,20 @@ class BazelTestContractTests(unittest.TestCase):
         # longer outside Bazel: the feature-lane generator emits a variant of
         # every unit that resolution compiles, and `//:feature_lane_clippy`
         # lints exactly those. The Cargo command stays for untrusted events,
-        # which have no cache credentials and so no pool.
+        # which have no cache credentials and so no pool. The feature-lane
+        # variants and the OFF graph are merge-group breadth: a pull request
+        # builds only the workspace clippy and the schema checks.
         self.assertIn("//:feature_lane_clippy", clippy_bazel["run"])
+        self.assertIn("//:runtime_off", clippy_bazel["run"])
+        self.assertIn(
+            'targets=(//:workspace_clippy //:schema_checks)', clippy_bazel["run"]
+        )
+        self.assertIn(
+            'if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then\n'
+            "  breadth=true\n"
+            "  targets+=(//:feature_lane_clippy //:runtime_off)",
+            clippy_bazel["run"],
+        )
 
         e2e = job_step(jobs["lint"], "Clippy (slack-clone e2e feature)")
         self.assertEqual(untrusted, e2e["if"])
@@ -947,20 +959,16 @@ class BazelTestContractTests(unittest.TestCase):
         # Remote execution needs the action result, not hundreds of MiB of
         # top-level binaries.
         bazel_test = job_step(
-            jobs["bazel-tests"], "Test deterministic PR selection or merge-group suite"
+            jobs["bazel-tests"], "Test the workspace core suite with shared cache"
         )
-        self.assertIn("//:workspace_tests", bazel_test["run"])
-        self.assertIn("-//:workspace_tail_tests", bazel_test["run"])
-        selector = job_step(jobs["bazel-tests"], "Select deterministic PR tests")
-        checkout = job_step(jobs["bazel-tests"], "Check out repository")
-        self.assertIn(
-            'git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=2 origin "${GITHUB_SHA}"',
-            checkout["run"],
+        # One suite for every trusted event: cached results scope the run.
+        self.assertIn("-- //:workspace_tests -//:workspace_tail_tests", bazel_test["run"])
+        self.assertNotIn("GITHUB_EVENT_NAME", bazel_test["run"])
+        self.assertEqual(
+            ["Check out repository", "Configure shared build cache",
+             "Test the workspace core suite with shared cache"],
+            [step["name"] for step in jobs["bazel-tests"]["steps"][:3]],
         )
-        self.assertEqual("github.event_name == 'pull_request'", selector["if"])
-        self.assertIn("scripts/ci/pr_test_targets.py", selector["run"])
-        self.assertIn("pr-test-targets.txt", bazel_test["run"])
-        self.assertNotIn("GITHUB_TOKEN", bazel_test.get("env", {}))
         self.assertNotIn("//:workspace_compile", bazel_test["run"])
         self.assertNotIn("workspace_doctests", bazel_test["run"])
         self.assertIn("--remote_download_outputs=minimal", bazel_test["run"])
