@@ -877,14 +877,20 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
             "process:record",
             lash_core::ProcessIncarnation::from_registration_sequence(1),
         ),
-        vec![event],
+        lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
+            events: lash_core::ProcessEventPageEvents::Full(vec![event]),
+            more: lash_core::ProcessEventPageMore::Complete,
+        }),
     ))
     .expect("remote process events");
-    let (process_ref, events) =
-        <(lash_core::ProcessRef, Vec<lash_core::ProcessEvent>)>::try_from(events_response)
-            .expect("events response");
+    let (process_ref, events): (
+        _,
+        lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
+    ) = events_response.try_into().expect("events response");
     assert_eq!(process_ref.process_id, "process:record");
-    assert_eq!(events.len(), 1);
+    assert!(
+        matches!(events, lash_core::ProcessEventReadOutcome::Retained(page) if page.events.len() == 1)
+    );
 }
 
 #[test]
