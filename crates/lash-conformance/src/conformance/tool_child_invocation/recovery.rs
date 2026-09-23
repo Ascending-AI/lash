@@ -246,42 +246,62 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         "the successor did not re-execute the leaf body"
     );
 
-    // A reopen on the successor tolerates the miss the same way: the group
-    // opens, the child is not dispatched, and no settlement is served for its
-    // rank while the opener stays absent.
-    let scoped = successor
-        .host
-        .scoped(crate::admit(scope.clone()))
-        .expect("the group scope binds");
-    let mut handle = scoped
-        .controller()
-        .open_effect_group(recovery_group(
-            &scope,
-            &session_id,
-            &group_key,
-            &env_ref,
-            deferrable_routing(fixture.deferrable_routing, &successor.host),
-            recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
-        ))
-        .await
-        .expect("a reopen tolerates a child this host cannot run");
-    assert!(
-        tokio::time::timeout(
-            ABSENCE_BUDGET,
-            scoped
-                .controller()
-                .await_next_settlement(&mut handle, tokio_util::sync::CancellationToken::new()),
-        )
-        .await
-        .is_err(),
-        "no settlement is served while the opener is absent: the child is accepted, not run and not failed"
-    );
-    scoped
-        .controller()
-        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
-        .await
-        .expect("the successor's observing handle closes");
-    drop(scoped);
+    // A reopen tolerates the miss the same way: the group opens, the child is
+    // not dispatched, and no settlement is served for its rank while the
+    // opener stays absent. The reopen runs on a peer host of its own — resolver
+    // wired, opener never registered — torn down with its runtime once the
+    // observation is made. Its close spawns that host's finalizer, whose
+    // obligation pass drives every child the host can run; on the successor
+    // that finalizer would still be in flight when the opener registers below,
+    // claim the child itself, and leave the reclaiming drain a `LeaseLive` row.
+    world_on_own_runtime(fixture, LIVE_LEASE_MS, {
+        let scope = scope.clone();
+        let session_id = session_id.clone();
+        let group_key = group_key.clone();
+        let env_store = Arc::clone(&process_env_store);
+        let env_ref = env_ref.clone();
+        let routing_kind = fixture.deferrable_routing;
+        move |peer| {
+            Box::pin(async move {
+                install_child_host(&peer.host, &env_store);
+                let scoped = peer
+                    .host
+                    .scoped(crate::admit(scope.clone()))
+                    .expect("the group scope binds");
+                let mut handle = scoped
+                    .controller()
+                    .open_effect_group(recovery_group(
+                        &scope,
+                        &session_id,
+                        &group_key,
+                        &env_ref,
+                        deferrable_routing(routing_kind, &peer.host),
+                        recorded_cancellation_authority(&peer.host, &crate::admit(scope.clone()))
+                            .await,
+                    ))
+                    .await
+                    .expect("a reopen tolerates a child this host cannot run");
+                assert!(
+                    tokio::time::timeout(
+                        ABSENCE_BUDGET,
+                        scoped.controller().await_next_settlement(
+                            &mut handle,
+                            tokio_util::sync::CancellationToken::new()
+                        ),
+                    )
+                    .await
+                    .is_err(),
+                    "no settlement is served while the opener is absent: the child is accepted, not run and not failed"
+                );
+                scoped
+                    .controller()
+                    .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
+                    .await
+                    .expect("the peer's observing handle closes");
+            })
+        }
+    })
+    .await;
 
     // The opener registers on the successor — the same `EffectOpener`, derived
     // from the same scope — and the next drain runs the child. The journaled

@@ -1922,11 +1922,23 @@ fn single_leaf_group(
 /// tasks among them — and the host's substrate handles with them. What is left
 /// behind is what a killed worker leaves: journaled rows under claims nobody
 /// renews.
+async fn crashed_world<P>(fixture: &ToolChildLawFixture, phase: P)
+where
+    P: FnOnce(ToolChildWorld) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>>
+        + Send
+        + 'static,
+{
+    world_on_own_runtime(fixture, CRASH_LEASE_MS, phase).await;
+}
+
+/// Run `phase` on a world built with `lease_ttl_ms`, on a runtime of its own,
+/// and destroy the runtime afterwards — so nothing the phase's host spawned
+/// (a child task, a close's finalizer) outlives the phase.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn crashed_world<P>(fixture: &ToolChildLawFixture, phase: P)
+async fn world_on_own_runtime<P>(fixture: &ToolChildLawFixture, lease_ttl_ms: u64, phase: P)
 where
     P: FnOnce(ToolChildWorld) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>>
         + Send
@@ -1938,12 +1950,9 @@ where
             .worker_threads(2)
             .enable_all()
             .build()
-            .expect("the crashing process gets a runtime of its own");
+            .expect("the phase's process gets a runtime of its own");
         runtime.block_on(async move {
-            let world = make(ToolChildWorldSpec {
-                lease_ttl_ms: CRASH_LEASE_MS,
-            })
-            .await;
+            let world = make(ToolChildWorldSpec { lease_ttl_ms }).await;
             phase(world).await;
         });
         // A killed worker does not shut down gracefully: bound the teardown so
@@ -1952,7 +1961,7 @@ where
         runtime.shutdown_timeout(std::time::Duration::from_secs(10));
     })
     .join()
-    .expect("the crashing process runs its phase before dying");
+    .expect("the phase's process runs its phase before dying");
 }
 
 /// Waits until the crashed process's claims on `group_key` have lapsed.
