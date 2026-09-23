@@ -688,9 +688,11 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
         // the target's definition, and the target is now a lifted process
         // whose declaration is named by its lift digest rather than by the
         // `const` the source spells. The derivation is unchanged; its input
-        // moved with the dialect.
+        // moved with the dialect. Re-pinned again by FIG-3571: the target's
+        // definition names the artifact that carries the linked program
+        // verbatim, so its module ref moved; the derivation is unchanged.
         let expected_key =
-            "derived/v3/c8727a9bd798917885c10ca9e76bde549e48c950c36e8201c959c02d9f9c8af2";
+            "derived/v3/4a0bc47a9f800bb2578eb69958bed2a1abd438fd22e7ca0963dfe298971c8bed";
         // The fixture's production effect address gives the deferred-resolution
         // journal its link identity, so the journaled resolution production
         // always wrote is now the first envelope; the register is the second.
