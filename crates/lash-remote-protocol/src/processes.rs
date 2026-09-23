@@ -835,6 +835,7 @@ impl RemoteObservedProcessEvent {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RemoteProcessEvent {
     pub process_id: ProcessId,
     pub process_incarnation: u64,

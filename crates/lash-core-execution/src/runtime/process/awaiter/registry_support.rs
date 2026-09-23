@@ -14,7 +14,9 @@ impl WatchedProcessRegistry {
     }
 
     pub(super) async fn sink_cursor(&self, process_id: &ProcessId) -> Option<u64> {
-        self.sink.as_ref()?;
+        if self.sinks.lock_recover().is_empty() {
+            return None;
+        }
         self.inner
             .recent_events(process_id, 1)
             .await
@@ -29,9 +31,13 @@ impl WatchedProcessRegistry {
     }
 
     pub(super) async fn emit_event_pages_since(&self, process_id: &ProcessId, cursor: Option<u64>) {
-        let (Some(sink), Some(cursor)) = (self.sink.as_ref(), cursor) else {
+        let sinks = self.sinks.lock_recover().clone();
+        let Some(cursor) = cursor else {
             return;
         };
+        if sinks.is_empty() {
+            return;
+        }
         let Ok(process_ref) = self.inner.resolve_process_ref(process_id).await else {
             return;
         };
@@ -59,7 +65,9 @@ impl WatchedProcessRegistry {
                 return;
             };
             for event in events {
-                sink.emit(&event).await;
+                for sink in &sinks {
+                    sink.emit(&event).await;
+                }
             }
             continuation = match page.more {
                 crate::ProcessEventPageMore::Complete => return,

@@ -116,6 +116,145 @@ fn streamed_observation_event() -> RemoteSessionObservationEvent {
     }
 }
 
+fn process_node_record() -> lash_trace::TraceRecord {
+    lash_trace::TraceRecord::new(
+        lash_trace::TraceContext::default(),
+        lash_trace::TraceEvent::LanguageExecution {
+            language: "lashlang".to_string(),
+            event: lash_trace::TraceLanguageExecution {
+                event_key: "process:wire:node:1:started".to_string(),
+                identity: lash_trace::TraceLanguageExecutionIdentity {
+                    scope: lash_trace::TraceRuntimeScope::none(),
+                    subject: lash_trace::TraceRuntimeSubject::Process {
+                        process_id: lash_sansio::ProcessId::from("process:wire"),
+                    },
+                    source_identity: "source".to_string(),
+                    module_ref: "module".to_string(),
+                    entry_kind: "main".to_string(),
+                    entry_ref: None,
+                    entry_name: "main".to_string(),
+                    restate_invocation_id: None,
+                    generation: Some(lash_trace::TraceLanguageExecutionGeneration::new(1, 1)),
+                },
+                payload: lash_trace::TraceLanguageExecutionPayload::NodeStarted {
+                    node_id: "node".to_string(),
+                    node_kind: lash_sansio::ExecutionNodeKind::Call,
+                    label: "call()".to_string(),
+                    occurrence: 1,
+                    call_id: None,
+                },
+            },
+        },
+    )
+}
+
+fn assert_process_observation_wire_contract(item: RemoteProcessObservationItem) {
+    let wire = item.encode_json().expect("encode observation item");
+    assert_eq!(
+        RemoteProcessObservationItem::decode_json(&wire).expect("decode item"),
+        item
+    );
+    let mut value: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
+    value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION - 1);
+    value["type"] = serde_json::json!("unknown_future_item");
+    assert!(matches!(
+        RemoteProcessObservationItem::decode_json(value.to_string().as_bytes()),
+        Err(RemoteProtocolError::UnsupportedProtocolVersion { actual, expected })
+            if actual == REMOTE_PROTOCOL_VERSION - 1 && expected == REMOTE_PROTOCOL_VERSION
+    ));
+    value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION);
+    assert!(RemoteProcessObservationItem::decode_json(value.to_string().as_bytes()).is_err());
+    let mut value: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
+    value["retired_field"] = serde_json::json!(true);
+    assert!(RemoteProcessObservationItem::decode_json(value.to_string().as_bytes()).is_err());
+}
+
+#[test]
+fn process_observation_cursor_wire_contract() {
+    let request = RemoteProcessObservationRequest {
+        process_id: lash_sansio::ProcessId::from("process:wire"),
+        incarnation: 1,
+        cursor: Some("lashpc1:epoch:1:1:process:wire".to_string()),
+    };
+    let wire = request.encode_json().expect("request wire");
+    assert_eq!(
+        RemoteProcessObservationRequest::decode_json(&wire).expect("request"),
+        request
+    );
+    let mut value: serde_json::Value = serde_json::from_slice(&wire).expect("wire json");
+    value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION - 1);
+    value["retired_cursor"] = serde_json::json!("old");
+    assert!(matches!(
+        RemoteProcessObservationRequest::decode_json(value.to_string().as_bytes()),
+        Err(RemoteProtocolError::UnsupportedProtocolVersion { .. })
+    ));
+    value["protocol_version"] = serde_json::json!(REMOTE_PROTOCOL_VERSION);
+    assert!(RemoteProcessObservationRequest::decode_json(value.to_string().as_bytes()).is_err());
+}
+
+#[test]
+fn process_observation_snapshot_wire_contract() {
+    let record = process_node_record();
+    let graph = lash_trace::TraceLashlangGraphStore::fold(None, &[record]).expect("graph");
+    assert_process_observation_wire_contract(RemoteProcessObservationItem::Snapshot {
+        process_id: lash_sansio::ProcessId::from("process:wire"),
+        incarnation: 1,
+        cursor: "lashpc1:epoch:1:1:process:wire".to_string(),
+        projection: RemoteProcessObservationProjection {
+            graph: Some(graph),
+            completeness: RemoteProcessObservationCompleteness::Complete,
+        },
+    });
+}
+
+#[test]
+fn process_observation_event_wire_contract() {
+    assert_process_observation_wire_contract(RemoteProcessObservationItem::Event {
+        process_id: lash_sansio::ProcessId::from("process:wire"),
+        incarnation: 1,
+        cursor: "lashpc1:epoch:1:1:process:wire".to_string(),
+        record: Box::new(process_node_record()),
+    });
+    let foreign = RemoteProcessObservationItem::Event {
+        process_id: lash_sansio::ProcessId::from("process:other"),
+        incarnation: 1,
+        cursor: "lashpc1:epoch:1:1:process:other".to_string(),
+        record: Box::new(process_node_record()),
+    };
+    assert!(
+        RemoteProcessObservationItem::decode_json(
+            &foreign.encode_json().expect("foreign event wire")
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn process_observation_gap_wire_contract() {
+    for reason in [
+        RemoteProcessObservationGapReason::Overflow,
+        RemoteProcessObservationGapReason::Expired,
+        RemoteProcessObservationGapReason::SubscriberLagged,
+        RemoteProcessObservationGapReason::PublisherReplaced,
+        RemoteProcessObservationGapReason::RoutingUnavailable,
+        RemoteProcessObservationGapReason::ProcessIdReused,
+        RemoteProcessObservationGapReason::CrossProcess,
+        RemoteProcessObservationGapReason::InvalidCursor,
+    ] {
+        assert_process_observation_wire_contract(RemoteProcessObservationItem::Gap {
+            process_id: lash_sansio::ProcessId::from("process:wire"),
+            incarnation: 1,
+            requested_cursor: Some("lashpc1:old:1:0:process:wire".to_string()),
+            latest_cursor: None,
+            projection: RemoteProcessObservationProjection {
+                graph: None,
+                completeness: RemoteProcessObservationCompleteness::Incomplete { reason },
+            },
+            reason,
+        });
+    }
+}
+
 #[test]
 fn streamed_llm_request_round_trips_and_gates_version() {
     assert_streamed_envelope_contract(

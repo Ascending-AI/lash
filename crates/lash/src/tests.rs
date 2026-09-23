@@ -5,10 +5,10 @@ use crate::support::{
     ProcessExecutionEnvStore, ProcessRegistry, PromptContribution, PromptLayerSink, PromptSlot,
     PromptTemplate, ProviderHandle, Result, RunActivityCollector, RuntimeHostConfig,
     RuntimeSessionState, ScopedEffectController, SelectedQueuedWorkDrainRefusalCause, SessionError,
-    SessionObservationSubscription, SessionProcessEventKind, SessionResume, SessionSpec,
-    SessionStoreFactory, StaticPluginFactory, StdMutex, TestLocalProcessRegistry, ToolProvider,
-    TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport,
-    async_trait, message_text,
+    SessionObservationSubscription, SessionResume, SessionSpec, SessionStoreFactory,
+    StaticPluginFactory, StdMutex, TestLocalProcessRegistry, ToolProvider, TurnActivity,
+    TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport, async_trait,
+    message_text,
 };
 use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
@@ -26,7 +26,8 @@ use lash_core::llm::types::{
     LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, ResponseTextMeta,
 };
 use lash_core::{
-    LlmOutputPart, SessionExecutionLeaseObservation, StoreError, ToolDefinitionBindingExt,
+    LlmOutputPart, SessionExecutionLeaseObservation, SessionProcessEventKind, StoreError,
+    ToolDefinitionBindingExt,
 };
 use tokio::sync::{Mutex as TokioMutex, oneshot};
 
@@ -2210,7 +2211,7 @@ fn checkpoint_gated_provider(
         .into_handle()
 }
 
-fn standard_core() -> LashCore {
+pub(crate) fn standard_core() -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
         .provider(mock_provider())
         .model(mock_model_spec())

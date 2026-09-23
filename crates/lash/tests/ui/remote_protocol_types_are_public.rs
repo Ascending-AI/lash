@@ -79,7 +79,9 @@ fn main() {
     };
     let _process =
         lash::remote::observations::RemoteSessionObservationEventPayload::ProcessChanged {
-            kind: lash::remote::observations::RemoteSessionProcessEventKind::Started,
+            kind: lash::remote::observations::RemoteSessionProcessEventKind::Started {
+                sequence: 1,
+            },
             process_ids: vec![ProcessId::from("process")],
         };
 

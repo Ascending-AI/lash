@@ -1,0 +1,60 @@
+{
+  "$id": "https://lash.dev/schemas/remote-process-events-request/v90",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "ProcessEventQueryMode": {
+      "description": "Payload projection selected for a bounded process-event page.",
+      "oneOf": [
+        {
+          "description": "Return the complete durable event, including its JSON payload.",
+          "enum": [
+            "full"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Return only the event ordering position and type.",
+          "enum": [
+            "lite"
+          ],
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "continuation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "incarnation": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "limit": {
+      "format": "uint",
+      "minimum": 1.0,
+      "type": "integer"
+    },
+    "mode": {
+      "$ref": "#/definitions/ProcessEventQueryMode"
+    },
+    "process_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "incarnation",
+    "limit",
+    "mode",
+    "process_id"
+  ],
+  "title": "RemoteProcessEventsRequest",
+  "type": "object",
+  "x-lash-schema-version": 90,
+  "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
+}

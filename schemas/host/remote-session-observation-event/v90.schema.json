@@ -1,0 +1,2760 @@
+{
+  "$id": "https://lash.dev/schemas/remote-session-observation-event/v90",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "EffectAddress": {
+      "description": "Canonical address of one admitted runtime effect.",
+      "properties": {
+        "execution_scope": {
+          "$ref": "#/definitions/ExecutionScope"
+        },
+        "replay_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_scope",
+        "replay_key"
+      ],
+      "type": "object"
+    },
+    "ExecutionScope": {
+      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic work begins. Its journal encoding is an existing durable contract; effect addresses compose it with a replay key without changing those bytes.",
+      "oneOf": [
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "process"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "drain_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "queue_drain"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "drain_id",
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "session_delete"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "runtime_operation"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FailureCode": {
+      "type": "string"
+    },
+    "RemoteAttachmentRef": {
+      "properties": {
+        "byte_len": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "type_metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteAttachmentTypeMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "byte_len",
+        "id",
+        "media_type"
+      ],
+      "type": "object"
+    },
+    "RemoteAttachmentSource": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "data_base64": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "inline"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data_base64",
+            "media_type",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attachment_ref": {
+              "$ref": "#/definitions/RemoteAttachmentRef"
+            },
+            "source": {
+              "enum": [
+                "stored"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "attachment_ref",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "external_url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "media_type",
+            "source",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_scope": {
+              "$ref": "#/definitions/RemoteProviderFileScope"
+            },
+            "source": {
+              "enum": [
+                "provider_file"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "provider_scope",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteAttachmentTypeMetadata": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteAttemptOutcome": {
+      "enum": [
+        "completed",
+        "failed",
+        "aborted",
+        "interrupted"
+      ],
+      "type": "string"
+    },
+    "RemoteAttemptRecord": {
+      "properties": {
+        "duration_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteNormalizedError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteExecutionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation_disposition": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ordinal": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "outcome": {
+          "$ref": "#/definitions/RemoteAttemptOutcome"
+        },
+        "protocol_position": {
+          "$ref": "#/definitions/RemoteProtocolPosition"
+        },
+        "retry_budget_consumed": {
+          "type": "boolean"
+        },
+        "retry_decision": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteRetryDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usage_disposition": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteAttemptUsageDisposition"
+            }
+          ],
+          "description": "Whether `usage` was provider-reported or the attempt ended before the provider's usage arrived (ADR 0031). Absent means reported."
+        }
+      },
+      "required": [
+        "duration_ms",
+        "ordinal",
+        "outcome",
+        "protocol_position",
+        "retry_budget_consumed",
+        "started_at_ms"
+      ],
+      "type": "object"
+    },
+    "RemoteAttemptUsageDisposition": {
+      "description": "Wire mirror of [`lash_core::AttemptUsageDisposition`].",
+      "enum": [
+        "reported",
+        "unreported_by_provider",
+        "unreported_after_abort",
+        "unreported_after_failure"
+      ],
+      "type": "string"
+    },
+    "RemoteCausalRef": {
+      "oneOf": [
+        {
+          "properties": {
+            "session_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/EffectAddress"
+            },
+            "type": {
+              "enum": [
+                "effect"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "address",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool_call"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "process"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "process_event"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "process_id",
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "occurrence_id": {
+              "type": "string"
+            },
+            "subscription_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subscription_incarnation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subscription_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "trigger_occurrence"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "occurrence_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "node_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "session_node"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "node_id",
+            "session_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteCellFailure": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/RemoteCellFailureKind"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message"
+      ],
+      "type": "object"
+    },
+    "RemoteCellFailureKind": {
+      "enum": [
+        "policy",
+        "program",
+        "host"
+      ],
+      "type": "string"
+    },
+    "RemoteExecutionEvidence": {
+      "properties": {
+        "collection_interruption": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteExecutionEvidenceCollectionInterruption"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_finish_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_request_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_response_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoning_output_tokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "served_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RemoteExecutionEvidenceCollectionInterruption": {
+      "enum": [
+        "protocol_abort"
+      ],
+      "type": "string"
+    },
+    "RemoteGenerationOptionOutcome": {
+      "description": "Mirror of the core `GenerationOptionOutcome`.",
+      "enum": [
+        "not_requested",
+        "applied",
+        "suppressed_protocol_owned",
+        "omitted_unsupported",
+        "omitted_sampling_pinned",
+        "clamped_to_capacity"
+      ],
+      "type": "string"
+    },
+    "RemoteGenerationReceipt": {
+      "additionalProperties": false,
+      "description": "Mirror of the core `GenerationReceipt`: the adapter-reported fate of a request's generation and prompt-cache intent, so a remote host can tell an honored repeatability request from a silently dropped one.",
+      "properties": {
+        "cache": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
+        "output_token_cap": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
+        "seed": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
+        "stop_sequences": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
+        "temperature": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        }
+      },
+      "type": "object"
+    },
+    "RemoteLlmCallRecord": {
+      "description": "Wire mirror of one logical LLM call and every provider attempt it consumed.",
+      "properties": {
+        "attempts": {
+          "items": {
+            "$ref": "#/definitions/RemoteAttemptRecord"
+          },
+          "type": "array"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replay_drops": {
+          "items": {
+            "$ref": "#/definitions/RemoteProviderReplayDrop"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "attempts",
+        "call_id"
+      ],
+      "type": "object"
+    },
+    "RemoteMessageOrigin": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "plugin"
+              ],
+              "type": "string"
+            },
+            "plugin_id": {
+              "type": "string"
+            },
+            "transient": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "plugin_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "caused_by": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RemoteCausalRef"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "event_type": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "process"
+              ],
+              "type": "string"
+            },
+            "process_id": {
+              "type": "string"
+            },
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "wake_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "event_type",
+            "kind",
+            "process_id",
+            "sequence"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "input_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "turn_input"
+              ],
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "turn_output"
+              ],
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/definitions/RemoteTurnOutputSource"
+            },
+            "turn_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "source",
+            "turn_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteMessageRole": {
+      "enum": [
+        "User",
+        "Assistant",
+        "System",
+        "Event"
+      ],
+      "type": "string"
+    },
+    "RemoteNormalizedError": {
+      "properties": {
+        "class": {
+          "type": "string"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FailureCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The attempt's namespaced failure code (`<namespace>:<spelling>`). Pre-cutover rows carried `provider_code`/`adapter_code`/`refusal_code` columns instead; they decode with `code: None`."
+        },
+        "http_status": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "provider_request_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retry_after_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "class"
+      ],
+      "type": "object"
+    },
+    "RemotePart": {
+      "additionalProperties": false,
+      "properties": {
+        "attachment": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemotePartAttachment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/RemotePartKind"
+        },
+        "reasoning_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteProviderReasoningReplay"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "response_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteResponseTextMeta"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool_call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_replay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteProviderReplayMeta"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "content",
+        "id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "RemotePartAttachment": {
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/RemoteAttachmentSource"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "RemotePartKind": {
+      "enum": [
+        "Text",
+        "Attachment",
+        "Code",
+        "Output",
+        "Error",
+        "Prose",
+        "ToolCall",
+        "ToolResult",
+        "Reasoning"
+      ],
+      "type": "string"
+    },
+    "RemotePluginMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteMessageOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/definitions/RemotePart"
+          },
+          "type": "array"
+        },
+        "role": {
+          "$ref": "#/definitions/RemoteMessageRole"
+        }
+      },
+      "required": [
+        "parts",
+        "role"
+      ],
+      "type": "object"
+    },
+    "RemoteProtocolPosition": {
+      "enum": [
+        "no_response",
+        "response_observed",
+        "output_started",
+        "terminal_observed"
+      ],
+      "type": "string"
+    },
+    "RemoteProviderFileScope": {
+      "properties": {
+        "credential_scope": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "credential_scope",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "RemoteProviderReasoningReplay": {
+      "properties": {
+        "encrypted_content": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteProviderRouteIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact LLM Provider route that minted the reasoning replay state."
+        },
+        "redacted": {
+          "type": "boolean"
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RemoteProviderReplayDrop": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/RemoteProviderReplayKind"
+        },
+        "minting_route": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteProviderRouteIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "$ref": "#/definitions/RemoteProviderReplayDropReason"
+        },
+        "serving_route": {
+          "$ref": "#/definitions/RemoteProviderRouteIdentity"
+        }
+      },
+      "required": [
+        "kind",
+        "reason",
+        "serving_route"
+      ],
+      "type": "object"
+    },
+    "RemoteProviderReplayDropReason": {
+      "enum": [
+        "unstamped",
+        "foreign_route"
+      ],
+      "type": "string"
+    },
+    "RemoteProviderReplayKind": {
+      "enum": [
+        "response_text",
+        "reasoning",
+        "tool_call"
+      ],
+      "type": "string"
+    },
+    "RemoteProviderReplayMeta": {
+      "properties": {
+        "item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "opaque": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteProviderRouteIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact LLM Provider route that minted the opaque replay state."
+        }
+      },
+      "type": "object"
+    },
+    "RemoteProviderRouteIdentity": {
+      "description": "Exact configured LLM Provider route that owns opaque replay state.",
+      "properties": {
+        "endpoint": {
+          "description": "Stable routing metadata, not a secret-bearing URL. LLM Provider endpoints reject URL userinfo; paths and query strings remain visible in remote envelopes and traces and therefore must not carry secrets.",
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "endpoint",
+        "model",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "RemoteQueuedWorkClaimBoundary": {
+      "enum": [
+        "active_turn_checkpoint",
+        "idle"
+      ],
+      "type": "string"
+    },
+    "RemoteResponseTextMeta": {
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteProviderRouteIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider_payload": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RemoteRetryDecision": {
+      "properties": {
+        "delay_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scheduled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scheduled"
+      ],
+      "type": "object"
+    },
+    "RemoteSessionProcessEventKind": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "waiting"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "resumed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "cancel_requested"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "abandon_requested"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "caller_departed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "cancelled"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "abandoned"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "sequence",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteSessionQueueEventKind": {
+      "enum": [
+        "enqueued",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "RemoteToolIntentExecutionOutcome": {
+      "oneOf": [
+        {
+          "properties": {
+            "identity": {
+              "$ref": "#/definitions/RemoteToolIntentIdentity"
+            },
+            "kind": {
+              "$ref": "#/definitions/RemoteToolIntentKind"
+            },
+            "result": true,
+            "status": {
+              "enum": [
+                "executed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "identity",
+            "kind",
+            "result",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "identity": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RemoteToolIntentIdentity"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "intent_index": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "$ref": "#/definitions/RemoteToolIntentKind"
+            },
+            "refusal": {
+              "$ref": "#/definitions/RemoteToolIntentRefusalReason"
+            },
+            "status": {
+              "enum": [
+                "refused"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "intent_index",
+            "kind",
+            "refusal",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "refusal": {
+              "$ref": "#/definitions/RemoteToolIntentRefusalReason"
+            },
+            "status": {
+              "enum": [
+                "protocol_refused"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteToolIntentIdentity": {
+      "properties": {
+        "execution_scope_id": {
+          "type": "string"
+        },
+        "intent_index": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "minting_emission_replay_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replay_key": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tool_call_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_scope_id",
+        "intent_index",
+        "replay_key",
+        "session_id",
+        "tool_call_id"
+      ],
+      "type": "object"
+    },
+    "RemoteToolIntentKind": {
+      "description": "Wire mirror of the core tool-intent kind set.\n\nDeliberately spelled out rather than generated from `lash_sansio::tool_intent_variants!`: the version-bump gate projects this enum's literal text, so generating it would move the variant list out of the `REMOTE_PROTOCOL_VERSION` guard's sight. The two `From` impls in `core_conversions::turn_result` are generated from that list instead, so a variant added to the core set fails to compile until it is added here and the wire version is bumped (FIG-2994).",
+      "enum": [
+        "start_process",
+        "signal_process",
+        "cancel_process",
+        "emit_process_event",
+        "emit_trigger",
+        "register_process_definition",
+        "register_trigger"
+      ],
+      "type": "string"
+    },
+    "RemoteToolIntentRefusalReason": {
+      "oneOf": [
+        {
+          "properties": {
+            "reason": {
+              "enum": [
+                "unsupported_protocol_version"
+              ],
+              "type": "string"
+            },
+            "recorded": {
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "reason",
+            "recorded"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "enum": [
+                "missing_tool_call_id"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "enum": [
+                "intent_index_overflow"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "actual": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maximum": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "reason": {
+              "enum": [
+                "count_budget_exceeded"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "actual",
+            "maximum",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "actual": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maximum": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "reason": {
+              "enum": [
+                "canonical_byte_budget_exceeded"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "actual",
+            "maximum",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "actual": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "$ref": "#/definitions/RemoteToolIntentKind"
+            },
+            "maximum": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "reason": {
+              "enum": [
+                "per_kind_budget_exceeded"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "actual",
+            "kind",
+            "maximum",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "expected": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "session_mismatch"
+              ],
+              "type": "string"
+            },
+            "recorded": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected",
+            "reason",
+            "recorded"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "command_failed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "enum": [
+                "minting_group_child_cancelled"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteTurnActivity": {
+      "oneOf": [
+        {
+          "properties": {
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "protocol_iteration": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "model_request_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "protocol_iteration",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "block": {
+              "$ref": "#/definitions/StreamBlockIdentity"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "assistant_prose_delta"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "block",
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "block": {
+              "$ref": "#/definitions/StreamBlockIdentity"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "reasoning_delta"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "block",
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "block": {
+              "$ref": "#/definitions/StreamBlockIdentity"
+            },
+            "kind": {
+              "$ref": "#/definitions/StreamBlockKind"
+            },
+            "type": {
+              "enum": [
+                "stream_block_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "block",
+            "kind",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "block": {
+              "$ref": "#/definitions/StreamBlockIdentity"
+            },
+            "kind": {
+              "$ref": "#/definitions/StreamBlockKind"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "stream_block_completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "block",
+            "kind",
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "assistant_prose_correlation_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "reasoning_correlation_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "model_attempt_reset"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "assistant_prose_correlation_ids",
+            "reasoning_correlation_ids",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "record": {
+              "$ref": "#/definitions/RemoteLlmCallRecord"
+            },
+            "type": {
+              "enum": [
+                "model_call_recorded"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "record",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "graph_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "code_block_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "language",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RemoteCellFailure"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "graph_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language": {
+              "type": "string"
+            },
+            "output": {
+              "type": "string"
+            },
+            "success": {
+              "type": "boolean"
+            },
+            "tool_call_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "code_block_completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "duration_ms",
+            "language",
+            "output",
+            "success",
+            "tool_call_ids",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": true,
+            "call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "graph_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "parent_call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "tool_call_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "args",
+            "name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": true,
+            "call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "graph_key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "output": true,
+            "parent_call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "tool_call_completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "args",
+            "duration_ms",
+            "name",
+            "output",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "outcome": {
+              "$ref": "#/definitions/RemoteToolIntentExecutionOutcome"
+            },
+            "type": {
+              "enum": [
+                "tool_intent_outcome"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "outcome",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "final_value"
+              ],
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool_value"
+              ],
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "tool_name",
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "cumulative": {
+              "$ref": "#/definitions/RemoteUsage"
+            },
+            "protocol_iteration": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "usage"
+              ],
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/definitions/RemoteUsage"
+            }
+          },
+          "required": [
+            "cumulative",
+            "protocol_iteration",
+            "type",
+            "usage"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "attempt": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "max_attempts": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "retry_status"
+              ],
+              "type": "string"
+            },
+            "wait_seconds": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "attempt",
+            "max_attempts",
+            "reason",
+            "type",
+            "wait_seconds"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "applications": {
+              "items": {
+                "$ref": "#/definitions/RemoteTurnInputApplication"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "turn_input_applied"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "applications",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "batch_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "boundary": {
+              "$ref": "#/definitions/RemoteQueuedWorkClaimBoundary"
+            },
+            "causes": {
+              "items": {
+                "$ref": "#/definitions/RemoteTurnCause"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "queued_work_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "batch_ids",
+            "boundary",
+            "causes",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "checkpoint": {
+              "$ref": "#/definitions/RemoteTurnInputCheckpoint"
+            },
+            "messages": {
+              "items": {
+                "$ref": "#/definitions/RemotePluginMessage"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "queued_messages_committed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "checkpoint",
+            "messages",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "event": true,
+            "plugin_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "plugin_runtime"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "plugin_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "error"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "message",
+            "type"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "correlation_id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "correlation_id",
+        "id",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "RemoteTurnCause": {
+      "properties": {
+        "event_type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/definitions/RemoteMessageOrigin"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_type",
+        "id",
+        "origin",
+        "text"
+      ],
+      "type": "object"
+    },
+    "RemoteTurnInputApplication": {
+      "description": "Stable identity proving an admitted input became canonical turn input.\n\nThis wire DTO intentionally contains no display text. `input_id` and `source_key` correlate to the admission receipt, while `turn_id` and `committed_message_id` identify the canonical conversation application.",
+      "properties": {
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RemoteTurnInputCheckpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "committed_message_id": {
+          "type": "string"
+        },
+        "input_id": {
+          "type": "string"
+        },
+        "source_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "committed_message_id",
+        "input_id",
+        "turn_id"
+      ],
+      "type": "object"
+    },
+    "RemoteTurnInputCheckpoint": {
+      "enum": [
+        "after_work",
+        "before_completion"
+      ],
+      "type": "string"
+    },
+    "RemoteTurnOutputSource": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "runtime"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "plugin"
+              ],
+              "type": "string"
+            },
+            "plugin_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "plugin_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "RemoteUsage": {
+      "properties": {
+        "cache_read_input_tokens": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "cache_write_input_tokens": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "reasoning_output_tokens": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cache_read_input_tokens",
+        "cache_write_input_tokens",
+        "input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens"
+      ],
+      "type": "object"
+    },
+    "StreamBlockIdentity": {
+      "description": "Provider-minted identity of one streamed output block.\n\nMinted by the provider adapter from provider facts: OpenAI `(item_id, summary_index)`, Anthropic content-block index, or a deterministic per-attempt ordinal for providers with no native notion. The id is opaque to hosts; ordering comes from `ordinal`, never from parsing `id`. Live and replayed streams emit identical identities.",
+      "properties": {
+        "id": {
+          "description": "Opaque provider-minted block key, stable within one response attempt.",
+          "type": "string"
+        },
+        "item_id": {
+          "description": "The reasoning or message item this block belongs to, when the provider has one. N blocks may share one item's replay material.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ordinal": {
+          "description": "Per-attempt block ordinal assigned by the provider adapter.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "ordinal"
+      ],
+      "type": "object"
+    },
+    "StreamBlockKind": {
+      "description": "Which render lane a streamed output block belongs to.\n\nA *block* is the unit a host renders: one OpenAI reasoning summary part, one Anthropic `thinking`/`text` content block, or one ordinal run of thought/text for providers with no native notion. Blocks name their owning reasoning item or message item when the provider has one; several blocks may share one item's replay material.",
+      "oneOf": [
+        {
+          "description": "Visible assistant prose.",
+          "enum": [
+            "assistant_text"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Reasoning summary (\"thinking\") text, kept separate from assistant response text.",
+          "enum": [
+            "reasoning"
+          ],
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "activity": {
+          "$ref": "#/definitions/RemoteTurnActivity"
+        },
+        "type": {
+          "enum": [
+            "turn_activity"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "activity",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "committed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "resident_changed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "frame_id": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "agent_frame_switched"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame_id",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "batch_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/definitions/RemoteSessionQueueEventKind"
+        },
+        "type": {
+          "enum": [
+            "queue_changed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "batch_ids",
+        "kind",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/RemoteSessionProcessEventKind"
+        },
+        "process_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "enum": [
+            "process_changed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "process_ids",
+        "type"
+      ],
+      "type": "object"
+    }
+  ],
+  "properties": {
+    "cursor": {
+      "type": "string"
+    },
+    "replay_incarnation_id": {
+      "type": "string"
+    },
+    "revision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "turn_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "cursor",
+    "replay_incarnation_id",
+    "revision",
+    "session_id"
+  ],
+  "title": "RemoteSessionObservationEvent",
+  "type": "object",
+  "x-lash-schema-version": 90,
+  "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
+}

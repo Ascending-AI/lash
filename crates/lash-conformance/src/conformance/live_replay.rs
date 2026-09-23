@@ -292,7 +292,7 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
         revision,
         None,
         SessionObservationEventPayload::ProcessChanged {
-            kind: SessionProcessEventKind::Started,
+            kind: SessionProcessEventKind::Started { sequence: 1 },
             process_ids: vec![ProcessId::from("proc-b".to_string())],
         },
     )
@@ -344,7 +344,7 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
 
     let replay_b =
         expect_live_replay_replayed(store.replay_after_cursor(&start_b), "session-b replay");
-    assert_live_replay_labels(&replay_b, &["process:Started:proc-b"]);
+    assert_live_replay_labels(&replay_b, &["process:Started { sequence: 1 }:proc-b"]);
 
     let tail_a = store.current_cursor(&SessionId::from("session-a"), SessionRevision::new(9));
     let replay_from_tail = expect_live_replay_replayed(

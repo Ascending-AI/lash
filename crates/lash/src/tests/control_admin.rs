@@ -1,6 +1,7 @@
 use super::*;
 use lash_core::{
-    ProcessEventLogTestSupport as _, ProcessObserverRegistry as _, SessionCommitStore as _,
+    ProcessEventLog as _, ProcessEventLogTestSupport as _, ProcessObserverRegistry as _,
+    ProcessQuery as _, SessionCommitStore as _,
 };
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -656,24 +657,259 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             native_process_scope(process_id),
         )
         .await?;
+    core.env
+        .process_registry()
+        .expect("watched registry")
+        .complete_process(
+            &ProcessId::from(process_id),
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
+                lash_core::ToolCancellation::runtime("cancelled by test worker"),
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key(process_id),
+        )
+        .await?;
 
     let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor)? else {
         panic!("recent cursor should replay process observation events");
     };
-    assert!(events.iter().any(|event| matches!(
-        &event.payload,
-        lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
-            if *kind == SessionProcessEventKind::Started
-                && process_ids.len() == 1
-                && process_ids[0] == process_id
-    )));
-    assert!(events.iter().any(|event| matches!(
-        &event.payload,
-        lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
-            if *kind == SessionProcessEventKind::Cancelled
-                && process_ids.len() == 1
-                && process_ids[0] == process_id
-    )));
+    let durable = registry
+        .recent_events(&ProcessId::from(process_id), 128)
+        .await?;
+    let current = registry
+        .get_process(&ProcessId::from(process_id))
+        .await?
+        .expect("current process");
+    let page_request = lash_remote_protocol::RemoteProcessEventsRequest {
+        process_id: ProcessId::from(process_id),
+        incarnation: current.incarnation.registration_sequence(),
+        limit: std::num::NonZeroUsize::new(128).expect("nonzero"),
+        mode: lash_core::ProcessEventQueryMode::Lite,
+        continuation: None,
+    };
+    assert!(matches!(
+        core.processes().events_remote(&page_request).await?.outcome,
+        lash_core::ProcessEventReadOutcome::Retained(_)
+    ));
+    let retired_request = lash_remote_protocol::RemoteProcessEventsRequest {
+        incarnation: page_request.incarnation + 1,
+        ..page_request
+    };
+    assert!(matches!(
+        core.processes().events_remote(&retired_request).await?.outcome,
+        lash_core::ProcessEventReadOutcome::NoLongerRetained(
+            lash_core::ProcessEventHistoryRetention::Retired {
+                requested_incarnation,
+                current_incarnation,
+            }
+        ) if requested_incarnation.registration_sequence() == retired_request.incarnation
+            && current_incarnation == current.incarnation
+    ));
+    let reused_id = ProcessId::from("remote-paged-reused");
+    let registration = || {
+        lash_core::ProcessRegistration::new(
+            reused_id.clone(),
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        )
+    };
+    let registry_port = core
+        .env
+        .process_registry()
+        .cloned()
+        .expect("watched registry");
+    let old = registry_port.register_process(registration()).await?;
+    registry_port
+        .complete_process(
+            &reused_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await?;
+    registry_port
+        .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await?;
+    let successor = registry_port.register_process(registration()).await?;
+    assert_ne!(old.incarnation, successor.incarnation);
+    let old_request = lash_remote_protocol::RemoteProcessEventsRequest {
+        process_id: reused_id,
+        incarnation: old.incarnation.registration_sequence(),
+        limit: std::num::NonZeroUsize::MIN,
+        mode: lash_core::ProcessEventQueryMode::Full,
+        continuation: None,
+    };
+    assert!(matches!(
+        core.processes().events_remote(&old_request).await?.outcome,
+        lash_core::ProcessEventReadOutcome::NoLongerRetained(
+            lash_core::ProcessEventHistoryRetention::Retired {
+                requested_incarnation,
+                current_incarnation,
+            }
+        ) if requested_incarnation == old.incarnation
+            && current_incarnation == successor.incarnation
+    ));
+    let lifecycle = durable
+        .iter()
+        .filter_map(|event| {
+            SessionProcessEventKind::from_durable_event(&event.event_type, event.sequence)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(
+            lifecycle.as_slice(),
+            [
+                SessionProcessEventKind::CancelRequested { sequence: first },
+                SessionProcessEventKind::Cancelled { sequence: second }
+            ] if first < second
+        ),
+        "cancel must publish the exact ordered durable lifecycle: {lifecycle:?}"
+    );
+    let observed = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
+                if process_ids.as_slice() == [ProcessId::from(process_id)] =>
+            {
+                Some(*kind)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        observed, lifecycle,
+        "the session stream carries exactly the durable lifecycle, in order, with its sequences"
+    );
+    let terminal_cursor = session.observe().current_observation().cursor;
+    let external_registration = |id: &ProcessId| {
+        lash_core::ProcessRegistration::new(
+            id.clone(),
+            lash_core::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            lash_core::RecoveryContract::ExternallyOwned,
+            lash_core::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        )
+    };
+    let session_observer = SessionId::from("process-observation-events");
+    let failed_id = ProcessId::from("observed-failed-process");
+    registry_port
+        .register_process_with_observers(
+            external_registration(&failed_id),
+            std::slice::from_ref(&session_observer),
+        )
+        .await?;
+    registry_port
+        .complete_process(
+            &failed_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
+                lash_core::ToolFailure::runtime(
+                    lash_core::ToolFailureClass::Execution,
+                    "test_failure",
+                    "process failed",
+                ),
+            )),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await?;
+    let abandoned_id = ProcessId::from("observed-abandoned-process");
+    registry_port
+        .register_process_with_observers(
+            external_registration(&abandoned_id),
+            std::slice::from_ref(&session_observer),
+        )
+        .await?;
+    core.processes()
+        .request_abandon(&abandoned_id, "test operator", None)
+        .await?;
+    registry_port
+        .complete_process(
+            &abandoned_id,
+            lash_core::ProcessAwaitOutput::Abandoned {
+                evidence: Box::new(lash_core::AbandonEvidence {
+                    writer: lash_core::AbandonWriter::ReconciledRequest,
+                    owner: None,
+                    epoch_ms: crate::process_admin::now_epoch_ms(),
+                }),
+                control: None,
+            },
+            lash_core::ProcessCompletionAuthority::ReconciledAbandon,
+        )
+        .await?;
+    let departed_id = ProcessId::from("observed-caller-departed-process");
+    registry_port
+        .register_process_with_observers(
+            external_registration(&departed_id),
+            std::slice::from_ref(&session_observer),
+        )
+        .await?;
+    registry_port.record_caller_departure(&departed_id).await?;
+    let SessionResume::Replayed {
+        events: terminal_events,
+    } = session.observe().resume_from_cursor(&terminal_cursor)?
+    else {
+        panic!("terminal transitions should replay")
+    };
+    for (id, expected_shape) in [
+        (&failed_id, "failed"),
+        (&abandoned_id, "abandoned"),
+        (&departed_id, "caller_departed"),
+    ] {
+        let durable = registry.recent_events(id, 128).await?;
+        let expected = durable
+            .iter()
+            .filter_map(|event| {
+                SessionProcessEventKind::from_durable_event(&event.event_type, event.sequence)
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            match expected_shape {
+                "failed" => matches!(
+                    expected.as_slice(),
+                    [SessionProcessEventKind::Failed { .. }]
+                ),
+                "abandoned" => matches!(
+                    expected.as_slice(),
+                    [
+                        SessionProcessEventKind::AbandonRequested { .. },
+                        SessionProcessEventKind::Abandoned { .. },
+                    ]
+                ),
+                "caller_departed" => matches!(
+                    expected.as_slice(),
+                    [SessionProcessEventKind::CallerDeparted { .. },]
+                ),
+                _ => false,
+            },
+            "unexpected {expected_shape} durable lifecycle: {expected:?}"
+        );
+        let observed = terminal_events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
+                    if process_ids.as_slice() == std::slice::from_ref(id) =>
+                {
+                    Some(*kind)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(observed, expected, "{expected_shape} stream sequence");
+    }
+    assert_eq!(core.process_lifecycle_feed.route_count(), 1);
+    drop(session);
+    assert_eq!(core.process_lifecycle_feed.route_count(), 0);
     Ok(())
 }
 

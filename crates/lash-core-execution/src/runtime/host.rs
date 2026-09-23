@@ -37,6 +37,7 @@ pub struct RuntimeHostConfig {
     pub prompt: RuntimePromptConfig,
     pub control: RuntimeControlConfig,
     pub tracing: RuntimeTracingConfig,
+    process_observation_sink: Option<Arc<dyn TraceSink>>,
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     /// Injected time source. Durable timestamps and timeout/backoff logic read
     /// this rather than the OS clock directly, so replay is reproducible and
@@ -200,6 +201,7 @@ impl RuntimeHostConfig {
                 trace_level: TraceLevel::Standard,
                 trace_context: TraceContext::default(),
             },
+            process_observation_sink: None,
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             clock: Arc::new(super::SystemClock),
         }
@@ -274,6 +276,10 @@ impl crate::plugin::ProcessEngineContributionTarget for RuntimeHostConfig {
         &self.tracing.trace_context
     }
 
+    fn process_observation_sink(&self) -> Option<Arc<dyn TraceSink>> {
+        self.process_observation_sink.clone()
+    }
+
     fn install_contributed_process_engine(
         &mut self,
         registration: crate::ProcessEngineRegistration,
@@ -284,6 +290,10 @@ impl crate::plugin::ProcessEngineContributionTarget for RuntimeHostConfig {
 }
 
 impl RuntimeHostConfig {
+    pub fn with_process_observation_sink(mut self, sink: Arc<dyn TraceSink>) -> Self {
+        self.process_observation_sink = Some(sink);
+        self
+    }
     /// Replace the lease timing capability governing every durable lease and
     /// claim this runtime takes.
     pub fn with_lease_timings(mut self, lease_timings: crate::LeaseTimings) -> Self {

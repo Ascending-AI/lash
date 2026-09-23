@@ -11,7 +11,8 @@ use crate::runtime::process::ProcessWorkerFault;
 /// # Contract
 ///
 /// - **Best-effort freshness, never truth.** The decorator installed by
-///   [`super::watch_process_registry_with_sink`] calls [`emit`](Self::emit)
+///   [`super::watch_process_registry_with_sink`] or attached through
+///   [`super::WatchedRegistry::add_event_sink`] calls [`emit`](Self::emit)
 ///   after a successful `append_event`, in that pod's per-process append order.
 ///   There is no buffering, no retry, and no delivery guarantee across pod
 ///   crashes or restarts: an event that was appended durably may never reach

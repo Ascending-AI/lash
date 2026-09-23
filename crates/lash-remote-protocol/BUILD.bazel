@@ -58,6 +58,60 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "remote_schema_generator__bin",
+    crate_features = [
+        "core-conversions",
+        "default",
+    ],
+    crate_name = "remote_schema_generator",
+    crate_root = "src/bin/remote_schema_generator.rs",
+    declared_features = [
+        "core-conversions",
+        "default",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":lash-remote-protocol",
+    library_crate_name = "lash_remote_protocol",
+    manifest_dir = "crates/lash-remote-protocol",
+    package_name = "lash-internal-remote-protocol",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_unit_test(
+    name = "remote_schema_generator__bin__unit_test",
+    crate_features = [
+        "core-conversions",
+        "default",
+    ],
+    crate_name = "remote_schema_generator",
+    crate_root = "src/bin/remote_schema_generator.rs",
+    declared_features = [
+        "core-conversions",
+        "default",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    library = ":lash-remote-protocol",
+    library_crate_name = "lash_remote_protocol",
+    manifest_dir = "crates/lash-remote-protocol",
+    package_name = "lash-internal-remote-protocol",
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+load("//tools/bazel:test_batch.bzl", "lash_batch_test")
+
+lash_batch_test(
+    name = "test_batch",
+    tests = [
+        ":lash-remote-protocol__unit_test",
+        ":remote_schema_generator__bin__unit_test",
+    ],
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
@@ -73,6 +127,7 @@ filegroup(
 # tools/bazel/feature_variants.py.
 load(
     "//tools/bazel:lash_rust.bzl",
+    "lash_rust_feature_binary",
     "lash_rust_feature_library",
     "lash_rust_feature_test",
 )
@@ -140,7 +195,7 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587"},
+    variant_deps = {"//crates/lash-sansio": "//crates/lash-sansio:lash-sansio__fv_09d91587", "//crates/lash-trace": "//crates/lash-trace:lash-trace__fv_8edd6ab0"},
     version = "0.0.0-dev",
 )
 
@@ -254,6 +309,59 @@ lash_rust_feature_test(
     ],
     exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
     extra_compile_data = [],
+    manifest_dir = "crates/lash-remote-protocol",
+    package_name = "lash-internal-remote-protocol",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_5f940d7c", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_955befbe", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_4928b98d", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-memory": "//crates/lash-core-memory:lash-core-memory__fv_faedc8f6", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "remote_schema_generator__bin__fv_e76f1385",
+    crate_features = [
+        "core-conversions",
+        "default",
+    ],
+    crate_name = "remote_schema_generator",
+    crate_root = "src/bin/remote_schema_generator.rs",
+    declared_features = [
+        "core-conversions",
+        "default",
+    ],
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-remote-protocol:lash-remote-protocol__fv_e76f1385",
+    library_crate_name = "lash_remote_protocol",
+    manifest_dir = "crates/lash-remote-protocol",
+    package_name = "lash-internal-remote-protocol",
+    rustc_env = {},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core": "//crates/lash-core:lash-core__fv_5f940d7c", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_955befbe", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_4928b98d", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_83f0d150", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_9d830e2e", "//crates/lash-core-memory": "//crates/lash-core-memory:lash-core-memory__fv_faedc8f6", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_9128f003"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "remote_schema_generator__bin__unit_test__fv_e76f1385",
+    crate_features = [
+        "core-conversions",
+        "default",
+    ],
+    crate_name = "remote_schema_generator",
+    crate_root = "src/bin/remote_schema_generator.rs",
+    declared_features = [
+        "core-conversions",
+        "default",
+    ],
+    exec_properties = {"cpu_count": "4", "memory_kb": "4194304"},
+    extra_compile_data = [],
+    library = "//crates/lash-remote-protocol:lash-remote-protocol__fv_e76f1385",
+    library_crate_name = "lash_remote_protocol",
     manifest_dir = "crates/lash-remote-protocol",
     package_name = "lash-internal-remote-protocol",
     tags = [

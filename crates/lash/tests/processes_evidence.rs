@@ -369,11 +369,17 @@ fn processes_area_witnesses() {
     type_witness::<lash::observe::SessionProcessEventKind>();
     // W0092: lash::observe::SessionProcessEventKind::Cancelled [variant]
     variant_witness(|value: &lash::observe::SessionProcessEventKind| {
-        matches!(value, lash::observe::SessionProcessEventKind::Cancelled)
+        matches!(
+            value,
+            lash::observe::SessionProcessEventKind::Cancelled { .. }
+        )
     });
     // W0093: lash::observe::SessionProcessEventKind::Started [variant]
     variant_witness(|value: &lash::observe::SessionProcessEventKind| {
-        matches!(value, lash::observe::SessionProcessEventKind::Started)
+        matches!(
+            value,
+            lash::observe::SessionProcessEventKind::Started { .. }
+        )
     });
     // W0094: lash::persistence::LeaseOwnerIdentity::restate_process_execution [function]
     let _ = lash::persistence::LeaseOwnerIdentity::restate_process_execution(todo!(), "exec");

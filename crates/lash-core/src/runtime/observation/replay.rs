@@ -13,6 +13,8 @@ use futures_util::Stream;
 use tokio::sync::broadcast;
 use tokio_util::sync::ReusableBoxFuture;
 
+pub use super::process_lifecycle::SessionProcessEventKind;
+
 use crate::runtime::LashRuntime;
 use crate::runtime::RuntimeSessionState;
 
@@ -272,13 +274,6 @@ impl SessionObservationEvent {
 #[serde(rename_all = "snake_case")]
 pub enum SessionQueueEventKind {
     Enqueued,
-    Cancelled,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionProcessEventKind {
-    Started,
     Cancelled,
 }
 

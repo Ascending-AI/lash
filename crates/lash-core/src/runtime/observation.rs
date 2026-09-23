@@ -1,7 +1,7 @@
-use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
+mod process_lifecycle;
 pub(crate) mod replay;
 
 use crate::facade_support::ToolStateFacadeOps;
@@ -480,23 +480,6 @@ impl RuntimeHandle {
                 SessionObservationEventPayload::QueueChanged { kind, batch_ids },
             )],
             "failed to publish queue observation event; reconnect may require gap recovery",
-        );
-    }
-
-    pub fn record_process_changed(
-        &self,
-        kind: SessionProcessEventKind,
-        process_ids: Vec<ProcessId>,
-    ) {
-        let observation = self.observe();
-        self.publish_live_events(
-            &SessionId::from(observation.session_id()),
-            observation.session_revision(),
-            vec![LiveReplayEventDraft::new(
-                None::<String>,
-                SessionObservationEventPayload::ProcessChanged { kind, process_ids },
-            )],
-            "failed to publish process observation event; reconnect may require gap recovery",
         );
     }
 

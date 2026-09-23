@@ -5,12 +5,16 @@ def _schema_documents_impl(ctx):
     args = ctx.actions.args()
     args.add(ctx.file.script.path)
     args.add("--generator", ctx.executable.generator.path)
+    tools = [ctx.attr.generator[DefaultInfo].files_to_run]
+    if ctx.attr.extra_generator:
+        args.add("--generator", ctx.executable.extra_generator.path)
+        tools.append(ctx.attr.extra_generator[DefaultInfo].files_to_run)
     args.add("--output", documents.path)
     ctx.actions.run_shell(
         command = 'exec /usr/bin/python3 "$@"',
         arguments = [args],
         inputs = [ctx.file.script],
-        tools = [ctx.attr.generator[DefaultInfo].files_to_run],
+        tools = tools,
         outputs = [documents],
         mnemonic = "SchemaGenerate",
         progress_message = "Generating schemas %{label}",
@@ -23,6 +27,7 @@ schema_documents = rule(
         # Keep the workspace's target configuration: an exec transition would
         # compile a second generator instead of using the ordinary binary.
         "generator": attr.label(executable = True, cfg = "target", mandatory = True),
+        "extra_generator": attr.label(executable = True, cfg = "target"),
         "script": attr.label(allow_single_file = [".py"], mandatory = True),
     },
 )

@@ -24,6 +24,7 @@ workspace = true
 lash-sansio = { workspace = true }
 base64 = { workspace = true }
 lash-core = { workspace = true, optional = true }
+lash-trace = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -32,6 +33,11 @@ thiserror = { workspace = true }
 [features]
 default = []
 core-conversions = ["dep:lash-core"]
+
+[[bin]]
+name = "remote_schema_generator"
+path = "src/bin/remote_schema_generator.rs"
+required-features = ["core-conversions"]
 
 [dev-dependencies]
 lash-core = { workspace = true, features = ["testing"] }

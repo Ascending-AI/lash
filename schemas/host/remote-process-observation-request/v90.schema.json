@@ -1,0 +1,30 @@
+{
+  "$id": "https://lash.dev/schemas/remote-process-observation-request/v90",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "description": "Start a process-scoped observation subscription at one publisher position.",
+  "properties": {
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "incarnation": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "process_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "incarnation",
+    "process_id"
+  ],
+  "title": "RemoteProcessObservationRequest",
+  "type": "object",
+  "x-lash-schema-version": 90,
+  "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
+}

@@ -1,9 +1,8 @@
 use crate::support::{
     Arc, CancellationToken, EmbedError, InputItem, LashCore, LashRuntime, PluginMessage,
     PromptContribution, PromptSlot, PromptTemplate, Result, RuntimeHandle, RuntimeSessionState,
-    ScopedEffectController, SessionError, SessionProcessEventKind, SessionStateService,
-    SessionToolAccess, ToolManifest, ToolProvider, ToolRestoreReport, ToolSourceHandle, ToolState,
-    TurnInput,
+    ScopedEffectController, SessionError, SessionStateService, SessionToolAccess, ToolManifest,
+    ToolProvider, ToolRestoreReport, ToolSourceHandle, ToolState, TurnInput,
 };
 pub(crate) use lash_core::facade_support::SessionConfigPatch;
 use lash_core::facade_support::{ToolRegistryFacadeOps, ToolStateFacadeOps};
@@ -719,10 +718,6 @@ impl SessionAdmin {
             .start_from_request(&session_id, request, scope)
             .await
             .map_err(EmbedError::Plugin)?;
-        self.runtime.record_process_changed(
-            SessionProcessEventKind::Started,
-            vec![summary.process_id.clone()],
-        );
         Ok(summary)
     }
 
@@ -758,10 +753,6 @@ impl SessionAdmin {
             .await
             .and_then(lash_core::ProcessCancelReceipt::from_record)
             .map_err(EmbedError::Plugin)?;
-        self.runtime.record_process_changed(
-            SessionProcessEventKind::Cancelled,
-            vec![summary.process_id.clone()],
-        );
         Ok(summary)
     }
 
@@ -782,13 +773,6 @@ impl SessionAdmin {
             .cancel_all_visible(&session_id, scope)
             .await
             .map_err(EmbedError::Plugin)?;
-        self.runtime.record_process_changed(
-            SessionProcessEventKind::Cancelled,
-            summaries
-                .iter()
-                .map(|summary| summary.process_id.clone())
-                .collect(),
-        );
         Ok(summaries)
     }
 
