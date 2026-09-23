@@ -35,6 +35,15 @@ pub const INSERT_COLUMNS_WITH_SEQ: &str = "enqueue_seq, input_id, session_id, so
 /// unbounded `input_json`; the full row is read back only on a match.
 pub const REPLAY_COLUMNS: &str = "input_id, submission_digest";
 
+/// The facts provisioned-id adoption consults (FIG-3513).
+///
+/// Narrow for the same reason [`REPLAY_COLUMNS`] is: whether a re-run of one
+/// acceptance adopts the row its id already names, or refuses a foreign one,
+/// depends only on the holder's session and admission-time digest, so deciding
+/// it never decodes the unbounded `input_json`; the full row is read back only
+/// on a match.
+pub const ADOPTION_COLUMNS: &str = "session_id, submission_digest";
+
 /// The facts the settlement verdict
 /// [`require_settleable_turn_input`](lash_core::store_backend_support::require_settleable_turn_input)
 /// consults, and nothing else.

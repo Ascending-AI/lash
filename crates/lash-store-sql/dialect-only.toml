@@ -3151,6 +3151,26 @@ kind = "operation exists on one backend only"
 reason = "The read half of the same fork as pending_turn_input.insert_or_adopt_existing."
 
 [[dialect_only]]
+statement = "pending_turn_input.insert_or_adopt_by_input_id"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+Provisioned-id adoption (FIG-3513). PostgreSQL cannot hold "read the absence,
+then insert" atomic under READ COMMITTED, so the conflict clause on `input_id`
+is what detects a concurrent re-run of the same acceptance and the no-op
+DO UPDATE is what makes RETURNING hand back the existing row, whose session and
+submission digest the caller then checks. SQLite reads the id's holder under
+the same write lock it inserts under (pending_turn_input.select_session_by_input_id)
+and has no counterpart.
+"""
+
+[[dialect_only]]
+statement = "pending_turn_input.select_session_by_input_id"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = "The read half of the same fork as pending_turn_input.insert_or_adopt_by_input_id."
+
+[[dialect_only]]
 statement = "pending_turn_input.select_by_id_for_update"
 backends = ["postgres"]
 kind = "FOR UPDATE"
