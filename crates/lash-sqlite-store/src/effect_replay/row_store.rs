@@ -1121,21 +1121,16 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             .map_err(effect_sqlite_error)
     }
 
-    async fn scope_is_quiescent(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<bool, RuntimeEffectControllerError> {
-        let scope_id = scope
-            .journal_identity()
-            .map_err(RuntimeEffectControllerError::from)?
-            .key()
-            .to_string();
-        let scope_json = serde_json::to_string(scope).map_err(|err| {
-            RuntimeEffectControllerError::new(
-                lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                format!("effect scope JSON encoding failed: {err}"),
+    async fn scope_is_quiescent(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
+        let read_error = |error: String| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                error,
             )
-        })?;
+        };
+        let scope_id = scope.journal_identity()?.key().to_string();
+        let scope_json =
+            serde_json::to_string(scope).map_err(|error| read_error(error.to_string()))?;
         self.conn
             .call(move |connection| {
                 let tx = connection.transaction()?;
@@ -1144,7 +1139,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 Ok(quiescent)
             })
             .await
-            .map_err(effect_sqlite_error)
+            .map_err(|error| read_error(error.to_string()))
     }
 
     async fn read_group_settlement(

@@ -907,26 +907,22 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .collect()
     }
 
-    async fn scope_is_quiescent(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<bool, RuntimeEffectControllerError> {
-        let scope_id = scope
-            .journal_identity()
-            .map_err(RuntimeEffectControllerError::from)?
-            .key()
-            .to_string();
-        let scope_json = serde_json::to_string(scope).map_err(|err| {
-            RuntimeEffectControllerError::new(
-                lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                format!("effect scope JSON encoding failed: {err}"),
+    async fn scope_is_quiescent(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
+        let read_error = |error: String| {
+            RuntimeError::new(
+                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                error,
             )
-        })?;
-        let mut tx = self.pool.begin().await.map_err(effect_store_error)?;
+        };
+        let scope_id = scope.journal_identity()?.key().to_string();
+        let scope_json =
+            serde_json::to_string(scope).map_err(|error| read_error(error.to_string()))?;
+        let sql_error = |error: sqlx::Error| read_error(error.to_string());
+        let mut tx = self.pool.begin().await.map_err(sql_error)?;
         let quiescent = scope_is_quiescent(&mut tx, &scope_id, &scope_json)
             .await
-            .map_err(effect_store_error)?;
-        tx.rollback().await.map_err(effect_store_error)?;
+            .map_err(sql_error)?;
+        tx.rollback().await.map_err(sql_error)?;
         Ok(quiescent)
     }
 
