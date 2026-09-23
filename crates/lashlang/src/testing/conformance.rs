@@ -323,6 +323,77 @@ pub async fn hostile_module_references_are_rejected(store: Arc<dyn LashlangArtif
     }
 }
 
+/// A cell that binds one main-level name and finishes with it; only the name
+/// varies, so two calls build alpha-variant modules.
+#[expect(
+    clippy::expect_used,
+    reason = "test-support fixture a #[test] fn calls; the clippy.toml exemptions reach #[test] fns, not this helper"
+)]
+fn alpha_variant_module_artifact(binding: &str) -> ModuleArtifact {
+    let program = builders::module(
+        vec![builders::process_returning(
+            "worker",
+            vec![builders::param("tick", TypeExpr::Str)],
+            TypeExpr::Bool,
+            builders::block(vec![builders::finish(builders::bool_lit(true))]),
+        )],
+        vec![
+            builders::assign(binding, builders::string("seed")),
+            builders::finish(builders::var(binding)),
+        ],
+    );
+    ModuleArtifact::from_program(program).expect("build alpha-variant module artifact")
+}
+
+/// L9 (FIG-3571): a module ref names exactly one byte string, alpha-variant
+/// cells publish under distinct refs without an immutability conflict, and a
+/// forged ref is refused.
+///
+/// The FIG-3120 pair is the witness: the perf guard's `spawnChild` cell and
+/// its high-traffic `loadChild` twin differ only in one binder name.
+#[expect(
+    clippy::expect_used,
+    reason = "artifact-store conformance law: each step's success is the law being asserted"
+)]
+pub async fn alpha_variants_publish_distinct_refs(store: Arc<dyn LashlangArtifactStore>) {
+    let owner = ArtifactOwner::host("alpha-variant-test");
+    let spawn_child = alpha_variant_module_artifact("spawnChild");
+    let load_child = alpha_variant_module_artifact("loadChild");
+    assert_ne!(
+        spawn_child.module_ref, load_child.module_ref,
+        "alpha-variant cells name distinct modules"
+    );
+    for artifact in [&spawn_child, &load_child, &spawn_child] {
+        store
+            .publish_module_artifact(&owner, artifact)
+            .await
+            .expect("an alpha variant and a republish both publish");
+    }
+    for artifact in [&spawn_child, &load_child] {
+        let stored = store
+            .get_module_artifact(&artifact.module_ref)
+            .await
+            .expect("the store reads back")
+            .expect("the published artifact is retained");
+        assert_eq!(
+            stored.to_store_bytes().expect("stored artifact encodes"),
+            artifact
+                .to_store_bytes()
+                .expect("published artifact encodes"),
+            "one module ref addresses one byte string"
+        );
+    }
+    let mut forged = load_child.clone();
+    forged.module_ref = spawn_child.module_ref.clone();
+    assert!(
+        store
+            .publish_module_artifact(&owner, &forged)
+            .await
+            .is_err(),
+        "a ref that does not hash its content is refused"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,6 +401,11 @@ mod tests {
 
     fn make() -> Arc<dyn LashlangArtifactStore> {
         Arc::new(InMemoryLashlangArtifactStore::new())
+    }
+
+    #[tokio::test]
+    async fn in_memory_alpha_variants_publish_distinct_refs() {
+        alpha_variants_publish_distinct_refs(make()).await;
     }
 
     #[tokio::test]

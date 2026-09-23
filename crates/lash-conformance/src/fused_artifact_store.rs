@@ -120,6 +120,14 @@ where
         .await;
 }
 
+pub async fn lashlang_alpha_variants_publish_distinct_refs<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    lashlang::testing::conformance::alpha_variants_publish_distinct_refs(make().open.artifacts)
+        .await;
+}
+
 pub async fn lashlang_artifact_survives_reopen<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,

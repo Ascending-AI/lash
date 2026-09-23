@@ -1461,6 +1461,7 @@ macro_rules! artifact_store_reopenable_tests {
             (lashlang_artifact_retirement_fences_late_publication, "lashlang-artifact-retirement-fence"),
             (lashlang_slow_writer_is_fenced_after_retirement, "lashlang-artifact-slow-writer"),
             (lashlang_hostile_module_references_are_rejected, "lashlang-artifact-hostile-reference"),
+            (lashlang_alpha_variants_publish_distinct_refs, "lashlang-artifact-alpha-variants"),
             (lashlang_artifact_survives_reopen, "lashlang-artifact-reopen"),
             (process_execution_env_store_fresh_instances, "process-env-fresh-instances"),
             (process_environment_namespace, "process-env-hostile-reference"),

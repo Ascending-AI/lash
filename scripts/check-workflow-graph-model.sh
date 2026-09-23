@@ -32,3 +32,71 @@ if ! grep -q 'workflow_graph_from_program' \
   echo "workflow graph model check failed: trace skeleton no longer projects WorkflowGraph" >&2
   exit 1
 fi
+
+# FIG-3571 (ADR 0100 R8): the IR crate and the process runtime stay
+# language-neutral. Neither the `lashlang` library nor the
+# `lash-lashlang-runtime` crate (library or tests) may reach a front-end crate
+# through its dependency graph; a front end depends on them, never the reverse.
+python3 - <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+FRONT_END_PACKAGES = {"lash-internal-typescript"}
+root = Path(".")
+workspace = tomllib.loads((root / "Cargo.toml").read_text())
+alias_to_path = {}
+for alias, spec in workspace.get("workspace", {}).get("dependencies", {}).items():
+    if isinstance(spec, dict) and "path" in spec:
+        alias_to_path[alias] = spec["path"]
+
+
+def manifest(path):
+    return tomllib.loads((root / path / "Cargo.toml").read_text())
+
+
+def package_name(path):
+    return manifest(path)["package"]["name"]
+
+
+def edges(path, tables):
+    data = manifest(path)
+    for table in tables:
+        for alias, spec in data.get(table, {}).items():
+            if isinstance(spec, dict) and spec.get("workspace"):
+                target = alias_to_path.get(alias)
+            elif isinstance(spec, dict) and "path" in spec:
+                target = str((Path(path) / spec["path"]).resolve().relative_to(root.resolve()))
+            else:
+                target = None
+            if target is not None:
+                yield target
+
+
+def reaches_front_end(start, tables):
+    seen, stack = set(), [(start, tables, [package_name(start)])]
+    while stack:
+        path, used_tables, trail = stack.pop()
+        for dependency in edges(path, used_tables):
+            name = package_name(dependency)
+            if name in FRONT_END_PACKAGES:
+                return trail + [name]
+            if dependency not in seen:
+                seen.add(dependency)
+                stack.append((dependency, ("dependencies",), trail + [name]))
+    return None
+
+
+failures = []
+for crate, tables in (
+    ("crates/lashlang", ("dependencies",)),
+    ("crates/lash-lashlang-runtime", ("dependencies", "dev-dependencies")),
+):
+    trail = reaches_front_end(crate, tables)
+    if trail:
+        failures.append(" -> ".join(trail))
+if failures:
+    for trail in failures:
+        print(f"workflow graph model check failed: language-neutral crate reaches a front end: {trail}", file=sys.stderr)
+    sys.exit(1)
+PY
