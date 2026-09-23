@@ -247,13 +247,13 @@ pub async fn queued_run_repaired_checkpoint_input_remains_deferred_after_settle(
 pub async fn queued_run_advance_repair_survives_later_terminal_settlement(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    queued_run_advance_repair_case(store, false).await;
+    Box::pin(queued_run_advance_repair_case(store, false)).await;
 }
 
 pub async fn queued_run_advance_repair_survives_host_terminal_settlement(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    queued_run_advance_repair_case(store, true).await;
+    Box::pin(queued_run_advance_repair_case(store, true)).await;
 }
 
 #[expect(
