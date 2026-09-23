@@ -323,6 +323,45 @@ lash_conformance::migrated_tools_redrive_tests!(
     }
 );
 
+// The FIG-3397 red-first anchor: before the cutover a Restate batch ran inside
+// one recorded effect with concurrency disabled, so the rendezvous could not
+// leave its first leaf. Each scenario's turn runs in a live handler, and its
+// batch is a durable effect group of child invocations. The process-bridge
+// producer drives its worker in the test process and stays on the in-process
+// tiers.
+lash_conformance::tool_batch_parallelism_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        // Restate state outlives a run: each run names its own sessions.
+        let prefix: &'static str =
+            Box::leak(format!("restate-tool-batch-{}", harness.run_nonce()).into_boxed_str());
+        let rlm: Arc<dyn lash_core::facade_support::PluginFactory> =
+            Arc::new(lash_protocol_rlm::RlmProtocolPluginFactory::new(
+                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash_protocol_rlm::RlmChannel::Cell)
+                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                    .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
+                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                    .build(),
+                Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
+            ));
+        (
+            harness,
+            prefix,
+            effect_host,
+            vec![
+                lash_conformance::parallel_model_tool_calls_producer(),
+                lash_conformance::rlm_promise_all_producer(vec![rlm]),
+            ],
+            turn_runner,
+        )
+    }
+);
+
 lash_conformance::wake_delivery_ordering_tests!({
     let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
     let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(

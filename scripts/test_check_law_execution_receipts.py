@@ -532,7 +532,7 @@ class RealTreeTests(unittest.TestCase):
         errors: list[str] = []
         manifest_set = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
-        self.assertEqual(len(manifest_set), 6)
+        self.assertEqual(len(manifest_set), 7)
         self.assertIn(
             (
                 "crates/lash-restate/src/tests/conformance_and_poison.rs",
@@ -543,7 +543,7 @@ class RealTreeTests(unittest.TestCase):
         )
 
     def test_the_real_deferred_recipe_owes_every_manifest_suite(self) -> None:
-        """A receipts file covering all six manifest suites passes, and
+        """A receipts file covering all seven manifest suites passes, and
         dropping one suite's rows fails naming that suite's laws -- the
         entries share one file and claimant, so this pins the deferred
         claim resolving each entry to its own real invocation."""
@@ -555,7 +555,7 @@ class RealTreeTests(unittest.TestCase):
             "effect-group-conformance-e2e", index
         )
         self.assertIsNone(error)
-        self.assertEqual(len(invocations), 6)
+        self.assertEqual(len(invocations), 7)
         expected = MODULE.expected_from_invocations(invocations, macros)
         observed: dict[str, Counter] = {
             claimant: Counter(pairs) for claimant, pairs in expected.items()
