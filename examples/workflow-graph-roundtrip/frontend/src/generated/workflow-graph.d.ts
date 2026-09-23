@@ -626,7 +626,7 @@ export interface WorkflowGraph {
   declarations?: WorkflowDeclaration[];
   facet_schema_version?: number | null;
   main: WorkflowSubgraph;
-  schema_version: 15;
+  schema_version: 16;
   /**
    * The definition identity of the admitted module artifact this graph projects ([`crate::ModuleArtifact::source_identity`]), which the module's traces carry too. A draft projected from source that has not been admitted claims no runtime identity and carries `None`. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts.
    */

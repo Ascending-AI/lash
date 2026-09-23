@@ -684,6 +684,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
 
 #[path = "lib_tests/aggregate_child.rs"]
 mod aggregate_child;
+mod pre_cutover_refusal;
 mod second_front_end;
 
 /// `process <name>(<params>) -> <return_ty> { finish <body> }` as a one-process

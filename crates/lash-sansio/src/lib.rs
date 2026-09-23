@@ -29,7 +29,11 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// v16: the builtin registry gains `__typescript_pending_timer`, and
 /// `__typescript_await_array` names its aggregate by method (ADR 0099 §11).
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v16";
+///
+/// v17 (FIG-3571): module artifacts carry the shared carrier IR — structural
+/// roles, process origins, binding visibility, source identity v4 and the
+/// canonical number rule — so every artifact hash moves.
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v17";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,

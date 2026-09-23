@@ -632,7 +632,7 @@ mod tests {
             durable_format(DurableFormat::ModuleArtifact)
                 .expect("the module-artifact format is always reported")
                 .version,
-            FormatVersion::Identity("lashlang-semantic-v16")
+            FormatVersion::Identity("lashlang-semantic-v17")
         );
     }
 

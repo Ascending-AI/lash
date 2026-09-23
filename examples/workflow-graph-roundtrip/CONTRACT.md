@@ -87,7 +87,7 @@ An unknown ID returns HTTP `404`:
 
 The current machine-readable contracts are:
 
-- [`WorkflowGraph` JSON Schema](../../schemas/host/workflow-graph/v15.schema.json)
+- [`WorkflowGraph` JSON Schema](../../schemas/host/workflow-graph/v16.schema.json)
 - [workflow type-facet JSON Schema](../../schemas/host/workflow-type-facets/v3.schema.json)
 - [generated graph declarations](frontend/src/generated/workflow-graph.d.ts)
 - [generated facet declarations](frontend/src/generated/workflow-type-facets.d.ts)

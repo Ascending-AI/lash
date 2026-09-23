@@ -116,7 +116,7 @@ pub(super) async fn session_state_version_admission_contract(
             error,
             crate::StoreError::SessionStateVersionUnsupported {
                 found: 0,
-                current: 2,
+                current: crate::store::CURRENT_SESSION_STATE_VERSION,
             }
         ));
         let error = store
@@ -127,7 +127,7 @@ pub(super) async fn session_state_version_admission_contract(
             error,
             crate::StoreError::SessionStateVersionUnsupported {
                 found: 0,
-                current: 2,
+                current: crate::store::CURRENT_SESSION_STATE_VERSION,
             }
         ));
     }

@@ -532,13 +532,16 @@ pub const LIFTED_PROCESS_NAME_PREFIX: &str = "__process_";
 /// the body *is* and where it sits — never of link order, span tables, or
 /// anything else a re-derivation could reorder. The linker's lift and the
 /// workflow lens's literal projection must agree on this spelling.
+///
+/// Domain v2 (FIG-3571): the preimage serializes the carrier IR body, so the
+/// same source lifts to a different name than under v1; v1 stays reserved.
 pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
     let preimage = serde_json::json!({
         "body": body,
         "path": path,
     });
     let digest = lash_sansio::core_support::blake3_domain_hash_hex(
-        "lash-lifted-process-name/v1",
+        "lash-lifted-process-name/v2",
         preimage.to_string(),
     );
     format!("{LIFTED_PROCESS_NAME_PREFIX}{digest}")

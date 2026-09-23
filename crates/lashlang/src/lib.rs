@@ -131,7 +131,13 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 ///
 /// v19: `AwaitArray` carries the aggregate's consumer mode instead of a
 /// settled flag, and `PendingTimer` mints a pending timer (ADR 0099 §10, §11).
-pub const BYTECODE_FORMAT_VERSION: u32 = 19;
+///
+/// v20 (FIG-3571): cells compile from the shared carrier IR. Compiler-generated
+/// and block-scoped bindings are private slots that never cross the session
+/// globals boundary, lifted process bodies compile from their `ProcessOrigin`,
+/// and node ids — and so every node-keyed occurrence counter and replay key —
+/// come from the canonical carrier paths. A v19 instruction stream is refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 20;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-graph/v15",
+  "$id": "https://lash.dev/schemas/workflow-graph/v16",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -2812,7 +2812,7 @@
     },
     "schema_version": {
       "enum": [
-        15
+        16
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -2832,6 +2832,6 @@
   ],
   "title": "WorkflowGraph",
   "type": "object",
-  "x-lash-schema-version": 15,
+  "x-lash-schema-version": 16,
   "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
 }

@@ -57,9 +57,14 @@ use super::exceptions::PendingErrorOrigin;
 /// a timer, but the refusal a parked v17 VM carries names a retired variant,
 /// so the boundary is a version rather than a decode failure.
 ///
+/// v19 (FIG-3571) resumes over bytecode v20: its chunks carry private slots and
+/// its occurrence counters are keyed by carrier node ids. A v18 continuation
+/// decodes cleanly but its counters and slots name a retired node vocabulary,
+/// so it is refused rather than resumed.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 18;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 19;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).

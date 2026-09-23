@@ -42,8 +42,11 @@ pub use projection::{
 };
 
 /// Version of the serialized workflow graph contract. Version 15 closes the
-/// execution-site kind vocabulary; v14 graph documents are refused.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 15;
+/// execution-site kind vocabulary; v14 graph documents are refused. Version 16
+/// (FIG-3571) projects the carrier IR: compound state updates carry their
+/// operator, node ids come from canonical carrier paths, and non-finite
+/// numbers use the IR number encoding; v15 graph documents are refused.
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 16;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(

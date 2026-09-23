@@ -498,6 +498,36 @@ lash_conformance::turn_crash_matrix_tests!({
     )
 });
 
+/// FIG-3571: a turn the pre-cutover build left in flight is refused, typed,
+/// before any effect when this build redrives it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_pre_cutover_generation_turn_redrive_is_refused_before_any_effect_when_configured()
+{
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres pre-cutover generation law: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let database_url = database_url().expect("configured Postgres database URL");
+    Box::pin(
+        lash_conformance::pre_cutover_generation_turn_redrive_is_refused_before_any_effect(
+            |scenario| {
+                let database_url = database_url.clone();
+                let storage = sync_await(async move {
+                    PostgresStorage::connect(&database_url)
+                        .await
+                        .expect("construct fresh Postgres pre-cutover generation pool")
+                });
+                Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
+            },
+            |_| lash_conformance::ConformanceInvocation::native(),
+        ),
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_held_turn_input_visibility_survives_claim_holder_crash_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
