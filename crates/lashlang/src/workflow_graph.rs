@@ -36,8 +36,9 @@ pub use ownership::{
     WorkflowNodePath, WorkflowOwnership, WorkflowProjection, process_workflow_projection,
 };
 
-/// Version of the serialized workflow graph contract.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 14;
+/// Version of the serialized workflow graph contract. Version 15 closes the
+/// execution-site kind vocabulary; v14 graph documents are refused.
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 15;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(

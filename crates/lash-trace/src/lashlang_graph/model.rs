@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use lash_sansio::ExecutionNodeKind;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -22,7 +23,7 @@ pub enum TraceLashlangGraphCompleteness {
 
 /// Canonical identity of one fold input.
 ///
-/// Node transitions use `(node_id, occurrence, attempt, incarnation)` plus
+/// Node transitions use `(node_id, node_kind, occurrence, attempt, incarnation)` plus
 /// the transition kind. The transition kind lets a start and its terminal
 /// fact merge monotonically while still making a second, different start or
 /// terminal a typed conflict.
@@ -32,6 +33,10 @@ pub struct TraceLashlangEventIdentity {
     pub generation: Option<TraceLanguageExecutionGeneration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_kind: Option<ExecutionNodeKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_node_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occurrence: Option<u64>,
     pub transition: TraceLashlangEventTransition,
@@ -43,6 +48,8 @@ pub enum TraceLashlangEventTransition {
     ExecutionStarted,
     ExecutionFinished,
     NodeStarted,
+    NodeWaiting,
+    NodeResumed,
     NodeTerminal,
     BranchSelected,
     ChildStarted,
@@ -181,6 +188,13 @@ pub enum TraceLashlangNodeObservation {
         occurrence: u64,
         start: DateTime<Utc>,
     },
+    Waiting {
+        occurrence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<DateTime<Utc>>,
+        since: DateTime<Utc>,
+        awaited: crate::TraceNodeAwaited,
+    },
     Completed {
         occurrence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -198,14 +212,28 @@ pub enum TraceLashlangNodeObservation {
         duration_ms: Option<i64>,
         failure: TraceLanguageExecutionFailure,
     },
+    Cancelled {
+        occurrence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<DateTime<Utc>>,
+        end: DateTime<Utc>,
+    },
+    Skipped {
+        end: DateTime<Utc>,
+        branch_node_id: String,
+        branch_occurrence: u64,
+    },
 }
 
 impl TraceLashlangNodeObservation {
     /// Whether no later transition for this occurrence may replace it.
     pub const fn is_terminal(&self) -> bool {
         match self {
-            Self::Unobserved | Self::Running { .. } => false,
-            Self::Completed { .. } | Self::Failed { .. } => true,
+            Self::Unobserved | Self::Running { .. } | Self::Waiting { .. } => false,
+            Self::Completed { .. }
+            | Self::Failed { .. }
+            | Self::Cancelled { .. }
+            | Self::Skipped { .. } => true,
         }
     }
 }
@@ -224,8 +252,17 @@ pub struct TraceLashlangNodeSummary {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLashlangNodeTerminalSummary {
     pub occurrence: u64,
-    pub status: LanguageExecutionStatus,
+    pub status: TraceLashlangNodeTerminalStatus,
     pub end: DateTime<Utc>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceLashlangNodeTerminalStatus {
+    Completed,
+    Failed,
+    Cancelled,
+    Skipped,
 }
 
 /// Observed branch-edge selection state.
@@ -248,7 +285,7 @@ pub enum TraceLashlangEdgeSelection {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLashlangGraphNode {
     pub id: String,
-    pub kind: String,
+    pub kind: ExecutionNodeKind,
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_metadata: Option<TraceLabelMetadata>,
@@ -265,13 +302,13 @@ pub struct TraceLashlangGraphNode {
 impl TraceLashlangGraphNode {
     pub(super) fn unobserved(
         id: impl Into<String>,
-        kind: impl Into<String>,
+        kind: ExecutionNodeKind,
         label: impl Into<String>,
         label_metadata: Option<TraceLabelMetadata>,
     ) -> Self {
         Self {
             id: id.into(),
-            kind: kind.into(),
+            kind,
             label: label.into(),
             label_metadata,
             branch_selection: None,

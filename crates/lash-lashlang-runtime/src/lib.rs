@@ -13,7 +13,9 @@ mod language_trace_host;
 pub use language_trace_host::{LanguageTraceHost, trace_failure};
 mod process_identity;
 pub use process_identity::deterministic_lashlang_process_id;
+mod trace_waits;
 mod trigger_commands;
+pub use trace_waits::TraceWaitBookkeeping;
 pub use trigger_commands::execute_trigger_operation;
 mod typescript_runtime;
 pub use typescript_runtime::{
@@ -27,7 +29,8 @@ pub use lash_trace::{
     TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
     TraceLanguageExecutionStatus, TraceLashlangEdgeSelection, TraceLashlangGraph,
     TraceLashlangGraphChildLink, TraceLashlangGraphEdge, TraceLashlangGraphNode,
-    TraceLashlangGraphStore, TraceLashlangNodeObservation,
+    TraceLashlangGraphStore, TraceLashlangNodeObservation, TraceNodeAwaited, TraceNodeWaitKind,
+    TraceNodeWaitResolution,
 };
 pub use lashlang::{
     CompiledProcessCache, InMemoryLashlangArtifactStore, LASH_TYPE_KEY, LashlangAbilities,

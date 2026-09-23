@@ -129,14 +129,18 @@ impl Compiler {
                 true
             }
             Expr::Await(handle) => {
-                self.compile_await_handle_expr(handle, false, forced_site, &path.child(0))
+                let site =
+                    forced_site.or_else(|| self.lashlang_execution_site_for_expr(expr, path));
+                self.compile_await_handle_expr(handle, false, site, &path.child(0))
             }
             Expr::ResultUnwrap(inner) => {
                 if let Expr::Await(handle) = inner.as_ref() {
+                    let site = forced_site
+                        .or_else(|| self.lashlang_execution_site_for_expr(inner, &path.child(0)));
                     return self.compile_await_handle_expr(
                         handle,
                         true,
-                        forced_site,
+                        site,
                         &path.child(0).child(0),
                     );
                 }

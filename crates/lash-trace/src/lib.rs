@@ -34,6 +34,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 mod jsonl_records;
+mod language_execution;
 mod language_execution_failure;
 mod lashlang_graph;
 #[cfg(feature = "otel")]
@@ -41,6 +42,9 @@ pub mod otel;
 
 use jsonl_records::truncate_torn_tail;
 pub use jsonl_records::{JsonlTraceReadError, parse_jsonl_records};
+pub use language_execution::{
+    TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,
+};
 pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_sansio::llm::types::GenerationReceipt;
 pub use lash_sansio::{
@@ -52,8 +56,8 @@ pub use lashlang_graph::{
     TraceLashlangGraphCompleteness, TraceLashlangGraphConflict, TraceLashlangGraphConflictKind,
     TraceLashlangGraphEdge, TraceLashlangGraphFoldError, TraceLashlangGraphHistoryEvent,
     TraceLashlangGraphNode, TraceLashlangGraphStore, TraceLashlangNodeObservation,
-    TraceLashlangNodeRetention, TraceLashlangNodeSummary, TraceLashlangNodeTerminalSummary,
-    fold_lashlang_graph,
+    TraceLashlangNodeRetention, TraceLashlangNodeSummary, TraceLashlangNodeTerminalStatus,
+    TraceLashlangNodeTerminalSummary, fold_lashlang_graph,
 };
 
 /// Version of the durable trace JSONL schema, written to
@@ -135,7 +139,9 @@ pub use lashlang_graph::{
 /// `context_budget_tokens` to `used_tokens`: the value is now the checked
 /// provider-reported usage, not a derived budget snapshot.
 /// Version 30 (FIG-3463) adds typed failure provenance to language observations.
-pub const TRACE_SCHEMA_VERSION: u32 = 30;
+/// Version 31 (FIG-3474) adds occurrence-level wait/resume/cancel facts, derives branch
+/// skips from selection and map membership, and closes workflow site kinds.
+pub const TRACE_SCHEMA_VERSION: u32 = 31;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -775,6 +781,9 @@ impl TraceEvent {
                 },
                 TraceLanguageExecutionPayload::ExecutionStarted { .. }
                 | TraceLanguageExecutionPayload::NodeStarted { .. }
+                | TraceLanguageExecutionPayload::NodeWaiting { .. }
+                | TraceLanguageExecutionPayload::NodeResumed { .. }
+                | TraceLanguageExecutionPayload::NodeCancelled { .. }
                 | TraceLanguageExecutionPayload::NodeCompleted { .. }
                 | TraceLanguageExecutionPayload::BranchSelected { .. }
                 | TraceLanguageExecutionPayload::ChildStarted { .. } => false,
@@ -1598,55 +1607,6 @@ pub struct TraceLanguageExecution {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TraceLanguageExecutionPayload {
-    ExecutionStarted {
-        execution_map: TraceLanguageExecutionMap,
-    },
-    ExecutionFinished {
-        status: TraceLanguageExecutionStatus,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    NodeStarted {
-        node_id: String,
-        node_kind: String,
-        label: String,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
-    },
-    NodeCompleted {
-        node_id: String,
-        node_kind: String,
-        label: String,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
-    },
-    NodeFailed {
-        node_id: String,
-        node_kind: String,
-        label: String,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        call_id: Option<String>,
-        failure: TraceLanguageExecutionFailure,
-    },
-    BranchSelected {
-        node_id: String,
-        occurrence: u64,
-        edge_id: String,
-        selected: TraceBranchSelection,
-    },
-    ChildStarted {
-        parent_node_id: String,
-        occurrence: u64,
-        child: TraceLanguageChildExecution,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceLanguageChildExecution {
     pub scope: TraceRuntimeScope,
     pub process_id: lash_sansio::ProcessId,
@@ -1714,10 +1674,19 @@ pub struct TraceLanguageExecutionMap {
 pub struct TraceLanguageExecutionMapNode {
     pub id: String,
     pub site: lash_sansio::WorkflowExecutionSite,
-    pub kind: String,
+    pub kind: lash_sansio::ExecutionNodeKind,
     pub label: String,
+    /// Observed branch selections that admit this node's arm.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub branch_memberships: Vec<TraceBranchMembership>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_metadata: Option<TraceLabelMetadata>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceBranchMembership {
+    pub branch_node_id: String,
+    pub arm: TraceBranchSelection,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

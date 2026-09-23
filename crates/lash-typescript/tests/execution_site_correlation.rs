@@ -34,13 +34,15 @@ fn compiled_site_descriptors(
         .into_iter()
         .map(|site| {
             (
-                site.node_kind.clone(),
+                site.node_kind.to_string(),
                 site.label.clone(),
                 site.workflow_site.path.clone(),
             )
         })
         .collect::<Vec<_>>();
-    sites.sort_by(|left, right| left.2.cmp(&right.2));
+    // Path first, then the descriptor: sites sharing a path compare as a set,
+    // independent of instruction order or the projector's kind order.
+    sites.sort_by(|left, right| left.2.cmp(&right.2).then_with(|| left.cmp(right)));
     sites
 }
 
@@ -49,9 +51,11 @@ fn graph_site_descriptors(program: &Program) -> Vec<(String, String, Vec<u32>)> 
     let mut sites = workflow_graph_from_program(program)
         .nodes()
         .flat_map(|node| node.execution_sites.iter())
-        .map(|site| (site.kind.clone(), site.label.clone(), site.path.clone()))
+        .map(|site| (site.kind.to_string(), site.label.clone(), site.path.clone()))
         .collect::<Vec<_>>();
-    sites.sort_by(|left, right| left.2.cmp(&right.2));
+    // Path first, then the descriptor: sites sharing a path compare as a set,
+    // independent of instruction order or the projector's kind order.
+    sites.sort_by(|left, right| left.2.cmp(&right.2).then_with(|| left.cmp(right)));
     sites
 }
 
@@ -74,6 +78,8 @@ async fn real_run_observations_use_projected_workflow_node_ids_directly() {
         fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
             let site = match observation {
                 LashlangExecutionObservation::NodeStarted { site, .. }
+                | LashlangExecutionObservation::ChildProcessWaiting { site, .. }
+                | LashlangExecutionObservation::NodeResumed { site, .. }
                 | LashlangExecutionObservation::NodeCompleted { site, .. }
                 | LashlangExecutionObservation::NodeFailed { site, .. }
                 | LashlangExecutionObservation::BranchSelected { site, .. }
@@ -173,7 +179,7 @@ finish(1);
         .expect("process should compile");
     let site = compiled_execution_sites(&compiled)
         .into_iter()
-        .find(|site| site.node_kind == "resource_operation")
+        .find(|site| site.node_kind == lash_sansio::ExecutionNodeKind::ResourceOperation)
         .expect("resource operation execution site");
 
     let graph = workflow_graph_from_program(linked.program());
@@ -206,8 +212,10 @@ finish(1);
     assert!(
         !compiled_execution_sites(&compiled)
             .into_iter()
-            .any(|candidate| candidate.node_kind == "step"
-                && candidate.workflow_site.path == site.workflow_site.path),
+            .any(
+                |candidate| candidate.node_kind == lash_sansio::ExecutionNodeKind::Step
+                    && candidate.workflow_site.path == site.workflow_site.path
+            ),
         "a resource operation should not also emit a generic step site at its own path"
     );
 }
@@ -310,6 +318,10 @@ finish(selected);
             .map(|observation| {
                 let (site, occurrence) = match observation {
                     LashlangExecutionObservation::NodeStarted { site, occurrence }
+                    | LashlangExecutionObservation::ChildProcessWaiting {
+                        site, occurrence, ..
+                    }
+                    | LashlangExecutionObservation::NodeResumed { site, occurrence }
                     | LashlangExecutionObservation::NodeCompleted { site, occurrence }
                     | LashlangExecutionObservation::NodeFailed {
                         site, occurrence, ..
@@ -493,7 +505,7 @@ finish(result);
     let mut graph = workflow_graph_from_program(linked.program())
         .nodes()
         .flat_map(|node| node.execution_sites.iter())
-        .map(|site| (site.kind.clone(), site.label.clone()))
+        .map(|site| (site.kind.to_string(), site.label.clone()))
         .collect::<Vec<_>>();
     graph.sort();
     graph.dedup();
@@ -529,7 +541,7 @@ finish(result);
 
     let branch = compiled_execution_sites(&main)
         .into_iter()
-        .find(|site| site.node_kind == "branch")
+        .find(|site| site.node_kind == lash_sansio::ExecutionNodeKind::Branch)
         .expect("compiled branch site");
     assert!(
         branch.branch.is_some(),
@@ -617,7 +629,7 @@ finish(selected);
     let resource_labels = graph
         .nodes()
         .flat_map(|node| node.execution_sites.iter())
-        .filter(|site| site.kind == "resource_operation")
+        .filter(|site| site.kind == lash_sansio::ExecutionNodeKind::ResourceOperation)
         .map(|site| site.label.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
@@ -671,6 +683,6 @@ fn direct_ir_process_sites_are_children_of_the_process_root() {
 fn descriptor_pairs(compiled: &lashlang::CompiledProgram) -> Vec<(String, String)> {
     compiled_execution_sites(compiled)
         .into_iter()
-        .map(|site| (site.node_kind.clone(), site.label.clone()))
+        .map(|site| (site.node_kind.to_string(), site.label.clone()))
         .collect()
 }

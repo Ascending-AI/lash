@@ -30,6 +30,7 @@ pub enum AbilityOp {
     Sleep(Sleep),
     WaitSignal {
         name: String,
+        call_site: Option<LashlangExecutionCallSite>,
     },
 }
 
@@ -86,6 +87,8 @@ pub struct ResourceOperation {
 #[derive(Clone, Debug)]
 pub struct ResourceOperationBatch {
     pub operations: Vec<ResourceOperation>,
+    /// Whether the aggregate wakes on the first settled rejection.
+    pub first_settled_rejection: bool,
     /// How many times this VM has reached this aggregate, counting from 1.
     ///
     /// The host needs it because a batch's content is not its identity: two
@@ -218,6 +221,7 @@ pub enum SleepKind {
 pub struct Sleep {
     pub kind: SleepKind,
     pub value: Value,
+    pub call_site: Option<LashlangExecutionCallSite>,
 }
 
 #[derive(Clone, Debug)]

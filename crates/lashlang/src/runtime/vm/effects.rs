@@ -12,8 +12,8 @@ use super::super::ops::value_type_name;
 use super::super::{
     CompiledAggregateAwaitShape, CompiledResourceOperationBatch,
     CompiledResourceOperationBatchLeaf, ExecutionHost, ExecutionHostError, RuntimeError, Value,
-    execution_host_error_value, is_process_handle, record_with_capacity, success,
-    unwrap_tool_result,
+    execution_host_error_value, is_process_handle, parse_handle_record, record_with_capacity,
+    success, unwrap_tool_result,
 };
 use super::control::VmOutcome;
 use super::pending_tools::{
@@ -134,7 +134,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     // element position refuses it, because only there did the
                     // retired second phase settle it out of the batch order.
                     AwaitedValue::Leaf(id) if is_runtime_process_handle_id(&id) => {
-                        let value = self.await_value_unwrap(value).await?;
+                        let value = self.await_value_unwrap(value, active).await?;
                         self.stack.push(value);
                     }
                     AwaitedValue::Leaf(id) => {
@@ -165,13 +165,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             VmEffect::AwaitHandle => {
                 let handle = self.pop_stack()?;
-                let result = self.await_value(handle).await?;
+                let result = self.await_value(handle, active).await?;
                 self.stack.push(result);
             }
             VmEffect::Sleep(kind) => {
                 let value = self.pop_stack()?;
                 self.host
-                    .perform(AbilityOp::Sleep(Sleep { kind, value }))
+                    .perform(AbilityOp::Sleep(Sleep {
+                        kind,
+                        value,
+                        call_site: active.map(lashlang_execution_call_site),
+                    }))
                     .await
                     .and_then(|result| result.into_value("sleep"))
                     .map_err(|source| RuntimeError::SleepFailed { source })?;
@@ -183,6 +187,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .host
                     .perform(AbilityOp::WaitSignal {
                         name: self.chunk.names[name].text.to_string(),
+                        call_site: active.map(lashlang_execution_call_site),
                     })
                     .await
                     .and_then(|result| result.into_value("wait_signal"))
@@ -191,7 +196,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             VmEffect::AwaitHandleUnwrap => {
                 let handle = self.pop_stack()?;
-                let result = self.await_value_unwrap(handle).await?;
+                let result = self.await_value_unwrap(handle, active).await?;
                 self.stack.push(result);
             }
             VmEffect::ProcessEvent(kind) => {
@@ -439,6 +444,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .perform(AbilityOp::ResourceOperationBatch(ResourceOperationBatch {
                 operations,
                 occurrence,
+                first_settled_rejection,
             }))
             .await;
         let result = match result {
@@ -569,20 +575,30 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// record of them, into result records. A value with no handle in it is
     /// already resolved: awaiting it is a guest error, never a wrapped
     /// `{ ok: false }` that reads like a host failure.
-    fn await_value(
-        &self,
+    fn await_value<'vm>(
+        &'vm self,
         handle: Value,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + '_>>
-    {
-        self.await_value_at(handle, String::new())
+        active: Option<&'vm ActiveLashlangExecutionNode>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + 'vm>,
+    > {
+        Box::pin(async move {
+            self.observe_child_process_wait(active, &handle);
+            let result = self.await_value_at(handle, String::new()).await;
+            if result.is_ok() && !self.host.is_cancelled() {
+                self.observe_wait_resumed(active);
+            }
+            result
+        })
     }
 
-    fn await_value_at(
-        &self,
+    fn await_value_at<'vm>(
+        &'vm self,
         handle: Value,
         path: String,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + '_>>
-    {
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + Send + 'vm>,
+    > {
         Box::pin(async move {
             match handle {
                 Value::Tuple(handles) => {
@@ -605,12 +621,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     }
                     Ok(Value::List(values.into()))
                 }
-                Value::Record(handles) if is_process_handle(&handles) => Ok(
-                    match self
+                Value::Record(handles) if is_process_handle(&handles) => {
+                    let result = self
                         .host
                         .perform(AbilityOp::Await(Value::Record(handles)))
-                        .await
-                    {
+                        .await;
+                    Ok(match result {
                         Ok(AbilityResult::Value(value)) => host_success(value, "await"),
                         Ok(AbilityResult::ResourceOperationBatch(_)) => execution_host_error_value(
                             ExecutionHostError::new(
@@ -623,8 +639,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             "await",
                         ),
                         Err(error) => execution_host_error_value(error, "await"),
-                    },
-                ),
+                    })
+                }
                 Value::Record(handles) => {
                     let mut record = record_with_capacity(handles.len());
                     for entry in handles.entries.iter() {
@@ -655,29 +671,96 @@ impl<H: ExecutionHost> Vm<'_, H> {
         })
     }
 
-    async fn await_value_unwrap(&self, handle: Value) -> Result<Value, RuntimeError> {
+    async fn await_value_unwrap(
+        &self,
+        handle: Value,
+        active: Option<&ActiveLashlangExecutionNode>,
+    ) -> Result<Value, RuntimeError> {
         match handle {
-            Value::Record(handles) if is_process_handle(&handles) => self
-                .host
-                .perform(AbilityOp::Await(Value::Record(handles)))
-                .await
-                .and_then(|result| result.into_value("await"))
-                .map_err(|error| {
-                    if error.tool_failure_code().is_some() {
-                        RuntimeError::UnwrappedHostToolResultFailed { source: error }
-                    } else {
-                        RuntimeError::UnwrappedToolResultFailed {
-                            message: error.to_string(),
+            Value::Record(handles) if is_process_handle(&handles) => {
+                self.observe_child_process_wait(active, &Value::Record(handles.clone()));
+                let result = self
+                    .host
+                    .perform(AbilityOp::Await(Value::Record(handles)))
+                    .await;
+                if result.is_ok() && !self.host.is_cancelled() {
+                    self.observe_wait_resumed(active);
+                }
+                result
+                    .and_then(|result| result.into_value("await"))
+                    .map_err(|error| {
+                        if error.tool_failure_code().is_some() {
+                            RuntimeError::UnwrappedHostToolResultFailed { source: error }
+                        } else {
+                            RuntimeError::UnwrappedToolResultFailed {
+                                message: error.to_string(),
+                            }
                         }
-                    }
-                }),
+                    })
+            }
             Value::Tuple(_) | Value::List(_) | Value::Record(_) => {
-                unwrap_tool_result(self.await_value(handle).await?)
+                unwrap_tool_result(self.await_value(handle, active).await?)
             }
             resolved => Err(RuntimeError::AwaitExpectsHandle {
                 found: value_type_name(&resolved).to_string(),
             }),
         }
+    }
+
+    fn observe_child_process_wait(
+        &self,
+        active: Option<&ActiveLashlangExecutionNode>,
+        value: &Value,
+    ) {
+        let Some(active) = active else { return };
+        let mut process_ids = Vec::new();
+        collect_awaited_process_ids(value, &mut process_ids);
+        if process_ids.is_empty() {
+            return;
+        }
+        self.host.observe_lashlang_execution(
+            crate::LashlangExecutionObservation::ChildProcessWaiting {
+                site: active.site.clone(),
+                occurrence: active.occurrence,
+                process_ids,
+            },
+        );
+    }
+
+    fn observe_wait_resumed(&self, active: Option<&ActiveLashlangExecutionNode>) {
+        if let Some(active) = active {
+            self.host.observe_lashlang_execution(
+                crate::LashlangExecutionObservation::NodeResumed {
+                    site: active.site.clone(),
+                    occurrence: active.occurrence,
+                },
+            );
+        }
+    }
+}
+
+fn collect_awaited_process_ids(value: &Value, process_ids: &mut Vec<lash_sansio::ProcessId>) {
+    match value {
+        Value::Tuple(values) | Value::List(values) => {
+            for value in values.iter() {
+                collect_awaited_process_ids(value, process_ids);
+            }
+        }
+        Value::Record(record) => {
+            if let Some(lash_sansio::handle::HandleTarget::Process { process_id, .. }) =
+                parse_handle_record(record).and_then(|id| id.target())
+            {
+                let process_id = lash_sansio::ProcessId::from(process_id);
+                if !process_ids.contains(&process_id) {
+                    process_ids.push(process_id);
+                }
+            } else {
+                for entry in record.entries.iter() {
+                    collect_awaited_process_ids(&entry.value, process_ids);
+                }
+            }
+        }
+        _ => {}
     }
 }
 

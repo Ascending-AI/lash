@@ -12,39 +12,11 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+pub use lash_sansio::GroupWakePolicy;
 use serde::{Deserialize, Serialize};
 
 use super::envelope::{RuntimeEffectInvocation, RuntimeEffectOutcome};
 use super::{RuntimeEffectControllerError, RuntimeEffectEnvelope};
-
-/// Wake rule of a durable effect group, recorded in the group's journal
-/// identity so replay cannot silently change it (FIG-1416).
-///
-/// Deliberately three variants, not four. `Promise.all` and `Promise.allSettled`
-/// both take [`All`](Self::All) because they ask the host for exactly the same
-/// thing — deliver settlements in durable rank order and keep the rest running.
-/// They differ only in how far the *caller* consumes: `all` stops at its first
-/// rejection, `allSettled` consumes every settlement. That early exit is a
-/// caller-side loop decision, never a host obligation, so encoding it here would
-/// make journaled identity pin a distinction no host acts on.
-///
-/// No serde default, matching the fail-closed discipline of
-/// [`ToolBatchEffectOutcome::settlement_order`](super::envelope::ToolBatchEffectOutcome::settlement_order):
-/// a group record written without a wake rule is refused rather than replayed
-/// under a guessed one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GroupWakePolicy {
-    /// `Promise.race`, and the FIG-1150 signal/deadline select: the first
-    /// settlement of any kind wakes the caller.
-    First,
-    /// `Promise.any`: the first *successful* settlement wakes the caller and
-    /// failures accumulate until one succeeds or all fail.
-    FirstSuccess,
-    /// `Promise.all` and `Promise.allSettled`: the caller consumes settlements
-    /// in rank order and decides for itself when to stop.
-    All,
-}
 
 /// A child effect's membership in a durable effect group.
 ///

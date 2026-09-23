@@ -100,6 +100,16 @@ must_cover = [
   "TraceAttemptUsageDisposition",
   "TraceLanguageExecutionPayload",
   "TraceLashlangGraph",
+  "TraceNodeWaitKind",
+  "TraceNodeAwaited",
+  "TraceNodeWaitResolution",
+  "TraceLashlangNodeObservation",
+  "TraceLashlangGraphNode",
+  "TraceLashlangNodeTerminalStatus",
+  "TraceLanguageExecutionMapNode",
+  "TraceLashlangEventIdentity",
+  "TraceLashlangNodeTerminalSummary",
+  "TraceBranchMembership",
 ]
 
 # The NodeFailed carrier embeds these Serde enums from lash-sansio. The trace
@@ -113,6 +123,11 @@ symbols = ["ToolFailureClass", "ToolFailureSource", "ToolRetryStatus"]
 kind = "rust_items"
 paths = ["crates/lash-sansio/src/workflow.rs"]
 symbols = ["WorkflowExecutionSite"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-sansio/src/execution_node_kind.rs"]
+symbols = ["ExecutionNodeKind"]
 
 [[surface.guard]]
 kind = "rust_items"

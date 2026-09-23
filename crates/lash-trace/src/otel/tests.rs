@@ -18,6 +18,66 @@ fn attribute_value<'a>(attrs: &'a [KeyValue], key: &str) -> &'a OtelValue {
 }
 
 #[test]
+fn wait_facts_export_closed_otel_attributes() {
+    let identity = crate::TraceLanguageExecutionIdentity {
+        scope: crate::TraceRuntimeScope::none(),
+        subject: crate::TraceRuntimeSubject::Process {
+            process_id: ProcessId::from("process-1"),
+        },
+        source_identity: "source".to_string(),
+        module_ref: "module".to_string(),
+        entry_kind: "process".to_string(),
+        entry_ref: None,
+        entry_name: "main".to_string(),
+        restate_invocation_id: None,
+        generation: None,
+    };
+    let record = |payload| {
+        TraceRecord::new(
+            TraceContext::default(),
+            TraceEvent::LanguageExecution {
+                language: "lashlang".to_string(),
+                event: crate::TraceLanguageExecution {
+                    event_key: "event".to_string(),
+                    identity: identity.clone(),
+                    payload,
+                },
+            },
+        )
+    };
+    let waiting = event_attributes(
+        &record(crate::TraceLanguageExecutionPayload::NodeWaiting {
+            node_id: "node".to_string(),
+            node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
+            label: "tool".to_string(),
+            occurrence: 2,
+            awaited: crate::TraceNodeAwaited::EffectGroup {
+                group_key: "group-key".to_string(),
+                position: 3,
+                wake: lash_sansio::GroupWakePolicy::FirstSuccess,
+            },
+        }),
+        &OtelTraceOptions::default(),
+    );
+    assert_eq!(
+        attribute_value(&waiting, "lash.language_execution.wait_kind"),
+        &OtelValue::String("effect_group".into())
+    );
+    assert_eq!(
+        attribute_value(&waiting, "lash.language_execution.awaited_group_key"),
+        &OtelValue::String("group-key".into())
+    );
+    assert_eq!(
+        attribute_value(&waiting, "lash.language_execution.awaited_position"),
+        &OtelValue::I64(3)
+    );
+    assert_eq!(
+        attribute_value(&waiting, "lash.language_execution.wake_policy"),
+        &OtelValue::String("first_success".into())
+    );
+}
+
+#[test]
 fn correlation_fields_are_exported_as_otel_attributes() {
     let identity = crate::TraceLanguageExecutionIdentity {
         scope: crate::TraceRuntimeScope::new("session-1"),
@@ -41,7 +101,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
                 identity,
                 payload: crate::TraceLanguageExecutionPayload::NodeStarted {
                     node_id: "node-1".to_string(),
-                    node_kind: "resource_operation".to_string(),
+                    node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
                     label: "tool".to_string(),
                     occurrence: 1,
                     call_id: Some("call-1".to_string()),
@@ -545,7 +605,7 @@ fn failed_language_execution_yields_error_span() {
                 identity: identity.clone(),
                 payload: TraceLanguageExecutionPayload::NodeFailed {
                     node_id: "n1".to_string(),
-                    node_kind: "resource_operation".to_string(),
+                    node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
                     label: "eval".to_string(),
                     occurrence: 1,
                     call_id: None,

@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 
 use lash_trace::{
-    TraceLabelMetadata, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
-    TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
+    TraceBranchMembership, TraceBranchSelection, TraceLabelMetadata, TraceLanguageExecutionMap,
+    TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
 };
 
 pub fn trace_lashlang_source_identity(artifact: &lashlang::ModuleArtifact) -> String {
@@ -66,12 +66,12 @@ pub fn trace_lashlang_main_map(artifact: &lashlang::ModuleArtifact) -> TraceLang
     trace_workflow_subgraph(&graph.main)
 }
 
-type TraceNodeKey = (String, String);
+type TraceNodeKey = (String, lash_sansio::ExecutionNodeKind);
 
 fn trace_workflow_subgraph(graph: &lashlang::WorkflowSubgraph) -> TraceLanguageExecutionMap {
     let mut nodes = BTreeMap::new();
     let mut edges = Vec::new();
-    append_trace_workflow_subgraph(graph, &mut nodes, &mut edges);
+    append_trace_workflow_subgraph(graph, &[], &mut nodes, &mut edges);
     let endpoint_ids = nodes
         .keys()
         .map(|(node_id, _)| node_id.clone())
@@ -85,6 +85,7 @@ fn trace_workflow_subgraph(graph: &lashlang::WorkflowSubgraph) -> TraceLanguageE
 
 fn append_trace_workflow_subgraph(
     graph: &lashlang::WorkflowSubgraph,
+    branch_memberships: &[TraceBranchMembership],
     nodes: &mut BTreeMap<TraceNodeKey, TraceLanguageExecutionMapNode>,
     edges: &mut Vec<TraceLanguageExecutionMapEdge>,
 ) {
@@ -100,11 +101,12 @@ fn append_trace_workflow_subgraph(
             let candidate = TraceLanguageExecutionMapNode {
                 id: node.id.to_string(),
                 site: site.clone(),
-                kind: site.kind.clone(),
+                kind: site.kind,
                 label: site.label.clone(),
+                branch_memberships: branch_memberships.to_vec(),
                 label_metadata: label_metadata.clone(),
             };
-            let key = (candidate.id.clone(), candidate.kind.clone());
+            let key = (candidate.id.clone(), candidate.kind);
             match nodes.entry(key) {
                 Entry::Vacant(entry) => {
                     entry.insert(candidate);
@@ -119,8 +121,19 @@ fn append_trace_workflow_subgraph(
             }
         }
         if let lashlang::WorkflowNodeKind::Container(container) = &node.kind {
-            for (_, child) in container.child_subgraphs() {
-                append_trace_workflow_subgraph(child, nodes, edges);
+            for (slot, child) in container.child_subgraphs() {
+                let mut child_memberships = branch_memberships.to_vec();
+                if let lashlang::WorkflowContainer::If { .. } = container {
+                    child_memberships.push(TraceBranchMembership {
+                        branch_node_id: node.id.to_string(),
+                        arm: if slot == "then" {
+                            TraceBranchSelection::Then
+                        } else {
+                            TraceBranchSelection::Else
+                        },
+                    });
+                }
+                append_trace_workflow_subgraph(child, &child_memberships, nodes, edges);
             }
         }
     }
@@ -143,6 +156,9 @@ fn append_trace_workflow_subgraph(
 pub(super) fn language_event_node_id(payload: &TraceLanguageExecutionPayload) -> Option<&str> {
     match payload {
         TraceLanguageExecutionPayload::NodeStarted { node_id, .. }
+        | TraceLanguageExecutionPayload::NodeWaiting { node_id, .. }
+        | TraceLanguageExecutionPayload::NodeResumed { node_id, .. }
+        | TraceLanguageExecutionPayload::NodeCancelled { node_id, .. }
         | TraceLanguageExecutionPayload::NodeCompleted { node_id, .. }
         | TraceLanguageExecutionPayload::NodeFailed { node_id, .. }
         | TraceLanguageExecutionPayload::BranchSelected { node_id, .. } => Some(node_id),
@@ -184,12 +200,15 @@ mod tests {
         let terminal = map
             .nodes
             .iter()
-            .find(|node| node.kind == "terminal")
+            .find(|node| node.kind == lash_sansio::ExecutionNodeKind::Terminal)
             .expect("terminal site");
         let operation = map
             .nodes
             .iter()
-            .find(|node| node.id == terminal.id && node.kind == "resource_operation")
+            .find(|node| {
+                node.id == terminal.id
+                    && node.kind == lash_sansio::ExecutionNodeKind::ResourceOperation
+            })
             .expect("the same structural node retains its resource-operation kind");
         assert_eq!(
             operation.label, "echo",

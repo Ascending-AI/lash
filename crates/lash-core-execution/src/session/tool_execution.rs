@@ -507,7 +507,7 @@ fn tool_invocation_batch_preimage(
     identity.finish()
 }
 
-fn deterministic_tool_invocation_batch_id(
+pub fn deterministic_tool_invocation_batch_id(
     calls: &[ToolInvocation],
     occurrence: ToolBatchOccurrence,
 ) -> String {

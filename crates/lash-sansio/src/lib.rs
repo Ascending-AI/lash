@@ -1,6 +1,7 @@
 pub mod attachment;
 pub mod causal;
 pub mod core_support;
+mod effect_group;
 mod effect_identity;
 mod frame_key;
 pub mod handle;
@@ -32,6 +33,7 @@ pub use attachment::{
     InvalidMediaType, MediaType,
 };
 pub use causal::CausalRef;
+pub use effect_group::GroupWakePolicy;
 pub use effect_identity::{
     EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,
 };
@@ -116,6 +118,8 @@ pub use turn_driver::{
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
 pub use workflow::WorkflowExecutionSite;
+mod execution_node_kind;
+pub use execution_node_kind::ExecutionNodeKind;
 
 pub fn head_tail_truncate(value: &str, max_chars: usize) -> (String, usize) {
     let raw_len = value.chars().count();

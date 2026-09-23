@@ -13,7 +13,8 @@ use lash_sansio::sync::MutexExt;
 use lash_trace::{
     TraceBranchSelection, TraceContext, TraceEvent, TraceLanguageChildExecution,
     TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus, TraceRecord, TraceRuntimeScope, TraceRuntimeSubject, TraceSink,
+    TraceLanguageExecutionStatus, TraceNodeAwaited, TraceNodeWaitResolution, TraceRecord,
+    TraceRuntimeScope, TraceRuntimeSubject, TraceSink,
 };
 use lashlang::{ExecutionHost, ExecutionHostError};
 
@@ -73,11 +74,13 @@ fn record_segment_boundary_decline(error: &dyn std::fmt::Display, message: &'sta
 /// settlement twice and double-charge its spend.
 /// v14 replaces runtime occurrence-counter keys with the shared workflow node
 /// identity and reserves the process root for the process declaration.
+/// v15 carries sleep/signal call-site continuations and the closed workflow
+/// execution-site kind. A parked v14 segment is refused before VM restore.
 /// v6 carries run-local child possession across execution segments. A segment
 /// parked by another version is refused rather than decoded (ADR 0055).
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 14;
+pub const LASHLANG_SEGMENT_STATE_VERSION: u32 = 15;
 
 const SEGMENT_STATE_CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
@@ -397,7 +400,7 @@ pub async fn run_lashlang_process(
         .as_ref()
         .and_then(lash_core::ProcessExecutionWriteAuthority::attempt)
         .expect("process engine runs with attempt-bound write authority");
-    let lashlang_execution_trace = LashlangProcessExecutionTrace::new(
+    let mut lashlang_execution_trace = LashlangProcessExecutionTrace::new(
         engine.execution_sink.clone(),
         engine.trace_context.clone(),
         LashlangProcessTraceIdentity {
@@ -412,6 +415,8 @@ pub async fn run_lashlang_process(
             restate_invocation_id,
         },
     );
+    lashlang_execution_trace.execution_map =
+        trace_lashlang_process_map(&artifact, &input.process_name).map(Arc::new);
     if is_initial_segment {
         lashlang_execution_trace.emit_started(&artifact);
     }
@@ -900,6 +905,11 @@ impl LashlangProcessHost<'_> {
         batch: lashlang::ResourceOperationBatch,
     ) -> lashlang::ResourceOperationBatchResult {
         let occurrence = batch.occurrence;
+        let call_sites = batch
+            .operations
+            .iter()
+            .map(|operation| operation.call_site.clone())
+            .collect::<Vec<_>>();
         let mut results = vec![None; batch.operations.len()];
         let mut positions = Vec::new();
         let mut invocations = Vec::new();
@@ -965,6 +975,23 @@ impl LashlangProcessHost<'_> {
             .iter()
             .map(|invocation| invocation.id.clone())
             .collect::<Vec<_>>();
+        let batch_id = lash_core::session::deterministic_tool_invocation_batch_id(
+            &invocations,
+            lash_core::session::ToolBatchOccurrence::Opener(occurrence),
+        );
+        if positions.len() > 1 {
+            for (position, index) in positions.iter().copied().enumerate() {
+                if let Some(Some(call_site)) = call_sites.get(index) {
+                    self.lashlang_execution_trace.emit_waiting(
+                        call_site,
+                        TraceNodeAwaited::ToolBatch {
+                            batch_id: batch_id.clone(),
+                            position,
+                        },
+                    );
+                }
+            }
+        }
         let batch = self
             .ctx
             .call_tool_batch(
@@ -981,6 +1008,14 @@ impl LashlangProcessHost<'_> {
             results[index] = Some(lashlang::ResourceOperationResult::from_result(
                 protocol_tool_reply_to_lashlang_value(reply, &replay_key, &self.cancellation),
             ));
+        }
+        if !self.cancellation.is_cancelled() && positions.len() > 1 {
+            for index in positions.iter().copied() {
+                if let Some(Some(call_site)) = call_sites.get(index) {
+                    self.lashlang_execution_trace
+                        .emit_resumed(call_site, TraceNodeWaitResolution::Resumed);
+                }
+            }
         }
 
         // The batch counts settlement in its own invocation positions; the VM
@@ -1044,7 +1079,19 @@ impl LashlangProcessHost<'_> {
     }
 
     async fn sleep(&self, sleep: lashlang::Sleep) -> Result<lashlang::Value, ExecutionHostError> {
+        let call_site = sleep.call_site;
         let sleep = process_sleep(sleep.kind, &sleep.value)?;
+        if let Some(call_site) = &call_site {
+            self.lashlang_execution_trace.emit_waiting(
+                call_site,
+                TraceNodeAwaited::Sleep {
+                    deadline_ms: match sleep {
+                        lash_core::SleepSpec::Until { deadline_ms } => Some(deadline_ms),
+                        lash_core::SleepSpec::For { .. } => None,
+                    },
+                },
+            );
+        }
         let sequence = self.ordinals.sleep_sequence.fetch_add(1, Ordering::Relaxed);
         let scope = format!("process:{}", self.process_id);
         self.ctx
@@ -1053,10 +1100,20 @@ impl LashlangProcessHost<'_> {
             .map_err(|error| LashlangHostError::SleepProcess {
                 message: error.to_string(),
             })?;
+        if let Some(call_site) = &call_site
+            && !self.cancellation.is_cancelled()
+        {
+            self.lashlang_execution_trace
+                .emit_resumed(call_site, TraceNodeWaitResolution::TimedOut);
+        }
         Ok(lashlang::Value::Null)
     }
 
-    async fn wait_signal(&self, name: String) -> Result<lashlang::Value, ExecutionHostError> {
+    async fn wait_signal(
+        &self,
+        name: String,
+        call_site: Option<lashlang::LashlangExecutionCallSite>,
+    ) -> Result<lashlang::Value, ExecutionHostError> {
         let event_type =
             lash_core::facade_support::process_signal_event_type(&name).map_err(|error| {
                 LashlangHostError::ValidateSignalName {
@@ -1079,7 +1136,7 @@ impl LashlangProcessHost<'_> {
             &self.process_id,
             name.clone(),
             event_type,
-            key,
+            key.clone(),
             event_ordinal,
         )
         .await
@@ -1091,6 +1148,15 @@ impl LashlangProcessHost<'_> {
                 message: error.to_string(),
             },
         })?;
+        if let Some(call_site) = &call_site {
+            self.lashlang_execution_trace.emit_waiting(
+                call_site,
+                TraceNodeAwaited::Signal {
+                    name: name.clone(),
+                    key,
+                },
+            );
+        }
         let payload = self
             .ctx
             .await_process_signal_event(&self.process_id, &name, event_ordinal)
@@ -1104,6 +1170,12 @@ impl LashlangProcessHost<'_> {
             .map_err(|error| LashlangHostError::ClearSignalWait {
                 message: error.to_string(),
             })?;
+        if let Some(call_site) = &call_site
+            && !self.cancellation.is_cancelled()
+        {
+            self.lashlang_execution_trace
+                .emit_resumed(call_site, TraceNodeWaitResolution::Resumed);
+        }
         Ok(lashlang::from_json(payload))
     }
 
@@ -1139,8 +1211,8 @@ impl LashlangProcessHost<'_> {
             lashlang::AbilityOp::Sleep(sleep) => {
                 Box::pin(async move { self.sleep(sleep).await.map(lashlang::AbilityResult::Value) })
             }
-            lashlang::AbilityOp::WaitSignal { name } => Box::pin(async move {
-                self.wait_signal(name)
+            lashlang::AbilityOp::WaitSignal { name, call_site } => Box::pin(async move {
+                self.wait_signal(name, call_site)
                     .await
                     .map(lashlang::AbilityResult::Value)
             }),
@@ -1167,6 +1239,34 @@ impl lashlang::ExecutionHost for LashlangProcessHost<'_> {
     }
 
     fn observe_lashlang_execution(&self, observation: lashlang::LashlangExecutionObservation) {
+        let observation = match observation {
+            lashlang::LashlangExecutionObservation::NodeFailed {
+                site, occurrence, ..
+            } if self.cancellation.is_cancelled()
+                && self
+                    .lashlang_execution_trace
+                    .active_nodes
+                    .lock_recover()
+                    .contains_key(&(site.node_id.clone(), site.node_kind, occurrence)) =>
+            {
+                self.lashlang_execution_trace
+                    .emit_cancelled_site(site, occurrence);
+                return;
+            }
+            lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence }
+                if self.cancellation.is_cancelled()
+                    && self.lashlang_execution_trace.waiting_nodes.is_waiting(
+                        &site.node_id,
+                        site.node_kind,
+                        occurrence,
+                    ) =>
+            {
+                self.lashlang_execution_trace
+                    .emit_cancelled_site(site, occurrence);
+                return;
+            }
+            observation => observation,
+        };
         self.lashlang_execution_trace.emit_observation(observation);
     }
 }
@@ -1187,7 +1287,13 @@ struct LashlangProcessExecutionTrace {
     resource_call_ids: Arc<std::sync::Mutex<BTreeMap<(String, u64), String>>>,
     pending_resource_starts:
         Arc<std::sync::Mutex<BTreeMap<(String, u64), lashlang::LashlangExecutionSite>>>,
+    active_nodes: Arc<std::sync::Mutex<ActiveProcessTraceNodes>>,
+    waiting_nodes: crate::TraceWaitBookkeeping,
+    execution_map: Option<Arc<lash_trace::TraceLanguageExecutionMap>>,
 }
+
+type ProcessTraceNodeKey = (String, lash_sansio::ExecutionNodeKind, u64);
+type ActiveProcessTraceNodes = BTreeMap<ProcessTraceNodeKey, lashlang::LashlangExecutionSite>;
 
 struct LashlangProcessTraceIdentity {
     session_id: Option<SessionId>,
@@ -1201,318 +1307,8 @@ struct LashlangProcessTraceIdentity {
     restate_invocation_id: Option<String>,
 }
 
-impl LashlangProcessExecutionTrace {
-    fn new(
-        sink: Option<Arc<dyn TraceSink>>,
-        base_context: TraceContext,
-        identity: LashlangProcessTraceIdentity,
-    ) -> Self {
-        Self {
-            sink,
-            base_context,
-            session_id: identity.session_id,
-            process_id: identity.process_id,
-            source_identity: identity.source_identity,
-            module_ref: identity.module_ref,
-            process_ref: identity.process_ref,
-            process_name: identity.process_name,
-            attempt: identity.attempt,
-            incarnation: identity.incarnation,
-            restate_invocation_id: identity.restate_invocation_id,
-            resource_call_ids: Arc::default(),
-            pending_resource_starts: Arc::default(),
-        }
-    }
-
-    fn scope(&self) -> TraceRuntimeScope {
-        TraceRuntimeScope {
-            session_id: self.session_id.clone(),
-            turn_id: None,
-            turn_index: None,
-            protocol_iteration: None,
-        }
-    }
-
-    fn identity(&self) -> TraceLanguageExecutionIdentity {
-        TraceLanguageExecutionIdentity {
-            scope: self.scope(),
-            subject: TraceRuntimeSubject::Process {
-                process_id: self.process_id.clone(),
-            },
-            source_identity: self.source_identity.clone(),
-            module_ref: self.module_ref.to_string(),
-            entry_kind: "process".to_string(),
-            entry_ref: Some(lashlang::process_ref_key(&self.process_ref)),
-            entry_name: self.process_name.clone(),
-            restate_invocation_id: self.restate_invocation_id.clone(),
-            generation: Some(lash_trace::TraceLanguageExecutionGeneration::new(
-                self.attempt,
-                self.incarnation.registration_sequence(),
-            )),
-        }
-    }
-
-    fn event_key(&self, suffix: impl std::fmt::Display) -> String {
-        format!(
-            "lashlang_execution:{}:{suffix}",
-            self.identity().graph_key()
-        )
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "process admission verified the named process exists in this artifact"
-    )]
-    fn emit_started(&self, artifact: &lashlang::ModuleArtifact) {
-        self.emit(TraceLanguageExecution {
-            event_key: self.event_key("started"),
-            identity: self.identity(),
-            payload: TraceLanguageExecutionPayload::ExecutionStarted {
-                execution_map: trace_lashlang_process_map(artifact, &self.process_name)
-                    .expect("admission verified the process exists in the artifact"),
-            },
-        });
-    }
-
-    fn emit_finished(&self, output: &lash_core::ProcessAwaitOutput) {
-        let (status, error) = match output {
-            lash_core::ProcessAwaitOutput::Settled { output } => match &output.outcome {
-                lash_core::ToolCallOutcome::Success(_) => {
-                    (TraceLanguageExecutionStatus::Completed, None)
-                }
-                lash_core::ToolCallOutcome::Failure(failure) => (
-                    TraceLanguageExecutionStatus::Failed,
-                    Some(failure.message.clone()),
-                ),
-                lash_core::ToolCallOutcome::Cancelled(cancellation) => (
-                    TraceLanguageExecutionStatus::Cancelled,
-                    Some(cancellation.message.clone()),
-                ),
-            },
-            // `emit_finished` fires after an actual execution, whose outcome is
-            // Success/Failure/Cancelled — abandonment is written out-of-band by the sweep,
-            // never returned by a run.
-            lash_core::ProcessAwaitOutput::Abandoned { .. } => (
-                TraceLanguageExecutionStatus::Failed,
-                Some("process abandoned".to_string()),
-            ),
-            lash_core::ProcessAwaitOutput::NoLongerRetained { terminal_label, .. } => (
-                TraceLanguageExecutionStatus::Failed,
-                Some(format!("process no longer retained ({terminal_label})")),
-            ),
-        };
-        self.emit(TraceLanguageExecution {
-            event_key: self.event_key("finished"),
-            identity: self.identity(),
-            payload: TraceLanguageExecutionPayload::ExecutionFinished { status, error },
-        });
-    }
-
-    fn emit_observation(&self, observation: lashlang::LashlangExecutionObservation) {
-        if self.sink.is_none() {
-            return;
-        }
-        let (suffix, payload) = match observation {
-            lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence }
-                if site.node_kind == lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND =>
-            {
-                self.pending_resource_starts
-                    .lock_recover()
-                    .insert((site.node_id.clone(), occurrence), site);
-                return;
-            }
-            lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence } => (
-                format!("node:{}:{occurrence}:started", site.node_id),
-                TraceLanguageExecutionPayload::NodeStarted {
-                    node_id: site.node_id,
-                    node_kind: site.node_kind,
-                    label: site.label,
-                    occurrence,
-                    call_id: None,
-                },
-            ),
-            lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence } => {
-                let call_id = self.finish_resource_call(&site, occurrence);
-                (
-                    format!("node:{}:{occurrence}:completed", site.node_id),
-                    TraceLanguageExecutionPayload::NodeCompleted {
-                        node_id: site.node_id,
-                        node_kind: site.node_kind,
-                        label: site.label,
-                        occurrence,
-                        call_id,
-                    },
-                )
-            }
-            lashlang::LashlangExecutionObservation::NodeFailed {
-                site,
-                occurrence,
-                failure,
-            } => {
-                let call_id = self.finish_resource_call(&site, occurrence);
-                (
-                    format!("node:{}:{occurrence}:failed", site.node_id),
-                    TraceLanguageExecutionPayload::NodeFailed {
-                        node_id: site.node_id,
-                        node_kind: site.node_kind,
-                        label: site.label,
-                        occurrence,
-                        call_id,
-                        failure: crate::language_trace_host::trace_failure(failure),
-                    },
-                )
-            }
-            lashlang::LashlangExecutionObservation::BranchSelected {
-                site,
-                occurrence,
-                edge_id,
-                selected,
-            } => (
-                format!("branch:{}:{occurrence}:{edge_id}", site.node_id),
-                TraceLanguageExecutionPayload::BranchSelected {
-                    node_id: site.node_id,
-                    occurrence,
-                    edge_id,
-                    selected: match selected {
-                        lashlang::ProcessBranchSelection::Then => TraceBranchSelection::Then,
-                        lashlang::ProcessBranchSelection::Else => TraceBranchSelection::Else,
-                    },
-                },
-            ),
-            lashlang::LashlangExecutionObservation::ChildStarted {
-                site,
-                occurrence,
-                child,
-            } => (
-                format!("child:{}:{occurrence}:{}", site.node_id, child.process_id),
-                TraceLanguageExecutionPayload::ChildStarted {
-                    parent_node_id: site.node_id,
-                    occurrence,
-                    child: TraceLanguageChildExecution {
-                        scope: self.scope(),
-                        process_id: child.process_id,
-                        incarnation: child.incarnation,
-                        attempt: child.attempt,
-                        module_ref: Some(child.module_ref.to_string()),
-                        entry_ref: Some(lashlang::process_ref_key(&child.process_ref)),
-                        entry_name: Some(child.process_name),
-                    },
-                },
-            ),
-        };
-        self.emit(TraceLanguageExecution {
-            event_key: self.event_key(suffix),
-            identity: self.identity(),
-            payload,
-        });
-    }
-
-    fn record_resource_call(&self, call_site: &lashlang::LashlangExecutionCallSite, call_id: &str) {
-        if self.sink.is_none() {
-            return;
-        }
-        let key = (call_site.site.node_id.clone(), call_site.occurrence);
-        self.resource_call_ids
-            .lock_recover()
-            .insert(key.clone(), call_id.to_string());
-        if let Some(site) = self.pending_resource_starts.lock_recover().remove(&key) {
-            self.emit(TraceLanguageExecution {
-                event_key: self.event_key(format!(
-                    "node:{}:{}:started",
-                    site.node_id, call_site.occurrence
-                )),
-                identity: self.identity(),
-                payload: TraceLanguageExecutionPayload::NodeStarted {
-                    node_id: site.node_id,
-                    node_kind: site.node_kind,
-                    label: site.label,
-                    occurrence: call_site.occurrence,
-                    call_id: Some(call_id.to_string()),
-                },
-            });
-        }
-    }
-
-    fn finish_resource_call(
-        &self,
-        site: &lashlang::LashlangExecutionSite,
-        occurrence: u64,
-    ) -> Option<String> {
-        if site.node_kind != lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND {
-            return None;
-        }
-        let key = (site.node_id.clone(), occurrence);
-        let call_id = self.resource_call_ids.lock_recover().remove(&key);
-        if let Some(started) = self.pending_resource_starts.lock_recover().remove(&key) {
-            self.emit(TraceLanguageExecution {
-                event_key: self.event_key(format!("node:{}:{occurrence}:started", started.node_id)),
-                identity: self.identity(),
-                payload: TraceLanguageExecutionPayload::NodeStarted {
-                    node_id: started.node_id,
-                    node_kind: started.node_kind,
-                    label: started.label,
-                    occurrence,
-                    call_id: call_id.clone(),
-                },
-            });
-        }
-        call_id
-    }
-
-    fn tool_child_execution_trace_hook(
-        &self,
-        call_site: lashlang::LashlangExecutionCallSite,
-    ) -> Option<ToolChildExecutionTraceHook> {
-        self.sink.as_ref()?;
-        let trace = self.clone();
-        let parent_node_id = call_site.site.node_id;
-        let occurrence = call_site.occurrence;
-        Some(ToolChildExecutionTraceHook::new(move |started| {
-            let child = TraceLanguageChildExecution {
-                scope: trace.scope(),
-                process_id: started.process_id,
-                incarnation: started.incarnation.registration_sequence(),
-                attempt: started.attempt,
-                module_ref: None,
-                entry_ref: None,
-                entry_name: started.child_entry_name,
-            };
-            let child_graph_key = child.graph_key().unwrap_or_else(|| {
-                format!(
-                    "process:{}:incarnation:{}",
-                    child.process_id, child.incarnation
-                )
-            });
-            trace.emit(TraceLanguageExecution {
-                event_key: trace.event_key(format!(
-                    "child:{parent_node_id}:{occurrence}:{child_graph_key}"
-                )),
-                identity: trace.identity(),
-                payload: TraceLanguageExecutionPayload::ChildStarted {
-                    parent_node_id: parent_node_id.clone(),
-                    occurrence,
-                    child,
-                },
-            });
-        }))
-    }
-
-    fn emit(&self, event: TraceLanguageExecution) {
-        let Some(sink) = &self.sink else {
-            return;
-        };
-        let mut context = self.base_context.clone();
-        context.session_id = self.session_id.clone();
-        context.graph_node_id = language_event_node_id(&event.payload).map(str::to_string);
-        let _ = sink.append(&TraceRecord::new(
-            context,
-            TraceEvent::LanguageExecution {
-                language: LASHLANG_ENGINE_KIND.to_string(),
-                event,
-            },
-        ));
-    }
-}
+#[path = "process/execution_trace.rs"]
+mod execution_trace;
 
 fn process_trace_session_id(originator: &lash_core::ProcessOriginator) -> Option<SessionId> {
     match originator {
