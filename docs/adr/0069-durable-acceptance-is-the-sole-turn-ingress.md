@@ -23,6 +23,15 @@ claim to its turn, so the input no longer lapses to whichever lease generation
 comes next; only that turn's redrive or a cancel by its receipt consumes it. A
 crashed turn is untouched: section 3's recovery still reclaims it.
 
+Amended 2026-09-24 (FIG-3600), **not yet implemented**: [ADR 0101's FIG-3600
+amendment](0101-one-session-ingress-carries-every-admitted-item.md#amendment-fig-3600-2026-09-24-one-send-ingress-the-driver-runs-every-turn)
+makes `session.send(input)` the only way a turn starts and the backend's work
+driver the only thing that runs one. Durable acceptance stays the sole ingress.
+On landing of FIG-3600, the caller-driven parts of this ADR are superseded:
+section 1's `run` / `stream_to` sugar, section 3's caller future as first
+driver, the direct-turn `Queued { ahead }` outcome in section 6, and section 7
+entirely. The text below still describes current code.
+
 ## Context
 
 Lash has two ways to start a turn, and they disagree about what durably exists.
@@ -342,6 +351,13 @@ generation fence attached to acceptance replay itself, on top of the two
 regimes section 5 defines.
 
 ### 7. An aborted direct turn's input is bound to that turn
+
+> Superseded on landing of FIG-3600 by [ADR 0101's FIG-3600
+> amendment](0101-one-session-ingress-carries-every-admitted-item.md#amendment-fig-3600-2026-09-24-one-send-ingress-the-driver-runs-every-turn).
+> No caller runs a turn after that cutover, so no caller owns an aborted turn's
+> continuation. The substrate re-drives it or parks it (A3, A4), and the
+> binding, the `TurnBound` read status and cancel refusal, and the receipt
+> re-drive are deleted (A8). This section still describes current code.
 
 Section 3 makes a crashed direct turn recoverable by anyone: its claim is pinned
 to a lease generation that stops holding the lane, and the next generation

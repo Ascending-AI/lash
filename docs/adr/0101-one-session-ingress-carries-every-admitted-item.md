@@ -30,6 +30,15 @@ D1–D17 come from the ingress prospect round
 Temporal, Pekko, Restate, DBOS and LangGraph. Where a review or the prospect
 report differs from an owner ruling, the ruling is what this ADR records.
 
+Amended 2026-09-24 (FIG-3600; Sam's rulings on that ticket). The *Amendment
+(FIG-3600)* section below makes the ingress the only way a turn starts and the
+backend's work driver the only thing that runs one: the caller submits with
+`session.send(..)` and observes through a handle. It also makes the session
+model durable session config changed by a session command. **Not yet
+implemented**: FIG-3600 builds it inside the FIG-3540 cutover series, after
+FIG-3585. Where the amendment and an earlier section disagree, the amendment
+wins; the passages it overrides carry a short note.
+
 ## Context
 
 Lash feeds turns from two durable queues. `pending_turn_inputs` holds host
@@ -197,7 +206,8 @@ PendingFollowOn {
   direct turn claims its row since FIG-3532, so its initial claim meets the
   refusal above: its row stays queued in order and the drain answers it after
   the follow-on commits. The head-write refusal is the backstop for any commit
-  that reaches the store anyway.
+  that reaches the store anyway. *(FIG-3600: no direct turn exists after that
+  cutover; the driver's claim meets the same refusal.)*
 * **Head invariant.** Every head write checks
   `pending_follow_on.frame_id ∈ { None, current_frame_node_id }`. A commit that
   would move the frame while a follow-on is pending is refused, and
@@ -281,7 +291,9 @@ replaces is recorded under *Alternatives*.
 `ClaimMode::Exact { item_ids }` stays as the one sanctioned out-of-order
 selection within the turn lane, kept for host-selected drains
 (`QueuedTurnBuilder` item ids). It is an operator or UI tool, never a producer
-delivery class. It never selects a command.
+delivery class. It never selects a command. *(FIG-3600 deletes host-selected
+drains: selecting items survives only as withdrawal or cancel (§10), so this
+claim mode loses the producer it was kept for. See the amendment, A8.)*
 
 A backend evaluates the turn-lane head inside the claim statement over a fixed
 head set. It never uses a skip-locked scan that can pass a locked head row; copy
@@ -361,6 +373,9 @@ The literal `64` at the checkpoint claim is deleted.
 behind the claim bound returns the typed success outcome `Queued { ahead }`, not
 an error (FIG-3532). The row stays admitted at its position, and the drain
 answers it in arrival order, exactly once. Replay reports the same position.
+*(FIG-3600: no caller runs a turn, so there is no caller turn to return
+`Queued { ahead }`. A sent input waits at its position, and its handle's
+outcome resolves when the driver answers it. See the amendment, A2.)*
 
 A checkpoint's addressed items and its prefix are one claim and settle together.
 
@@ -563,7 +578,8 @@ and rides the §15 cutover.
 
 Public API breaks are accepted with no aliases (E4): `BatchId` becomes an item id
 in `QueuedTurnBuilder`, `SessionCommandReceipt` and the queue events, and the
-per-family error codes collapse into one code per condition.
+per-family error codes collapse into one code per condition. *(FIG-3600 deletes
+`QueuedTurnBuilder` itself; see the amendment, A8.)*
 
 ### 15. Cutover
 
@@ -655,6 +671,176 @@ advisory lock on the merged table.
     order.
 22. **Cutover refusal.** A pre-cutover store is refused at open, and a
     state-version-2 session is refused at admission.
+
+## Amendment (FIG-3600, 2026-09-24): one `send()` ingress; the driver runs every turn
+
+**Status.** Decided by Sam on FIG-3600, 2026-09-24. **Not yet implemented**:
+FIG-3600 builds it inside the FIG-3540 cutover series, after FIG-3585, so the
+cutover changes two stores, not three. It is one wholehog cutover: no aliases,
+no compatibility path for caller-driven turns, and no convenience wrapper that
+runs a turn inline. The evidence, including the design that was not taken, is
+in `/workspace/notes/lash/fig3573-arc/input-lifecycle/`. It amends ADR 0045,
+ADR 0069 (§7 is superseded on landing) and the `CONTEXT.md` glossary; each
+carries a note pointing here.
+
+### A1. The ingress is the only way a turn starts
+
+**A turn starts only from the session's ingress, and only the backend's work
+driver runs it.** Direct and queued turns collapse into one path,
+`session.send(input)`, with durable acceptance
+([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md)).
+
+* **The driver always runs the turn, even when the queue is empty.** If the
+  session is idle with an empty queue, the driver claims the input at once;
+  that is the old "direct" behaviour. Otherwise the input queues on the lanes
+  (§4, §5). The caller never runs a turn inside its own call.
+* **The backend carries the work driver.** The in-process driver on SQLite and
+  PostgreSQL, and the engine-backed driver on Restate, are part of the
+  `Backend` ([ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md)). This
+  settles FIG-3581's open question about `process_work` / `with_queued_work`.
+* **Delivery modes replace steer and follow-up.** `NextTurn` is the default,
+  `AnyBoundary` steers into a running turn, and `Turn { id }` addresses one
+  turn (§5.1).
+* **"Now, despite the queue"** means the host withdraws or cancels the items
+  ahead (§10). There is no fast path and no priority.
+
+### A2. The caller observes through a handle
+
+`send` returns a handle:
+
+* `handle.events()` subscribes to the session observation stream from a
+  cursor;
+* `handle.outcome()` resolves to `Answered | Failed | Cancelled | Parked`.
+
+Cancel goes through `session.cancel(input or turn id)`: a host withdrawal while
+the input is queued (§10), and a durable turn cancel
+([ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md))
+once it runs. It replaces `cancel(CancellationToken)`. Activity sinks,
+`stream_to` and the effect sinks become `handle.events()`. Dropping a handle
+stops nothing: abandonment is expressed by cancel, never by silence (ADR 0069
+§3).
+
+### A3. Continuation belongs to the substrate
+
+Continuation is the substrate's for every turn
+([ADR 0045](0045-services-are-stateless-substrates-own-continuation.md)),
+because no caller-driven turn exists.
+
+* A deterministic failure is recorded as a failed turn (FIG-3575), and the
+  outcome is `Failed`.
+* Live faults and crashes are re-driven by the substrate under its own policy:
+  the engine's retry on Restate, the worker's retry budget on SQLite and
+  PostgreSQL. A re-drive keeps the same turn id and replays the journal.
+* Lash never settles an attempt on anyone's behalf. With no caller-owned aborted
+  turn, nothing binds an input to an aborted turn (ADR 0069 §7).
+
+### A4. Parked is a generic state of a driver-run turn
+
+A parked turn is not specific to code cells. Either of two causes parks a turn
+the driver runs:
+
+* the substrate's re-drive budget is exhausted;
+* a replay divergence (FIG-3586).
+
+A parked turn is neither failed nor retried live. It is visible in drain status,
+and `handle.outcome()` resolves to `Parked`. The operator and host verbs are
+**re-drive** (same turn id, replaying the journal; after a divergence, on a
+build that matches it), **cancel** (`session.cancel`, ADR 0039) and **fork**.
+
+### A5. Session commands, and the session model as durable config
+
+**Session commands keep the command-lane semantics of §4**, including
+`SetModel`. They are applied at turn boundaries, and every pending command is
+applied before the turn-lane claim. The driver takes the per-turn config
+snapshot at turn start, **after** that drain.
+
+**The session model is durable session config:** a route
+`{provider, model}` plus settings such as the thinking level. It is never a live
+handle.
+
+* **Changed by command.** It changes through a session command, a config patch
+  on the command lane (§4, §12), and the change is recorded in history.
+  `send(SetModel)` followed by `send(input)` therefore runs that input on the new
+  model, deterministically. This is pi's `model_change`.
+* **Resolved at turn start.** The driver snapshots the session config and
+  resolves the route by name through the backend's provider resolver. A
+  re-drive resolves the same route. There is one resolution point per
+  execution.
+* **Validated twice.** When the command is sent, a bad route is refused at once
+  with a typed refusal and nothing is queued. When it is applied, at a later
+  time and possibly on another worker, it is checked again. The typed refusals
+  are `ProviderRouteUnknown` and `ProviderCredentialsMissing`.
+* **A refusal at apply** leaves the session model unchanged, and the turn queued
+  behind the command fails with that typed refusal. Nothing runs on a model the
+  host did not intend; there is no silent substitution.
+* **No per-turn override.** `TurnBuilder::provider(ProviderHandle)` is deleted.
+
+**The *Session Model* rule changes.** It used to say that the host supplies the
+model at every open and that stored state is never authoritative. The host now
+sets the model by command, the session state is durable, and the driver reads
+it. A worker reopening a session after a crash has no host to ask.
+
+### A6. Everything on a sent input is durable data
+
+* Already durable: the prompt template, contributions, slots and layer (all in
+  `turn_context`), and `protocol_turn_options`.
+* Deleted: the live `protocol_extension` and `live_plugin_inputs`. Durable hosts
+  already refuse both; `protocol_turn_options` and persisted plugin state are
+  their durable forms.
+
+### A7. No injected prompts
+
+Lash never writes model-visible markers or feedback because something failed or
+crashed. The model only ever sees real committed history.
+
+### A8. Deleted in the cutover
+
+* **Caller-driven turns:** `TurnBuilder::{run, run_with_effects, stream,
+  stream_to, stream_to_with_effects, *_with_scope, collect*}`, `AdvancedTurn`,
+  and the drive half of the direct-turn path
+  (`crates/lash-core/src/runtime/turn_loop/accept.rs`).
+* **Caller-driven drains:** `QueuedTurnBuilder`, the selected-drain builder, and
+  `drain_id` / `batch_ids` as caller-run drains. Selecting items survives only
+  as withdrawal or cancel (§10), so `ClaimMode::Exact` (§4) and law 8 lose the
+  host-selected drain they were kept for.
+* **FIG-3589's surface:** `claim_bound_turn_id`, `claim_bound_receipt_input_id`,
+  `PendingTurnInputReadStatus::TurnBound`,
+  `PendingTurnInputCancelOutcome::TurnBound`, and the receipt re-drive docs in
+  `crates/lash/src/error.rs` and ADR 0069 §7. With no caller-owned aborted turns,
+  nothing needs them.
+* **Old gates and live inputs:** FIG-3416's durable-admission gate
+  (`ensure_durable_effect_input`), the live `protocol_extension`,
+  `live_plugin_inputs`, and per-turn provider plumbing.
+* **Old vocabulary:** "Queued Turn" versus direct turn, in `CONTEXT.md`, ADR 0069
+  and this ADR.
+
+Every `session.turn(..).run()` / `queued_turn()` call site moves, repo-wide and
+in the same cutover, to `send` plus `outcome()` or `events()`.
+
+### A9. Not adopted
+
+* **FIG-3597 design (b), auto-cancel and hide.** It cancelled an aborted turn's
+  bound input and hid it at the next commit. That hides a loss from the host
+  and already-run effects from the model. With no caller-owned aborted turn,
+  there is no bound input left to hide.
+* **The pico3-style unanswered-marker lifecycle** (the rescoped FIG-3597 draft).
+  It settled an unanswered input into history with a model-visible abort marker.
+  The marker is an injected prompt, which A7 forbids. Its content had no durable
+  source for a turn's tool calls either. The substrate re-drives the turn or
+  parks it instead.
+* **A boundary commit triggered by relinquishment** (the lead's tie-break in
+  the combined critique). It was a separate journaled commit that settled a
+  relinquished attempt before the next turn claimed. It existed only because
+  the caller owned an aborted direct turn's continuation. Now the substrate
+  owns it, and an exhausted budget parks the turn for an operator or host
+  decision (A4); nothing settles it on anyone's behalf.
+* **`abandon(receipt)`.** It was a verb for a caller-owned aborted turn.
+  `session.cancel(input or turn id)` covers withdrawal, turn cancel and the
+  cancel of a parked turn: one verb.
+
+The peer evidence is pi `a8ed4977` (one `send()`, with steer and follow-up when
+busy; the model as a session setting with `model_change` entries), codex
+`7db578f`, openai-agents `32edd3c` / js `a0b1c6f`, and langgraph `1211af4`.
 
 ## Alternatives considered
 
