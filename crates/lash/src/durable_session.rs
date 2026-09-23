@@ -279,6 +279,11 @@ impl DurableSession {
     }
 
     /// Cancels pending turn input.
+    ///
+    /// This is how a host withdraws the input of a direct turn that aborted,
+    /// by the receipt its error carries: the input is bound to that turn and
+    /// nothing else consumes it (FIG-3589). Cancelling it also returns any
+    /// earlier inputs the aborted turn had absorbed to the queue.
     pub async fn cancel_pending_turn_input(
         &self,
         input_id: &lash_core::InputId,

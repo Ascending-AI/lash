@@ -145,8 +145,10 @@ about the tier (FIG-3575):
 - A deterministic failure, an outcome over journaled inputs, is recorded as a
   failed turn.
 - Only a live fault, one a re-drive can fix, aborts with `Err`. An aborted direct
-  turn hands back its claim and returns its acceptance receipt, and its input is
-  never folded into a later turn.
+  turn keeps its claim, binds it to its turn, and returns its acceptance receipt;
+  its input is never folded into a later turn. Only a re-drive of that turn or a
+  cancel by the receipt consumes it ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md)
+  §7, FIG-3589).
 - A queued run never retries a deterministic failure in a loop. It settles once;
   the retry budget applies to live faults only.
 

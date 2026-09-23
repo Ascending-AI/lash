@@ -814,6 +814,47 @@ impl TurnInputStore for PostgresSessionStore {
         Ok(())
     }
 
+    async fn bind_turn_input_claim(
+        &self,
+        claim: &lash_core_execution::TurnInputClaim,
+        turn_id: &lash_core_execution::TurnId,
+    ) -> Result<(), StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        sqlx::query(
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .bind_claim
+                .sql(),
+        )
+        .bind(claim.session_id.as_str())
+        .bind(&claim.claim_id)
+        .bind(&claim.lease_token)
+        .bind(turn_id.as_str())
+        .execute(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
+        Ok(())
+    }
+
+    async fn reclaim_turn_bound_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        turn_id: &lash_core_execution::TurnId,
+    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
+        reclaim_turn_bound_inputs_postgres(
+            &self.pool,
+            #[cfg(any(test, feature = "testing"))]
+            self.lease_clock_for_testing.as_ref(),
+            session_id,
+            session_execution_lease,
+            owner,
+            turn_id,
+        )
+        .await
+    }
+
     async fn abandon_turn_input_claims(
         &self,
         claims: &[lash_core_execution::TurnInputClaim],

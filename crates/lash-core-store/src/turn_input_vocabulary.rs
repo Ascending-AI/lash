@@ -461,7 +461,8 @@ pub struct PendingTurnInput {
 /// durable lifecycle state and its read-time claim status answer different
 /// questions. A live matching session-execution-lease generation makes the
 /// row held; an expired, released, or mismatched generation leaves it pending
-/// for successor reclaim under ADR 0029.
+/// for successor reclaim under ADR 0029, unless an aborted direct turn's
+/// binding reserves it for that turn (FIG-3589).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct PendingTurnInputRead {
@@ -489,6 +490,15 @@ impl PendingTurnInputRead {
             },
         }
     }
+
+    /// Project an open row whose claim is bound to the aborted direct turn
+    /// `turn_id` (FIG-3589).
+    pub fn turn_bound(input: PendingTurnInput, turn_id: crate::TurnId) -> Self {
+        Self {
+            input,
+            status: PendingTurnInputReadStatus::TurnBound { turn_id },
+        }
+    }
 }
 
 /// `Held` reports only durable lease facts. It does not assert that the holder
@@ -504,6 +514,18 @@ pub enum PendingTurnInputReadStatus {
     Held {
         /// Exact expiry stored on that matching session-execution lease.
         lease_expires_at_ms: u64,
+    },
+    /// The row belongs to a direct turn that aborted with `Err` while it held
+    /// the row's claim (FIG-3589, ADR 0069 §7).
+    ///
+    /// No drain and no other turn claims it, whatever lease generation holds
+    /// the session. Only a redrive of `turn_id`, which replays that turn's
+    /// journal and settles the row with its claim, or a cancel of the input
+    /// consumes it. The aborted turn's `Err` carries the acceptance receipt
+    /// that names both.
+    TurnBound {
+        /// The aborted turn the row is bound to.
+        turn_id: crate::TurnId,
     },
 }
 

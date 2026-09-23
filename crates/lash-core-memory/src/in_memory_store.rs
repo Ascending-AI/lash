@@ -878,6 +878,71 @@ impl InMemorySessionStore {
         Ok(Some(plan.into_claim()))
     }
 
+    /// Re-take the rows bound to aborted turn `turn_id` for its redrive, in
+    /// queue order, releasing the binding (FIG-3589).
+    fn reclaim_turn_bound_inputs_for_state(
+        pending: &mut [InMemoryPendingTurnInput],
+        session_id: &SessionId,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        owner: &crate::LeaseOwnerIdentity,
+        turn_id: &TurnId,
+        now: u64,
+    ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {
+        let generation = session_execution_lease.fencing_token;
+        pending.sort_by_key(|entry| entry.input.enqueue_seq);
+        let selected_indices = pending
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                entry.input.session_id == session_id
+                    && entry.input.state.is_next_turn_pending()
+                    && entry.claim.bound_turn() == Some(turn_id)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let observations = selected_indices
+            .iter()
+            .map(|&index| {
+                let entry = &pending[index];
+                crate::store::claim_plan::TurnInputClaimRow {
+                    input: entry.input.clone(),
+                    enqueue_seq: entry.input.enqueue_seq,
+                    claim_fencing_token: entry.claim.fencing_token,
+                    claim_token: entry.claim.token(),
+                    claim_session_lease_generation: entry
+                        .claim
+                        .diagnostic_generation()
+                        .unwrap_or(0),
+                }
+            })
+            .collect::<Vec<_>>();
+        let plan = match crate::store::claim_plan::plan_turn_input_claim(
+            crate::store::queued_work::ClaimIdDialect::RecordingTurnInput,
+            session_id,
+            owner,
+            generation,
+            now,
+            crate::TurnInputClaimMode::NextTurn,
+            observations,
+        )? {
+            // Defer: the bound claim is pinned to the reclaiming generation
+            // itself, so the redrive's lane never turned over; nothing moves.
+            crate::store::claim_plan::ClaimPlanDecision::Empty
+            | crate::store::claim_plan::ClaimPlanDecision::Defer => return Ok(None),
+            crate::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+        };
+        for (&index, write) in selected_indices.iter().zip(plan.writes()) {
+            pending[index].claim.acquire(
+                plan.claim_id().to_string(),
+                plan.lease_token().to_string(),
+                owner.clone(),
+                generation,
+                write.next_claim_fencing_token,
+            );
+        }
+        Ok(Some(plan.into_claim()))
+    }
+
     fn checkpoint_work_pending_in_memory(
         &self,
         session_id: &SessionId,

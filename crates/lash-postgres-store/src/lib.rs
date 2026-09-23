@@ -463,7 +463,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `turn_input_redrive_set_unavailable` is removed, and
 // `accepted_turn_input_ceded` and `TurnOutcome::Queued` are added. No relation
 // changes. Component-118 catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 119;
+// Version 120 (FIG-3589) gives `lash_pending_turn_inputs` the nullable
+// `claim_bound_turn_id`, the aborted direct turn a row's claim is bound to,
+// and `ck_pending_turn_inputs_bound_claim_is_next_turn`. A binding is written
+// only at an abort, so a pre-120 build would reclaim a bound row under a new
+// lease generation and fold it into a later turn; component-119 catalogs are
+// rejected and recreated rather than served to such a build.
+const SCHEMA_VERSION: i32 = 120;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

@@ -10,8 +10,10 @@
 //!   failed turn, and a queued run settles once.
 //! * A live fault aborts with `Err`. The aborted direct turn's error carries
 //!   its acceptance receipt: the host withdraws the input by it, or redrives
-//!   the same turn id, which replays the journal and commits once (FIG-3589
-//!   binds the input to the aborted turn). A queued run stays pending and a
+//!   the same turn id, which replays the journal and commits once. Until then
+//!   the input is bound to the aborted turn (FIG-3589): no later direct turn
+//!   and no drain folds it in, while a crashed turn's input is still
+//!   reclaimed by the next lease generation. A queued run stays pending and a
 //!   retry completes it.
 //! * A failure the journal already holds is an outcome on every redrive,
 //!   whatever its code, so it never becomes an abort loop.
@@ -307,6 +309,7 @@ async fn live_fault_on_a_direct_turn_returns_its_receipt_to_withdraw_the_input()
         cancelled.is_cancelled(),
         "the aborted turn's input is withdrawable by its receipt: {cancelled:?}"
     );
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
 
     let next = session.turn(TurnInput::text("the next turn")).run().await?;
     assert!(next.is_success(), "{:?}", next.result.outcome);
@@ -341,6 +344,13 @@ async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id() -> Result<()> 
         .turn_input_acceptance()
         .cloned()
         .expect("an aborted direct turn returns its acceptance receipt");
+    assert_eq!(
+        session.durable().pending_turn_inputs().await?[0].status,
+        lash_core::PendingTurnInputReadStatus::TurnBound {
+            turn_id: lash_core::TurnId::from("redriven-turn"),
+        },
+        "until its redrive, the input is bound to the aborted turn"
+    );
 
     let redriven = session
         .turn(TurnInput::text(STRANDED_WORDS))
@@ -363,17 +373,183 @@ async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id() -> Result<()> 
     Ok(())
 }
 
-/// Until FIG-3589 binds an aborted turn's input to that turn, a later drain
-/// answers it, once, in its own turn, when the host neither withdraws nor
-/// redrives it.
+/// FIG-3589: the aborted turn's input is bound to that turn. A later direct
+/// turn under a new lease generation drives only its own input and never
+/// folds the aborted one in. The aborted turn's journal was recorded against
+/// the session head it ran on, so once a later turn commits its redrive can no
+/// longer replay; the input stays bound until the host cancels it by the
+/// receipt.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_abandoned_input_is_answered_once_by_the_next_drain() -> Result<()> {
-    const SESSION: &str = "direct-live-fault-drain";
+async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input() -> Result<()> {
+    const SESSION: &str = "direct-live-fault-next-turn";
     let deployment = SqliteDeployment::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
     let core = deployment.core(
         counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
+        None,
+    );
+    let session = core.session(SESSION).open().await?;
+
+    let (error, input_id) =
+        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "bound-turn").await;
+    let receipt = error
+        .turn_input_acceptance()
+        .cloned()
+        .expect("an aborted direct turn returns its acceptance receipt");
+
+    let next = session
+        .turn(TurnInput::text("the next turn"))
+        .turn_id("next-turn")
+        .run()
+        .await?;
+    assert!(next.is_success(), "{:?}", next.result.outcome);
+    {
+        let seen = requests.lock_recover();
+        assert_eq!(seen.len(), 1);
+        assert!(
+            !seen[0].contains(STRANDED_WORDS),
+            "a later direct turn must not fold in the aborted turn's input: {}",
+            seen[0]
+        );
+    }
+    let bound = vec![(
+        input_id.clone(),
+        lash_core::PendingTurnInputReadStatus::TurnBound {
+            turn_id: lash_core::TurnId::from("bound-turn"),
+        },
+    )];
+    let open = |reads: Vec<crate::PendingTurnInputRead>| {
+        reads
+            .into_iter()
+            .map(|read| (read.input.input_id, read.status))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        open(session.durable().pending_turn_inputs().await?),
+        bound,
+        "the aborted turn's input is still open, bound to its turn"
+    );
+
+    let late_redrive = session
+        .turn(TurnInput::text(STRANDED_WORDS))
+        .turn_id("bound-turn")
+        .run()
+        .await
+        .expect_err("a redrive after a later turn committed cannot replay the aborted journal");
+    let EmbedError::Runtime(late_redrive) = late_redrive else {
+        panic!("the refused redrive is a runtime error: {late_redrive:?}");
+    };
+    assert_eq!(
+        late_redrive.code,
+        lash_core::RuntimeErrorCode::SqliteEffectReplayHashConflict,
+        "{late_redrive:?}"
+    );
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        open(session.durable().pending_turn_inputs().await?),
+        bound,
+        "a refused redrive leaves the input bound"
+    );
+
+    let cancelled = session
+        .durable()
+        .cancel_pending_turn_input(&receipt.input_id)
+        .await?;
+    assert!(cancelled.is_cancelled(), "{cancelled:?}");
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    Ok(())
+}
+
+/// FIG-3589: a cancel by the receipt settles the bound input, and the earlier
+/// admissions the aborted turn had absorbed into its drive go back to the
+/// queue for the next drain instead of staying bound to a turn that can no
+/// longer settle them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelling_a_bound_input_returns_the_rest_of_its_drive_to_the_queue() -> Result<()> {
+    const SESSION: &str = "direct-live-fault-cancel-absorbed";
+    const EARLIER_WORDS: &str = "an earlier queued admission";
+    let deployment = SqliteDeployment::open().await;
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let core = deployment.core(
+        counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
+        None,
+    );
+    let session = core.session(SESSION).open().await?;
+    let earlier = session
+        .durable()
+        .enqueue(TurnInput::text(EARLIER_WORDS))
+        .id("earlier-admission")
+        .send()
+        .await?;
+    let faults = deployment.effect_host.effect_journal_faults();
+    faults.fail_next(
+        EffectJournalFaultPoint::Claim,
+        &first_llm_call_key(SESSION, "absorbing-turn"),
+    );
+    let error = session
+        .turn(TurnInput::text(STRANDED_WORDS))
+        .turn_id("absorbing-turn")
+        .run()
+        .await
+        .expect_err("a live journal fault aborts the direct turn");
+    assert!(faults.fired(), "the armed model-call claim fault fired");
+    let receipt = error
+        .turn_input_acceptance()
+        .cloned()
+        .expect("an aborted direct turn returns its acceptance receipt");
+    let bound = session.durable().pending_turn_inputs().await?;
+    assert_eq!(bound.len(), 2, "both rows of the aborted drive stay open");
+    assert!(
+        bound.iter().all(|read| read.status
+            == lash_core::PendingTurnInputReadStatus::TurnBound {
+                turn_id: lash_core::TurnId::from("absorbing-turn"),
+            }),
+        "the aborted turn's whole drive is bound to it: {bound:?}"
+    );
+
+    let cancelled = session
+        .durable()
+        .cancel_pending_turn_input(&receipt.input_id)
+        .await?;
+    assert!(cancelled.is_cancelled(), "{cancelled:?}");
+    let released = session.durable().pending_turn_inputs().await?;
+    assert_eq!(
+        released
+            .iter()
+            .map(|read| (read.input.input_id.clone(), read.status.clone()))
+            .collect::<Vec<_>>(),
+        vec![(
+            earlier.input_id.clone(),
+            lash_core::PendingTurnInputReadStatus::Pending
+        )],
+        "the absorbed admission is back in the queue, unbound"
+    );
+
+    let drained = format!("{:?}", session.queued_turn().run().await?);
+    assert!(drained.contains("Ran"), "{drained}");
+    let seen = requests.lock_recover().clone();
+    assert_eq!(seen.len(), 1);
+    assert!(seen[0].contains(EARLIER_WORDS), "{}", seen[0]);
+    assert!(
+        !seen[0].contains(STRANDED_WORDS),
+        "the cancelled input is never answered: {}",
+        seen[0]
+    );
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    Ok(())
+}
+
+/// FIG-3589: a drain never answers an aborted turn's input either. Only the
+/// aborted turn's redrive or a cancel by its receipt consumes it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drain_never_answers_an_aborted_turns_input() -> Result<()> {
+    const SESSION: &str = "direct-live-fault-drain";
+    let deployment = SqliteDeployment::open().await;
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let core = deployment.core(
+        counting_text_provider(Arc::clone(&provider_calls), Arc::default()),
         None,
     );
     let session = core.session(SESSION).open().await?;
@@ -389,13 +565,100 @@ async fn an_abandoned_input_is_answered_once_by_the_next_drain() -> Result<()> {
 
     let drained = format!("{:?}", session.queued_turn().run().await?);
     assert!(
-        drained.contains("Ran"),
-        "the drain answers the input: {drained}"
+        drained.contains("Empty"),
+        "a drain must not answer the aborted turn's input: {drained}"
     );
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
+    let pending = session.durable().pending_turn_inputs().await?;
+    assert_eq!(pending.len(), 1);
     assert_eq!(
-        requests.lock_recover()[0].matches(STRANDED_WORDS).count(),
-        1
+        pending[0].status,
+        lash_core::PendingTurnInputReadStatus::TurnBound {
+            turn_id: lash_core::TurnId::from("drained-turn"),
+        }
+    );
+    Ok(())
+}
+
+/// FIG-3589 keeps crash recovery: a direct turn whose worker dies mid-turn
+/// never reaches its abort path, so its claim is not bound, and the next lease
+/// generation reclaims the input under the ADR 0029 fence and answers it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> Result<()> {
+    const SESSION: &str = "direct-crash-reclaim";
+    let deployment = SqliteDeployment::open().await;
+    let (entered_tx, entered_rx) = oneshot::channel::<()>();
+    let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete({
+            let requests = Arc::clone(&requests);
+            move |request| {
+                let entered_tx = Arc::clone(&entered_tx);
+                let requests = Arc::clone(&requests);
+                async move {
+                    let first_call = entered_tx.lock_recover().take();
+                    if let Some(tx) = first_call {
+                        let _ = tx.send(());
+                        // The worker dies here: the call never returns and the
+                        // turn's future is dropped, so no abort path runs.
+                        std::future::pending::<()>().await;
+                    }
+                    requests.lock_recover().push(request_text(&request));
+                    Ok(text_response("answered"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = deployment.core(provider, None);
+    let session = core.session(SESSION).open().await?;
+    let crashed = tokio::spawn({
+        let session = session.clone();
+        async move {
+            session
+                .turn(TurnInput::text(STRANDED_WORDS))
+                .turn_id("crashed-turn")
+                .run()
+                .await
+        }
+    });
+    entered_rx
+        .await
+        .expect("the crashed turn reached its model call");
+    crashed.abort();
+    assert!(crashed.await.is_err_and(|error| error.is_cancelled()));
+
+    // The dropped lease guard releases its lease in the background; the next
+    // turn waits for the lane to turn over and then claims under a new
+    // generation.
+    let mut attempts = 0;
+    let next = loop {
+        match session
+            .turn(TurnInput::text("the next turn"))
+            .turn_id("next-generation-turn")
+            .run()
+            .await
+        {
+            Err(EmbedError::Runtime(error))
+                if error.code == lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
+                    && attempts < 200 =>
+            {
+                attempts += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            other => break other?,
+        }
+    };
+    assert!(next.is_success(), "{:?}", next.result.outcome);
+    let seen = requests.lock_recover().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        seen[0].matches(STRANDED_WORDS).count(),
+        1,
+        "the next generation reclaims the crashed turn's input and answers it once: {}",
+        seen[0]
     );
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
     Ok(())

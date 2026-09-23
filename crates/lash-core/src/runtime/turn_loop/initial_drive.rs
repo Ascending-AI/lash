@@ -99,9 +99,11 @@ impl AcceptedTurnInputDriveRunner {
     /// does not is handed straight back, and the accepted row is read without
     /// mutating it: still open means it waits behind more earlier admissions
     /// than one claim absorbs, so it stays queued for the drain to answer in
-    /// order; held means another driver has it; absent means it was settled,
-    /// cancelled, or pruned. The last two cede. Nothing here ever drops,
-    /// withdraws, or re-admits a row.
+    /// order; bound to this turn means an earlier execution of it aborted, and
+    /// this redrive re-takes the set that execution drove (FIG-3589); held
+    /// means another driver has it; absent means it was settled, cancelled, or
+    /// pruned. The last two cede. Nothing here ever drops, withdraws, or
+    /// re-admits a row.
     async fn drive(self) -> Result<crate::AcceptedTurnInputDrive, crate::StoreError> {
         if let Some(claim) = self.claim_admitted_through_acceptance().await? {
             if claim
@@ -162,17 +164,37 @@ impl AcceptedTurnInputDriveRunner {
             .iter()
             .find(|read| read.input.input_id == self.accepted.input_id);
         Ok(match own_row {
-            Some(read) => match read.status {
+            Some(read) => match &read.status {
                 crate::PendingTurnInputReadStatus::Pending => {
+                    // A row bound to an aborted turn waits for that turn's
+                    // redrive, not for the drain, so it is not ahead.
                     let ahead = open
                         .iter()
                         .filter(|earlier| {
                             earlier.input.state == crate::TurnInputState::DeferredNextTurn
                                 && earlier.input.enqueue_seq < self.accepted.enqueue_seq
+                                && !matches!(
+                                    earlier.status,
+                                    crate::PendingTurnInputReadStatus::TurnBound { .. }
+                                )
                         })
                         .count();
                     crate::AcceptedTurnInputDrive::Queued {
                         ahead: u64::try_from(ahead).unwrap_or(u64::MAX),
+                    }
+                }
+                // An earlier execution of this same turn drove the row and
+                // aborted, binding it here: this redrive re-takes that set.
+                crate::PendingTurnInputReadStatus::TurnBound { turn_id }
+                    if *turn_id == self.trace.turn_id =>
+                {
+                    match self.reclaim_bound_drive().await? {
+                        Some(claim) => crate::AcceptedTurnInputDrive::Claimed {
+                            claim: Box::new(claim),
+                        },
+                        None => crate::AcceptedTurnInputDrive::Refused {
+                            refusal: crate::AcceptedTurnInputRefusal::HeldByLiveClaim,
+                        },
                     }
                 }
                 // Held under the live lease generation, or any status this
@@ -186,6 +208,54 @@ impl AcceptedTurnInputDriveRunner {
                 refusal: crate::AcceptedTurnInputRefusal::SettledOrRemoved,
             },
         })
+    }
+
+    /// Re-take the rows an earlier execution of this same turn drove and then
+    /// aborted on (FIG-3589).
+    ///
+    /// The aborted execution bound its drive claim to this turn id, so no
+    /// other claim can take those rows, and the ordinary claim above skipped
+    /// the accepted row. A redrive that replays a journaled drive never gets
+    /// here; this is the redrive whose effect host did not journal the drive,
+    /// and it drives exactly the bound set, which always holds its own
+    /// accepted row: any cancel of a bound row releases the rest.
+    async fn reclaim_bound_drive(
+        &self,
+    ) -> Result<Option<crate::TurnInputClaim>, crate::StoreError> {
+        let Some(claim) = self
+            .store
+            .reclaim_turn_bound_inputs(
+                &self.accepted.session_id,
+                &self.fence,
+                &self.owner,
+                &self.trace.turn_id,
+            )
+            .await?
+        else {
+            return Ok(None);
+        };
+        if !claim
+            .inputs
+            .iter()
+            .any(|pending| pending.input_id == self.accepted.input_id)
+        {
+            // Unreachable while cancels release whole bound claims; hand the
+            // rows back rather than drive a set without this turn's input.
+            self.store.abandon_turn_input_claim(&claim).await?;
+            return Ok(None);
+        }
+        self.trace.emit(
+            "turn_input.bound_drive_reclaimed",
+            serde_json::json!({
+                "claim_id": &claim.claim_id,
+                "input_ids": claim
+                    .inputs
+                    .iter()
+                    .map(|input| input.input_id.clone())
+                    .collect::<Vec<_>>(),
+            }),
+        );
+        Ok(Some(claim))
     }
 
     /// Claim the queued next-turn rows this acceptance is allowed to drive.

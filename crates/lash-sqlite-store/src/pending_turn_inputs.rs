@@ -73,15 +73,27 @@ pub(crate) fn pending_turn_input_row_from_sql(
     })
 }
 
+/// One `list_undelivered` row: the input, the expiry of the live lease its
+/// claim is pinned to, and the aborted turn its claim is bound to (FIG-3589).
+pub(crate) struct PendingTurnInputReadRow {
+    row: PendingTurnInputRow,
+    lease_expires_at_ms: Option<u64>,
+    bound_turn_id: Option<String>,
+}
+
 pub(crate) fn pending_turn_input_read_row_from_sql(
     row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<(PendingTurnInputRow, Option<u64>)> {
+) -> rusqlite::Result<PendingTurnInputReadRow> {
     let input = pending_turn_input_row_from_sql(row)?;
     let lease_expires_at_ms = row
-        .get::<_, Option<i64>>(14)?
+        .get::<_, Option<i64>>(15)?
         .map(|value| u64_from_sql("PendingTurnInputRead", "lease_expires_at_ms", value))
         .transpose()?;
-    Ok((input, lease_expires_at_ms))
+    Ok(PendingTurnInputReadRow {
+        row: input,
+        lease_expires_at_ms,
+        bound_turn_id: row.get(14)?,
+    })
 }
 
 pub(crate) fn pending_turn_input_from_row(
@@ -100,15 +112,17 @@ pub(crate) fn pending_turn_input_from_row(
 }
 
 pub(crate) fn pending_turn_input_read_from_row(
-    row: PendingTurnInputRow,
-    lease_expires_at_ms: Option<u64>,
+    read: PendingTurnInputReadRow,
 ) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
-    let input = pending_turn_input_from_row(row)?;
-    Ok(match lease_expires_at_ms {
-        Some(lease_expires_at_ms) => {
+    let input = pending_turn_input_from_row(read.row)?;
+    Ok(match (read.bound_turn_id, read.lease_expires_at_ms) {
+        (Some(turn_id), _) => {
+            lash_core_execution::PendingTurnInputRead::turn_bound(input, turn_id.into())
+        }
+        (None, Some(lease_expires_at_ms)) => {
             lash_core_execution::PendingTurnInputRead::held(input, lease_expires_at_ms)
         }
-        None => lash_core_execution::PendingTurnInputRead::pending(input),
+        (None, None) => lash_core_execution::PendingTurnInputRead::pending(input),
     })
 }
 

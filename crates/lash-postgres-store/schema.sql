@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 119.
+-- lash-postgres-store schema, component version 120.
 --
 -- Generated artifact. These bytes are exactly the DDL `PostgresStorage`
 -- executes at open; `PostgresStorage::schema_ddl()` returns this file
@@ -314,9 +314,11 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     claim_token TEXT,
     claim_fencing_token BIGINT NOT NULL DEFAULT 0,
     claim_session_lease_generation BIGINT NOT NULL DEFAULT 0,
+    claim_bound_turn_id TEXT,
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
     CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
+    CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn CHECK (claim_bound_turn_id IS NULL OR (claim_token IS NOT NULL AND state = 'deferred_next_turn')),
     UNIQUE (session_id, source_key)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_session
@@ -841,7 +843,7 @@ CREATE TABLE IF NOT EXISTS lash_release_stamp (
 -- await-event signing secret. `gen_random_uuid()` is core PostgreSQL and draws
 -- from the server's strong RNG, so the 32-byte secret needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 119)
+VALUES ('lash-postgres-store', 120)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

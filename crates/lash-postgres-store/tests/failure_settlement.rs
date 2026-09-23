@@ -4,8 +4,11 @@
 //! * A deterministic before-LLM failure is recorded as a failed turn on a
 //!   direct turn, and a queued run settles it after one attempt.
 //! * A live journal fault aborts a direct turn with `Err` that carries its
-//!   acceptance receipt, so the host withdraws the input by name. On a queued
-//!   run it keeps the run pending and the retry completes it.
+//!   acceptance receipt, so the host withdraws the input by name or redrives
+//!   the turn id. Until then the input is bound to the aborted turn and no
+//!   later turn folds it in (FIG-3589); a crashed turn's input is still
+//!   reclaimed by the next lease generation. On a queued run a live fault
+//!   keeps the run pending and the retry completes it.
 //! * Cancellation keeps settling `Stopped { Cancelled }`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -402,5 +405,198 @@ async fn cancellation_still_settles_stopped_cancelled() -> Result<(), Box<dyn st
         "{:?}",
         output.result.outcome
     );
+    Ok(())
+}
+
+/// FIG-3589 on PostgreSQL: the aborted turn's input is bound to that turn. A
+/// later direct turn under a new lease generation drives only its own input,
+/// and the host consumes the bound input with a cancel by the receipt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input()
+-> Result<(), Box<dyn std::error::Error>> {
+    const SESSION: &str = "pg-direct-live-fault-next-turn";
+    let Some(deployment) = PostgresDeployment::open().await else {
+        return Ok(());
+    };
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let core = deployment.core(
+        counting_text_provider(Arc::default(), Arc::clone(&requests)),
+        None,
+    );
+    let session = core.session(SESSION).open().await?;
+
+    let (error, input_id) =
+        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "bound-turn").await;
+    let receipt = error
+        .turn_input_acceptance()
+        .cloned()
+        .expect("an aborted direct turn returns its acceptance receipt");
+    let next = session
+        .turn(TurnInput::text("the next turn"))
+        .turn_id("next-turn")
+        .run()
+        .await?;
+    assert!(next.is_success(), "{:?}", next.result.outcome);
+    let seen = requests.lock_recover().clone();
+    assert_eq!(seen.len(), 1);
+    assert!(
+        !seen[0].contains(STRANDED_WORDS),
+        "a later direct turn must not fold in the aborted turn's input: {}",
+        seen[0]
+    );
+    let pending = session.durable().pending_turn_inputs().await?;
+    assert_eq!(
+        pending
+            .iter()
+            .map(|read| (read.input.input_id.clone(), read.status.clone()))
+            .collect::<Vec<_>>(),
+        vec![(
+            input_id,
+            lash_core::PendingTurnInputReadStatus::TurnBound {
+                turn_id: lash_core::TurnId::from("bound-turn"),
+            }
+        )],
+        "the aborted turn's input is still open, bound to its turn"
+    );
+
+    let cancelled = session
+        .durable()
+        .cancel_pending_turn_input(&receipt.input_id)
+        .await?;
+    assert!(cancelled.is_cancelled(), "{cancelled:?}");
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    Ok(())
+}
+
+/// FIG-3589 on PostgreSQL: redriving the aborted turn id replays its journal
+/// and settles the bound input once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id()
+-> Result<(), Box<dyn std::error::Error>> {
+    const SESSION: &str = "pg-direct-live-fault-redrive";
+    let Some(deployment) = PostgresDeployment::open().await else {
+        return Ok(());
+    };
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let core = deployment.core(
+        counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
+        None,
+    );
+    let session = core.session(SESSION).open().await?;
+
+    let (error, _) =
+        abort_direct_turn_with_live_fault(&deployment, &session, SESSION, "redriven-turn").await;
+    let receipt = error
+        .turn_input_acceptance()
+        .cloned()
+        .expect("an aborted direct turn returns its acceptance receipt");
+    assert_eq!(
+        session.durable().pending_turn_inputs().await?[0].status,
+        lash_core::PendingTurnInputReadStatus::TurnBound {
+            turn_id: lash_core::TurnId::from("redriven-turn"),
+        }
+    );
+
+    let redriven = session
+        .turn(TurnInput::text(STRANDED_WORDS))
+        .turn_id("redriven-turn")
+        .run()
+        .await?;
+    assert!(redriven.is_success(), "{:?}", redriven.result.outcome);
+    assert_eq!(redriven.result.acceptance.as_ref(), Some(&receipt));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        requests.lock_recover()[0].matches(STRANDED_WORDS).count(),
+        1,
+        "the redriven turn carries its input exactly once"
+    );
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
+    Ok(())
+}
+
+/// FIG-3589 keeps crash recovery on PostgreSQL: a direct turn whose worker
+/// dies mid-turn never binds its claim, so the next lease generation reclaims
+/// the input and answers it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation()
+-> Result<(), Box<dyn std::error::Error>> {
+    const SESSION: &str = "pg-direct-crash-reclaim";
+    let Some(deployment) = PostgresDeployment::open().await else {
+        return Ok(());
+    };
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+    let entered_tx = Arc::new(StdMutex::new(Some(entered_tx)));
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let provider = lash::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete({
+            let requests = Arc::clone(&requests);
+            move |request| {
+                let entered_tx = Arc::clone(&entered_tx);
+                let requests = Arc::clone(&requests);
+                async move {
+                    let first_call = entered_tx.lock_recover().take();
+                    if let Some(tx) = first_call {
+                        let _ = tx.send(());
+                        // The worker dies here: the call never returns and the
+                        // turn's future is dropped, so no abort path runs.
+                        std::future::pending::<()>().await;
+                    }
+                    requests
+                        .lock_recover()
+                        .push(serde_json::to_string(&request.messages).expect("serialize request"));
+                    Ok(text_response("answered"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let core = deployment.core(provider, None);
+    let session = core.session(SESSION).open().await?;
+    let crashed = tokio::spawn({
+        let session = session.clone();
+        async move {
+            session
+                .turn(TurnInput::text(STRANDED_WORDS))
+                .turn_id("crashed-turn")
+                .run()
+                .await
+        }
+    });
+    entered_rx
+        .await
+        .expect("the crashed turn reached its model call");
+    crashed.abort();
+    assert!(crashed.await.is_err_and(|error| error.is_cancelled()));
+
+    let mut attempts = 0;
+    let next = loop {
+        match session
+            .turn(TurnInput::text("the next turn"))
+            .turn_id("next-generation-turn")
+            .run()
+            .await
+        {
+            Err(lash::EmbedError::Runtime(error))
+                if error.code == lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
+                    && attempts < 200 =>
+            {
+                attempts += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            other => break other?,
+        }
+    };
+    assert!(next.is_success(), "{:?}", next.result.outcome);
+    let seen = requests.lock_recover().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        seen[0].matches(STRANDED_WORDS).count(),
+        1,
+        "the next generation reclaims the crashed turn's input and answers it once: {}",
+        seen[0]
+    );
+    assert!(session.durable().pending_turn_inputs().await?.is_empty());
     Ok(())
 }

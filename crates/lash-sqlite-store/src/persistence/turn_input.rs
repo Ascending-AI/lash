@@ -639,9 +639,7 @@ impl TurnInputStore for Store {
                             rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
                         };
                         rows.into_iter()
-                            .map(|(row, lease_expires_at_ms)| {
-                                pending_turn_input_read_from_row(row, lease_expires_at_ms)
-                            })
+                            .map(pending_turn_input_read_from_row)
                             .collect()
                     })();
                 Ok(outcome)
@@ -864,6 +862,53 @@ impl TurnInputStore for Store {
             .await
             .map_err(sqlite_error)?;
         Ok(())
+    }
+
+    async fn bind_turn_input_claim(
+        &self,
+        claim: &lash_core_execution::TurnInputClaim,
+        turn_id: &lash_core_execution::TurnId,
+    ) -> Result<(), StoreError> {
+        let session_id = claim.session_id.clone();
+        let claim_id = claim.claim_id.clone();
+        let lease_token = claim.lease_token.clone();
+        let turn_id = turn_id.clone();
+        self.conn
+            .write(move |tx| {
+                tx.execute(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .pending_inputs
+                        .bind_claim
+                        .sql(),
+                    params![
+                        session_id.as_str(),
+                        claim_id.as_str(),
+                        lease_token,
+                        turn_id.as_str(),
+                    ],
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    async fn reclaim_turn_bound_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &SessionExecutionLeaseAuthority,
+        owner: &LeaseOwnerIdentity,
+        turn_id: &lash_core_execution::TurnId,
+    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
+        reclaim_turn_bound_inputs_sqlite(
+            &self.conn,
+            self.clock.timestamp_ms(),
+            session_id,
+            session_execution_lease,
+            owner,
+            turn_id,
+        )
+        .await
     }
 
     async fn orphaned_active_turn_ids(

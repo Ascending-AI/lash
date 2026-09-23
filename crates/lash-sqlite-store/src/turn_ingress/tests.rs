@@ -74,6 +74,8 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs.cancel.sql(),
         sql.pending_inputs.defer_to_next_turn.sql(),
         sql.pending_inputs.claim.sql(),
+        sql.pending_inputs.bind_claim.sql(),
+        sql.pending_inputs.release_bound_claim.sql(),
         sql.pending_inputs.settle_claimed.sql(),
         sql.pending_inputs.settle_unclaimed.sql(),
         sql.pending_inputs.delete_terminal.sql(),
@@ -87,6 +89,7 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs_sqlite.select_active_turn_rows.sql(),
         sql.pending_inputs_sqlite.select_pending_active.sql(),
         sql.pending_inputs_sqlite.claim_candidates_next_turn.sql(),
+        sql.pending_inputs_sqlite.select_turn_bound.sql(),
         sql.pending_inputs_sqlite
             .claim_candidates_active_turn_after_work
             .sql(),

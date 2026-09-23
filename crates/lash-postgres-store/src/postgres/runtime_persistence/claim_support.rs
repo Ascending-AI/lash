@@ -777,8 +777,73 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
         owner,
         mode,
         selected,
+        None,
     )
     .await
+}
+
+/// Re-take, under the caller's live fence, the rows bound to the aborted turn
+/// `turn_id` for that turn's redrive (FIG-3589).
+///
+/// One claim over every bound row, in queue order, locked: the redrive drives
+/// the set its first execution drove. The claim releases the binding, and the
+/// claim statement's binding predicate admits the bound rows only for this
+/// turn.
+pub(super) async fn reclaim_turn_bound_inputs_postgres(
+    pool: &PgPool,
+    #[cfg(any(test, feature = "testing"))] lease_clock: Option<
+        &Arc<dyn lash_core_execution::Clock>,
+    >,
+    session_id: &SessionId,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
+    owner: &LeaseOwnerIdentity,
+    turn_id: &lash_core_execution::TurnId,
+) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
+    let mut connection = acquire_runtime_connection(pool).await?;
+    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+    #[cfg(any(test, feature = "testing"))]
+    super::test_support::set_transaction_lease_clock_for_testing(&mut tx, lease_clock).await?;
+    ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+    let now = postgres_transaction_epoch_ms(&mut tx).await?;
+    let rows = sqlx::query(
+        crate::turn_ingress::turn_ingress_sql()
+            .pending_inputs_postgres
+            .select_turn_bound
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(turn_id.as_str())
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let selected = rows
+        .into_iter()
+        .map(|row| {
+            let row = pending_turn_input_row(row)?;
+            Ok((row.clone(), pending_turn_input_from_row(row)?))
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    match claim_turn_input_rows_postgres_tx(
+        &mut tx,
+        now,
+        session_id,
+        session_execution_lease,
+        owner,
+        lash_core_execution::TurnInputClaimMode::NextTurn,
+        selected,
+        Some(turn_id),
+    )
+    .await?
+    {
+        ClaimTransactionOutcome::Commit(value) => {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            Ok(value)
+        }
+        ClaimTransactionOutcome::Rollback(value) => {
+            tx.rollback().await.map_err(store_sqlx_error)?;
+            Ok(value)
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -790,6 +855,7 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
     owner: &LeaseOwnerIdentity,
     mode: lash_core_execution::TurnInputClaimMode,
     selected: Vec<(PendingTurnInputRow, lash_core_execution::PendingTurnInput)>,
+    redrive_of: Option<&lash_core_execution::TurnId>,
 ) -> Result<ClaimTransactionOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> {
     let generation = session_execution_lease.fencing_token;
     let observations = selected
@@ -844,6 +910,7 @@ pub(super) async fn claim_turn_input_rows_postgres_tx(
             "turn_input_claim_fencing_token",
             write.next_claim_fencing_token,
         )?)
+        .bind(redrive_of.map(lash_core_execution::TurnId::as_str))
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?

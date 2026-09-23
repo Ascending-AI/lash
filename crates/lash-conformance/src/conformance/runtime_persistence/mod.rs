@@ -127,6 +127,7 @@ pub use queued_run_cold::{
 };
 mod reopen_and_commit;
 mod suite_and_receipts;
+mod turn_bound_claims;
 mod turn_inputs_and_reopen;
 
 /// Public implementation paths used only by the exported registration macros.
@@ -141,6 +142,7 @@ pub mod runtime_persistence_macro_support {
     pub use super::queued_runs::*;
     pub use super::reopen_and_commit::*;
     pub use super::suite_and_receipts::*;
+    pub use super::turn_bound_claims::*;
     pub use super::turn_inputs_and_reopen::*;
     pub use crate::conformance::durable_queued_drain_wait::*;
     pub use crate::conformance::plugin_state::*;

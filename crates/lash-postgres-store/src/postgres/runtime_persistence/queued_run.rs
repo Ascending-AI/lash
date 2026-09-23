@@ -575,6 +575,7 @@ async fn reclaim_run_members_tx(
                     owner,
                     lash_core_execution::TurnInputClaimMode::NextTurn,
                     inputs,
+                    None,
                 )
                 .await?,
                 &fence.session_id,

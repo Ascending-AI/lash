@@ -3229,6 +3229,12 @@ interrupted turn's commit re-defers.
 """
 
 [[dialect_only]]
+statement = "pending_turn_input.select_turn_bound"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = "Same lock fork as pending_turn_input.settlement_facts, over the rows an aborted turn's redrive re-takes (FIG-3589)."
+
+[[dialect_only]]
 statement = "pending_turn_input.claim_candidates_next_turn"
 backends = ["sqlite", "postgres"]
 kind = "SKIP LOCKED"

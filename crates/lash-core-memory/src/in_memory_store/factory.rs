@@ -364,6 +364,7 @@ impl InMemorySessionStoreFactory {
             |entry| {
                 entry.input.session_id == request.session_id
                     && entry.input.state == crate::TurnInputState::DeferredNextTurn
+                    && entry.claim.bound_turn().is_none()
             },
         )))
     }

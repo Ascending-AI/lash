@@ -70,6 +70,19 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                 ],
             )
             .map_err(sqlite_error)?;
+            // A cancel of one row of a claim bound to an aborted turn leaves
+            // that turn's redrive nothing to settle, so the claim's other rows
+            // go back to the queue rather than stay bound (FIG-3589).
+            if let (Some(claim_id), Some(claim_token)) = (&row.claim_id, &row.claim_token) {
+                conn.execute(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .pending_inputs
+                        .release_bound_claim
+                        .sql(),
+                    params![row.session_id.as_str(), claim_id, claim_token],
+                )
+                .map_err(sqlite_error)?;
+            }
             input.state = lash_core_execution::TurnInputState::Cancelled(input.state.ingress());
             Ok(lash_core_execution::PendingTurnInputCancelOutcome::Cancelled(input))
         }
@@ -454,6 +467,7 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
         owner,
         mode,
         selected,
+        None,
     )
 }
 
@@ -466,6 +480,7 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
     owner: &LeaseOwnerIdentity,
     mode: lash_core_execution::TurnInputClaimMode,
     selected: Vec<(PendingTurnInputRow, lash_core_execution::PendingTurnInput)>,
+    redrive_of: Option<&lash_core_execution::TurnId>,
 ) -> Result<TxOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> {
     let generation = session_execution_lease.fencing_token;
     let observations = selected
@@ -519,6 +534,7 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
                         "turn_input_claim_fencing_token",
                         write.next_claim_fencing_token,
                     )?,
+                    redrive_of.map(lash_core_execution::TurnId::as_str),
                 ],
             )
             .map_err(sqlite_error)?;
@@ -585,6 +601,75 @@ pub(super) async fn claim_pending_turn_inputs_sqlite(
                     )?;
                 }
                 Ok(outcome)
+            })();
+        match outcome {
+            Ok(TxOutcome::Commit(value)) => Ok(TxOutcome::Commit(Ok(value))),
+            Ok(TxOutcome::Rollback(value)) => Ok(TxOutcome::Rollback(Ok(value))),
+            Err(err) => Ok(TxOutcome::Rollback(Err(err))),
+        }
+    })
+    .await
+    .map_err(sqlite_error)?
+}
+
+/// Re-take, under the caller's live fence, the rows bound to the aborted turn
+/// `turn_id` for that turn's redrive (FIG-3589).
+///
+/// One claim over every bound row, in queue order: the redrive drives the set
+/// its first execution drove. The claim releases the binding, and the claim
+/// statement's binding predicate admits the bound rows only for this turn.
+pub(super) async fn reclaim_turn_bound_inputs_sqlite(
+    conn: &SqliteConnection,
+    now: u64,
+    session_id: &SessionId,
+    session_execution_lease: &SessionExecutionLeaseAuthority,
+    owner: &LeaseOwnerIdentity,
+    turn_id: &lash_core_execution::TurnId,
+) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
+    let session_id = SessionId::from(session_id.to_string());
+    let session_execution_lease = session_execution_lease.clone();
+    let owner = owner.clone();
+    let turn_id = turn_id.clone();
+    conn.write_flow(move |tx| {
+        let outcome: Result<TxOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> =
+            (|| {
+                ensure_session_execution_lease_conn(
+                    tx,
+                    &session_id,
+                    &session_execution_lease,
+                    now,
+                )?;
+                let rows = {
+                    let mut stmt = tx
+                        .prepare(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .pending_inputs_sqlite
+                                .select_turn_bound
+                                .sql(),
+                        )
+                        .map_err(sqlite_error)?;
+                    let rows = stmt
+                        .query_map(
+                            params![session_id.as_str(), turn_id.as_str()],
+                            pending_turn_input_row_from_sql,
+                        )
+                        .map_err(sqlite_error)?;
+                    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
+                };
+                let selected = rows
+                    .into_iter()
+                    .map(|row| Ok((row.clone(), pending_turn_input_from_row(row)?)))
+                    .collect::<Result<Vec<_>, StoreError>>()?;
+                claim_turn_input_rows_sqlite_conn(
+                    tx,
+                    now,
+                    &session_id,
+                    &session_execution_lease,
+                    &owner,
+                    lash_core_execution::TurnInputClaimMode::NextTurn,
+                    selected,
+                    Some(&turn_id),
+                )
             })();
         match outcome {
             Ok(TxOutcome::Commit(value)) => Ok(TxOutcome::Commit(Ok(value))),

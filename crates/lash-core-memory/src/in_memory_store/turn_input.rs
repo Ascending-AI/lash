@@ -71,6 +71,31 @@ impl InMemoryPendingTurnInput {
     }
 }
 
+/// The bound claim a cancelled row carried, whose other rows go back to the
+/// queue with it (FIG-3589).
+fn bound_claim_of(entry: &InMemoryPendingTurnInput) -> Option<(String, String)> {
+    entry.claim.bound_turn()?;
+    Some((entry.claim.id()?, entry.claim.token()?))
+}
+
+/// Return the other rows of bound claim `claim_id`/`token` to the next-turn
+/// queue: a cancel of one of them leaves the aborted turn's redrive nothing to
+/// settle (FIG-3589).
+fn release_bound_claim(
+    pending: &mut [InMemoryPendingTurnInput],
+    session_id: &SessionId,
+    (claim_id, token): &(String, String),
+) {
+    for entry in pending.iter_mut() {
+        if entry.input.session_id == session_id
+            && entry.claim.bound_turn().is_some()
+            && entry.claim.owned_by(claim_id, token)
+        {
+            entry.claim.release();
+        }
+    }
+}
+
 fn find_pending_turn_input_index(
     pending: &[InMemoryPendingTurnInput],
     session_id: &SessionId,
@@ -461,8 +486,11 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                             | crate::TurnInputState::DeferredNextTurn
                     )
             })
-            .map(|entry| match live_lease {
-                Some((generation, lease_expires_at_ms))
+            .map(|entry| match (entry.claim.bound_turn(), live_lease) {
+                (Some(turn_id), _) => {
+                    crate::PendingTurnInputRead::turn_bound(entry.input.clone(), turn_id.clone())
+                }
+                (None, Some((generation, lease_expires_at_ms)))
                     if entry.claim.live_under(Some(generation)) =>
                 {
                     crate::PendingTurnInputRead::held(entry.input.clone(), lease_expires_at_ms)
@@ -521,7 +549,14 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
                                 pending[index].input.input_id.clone(),
                             ))
                     });
-                    pending[index].cancel_outcome(claim_is_live || run_owns_input)
+                    let bound = bound_claim_of(&pending[index]);
+                    let outcome = pending[index].cancel_outcome(claim_is_live || run_owns_input);
+                    if let (Some(bound), crate::PendingTurnInputCancelOutcome::Cancelled(_)) =
+                        (bound, &outcome)
+                    {
+                        release_bound_claim(&mut pending, session_id, &bound);
+                    }
+                    outcome
                 }
                 None => crate::PendingTurnInputCancelOutcome::NotFound,
             };
@@ -551,22 +586,34 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             });
         };
         pending.sort_by_key(|entry| entry.input.enqueue_seq);
-        let outcomes = pending
-            .iter_mut()
-            .filter(|entry| entry.input.session_id == session_id)
-            .filter(|entry| entry.input.enqueue_seq >= anchor_seq)
-            .map(|entry| {
-                let claim_is_live = entry.claim.live_under(live_generation);
-                let run_owns_input = runs.values().any(|run| {
-                    run.scope.session_id() == Some(session_id)
-                        && run.terminal.is_none()
-                        && run.owns_member(&crate::store::QueuedRunMember::Input(
-                            entry.input.input_id.clone(),
-                        ))
-                });
-                entry.cancel_outcome(claim_is_live || run_owns_input)
+        let suffix = pending
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                entry.input.session_id == session_id && entry.input.enqueue_seq >= anchor_seq
             })
+            .map(|(index, _)| index)
             .collect::<Vec<_>>();
+        let mut outcomes = Vec::with_capacity(suffix.len());
+        for index in suffix {
+            let entry = &mut pending[index];
+            let claim_is_live = entry.claim.live_under(live_generation);
+            let run_owns_input = runs.values().any(|run| {
+                run.scope.session_id() == Some(session_id)
+                    && run.terminal.is_none()
+                    && run.owns_member(&crate::store::QueuedRunMember::Input(
+                        entry.input.input_id.clone(),
+                    ))
+            });
+            let bound = bound_claim_of(entry);
+            let outcome = entry.cancel_outcome(claim_is_live || run_owns_input);
+            if let (Some(bound), crate::PendingTurnInputCancelOutcome::Cancelled(_)) =
+                (bound, &outcome)
+            {
+                release_bound_claim(&mut pending, session_id, &bound);
+            }
+            outcomes.push(outcome);
+        }
         Ok(crate::PendingTurnInputSuffixCancelOutcome::Outcomes {
             anchor: anchor.clone(),
             outcomes,
@@ -629,6 +676,46 @@ impl crate::store::TurnInputStore for InMemorySessionStore {
             }
         }
         Ok(())
+    }
+
+    async fn bind_turn_input_claim(
+        &self,
+        claim: &crate::TurnInputClaim,
+        turn_id: &crate::TurnId,
+    ) -> Result<(), crate::store::StoreError> {
+        let _transaction = self.write_transaction.lock_recover();
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        for entry in pending.iter_mut() {
+            if entry.input.session_id == claim.session_id
+                && entry.input.state.is_next_turn_pending()
+            {
+                entry
+                    .claim
+                    .bind(&claim.claim_id, &claim.lease_token, turn_id);
+            }
+        }
+        Ok(())
+    }
+
+    async fn reclaim_turn_bound_inputs(
+        &self,
+        session_id: &SessionId,
+        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
+        owner: &crate::LeaseOwnerIdentity,
+        turn_id: &crate::TurnId,
+    ) -> Result<Option<crate::TurnInputClaim>, crate::store::StoreError> {
+        let now = self.clock.timestamp_ms();
+        let _transaction = self.write_transaction.lock_recover();
+        self.verify_session_execution_lease(session_id, session_execution_lease, now)?;
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        Self::reclaim_turn_bound_inputs_for_state(
+            &mut pending,
+            session_id,
+            session_execution_lease,
+            owner,
+            turn_id,
+            now,
+        )
     }
 
     async fn orphaned_active_turn_ids(

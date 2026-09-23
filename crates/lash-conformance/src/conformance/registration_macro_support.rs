@@ -51,6 +51,7 @@ pub use super::tool_child_invocation::*;
 pub use super::tool_child_turn_cancel::*;
 pub use super::tool_intent_runtime::*;
 pub use super::trigger_store::*;
+pub use super::turn_bound_input::*;
 pub use super::turn_control::*;
 pub use super::turn_crash_matrix::*;
 pub use super::wake_delivery::*;

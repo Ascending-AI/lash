@@ -1,5 +1,6 @@
 //! Registration macros for turn-ingress laws: direct-turn acceptance
-//! (ADR 0069) and the cancelled turn's withheld input (FIG-3531). Both take
+//! (ADR 0069), the aborted turn's bound input (FIG-3589), and the cancelled
+//! turn's withheld input (FIG-3531). Both take
 //! the same `(guard, prefix, store)` fixture, so they share one catalogue arm.
 
 /// Register one independently reported test per direct-turn acceptance law.
@@ -20,6 +21,10 @@ macro_rules! direct_turn_acceptance_tests {
             (drive_effect_refusal_is_journaled, "direct-turn-refused-drive"),
             (queued_direct_turn_input_is_answered_in_order_by_the_drain, "direct-turn-queued-input"),
             (accept_turn_input_redrive_after_store_commit_admits_one_row, "direct-turn-acceptance-lost-outcome"),
+            (aborted_direct_turn_input_is_bound_until_its_redrive, "direct-turn-bound-until-redrive"),
+            (later_direct_turn_never_folds_in_a_bound_input, "direct-turn-bound-later-turn"),
+            (cancelling_a_bound_input_returns_its_drive_to_the_queue, "direct-turn-bound-cancel"),
+            (journal_less_redrive_retakes_its_bound_drive, "direct-turn-bound-journal-less-redrive"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

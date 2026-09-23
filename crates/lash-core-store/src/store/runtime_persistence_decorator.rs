@@ -63,6 +63,8 @@ macro_rules! persistence_operations {
                 fn claim_next_turn_inputs(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, owner: &LeaseOwnerIdentity, max_inputs: usize) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError>;
                 fn abandon_turn_input_claim(&self, claim: &crate::WorkClaim<crate::runtime::TurnInputClaimData>) -> Result<(), StoreError>;
                 fn abandon_turn_input_claims(&self, claims: &[crate::WorkClaim<crate::runtime::TurnInputClaimData>]) -> Result<(), StoreError>;
+                fn bind_turn_input_claim(&self, claim: &crate::WorkClaim<crate::runtime::TurnInputClaimData>, turn_id: &crate::TurnId) -> Result<(), StoreError>;
+                fn reclaim_turn_bound_inputs(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, owner: &LeaseOwnerIdentity, turn_id: &crate::TurnId) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError>;
                 fn orphaned_active_turn_ids(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, scope: OrphanedTurnInputScope<'_>) -> Result<Vec<crate::TurnId>, StoreError>;
                 fn repair_orphaned_active_turn_inputs(&self, session_id: &SessionId, session_execution_lease: &SessionExecutionLeaseAuthority, turn_id: &crate::TurnId, observed: &crate::TurnCancelIntentSnapshot, settlement: Option<&crate::TurnCancelClosureSettlement>) -> Result<crate::store::TurnCancelRepairResult, StoreError>;
             }

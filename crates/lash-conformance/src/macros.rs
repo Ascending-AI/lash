@@ -258,6 +258,7 @@ macro_rules! runtime_persistence_tests {
             (changed_retry_is_typed_conflict, "root"),
             (pending_turn_input_bulk_and_suffix_cancellation, "pending-bulk-cancel"),
             (pending_turn_input_claims_reclaim_complete_and_fence, "root"),
+            (bound_turn_input_claim_is_excluded_until_its_turn_retakes_it, "turn-bound-claims"),
             (turn_input_application_identity_survives_pending_tombstone_vacuum, "turn-input-application"),
             (active_turn_input_claim_reacquires_after_unrecorded_checkpoint, "fig905-active-reacquire"),
             (pending_turn_input_cancel_covers_active_and_deferred_states, "root"),

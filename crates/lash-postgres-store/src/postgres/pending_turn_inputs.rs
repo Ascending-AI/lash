@@ -122,12 +122,16 @@ pub(crate) fn pending_turn_input_read_from_row(
         .get::<Option<i64>, _>("live_lease_expires_at_ms")
         .map(|value| u64_from_sql("PendingTurnInputRead", "lease_expires_at_ms", value))
         .transpose()?;
+    let bound_turn_id = row.get::<Option<String>, _>("claim_bound_turn_id");
     let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
-    Ok(match lease_expires_at_ms {
-        Some(lease_expires_at_ms) => {
+    Ok(match (bound_turn_id, lease_expires_at_ms) {
+        (Some(turn_id), _) => {
+            lash_core_execution::PendingTurnInputRead::turn_bound(input, turn_id.into())
+        }
+        (None, Some(lease_expires_at_ms)) => {
             lash_core_execution::PendingTurnInputRead::held(input, lease_expires_at_ms)
         }
-        None => lash_core_execution::PendingTurnInputRead::pending(input),
+        (None, None) => lash_core_execution::PendingTurnInputRead::pending(input),
     })
 }
 
@@ -275,6 +279,23 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
+            // A cancel of one row of a claim bound to an aborted turn leaves
+            // that turn's redrive nothing to settle, so the claim's other rows
+            // go back to the queue rather than stay bound (FIG-3589).
+            if let (Some(claim_id), Some(claim_token)) = (&row.claim_id, &row.claim_token) {
+                sqlx::query(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .pending_inputs
+                        .release_bound_claim
+                        .sql(),
+                )
+                .bind(row.session_id.as_str())
+                .bind(claim_id)
+                .bind(claim_token)
+                .execute(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            }
             input.state = lash_core_execution::TurnInputState::Cancelled(input.state.ingress());
             Ok(lash_core_execution::PendingTurnInputCancelOutcome::Cancelled(input))
         }
