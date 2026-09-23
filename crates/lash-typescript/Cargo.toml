@@ -68,3 +68,10 @@ path = "tests/race_any_runtime.rs"
 [[test]]
 name = "carrier_laws"
 path = "tests/carrier_laws.rs"
+
+# Its own binary: the corpus laws (FIG-3599) link, project, print and relink
+# every program of every corpus, and the integration binary's compile is
+# already at its memory request.
+[[test]]
+name = "corpus_laws"
+path = "tests/corpus_laws.rs"

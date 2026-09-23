@@ -5,7 +5,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
+    path::Path,
     sync::Mutex,
 };
 
@@ -15,12 +15,14 @@ use lashlang::{
     ExecutionHostError, ExecutionOutcome, RuntimeError, State, Value,
 };
 
+#[path = "test262/support/ingest.rs"]
+mod ingest;
 #[path = "test262/support/metadata.rs"]
 mod metadata;
 
-use metadata::{ErrorType, Phase, TestFlag};
+use ingest::{data_path, source_for};
 
-const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/test262");
+use metadata::{ErrorType, Phase, TestFlag};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ManifestEntry {
@@ -46,10 +48,6 @@ impl ExecutionHost for Host {
             _ => Err(ExecutionHostError::new("unexpected Test262 ability")),
         }
     }
-}
-
-fn data_path(relative: &str) -> PathBuf {
-    Path::new(ROOT).join(relative)
 }
 
 fn data_lines(relative: &str, columns: usize) -> Vec<Vec<String>> {
@@ -223,113 +221,6 @@ fn load_census() -> BTreeMap<(String, String), (String, String)> {
             )
         })
         .collect()
-}
-
-fn supply_assertion_message(source: String, callee: &str) -> String {
-    let mut output = String::with_capacity(source.len());
-    let mut remaining = source.as_str();
-    while let Some(start) = remaining.find(callee) {
-        let arguments_start = start + callee.len();
-        output.push_str(&remaining[..arguments_start]);
-        let bytes = remaining.as_bytes();
-        let mut stack = vec![b'('];
-        let mut quote = None;
-        let mut escaped = false;
-        let mut commas = 0;
-        let mut end = arguments_start;
-        for (offset, byte) in bytes[arguments_start..].iter().copied().enumerate() {
-            end = arguments_start + offset;
-            if let Some(active_quote) = quote {
-                if escaped {
-                    escaped = false;
-                } else if byte == b'\\' {
-                    escaped = true;
-                } else if byte == active_quote {
-                    quote = None;
-                }
-                continue;
-            }
-            match byte {
-                b'\'' | b'"' | b'`' => quote = Some(byte),
-                b'(' | b'[' | b'{' => stack.push(byte),
-                b',' if stack.len() == 1 => commas += 1,
-                b')' => {
-                    if stack.pop() == Some(b'(') && stack.is_empty() {
-                        break;
-                    }
-                }
-                b']' => {
-                    assert_eq!(stack.pop(), Some(b'['), "balanced assertion argument");
-                }
-                b'}' => {
-                    assert_eq!(stack.pop(), Some(b'{'), "balanced assertion argument");
-                }
-                _ => {}
-            }
-        }
-        assert!(stack.is_empty(), "unterminated Test262 assertion call");
-        output.push_str(&remaining[arguments_start..end]);
-        if commas == 1 {
-            output.push_str(", undefined");
-        }
-        remaining = &remaining[end..];
-    }
-    output.push_str(remaining);
-    output
-}
-
-fn source_for(path: &Path, test_metadata: &metadata::Metadata, finish: bool) -> String {
-    let test = std::fs::read_to_string(path).expect("read vendored Test262 test");
-    if test_metadata.flags.contains(&TestFlag::Raw) {
-        return test;
-    }
-
-    // The dialect intentionally distinguishes known method calls from calls
-    // through computed function-valued properties. The shim is a plain record,
-    // not a production runtime global, so bridge only Test262's assertion
-    // namespace to the latter spelling. Vendored tests remain byte-identical.
-    let test = test
-        .replace("new Test262Error(", "Test262Error(")
-        .replace("assert.sameValue", "assert[\"sameValue\"]")
-        .replace("assert.notSameValue", "assert[\"notSameValue\"]")
-        .replace("assert.compareArray", "assert[\"compareArray\"]");
-    let test = [
-        "assert[\"sameValue\"](",
-        "assert[\"notSameValue\"](",
-        "assert[\"compareArray\"](",
-    ]
-    .into_iter()
-    .fold(test, supply_assertion_message);
-
-    let mut source = String::new();
-    for harness in ["sta.js", "assert.js", "compareArray.js"] {
-        source.push_str(
-            &std::fs::read_to_string(data_path(&format!("harness-shim/{harness}")))
-                .expect("read Test262 harness shim"),
-        );
-        source.push('\n');
-    }
-    for include in test_metadata.includes.iter() {
-        if include.as_ref() == "compareArray.js" {
-            continue;
-        }
-        let include_path = data_path(&format!("harness-shim/{include}"));
-        source.push_str(
-            &std::fs::read_to_string(&include_path).unwrap_or_else(|error| {
-                panic!(
-                    "{} requires missing harness shim {}: {error}",
-                    path.display(),
-                    include_path.display()
-                )
-            }),
-        );
-        source.push('\n');
-    }
-    source.push_str(&test);
-    if finish {
-        source.push_str("\nfinish(true);\n");
-    }
-    source
 }
 
 fn execute_positive(path: &Path, source: &str) -> Result<(), String> {

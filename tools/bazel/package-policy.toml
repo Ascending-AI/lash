@@ -186,6 +186,14 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["integration"]
 compile_data = ["//examples:codemode_parity_cells", "//:workflow_graph_schema"]
 
+# The corpus laws (FIG-3599) run over every corpus, the codemode parity cells
+# among them.
+[[rule]]
+packages = ["lash-internal-typescript"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["corpus_laws"]
+compile_data = ["//examples:codemode_parity_cells"]
+
 # The schema agreement tests compile the published trace record and graph
 # snapshot schemas in and validate real serialized records against them.
 [[rule]]
