@@ -322,11 +322,34 @@ impl<'p> Printer<'p> {
                     self.expression(value)?
                 ))
             }
+            expression if let Some(classic) = classic_for(expression) => {
+                let mut inner = bound.clone();
+                inner.push(classic.binding.to_string());
+                Ok(format!(
+                    "{prefix}for (let {binding} = {start}; {binding} < {end}; {binding}++) {}\n",
+                    self.block(classic.body, level, &mut inner)?,
+                    binding = self.identifier("loop binding", classic.binding)?,
+                    start = self.expression(classic.start)?,
+                    end = self.expression(classic.end)?,
+                ))
+            }
             Expr::Block(_) => {
                 let mut inner = bound.clone();
                 Ok(format!(
                     "{prefix}{}\n",
                     self.block(expression, level, &mut inner)?
+                ))
+            }
+            // A function bound to its own name is its declaration.
+            Expr::Assign { target, expr }
+                if target.is_simple()
+                    && let Expr::Function(function) = expr.as_ref()
+                    && function.name.as_deref() == Some(target.root.as_str()) =>
+            {
+                bound.push(target.root.to_string());
+                Ok(format!(
+                    "{prefix}{}\n",
+                    self.named_function(target.root.as_str(), function)?
                 ))
             }
             Expr::Assign { target, expr } => {
@@ -396,12 +419,19 @@ impl<'p> Printer<'p> {
                 body,
             } => {
                 let header = loop_header(binding.as_str(), iterable, bind.as_deref())?;
+                // An element binding already in scope is assigned by the loop
+                // (a `var` head, or a head with no declaration), not declared.
+                let declaration = if bound.iter().any(|name| name == header.binding) {
+                    ""
+                } else {
+                    element_binding_kind(&statement_block_contents(body), header.binding)
+                };
                 let mut body_bound = bound.clone();
                 body_bound.push(header.binding.to_string());
-                let statements = statement_block_contents(body);
                 Ok(format!(
-                    "{prefix}for ({} {} {} {}) {}\n",
-                    element_binding_kind(&statements, header.binding),
+                    "{prefix}for ({}{}{} {} {}) {}\n",
+                    declaration,
+                    if declaration.is_empty() { "" } else { " " },
                     self.identifier("loop binding", header.binding)?,
                     if header.keys { "in" } else { "of" },
                     self.expression(header.source)?,
@@ -747,6 +777,17 @@ impl<'p> Printer<'p> {
         if let Some(sugared) = self.collection_transform(expression)? {
             return Ok(Some(sugared));
         }
+        if let Some((quasis, holes)) = template_parts(expression) {
+            let mut out = String::from("`");
+            for (index, quasi) in quasis.iter().enumerate() {
+                out.push_str(&template_text(quasi));
+                if let Some(hole) = holes.get(index) {
+                    out.push_str(&format!("${{{}}}", self.expression(hole)?));
+                }
+            }
+            out.push('`');
+            return Ok(Some(out));
+        }
         if let Some((target, operator, value)) = attribute_assignment(expression)? {
             return Ok(Some(format!(
                 "({target} {operator} {})",
@@ -801,6 +842,9 @@ impl<'p> Printer<'p> {
     }
 
     fn arrow(&self, function: &FunctionExpr) -> Printed {
+        if let Some(name) = &function.name {
+            return self.named_function(name.as_str(), function);
+        }
         let params = function
             .params
             .iter()
@@ -824,6 +868,29 @@ impl<'p> Printer<'p> {
                 ""
             },
             params.join(", "),
+        ))
+    }
+
+    /// A function with a name of its own is a `function` form: the name is
+    /// bound inside it, so an arrow (which has none) would lower to a
+    /// different function.
+    fn named_function(&self, name: &str, function: &FunctionExpr) -> Printed {
+        let params = function
+            .params
+            .iter()
+            .map(|param| self.identifier("function parameter", param.as_str()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut bound = function.params.iter().map(ToString::to_string).collect();
+        Ok(format!(
+            "{}function {}({}) {}",
+            if awaits_in_own_body(&function.body) {
+                "async "
+            } else {
+                ""
+            },
+            self.identifier("function", name)?,
+            params.join(", "),
+            self.block(&function.body, 0, &mut bound)?
         ))
     }
 
@@ -964,6 +1031,133 @@ fn is_statement_body(expression: &Expr) -> bool {
                 ..
             }
     )
+}
+
+/// The parts of the classic `for (let i = start; i < end; i++)` loop, from
+/// the block it lowers to: the binding's initialization, then a `while` over
+/// `i < end` whose body ends with the increment the lowering appends. An
+/// authored increment lowers to an assignment expression, never to that bare
+/// assignment, so the shape is the loop's own.
+struct ClassicFor<'a> {
+    binding: &'a str,
+    start: &'a Expr,
+    end: &'a Expr,
+    body: &'a Expr,
+}
+
+fn classic_for(expression: &Expr) -> Option<ClassicFor<'_>> {
+    let Expr::Block(items) = expression else {
+        return None;
+    };
+    let [
+        Expr::Assign {
+            target,
+            expr: start,
+        },
+        Expr::While { condition, body },
+    ] = items.as_slice()
+    else {
+        return None;
+    };
+    let binding = target.is_simple().then(|| target.root.as_str())?;
+    let Expr::JavaScriptBinary {
+        left,
+        op: JavaScriptBinaryOp::Less,
+        right: end,
+    } = condition.as_ref()
+    else {
+        return None;
+    };
+    let Expr::Block(parts) = body.as_ref() else {
+        return None;
+    };
+    let [
+        body,
+        Expr::Assign {
+            target: updated,
+            expr: update,
+        },
+    ] = parts.as_slice()
+    else {
+        return None;
+    };
+    let increments = matches!(
+        update.as_ref(),
+        Expr::JavaScriptBinary {
+            left,
+            op: JavaScriptBinaryOp::Add,
+            right,
+        } if matches!(left.as_ref(), Expr::Variable(name) if name.as_str() == binding)
+            && matches!(right.as_ref(), Expr::Number(step) if *step == 1.0)
+    );
+    (matches!(left.as_ref(), Expr::Variable(name) if name.as_str() == binding)
+        && updated.is_simple()
+        && updated.root.as_str() == binding
+        && increments)
+        .then_some(ClassicFor {
+            binding,
+            start,
+            end,
+            body,
+        })
+}
+
+/// A template literal's text and holes, from the chain it lowers to:
+/// `q0 + e0 + q1 + … + en + qn+1`, left-nested, a string at every even
+/// position. Printed back as the template, the chain lowers identically, and
+/// its nesting costs one level rather than one per term.
+fn template_parts(expression: &Expr) -> Option<(Vec<&str>, Vec<&Expr>)> {
+    let mut rights = Vec::new();
+    let mut current = expression;
+    while let Expr::JavaScriptBinary {
+        left,
+        op: JavaScriptBinaryOp::Add,
+        right,
+    } = current
+    {
+        rights.push(right.as_ref());
+        current = left;
+    }
+    let Expr::String(first) = current else {
+        return None;
+    };
+    if rights.is_empty() || rights.len() % 2 != 0 {
+        return None;
+    }
+    rights.reverse();
+    let mut quasis = vec![first.as_str()];
+    let mut holes = Vec::with_capacity(rights.len() / 2);
+    for pair in rights.chunks(2) {
+        let [hole, Expr::String(quasi)] = pair else {
+            return None;
+        };
+        holes.push(*hole);
+        quasis.push(quasi.as_str());
+    }
+    Some((quasis, holes))
+}
+
+/// A template literal's raw text for `value`: the characters whose raw form
+/// would read back differently (a backtick, a backslash, `${`, a carriage
+/// return and the other controls) are escaped.
+fn template_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '`' => out.push_str("\\`"),
+            '\\' => out.push_str("\\\\"),
+            '$' if characters.peek() == Some(&'{') => out.push_str("\\$"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            control if control.is_control() => {
+                out.push_str(&format!("\\u{{{:x}}}", u32::from(control)));
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// The authored target spelling, assignment operator (`=`, or `op=` for an
@@ -1180,18 +1374,22 @@ fn key(name: &str) -> String {
     string_literal(name)
 }
 
-/// A number literal by the one IR number rule: `NaN`, `Infinity` and
-/// `-Infinity` by name (the lowering reads them back as the same literals),
-/// `-0` with its sign, and every other value in its shortest round-trip form.
+/// A number literal by the one IR number rule: `NaN` and `Infinity` by
+/// name (the lowering reads them back as the same literals), and every other
+/// value in its shortest round-trip form. A negative literal has no spelling:
+/// `-5` is the negation of `5`, which lowers to a different program than the
+/// literal `-5` a constant (`Number.MIN_SAFE_INTEGER`) folds to, so it is
+/// refused rather than printed as the negation (FIG-3599 round-trip law).
 fn number_literal(value: f64) -> Printed {
+    if value.is_sign_negative() && !value.is_nan() {
+        return Err(TypeScriptSourceError::Unrepresentable {
+            kind: "a negative number literal",
+        });
+    }
     Ok(if value.is_nan() {
         "NaN".to_string()
     } else if value == f64::INFINITY {
         "Infinity".to_string()
-    } else if value == f64::NEG_INFINITY {
-        "-Infinity".to_string()
-    } else if value == 0.0 && value.is_sign_negative() {
-        "-0".to_string()
     } else {
         ryu_js::Buffer::new().format_finite(value).to_string()
     })

@@ -448,11 +448,21 @@ impl Lowerer {
                             .transpose()?
                             .unwrap_or(LashExpr::Undefined)
                     };
-                    output.extend(self.lower_pattern(
-                        &declaration.pattern,
-                        value,
-                        PatternMode::Initialize,
-                    )?);
+                    let mut initialization =
+                        self.lower_pattern(&declaration.pattern, value, PatternMode::Initialize)?;
+                    // A `var` initializer assigns the binding its function
+                    // hoisted, so it lowers as the assignment statement it is:
+                    // the same program `x = value;` lowers to, which is also
+                    // what the lens prints it as.
+                    if *kind == VarKind::Var
+                        && let [LashExpr::Assign { target, .. }] = initialization.as_slice()
+                        && target.is_simple()
+                    {
+                        let result = LashExpr::Variable(target.root.clone());
+                        initialization =
+                            vec![completion_list(vec![initialization.remove(0), result])];
+                    }
+                    output.extend(initialization);
                 }
                 output
             }
