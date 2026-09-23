@@ -324,6 +324,46 @@ pub fn record_token_usage_shared(
     }
 }
 
+/// ADR 0031: every provider attempt that reported usage is its own fact — a
+/// billed failed attempt and the retry that succeeded are two facts, never a
+/// summed or a lost one. Appends one reported row per attempt whose usage the
+/// cumulative `token_usage` write does not already cover. A counted call's
+/// response is always its last attempt, and the counted calls are a leading
+/// prefix of `llm_calls`, so `counted_calls` names exactly the calls whose
+/// final attempt must not be written again.
+///
+/// Append-only like [`record_reconciled_usage_shared`]: each attempt keeps its
+/// own durable delta identity instead of folding into the accumulated
+/// `(source, model)` row before staging.
+pub fn record_attempt_usage_shared(
+    token_ledger: &Arc<std::sync::Mutex<Vec<PendingTokenLedgerEntry>>>,
+    source: &str,
+    model: &str,
+    llm_calls: &[crate::LlmCallRecord],
+    counted_calls: usize,
+) {
+    let mut ledger = token_ledger.lock_recover();
+    for (index, call) in llm_calls.iter().enumerate() {
+        let counted = usize::from(index < counted_calls);
+        for attempt in call
+            .attempts
+            .iter()
+            .take(call.attempts.len().saturating_sub(counted))
+        {
+            let Some(usage) = attempt.usage.as_ref() else {
+                continue;
+            };
+            let usage = crate::runtime::effect::token_usage_from_llm(usage);
+            if usage.is_zero() {
+                continue;
+            }
+            ledger.push(PendingTokenLedgerEntry::unstaged(
+                TokenLedgerEntry::reported(source.to_string(), model.to_string(), usage),
+            ));
+        }
+    }
+}
+
 /// Record interrupted attempts whose provider usage never arrived: a
 /// zero-usage row marked unreported, so the ledger shows the hole instead of
 /// writing nothing (ADR 0031). Accumulates into the pending unreported row for
