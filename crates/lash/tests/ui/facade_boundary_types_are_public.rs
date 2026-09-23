@@ -469,6 +469,7 @@ fn persistence_types_are_nameable(
         turn_commit: RuntimeTurnCommitStamp::new(operation),
         completed_queue_claims: Vec::new(),
         completed_turn_input_claims: Vec::new(),
+        undelivered_turn_input_claims: Vec::new(),
         enqueued_queue_batches: Vec::new(),
         interrupted_turn_input_turn_id: None,
         interrupted_turn_input_cancellation: None,

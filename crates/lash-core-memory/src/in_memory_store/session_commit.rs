@@ -686,6 +686,22 @@ impl crate::store::SessionCommitStore for InMemorySessionStore {
                         evidence,
                     )?;
                 }
+                // Withheld claims are released first, under their own fence,
+                // so the disposition below settles them exactly as it settles
+                // an unclaimed row (FIG-3531).
+                for claim in &commit.undelivered_turn_input_claims {
+                    for entry in pending.iter_mut() {
+                        if entry.input.session_id == claim.session_id
+                            && entry.claim.owned_by(&claim.claim_id, &claim.lease_token)
+                        {
+                            if let crate::TurnInputState::Accepted(scope) = &entry.input.state {
+                                entry.input.state =
+                                    crate::TurnInputState::PendingActive(scope.clone());
+                            }
+                            entry.claim.release();
+                        }
+                    }
+                }
                 for entry in pending.iter_mut() {
                     if entry.input.session_id == commit.session_id
                         && matches!(

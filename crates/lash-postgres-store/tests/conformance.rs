@@ -2288,6 +2288,8 @@ lash_conformance::trigger_retention_fault_tests!({
 #[path = "conformance/process_retention.rs"]
 mod process_retention;
 include!("conformance/append_identity.rs");
+#[path = "conformance/cancelled_turn_withheld_input.rs"]
+mod cancelled_turn_withheld_input;
 #[path = "conformance/direct_turn_acceptance.rs"]
 mod direct_turn_acceptance;
 #[path = "conformance/drain_end.rs"]

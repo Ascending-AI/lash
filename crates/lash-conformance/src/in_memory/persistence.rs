@@ -71,6 +71,13 @@ crate::direct_turn_acceptance_tests!({
         Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
     )
 });
+crate::cancelled_turn_withheld_input_tests!({
+    (
+        (),
+        "in-memory",
+        Arc::new(crate::InMemorySessionStore::new()) as Arc<dyn crate::RuntimePersistence>,
+    )
+});
 mod runtime_laws {
     use super::*;
     crate::runtime_persistence_tests!({

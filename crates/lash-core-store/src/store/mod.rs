@@ -612,6 +612,7 @@ impl RuntimeCommit {
             turn_commit: _,
             completed_queue_claims,
             completed_turn_input_claims,
+            undelivered_turn_input_claims,
             enqueued_queue_batches,
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
@@ -624,6 +625,7 @@ impl RuntimeCommit {
         debug_assert!(
             completed_queue_claims.is_empty()
                 && completed_turn_input_claims.is_empty()
+                && undelivered_turn_input_claims.is_empty()
                 && enqueued_queue_batches.is_empty()
                 && interrupted_turn_input_turn_id.is_none()
                 && interrupted_turn_input_cancellation.is_none()
@@ -791,6 +793,7 @@ impl RuntimeCommit {
             queued_run: None,
             completed_queue_claims: Vec::new(),
             completed_turn_input_claims: Vec::new(),
+            undelivered_turn_input_claims: Vec::new(),
             enqueued_queue_batches: Vec::new(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,

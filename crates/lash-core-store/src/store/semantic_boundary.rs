@@ -52,6 +52,10 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
             !commit.completed_turn_input_claims.is_empty(),
         ),
         (
+            "undelivered_turn_input_claims",
+            !commit.undelivered_turn_input_claims.is_empty(),
+        ),
+        (
             "enqueued_queue_batches",
             !commit.enqueued_queue_batches.is_empty(),
         ),
@@ -113,16 +117,17 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         usage_deltas,
         failure_evidence: _, // refused non-empty by validation
         turn_commit,
-        completed_queue_claims: _,      // refused non-empty by validation
-        completed_turn_input_claims: _, // refused non-empty by validation
-        enqueued_queue_batches: _,      // refused non-empty by validation
+        completed_queue_claims: _,        // refused non-empty by validation
+        completed_turn_input_claims: _,   // refused non-empty by validation
+        undelivered_turn_input_claims: _, // refused non-empty by validation
+        enqueued_queue_batches: _,        // refused non-empty by validation
         interrupted_turn_input_turn_id: _, // refused present by validation
         interrupted_turn_input_cancellation: _, // refused present by validation
         interrupted_turn_cancel_intent: _, // transient CAS predicate
         turn_cancel_closure_settlement: _, // transient fenced obligation
-        adopted_intent_rows: _,         // refused non-zero by validation
-        queued_run: _,                  // refused by semantic-boundary validation
-        committed_attachment_ids: _,    // refused non-empty by validation
+        adopted_intent_rows: _,           // refused non-zero by validation
+        queued_run: _,                    // refused by semantic-boundary validation
+        committed_attachment_ids: _,      // refused non-empty by validation
     } = commit;
     let operation_key = turn_commit.operation.storage_key()?;
     let projection = SemanticBoundaryRequestIntent {

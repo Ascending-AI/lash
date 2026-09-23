@@ -43,6 +43,10 @@ impl<C> ClaimSettlement<C> {
 pub(super) struct TurnClaimSettlement {
     pub(super) queued: ClaimSettlement<crate::QueuedWorkCompletion>,
     pub(super) turn_inputs: ClaimSettlement<crate::TurnInputCompletion>,
+    /// Turn input a cancelled turn withheld from its terminal checkpoint. It
+    /// is released for the cancellation's undelivered disposition, never
+    /// completed (FIG-3531).
+    pub(super) undelivered_turn_inputs: Vec<crate::TurnInputClaim>,
 }
 
 impl TurnClaimSettlement {
@@ -55,7 +59,16 @@ impl TurnClaimSettlement {
         Self {
             queued: ClaimSettlement::new(queued, queue_generations),
             turn_inputs: ClaimSettlement::new(turn_inputs, input_generations),
+            undelivered_turn_inputs: Vec::new(),
         }
+    }
+
+    pub(super) fn with_undelivered_turn_inputs(
+        mut self,
+        undelivered: Vec<crate::TurnInputClaim>,
+    ) -> Self {
+        self.undelivered_turn_inputs = undelivered;
+        self
     }
 
     pub(super) fn has_recovered(&self, current: Option<u64>) -> bool {
@@ -97,6 +110,7 @@ impl TurnClaimSettlement {
                 completed_inputs,
                 input_generations,
             ),
+            undelivered_turn_inputs: Vec::new(),
         }
     }
 }

@@ -1394,9 +1394,13 @@ impl SessionStateAdmin {
         instructions: Option<String>,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<bool> {
-        self.control
-            .compact_context(instructions, scoped_effect_controller)
-            .await
+        // Boxed at the facade seam: compaction opens a frame through a whole
+        // runtime commit, which puts the inline future past the size bound.
+        Box::pin(
+            self.control
+                .compact_context(instructions, scoped_effect_controller),
+        )
+        .await
     }
 }
 

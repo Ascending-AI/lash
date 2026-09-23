@@ -52,10 +52,16 @@ pub(super) struct LogicalTurnClaims {
     /// accepted the row itself and settles it at the head CAS (ADR 0069 §5).
     pub(super) turn_inputs: Vec<TurnInputDrive>,
     /// Work this turn claimed at its terminal checkpoint and withheld from the
-    /// delivery. It is not settled by this turn: it is the follow-on turn's
-    /// input, and holding it keeps the session execution lease live across the
-    /// commit that ends this turn.
+    /// delivery. It is never settled as this turn's completed work: it is the
+    /// follow-on turn's input, and holding it keeps the session execution
+    /// lease live across the commit that ends this turn. A cancelled turn
+    /// starts no follow-on for withheld turn input; its commit settles that
+    /// input through the undelivered disposition instead (FIG-3531).
     pub(super) withheld_terminal_work: Option<WithheldTerminalWork>,
+    /// Withheld turn input a turn that aborted on a cancel hands straight to
+    /// the undelivered disposition, whatever outcome the commit assembles
+    /// (FIG-3531).
+    pub(super) undelivered_turn_inputs: Vec<TurnInputDrive>,
 }
 
 impl LogicalTurnClaims {
@@ -67,7 +73,13 @@ impl LogicalTurnClaims {
             queued,
             turn_inputs,
             withheld_terminal_work: None,
+            undelivered_turn_inputs: Vec::new(),
         }
+    }
+
+    pub(super) fn with_undelivered_turn_inputs(mut self, undelivered: Vec<TurnInputDrive>) -> Self {
+        self.undelivered_turn_inputs = undelivered;
+        self
     }
 
     pub(super) fn with_withheld_terminal_work(
@@ -80,6 +92,28 @@ impl LogicalTurnClaims {
 
     pub(super) fn is_empty(&self) -> bool {
         self.queued.is_empty() && self.turn_inputs.is_empty()
+    }
+
+    /// Whether this turn leaves withheld work for a follow-on turn, given
+    /// whether it committed as cancelled. A cancelled turn settles withheld
+    /// turn input through the undelivered disposition instead of carrying it
+    /// (FIG-3531); withheld queued work is carried either way.
+    pub(super) fn carries_follow_on_work(&self, cancelled: bool) -> bool {
+        self.withheld_terminal_work
+            .as_ref()
+            .is_some_and(|withheld| {
+                !withheld.queued.is_empty() || (!cancelled && !withheld.turn_inputs.is_empty())
+            })
+    }
+
+    /// The withheld work the logical run drives in a follow-on turn once this
+    /// turn has committed. See [`Self::carries_follow_on_work`].
+    pub(super) fn take_follow_on_work(&mut self, cancelled: bool) -> Option<WithheldTerminalWork> {
+        let mut withheld = self.withheld_terminal_work.take()?;
+        if cancelled {
+            withheld.turn_inputs.clear();
+        }
+        withheld.take_if_any()
     }
 
     pub(super) fn commit_effects(
@@ -129,13 +163,31 @@ impl LogicalTurnClaims {
             }
             _ => Vec::new(),
         };
+        // A cancelled turn never delivers the input it withheld from its
+        // terminal checkpoint: it starts no follow-on for it (FIG-3531).
+        // Withheld input is always claimed at the checkpoint that withheld it;
+        // an unclaimed drive would have no fence to release.
+        let cancelled = matches!(outcome, TurnOutcome::Stopped(TurnStop::Cancelled { .. }));
+        let withheld_turn_inputs = self
+            .withheld_terminal_work
+            .iter()
+            .filter(|_| cancelled)
+            .flat_map(|withheld| &withheld.turn_inputs);
+        let undelivered_turn_inputs = self
+            .undelivered_turn_inputs
+            .iter()
+            .chain(withheld_turn_inputs)
+            .filter_map(TurnInputDrive::as_claim)
+            .cloned()
+            .collect();
         LogicalTurnCommitEffects {
             claim_settlement: TurnClaimSettlement::new(
                 completed_queue_claims,
                 completed_turn_input_claims,
                 queue_claim_generations,
                 turn_input_claim_generations,
-            ),
+            )
+            .with_undelivered_turn_inputs(undelivered_turn_inputs),
             enqueued_queue_batches,
         }
     }

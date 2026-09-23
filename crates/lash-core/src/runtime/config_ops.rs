@@ -132,8 +132,10 @@ impl LashRuntime {
     /// setter contract: enqueue-failure = rejected error, drain-commit =
     /// durable success, pending/cancelled = their typed errors.
     async fn settle_config_patch(&mut self, patch: ApplyConfigPatch) -> Result<(), SessionError> {
-        match self
-            .submit_apply_config_patch(patch)
+        // Boxed at this seam: the config-patch commit future carries a whole
+        // runtime commit, and inlining it pushes both callers past the
+        // large-future bound.
+        match Box::pin(self.submit_apply_config_patch(patch))
             .await
             .map_err(|error| SessionError::Protocol(error.to_string()))?
         {

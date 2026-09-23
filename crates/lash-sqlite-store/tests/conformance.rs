@@ -267,6 +267,8 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     );
 }
 
+#[path = "conformance/cancelled_turn_withheld_input.rs"]
+mod cancelled_turn_withheld_input;
 #[path = "conformance/direct_turn_acceptance.rs"]
 mod direct_turn_acceptance;
 #[path = "conformance/drain_end.rs"]

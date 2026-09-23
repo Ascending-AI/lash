@@ -837,6 +837,14 @@ impl SessionCommitStore for PostgresSessionStore {
                     });
                 }
             }
+            // Withheld claims are released first, under their own fence, so
+            // the disposition below settles them exactly as it settles an
+            // unclaimed row (FIG-3531).
+            release_undelivered_turn_input_claims_tx(
+                &mut tx,
+                &commit.undelivered_turn_input_claims,
+            )
+            .await?;
             let sql = crate::turn_ingress::turn_ingress_sql();
             let rows = sqlx::query(sql.pending_inputs_postgres.select_pending_active.sql())
                 .bind(commit.session_id.as_str())
@@ -1092,4 +1100,32 @@ impl SessionCommitStore for PostgresSessionStore {
     async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
         crate::session_meta::load_session_meta(&self.pool, Some(&self.session_id)).await
     }
+}
+
+/// Release the turn-input claims a cancelled turn withheld from its terminal
+/// checkpoint (FIG-3531), each under its own fence, inside the commit
+/// transaction.
+///
+/// Each row returns to the open spelling its ingress carries —
+/// `pending_active` for the active-turn rows a terminal checkpoint claims — so
+/// the cancellation's disposition, which runs next, settles and records it
+/// exactly as it does an unclaimed row. A claim this turn no longer holds
+/// matches no row and is left to its new holder.
+async fn release_undelivered_turn_input_claims_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    claims: &[lash_core_execution::TurnInputClaim],
+) -> Result<(), StoreError> {
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    for claim in claims {
+        sqlx::query(sql.pending_inputs_postgres.abandon_claim.sql())
+            .bind(claim.session_id.as_str())
+            .bind(&claim.claim_id)
+            .bind(&claim.lease_token)
+            .bind(lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str())
+            .bind(lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    Ok(())
 }

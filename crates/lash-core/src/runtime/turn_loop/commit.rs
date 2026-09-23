@@ -643,10 +643,10 @@ impl LashRuntime {
         let release_session_execution_lease = session_execution_lease_release_policy
             .should_release(
                 prepared.outcome(),
-                claims
-                    .withheld_terminal_work
-                    .as_ref()
-                    .is_some_and(|withheld| !withheld.is_empty()),
+                claims.carries_follow_on_work(matches!(
+                    prepared.outcome(),
+                    TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+                )),
             );
         let commit_effects = claims.commit_effects(
             prepared.outcome(),
@@ -940,14 +940,10 @@ impl LashRuntime {
             policy,
             turn_pipeline,
             mut pending_queue_claims,
-            mut pending_turn_input_claims,
+            pending_turn_input_claims,
             withheld_terminal_work,
             ..
         } = driver;
-        // A cancelled turn starts no follow-on, so work withheld from its
-        // terminal checkpoint settles with this turn instead (FIG-3157).
-        pending_queue_claims.extend(withheld_terminal_work.queued);
-        pending_turn_input_claims.extend(withheld_terminal_work.turn_inputs);
         emit_terminal_sequence(
             &mut assembler,
             events,
@@ -957,7 +953,18 @@ impl LashRuntime {
             },
         )
         .await;
-        let claims = LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims);
+        // A cancelled turn starts no follow-on (FIG-3157). Its final commit
+        // settles withheld turn input through the cancellation's undelivered
+        // disposition (FIG-3531), handed over directly rather than inferred
+        // from the committed outcome; withheld queued work settles with the
+        // turn, as it always has.
+        let crate::runtime::logical_turn::WithheldTerminalWork {
+            queued: withheld_queue_claims,
+            turn_inputs: withheld_turn_inputs,
+        } = withheld_terminal_work;
+        pending_queue_claims.extend(withheld_queue_claims);
+        let claims = LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims)
+            .with_undelivered_turn_inputs(withheld_turn_inputs);
         Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
                 turn_pipeline,
