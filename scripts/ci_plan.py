@@ -265,11 +265,12 @@ DISPATCH_ONLY_JOBS = {
 
 DEFERRED_EVENTS = {"pull_request", "merge_group"}
 
-# The PostgreSQL matrix. PG16 is the sole primary lane on pull_request and
-# merge_group. PG14/PG18 compare catalog shape only and run when the diff
-# touches a durable schema crate, or on workflow_dispatch (the full profile,
-# including weekly/release certification). Weekly confidence backends remain
-# the compatibility witness for unrelated landings.
+# The PostgreSQL matrix. PG16 is the sole primary lane and the only major a
+# pull request runs: a PR gets fast signal. PG14/PG18 compare catalog shape
+# only; they are merge-group breadth when the diff touches a durable schema
+# crate, and part of the full profile on workflow_dispatch (weekly/release
+# certification). Weekly confidence backends remain the compatibility witness
+# for unrelated landings.
 POSTGRES_PRIMARY_LEG = {"postgres": "16", "role": "primary"}
 POSTGRES_COMPATIBILITY_LEGS = [
     {"postgres": "14", "role": "compatibility"},
@@ -278,9 +279,7 @@ POSTGRES_COMPATIBILITY_LEGS = [
 
 
 def postgres_matrix(event_name: str, schema: bool = False) -> list[dict[str, str]]:
-    if event_name == "pull_request" and not schema:
-        return [POSTGRES_PRIMARY_LEG]
-    if schema or event_name == "workflow_dispatch":
+    if event_name == "workflow_dispatch" or (event_name == "merge_group" and schema):
         return [
             POSTGRES_COMPATIBILITY_LEGS[0],
             POSTGRES_PRIMARY_LEG,
@@ -304,8 +303,8 @@ WORKERS_E2E_JOBS = {
 }
 
 BAZEL_TEST_JOB = "bazel-tests"
-# Trusted Rust pull requests run reverse-dependency tests in `bazel-tests`.
-# Merge groups run the complete core and tail partitions on the combined tree.
+# Trusted Rust events run the core partition in `bazel-tests`. The tail is
+# breadth: merge groups and dispatches run it on the combined tree.
 BAZEL_TEST_JOBS = frozenset({BAZEL_TEST_JOB, "bazel-tests-tail"})
 
 

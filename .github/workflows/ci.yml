@@ -13,15 +13,23 @@ name: CI
 # nothing at all. Trunk breadth on push (FIG-2789) is retired: the queue
 # validates the required core board on its merge-group commit and main merges
 # by fast-forwarding to that same commit, so an automatic push carried a tree
-# CI had already seen. Pull requests run a conservative reverse-dependency
-# Bazel test selection and path-gated jobs; merge_group runs the complete
-# deterministic Bazel partition on the combined tree. The
-# breadth families — Test heavy suites, Test S3 store, Functional E2E, Restate
-# workers E2E, Fuzz smoke, Stack budget, deferred Unicode, worker artifacts —
-# are gated to `workflow_dispatch` alone, which is also the profile
-# release.yml certifies against and the sole home of feature lanes, the
-# PG14/PG18 compatibility legs, deferred Unicode, the seal lane on non-facade
-# diffs, and the lashlang consumer.
+# CI had already seen.
+#
+# Pull requests get fast signal; the merge group gets breadth. A pull request
+# runs the core Bazel suite (`//:workspace_tests` minus its tail), the
+# workspace clippy, the seal lane when the facade moved, one PostgreSQL major
+# (16) and the path-gated script jobs. The merge group runs the same set on
+# the combined tree plus the test tail, the feature-lane clippy, the
+# `//:runtime_off` graph and, for a schema diff, the PG14/PG18 compatibility
+# legs. Cached Bazel results mean a merge group re-executes only what its
+# combined tree changed.
+#
+# The breadth families — Test heavy suites, Test S3 store, Functional E2E,
+# Restate workers E2E, Fuzz smoke, Stack budget, deferred Unicode, worker
+# artifacts — are gated to `workflow_dispatch` alone, which is also the
+# profile release.yml certifies against and the sole home of feature lanes,
+# the PG14/PG18 legs on a non-schema diff, deferred Unicode, the seal lane on
+# non-facade diffs, and the lashlang consumer.
 
 on:
   # The full profile, and the only home of the heavy families. A manual
@@ -207,8 +215,8 @@ jobs:
             --event "${GITHUB_EVENT_NAME}" \
             --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
 
-      # PG16 is the sole primary lane on rust pull requests and merge groups.
-      # PG14/PG18 run when the diff touches a durable schema crate, or on
+      # PG16 is the only major a pull request runs. PG14/PG18 run on a merge
+      # group whose diff touches a durable schema crate, and on
       # workflow_dispatch. scripts/ci_plan.py owns the rule.
       - name: Resolve PostgreSQL matrix
         id: postgres-matrix
@@ -489,7 +497,6 @@ jobs:
           python3 scripts/test_generate_workflow_schemas.py
           python3 scripts/test_schema_validation.py
           python3 scripts/test_dev_test.py
-          python3 scripts/test_pr_test_targets.py
           python3 scripts/test_test_batch_runner.py
           python3 scripts/test_test_xml.py
           python3 scripts/test_launcher_test_sandbox.py
@@ -766,9 +773,9 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
-  # The merge group owns the complete deterministic/default-feature partition.
-  # Trusted pull requests preflight changed targets and their reverse dependencies,
-  # falling back to the complete suite when selection is uncertain. The job
+  # The core of the deterministic/default-feature partition, on every trusted
+  # event: `//:workspace_tests` minus its long tail. The merge group adds the
+  # tail on a parallel runner (`bazel-tests-tail`). The job
   # executes locally on a GitHub-hosted runner and only shares
   # action results with that exact runner image identity, never Kiln's executor
   # identity. Fork and Dependabot pull requests intentionally skip this
@@ -796,9 +803,7 @@ jobs:
           # Bounded and retried: a fetch that hangs used to hold the runner until the
           # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
           for attempt in 1 2 3; do
-            # PR GITHUB_SHA is a synthetic merge commit. Fetch its parents so
-            # the selector can prove the event base is an ancestor of HEAD.
-            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=2 origin "${GITHUB_SHA}"; then
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
               break
             fi
             [ "${attempt}" -lt 3 ] || exit 1
@@ -818,29 +823,15 @@ jobs:
           CACHE_CERT: ${{ secrets.CACHE_CERT }}
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
-      - name: Select deterministic PR tests
-        if: github.event_name == 'pull_request'
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 scripts/ci/pr_test_targets.py \
-            --base "$PR_BASE_SHA" --output-user-root "$BAZEL_OUTPUT_USER_ROOT" \
-            > "$RUNNER_TEMP/pr-test-targets.txt"
-
-      # Every selected label is deterministic and service-free; service-backed
-      # tests remain manual and scripts/ci/store-tests.sh runs them fresh.
-      - name: Test deterministic PR selection or merge-group suite
+      # Every label is deterministic and service-free; service-backed tests
+      # remain manual and scripts/ci/store-tests.sh runs them fresh. Pull
+      # requests and merge groups run the same core suite: cached test results
+      # already scope a run to what the tree changed, so a reverse-dependency
+      # selection saved no pool work and fell back to the full suite on four
+      # PR runs in five.
+      - name: Test the workspace core suite with shared cache
         shell: bash
         run: |
-          set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            mapfile -t test_targets < "$RUNNER_TEMP/pr-test-targets.txt"
-          else
-            test_targets=(//:workspace_tests -//:workspace_tail_tests)
-          fi
-          # shellcheck disable=SC2086
           # The all-targets compile proof rides the Lint job instead:
           # `//:workspace_clippy` type-checks the same 189-target workspace
           # shape `cargo check --workspace --all-targets` used to, so the
@@ -850,16 +841,17 @@ jobs:
           #
           # `-//:workspace_tail_tests` subtracts the profiled long tail (the
           # `//examples/` leaves and the `dev-deferred` slow tests), which the
-          # `bazel-tests-tail` job runs on a parallel runner; a core-touching
-          # diff otherwise ends this leg in a ~5.5-minute agent-workbench
-          # compile long after every crate test has finished.
+          # merge-group-only `bazel-tests-tail` job runs on a parallel runner;
+          # a core-touching diff otherwise ends this leg in a ~5.5-minute
+          # agent-workbench compile long after every crate test has finished.
+          # shellcheck disable=SC2086
           bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
             --remote_download_regex='.*test\.outputs.*' \
             --cache_test_results=yes --test_output=errors \
             --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
-            -- "${test_targets[@]}"
+            -- //:workspace_tests -//:workspace_tail_tests
 
       # FIG-3429 item 8: conformance laws leave an execution receipt in each
       # target's undeclared outputs; this census fails on any registered law
@@ -896,7 +888,9 @@ jobs:
   # that end the serial compile chain on a core-touching diff plus the
   # `dev-deferred` slow labels -- so it runs here in parallel with the main
   # leg instead of at the end of it. Same trust gate, same pool credentials,
-  # same flags: the legs differ only in which suite labels they expand.
+  # same flags: the legs differ only in which suite labels they expand. It is
+  # breadth, not signal: pull requests skip it and the merge group runs it on
+  # the combined tree.
   bazel-tests-tail:
     name: Test Bazel partition tail
     runs-on: ubuntu-24.04
@@ -1421,22 +1415,33 @@ jobs:
       # and a trailing `-D warnings`, in the order Cargo emits them. See
       # `tools/bazel/clippy.bzl`.
       #
-      # `//:feature_lane_clippy` lints the slack-clone `e2e` variant in the
-      # same invocation. #1591 ran that leg as a Cargo command beside this one
-      # so it would not queue behind it; it is a Bazel label now, so it rides
-      # the same remote execution instead of this runner's four cores. The
-      # lint set, the feature set and the trailing `-D warnings` are the ones
-      # the Cargo leg carried.
+      # Breadth rides the merge group and the dispatch only. On those events
+      # `//:feature_lane_clippy` lints the slack-clone `e2e` variant and the
+      # other feature-lane variants in the same invocation, and
+      # `//:runtime_off` builds the isolated OFF graph whose compiler actions
+      # are reconciled with Cargo below. Together they are about 45
+      # feature-variant compiles on a core-touching diff, evidence no pull
+      # request needs for its first signal; the merge group proves them on the
+      # combined tree before anything lands.
       - name: Clippy (workspace, all targets, shared cache)
         if: needs.plan.outputs.bazel_trusted == 'true'
         shell: bash
         run: |
+          targets=(//:workspace_clippy //:schema_checks)
+          breadth=false
+          if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            breadth=true
+            targets+=(//:feature_lane_clippy //:runtime_off)
+          fi
           # shellcheck disable=SC2086
           bazel --output_user_root="$RUNNER_TEMP/bazel-output" build \
             ${BAZEL_SHARED_CACHE_FLAGS} \
             --remote_download_outputs=minimal \
             --profile="${RUNNER_TEMP}/bazel-lint-profile.json.gz" \
-            //:workspace_clippy //:feature_lane_clippy //:schema_checks //:runtime_off
+            -- "${targets[@]}"
+          if [[ "$breadth" == false ]]; then
+            exit 0
+          fi
           # shellcheck disable=SC2086
           bazel --output_user_root="$RUNNER_TEMP/bazel-output" aquery \
             ${BAZEL_SHARED_CACHE_FLAGS} \
@@ -1477,7 +1482,8 @@ jobs:
       # `slack-clone`'s `e2e` feature is outside the resolved default workspace
       # graph, so it used to have no Bazel label and this 106 s Cargo compile
       # ran on every event. It has one now: `//:feature_lane_clippy` lints the
-      # feature-lane variants of the same targets, above. `slack-clone`
+      # feature-lane variants of the same targets on trusted merge groups and
+      # dispatches, above. `slack-clone`
       # declares no `default` feature, so the lane's `--no-default-features
       # --features e2e` resolution is the resolution this command used.
       # Untrusted events receive no cache credentials and keep the Cargo path.
@@ -1509,9 +1515,9 @@ jobs:
       # that every referenced path exists at that feature set (FIG-3427:
       # `lash_core::runtime::effect` is `pub(crate)` without `testing`, and a
       # downstream `crate::runtime::effect::…` path broke only under this
-      # command). Trusted events now build the isolated //:runtime_off graph
-      # alongside Clippy above and reconcile its actual compiler actions with
-      # Cargo. Untrusted events retain the Cargo OFF witness here because the
+      # command). Trusted merge groups and dispatches build the isolated
+      # //:runtime_off graph alongside Clippy above and reconcile its actual
+      # compiler actions with Cargo. Untrusted events retain the Cargo OFF witness here because the
       # feature-lanes job is dispatch-only and repo-gates skips Rust-only
       # diffs.
       - name: Check feature and schema contracts
@@ -1666,10 +1672,10 @@ jobs:
     # `pg_constraint` rows, 14 is before `pg_index.indnullsnotdistinct` existed —
     # and the shape suite asserts all three produce the byte-identical artifact.
     # PG14 and PG18 are compatibility lanes: they run only the live catalog
-    # artifact comparison and a focused version-stamp gate, so they are deferred
-    # off the pull-request critical path and run on merge_group and
-    # workflow_dispatch. Nothing reaches trunk without all three majors: the
-    # merge queue runs the full matrix before anything lands.
+    # artifact comparison and a focused version-stamp gate, so they stay off
+    # the pull-request path. A merge group whose diff touches a durable schema
+    # crate runs them, and so does workflow_dispatch: no schema change reaches
+    # trunk without all three majors.
     # scripts/ci_plan.py `postgres-matrix` owns the per-event matrix. PG16 is
     # the sole primary lane and runs on every event. On PR-class events it runs
     # the proven runtime identity oracle; on full-profile runs it retains the

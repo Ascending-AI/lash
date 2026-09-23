@@ -526,14 +526,15 @@ output:
 
 | Event | PG 14 (compatibility) | PG 16 (primary) | PG 18 (compatibility) |
 | --- | --- | --- | --- |
-| `pull_request` (rust) | schema diffs only | runs | schema diffs only |
+| `pull_request` (rust) | skipped | runs | skipped |
 | `merge_group` (rust) | schema diffs only | runs | schema diffs only |
 | `push` to `main` | skipped (queue already witnessed the SHA) | skipped | skipped |
 | `workflow_dispatch` | runs | runs | runs |
 
 The compatibility lanes only compare the live catalog artifact and a focused
-version-stamp gate. They run when the diff touches `lash-postgres-store` or
-`lash-sqlite-store`, or on the full-profile dispatch. Weekly confidence
+version-stamp gate. They run on a merge group whose diff touches
+`lash-postgres-store` or `lash-sqlite-store`, and on the full-profile dispatch;
+a pull request runs PG 16 alone. Weekly confidence
 backends remain the compatibility witness for unrelated landings. The lane is
 removed from the matrix rather than kept with its steps skipped -- a leg that
 ran no tests would be a hollow green.
@@ -566,9 +567,9 @@ is recorded with `cargo-feature-gate` in `tools/bazel/target-inventory.json`
 and keeps its Cargo recipe.
 
 The main CI workflow makes the merge group the authoritative complete partition.
-Trusted same-repository pull requests select deterministic tests in changed
-packages and their reverse dependencies, with `//:workspace_tests` as the
-fallback for uncertain diffs or graph queries. Merge-queue groups run the full
+Trusted same-repository pull requests run the core suite,
+`//:workspace_tests -//:workspace_tail_tests`; cached test results already
+scope that run to what the diff changed. Merge-queue groups run the full
 `//:workspace_tests` partition, split into core and tail jobs, on the combined
 tree. There is no `main` push CI trigger because the queue witnessed the merged
 tree. A Rust PR runs no Cargo
