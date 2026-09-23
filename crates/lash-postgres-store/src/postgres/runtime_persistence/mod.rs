@@ -279,6 +279,41 @@ async fn lock_process_wake_source_tx(
     Ok(())
 }
 
+/// Raise session `session_id`'s redelivery fence to `max(floor, sequence)`
+/// for a wake whose row is leaving the queue in this transaction.
+///
+/// The one home of the invariant that every terminal transition of a wake —
+/// claim settlement and host cancel — raises the floor with the row's
+/// removal (FIG-1065, FIG-3545). The wake source's advisory lock serializes
+/// the fence against a concurrent enqueue of the same source, which takes
+/// the same lock before it reads the floor. Callers write the fence before
+/// the delete.
+async fn raise_wake_redelivery_fence_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    wake: &lash_core::store::claim_plan::TerminalProcessWake,
+) -> Result<(), StoreError> {
+    // A validated wake batch always names its source key, so the advisory
+    // lock is always taken; the `None` arm is a corrupt-row path that still
+    // writes the fence it can.
+    if let Some(source_key) = wake.source_key.as_deref() {
+        lock_process_wake_source_tx(tx, session_id, source_key).await?;
+    }
+    sqlx::query(
+        crate::process_sql::process_sql()
+            .fence_postgres
+            .upsert_max
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(wake.process_id.as_str())
+    .bind(sql_counter_value("wake_allocation_floor", wake.sequence)?)
+    .execute(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    Ok(())
+}
+
 async fn read_session_state_version_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,

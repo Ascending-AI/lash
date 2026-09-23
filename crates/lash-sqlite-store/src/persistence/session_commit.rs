@@ -736,7 +736,6 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                     }
                     {
                         let turn_ingress = crate::turn_ingress::turn_ingress_sql();
-                        let fence = crate::process_registry::sql::process_sql();
                         for settlement_plan in &queued_work_plans {
                             for write in settlement_plan.writes() {
                                 match write {
@@ -745,23 +744,11 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                                     // replay a wake the session already
                                     // consumed (FIG-1065).
                                     lash_core::store::claim_plan::QueuedWorkSettlementWrite::FenceWakeRedelivery { wake, .. } => {
-                                        tx.execute(
-                                            fence.fence_sqlite.upsert_max.sql(),
-                                            params![
-                                                settlement_plan.session_id().as_str(),
-                                                wake.process_id.as_str(),
-                                                i64::try_from(wake.sequence).map_err(|_| {
-                                                    stored_data_corrupt(
-                                                        "WakeRedeliveryFence",
-                                                        format!(
-                                                            "allocation_floor does not fit SQLite INTEGER: {}",
-                                                            wake.sequence
-                                                        ),
-                                                    )
-                                                })?,
-                                            ],
-                                        )
-                                        .map_err(sqlite_error)?;
+                                        crate::queued_work::raise_wake_redelivery_fence_conn(
+                                            tx,
+                                            settlement_plan.session_id(),
+                                            wake,
+                                        )?;
                                     }
                                     lash_core::store::claim_plan::QueuedWorkSettlementWrite::SettleClaimedBatch { batch_id } => {
                                         let settled = tx

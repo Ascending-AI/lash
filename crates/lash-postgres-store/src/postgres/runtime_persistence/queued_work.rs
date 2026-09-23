@@ -446,6 +446,12 @@ impl QueuedWorkStore for PostgresSessionStore {
             return Ok(None);
         }
         let batch = queued_work_batch_from_row(&mut tx, queued_batch_row(row)?).await?;
+        // A host cancel is a wake's terminal transition too: the fence lands
+        // with the removal, or a redelivery of the withdrawn wake would be
+        // admitted again (FIG-3545).
+        if let Some(wake) = lash_core::store::claim_plan::TerminalProcessWake::of_batch(&batch) {
+            raise_wake_redelivery_fence_tx(&mut tx, session_id, &wake).await?;
+        }
         sqlx::query(sql.queued_batches_postgres.delete_cancelled.sql())
             .bind(batch_id)
             .execute(&mut *tx)

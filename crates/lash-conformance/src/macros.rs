@@ -246,6 +246,7 @@ macro_rules! runtime_persistence_tests {
             (process_wakes_batch_by_default, "wake-default-batch"),
             (queued_work_completion_is_lease_guarded, "root"),
             (queued_wake_delivery_is_source_key_idempotent_and_claimed_once, "root"),
+            (host_cancelled_wake_is_not_redelivered, "root"),
             (queue_completion_and_turn_commit_stamp_are_atomic, "root"),
             (pending_turn_inputs_source_keys_order_cancel_and_cross_session, "root"),
             (pending_turn_input_duplicate_input_id, "root"),

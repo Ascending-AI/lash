@@ -192,7 +192,7 @@ pub(crate) async fn plan_queued_work_settlement_tx(
         // fence: the source key (advisory-lock identity) and the head
         // payload, both claim-keyed reads over the locked row. The advisory
         // lock itself stays at the write site.
-        let consumed_wake = match claim.as_ref() {
+        let terminal_wake = match claim.as_ref() {
             Some(_) => {
                 let source_key: Option<String> =
                     sqlx::query_scalar(sql.family_postgres.select_claimed_batch_source_key.sql())
@@ -222,15 +222,10 @@ pub(crate) async fn plan_queued_work_settlement_tx(
                         )
                     })
                     .transpose()?
-                    .and_then(|payload| match payload {
-                        lash_core::runtime::QueuedWorkPayload::ProcessWake { wake } => {
-                            Some(lash_core::store::claim_plan::ConsumedProcessWake {
-                                source_key,
-                                process_id: wake.process_id,
-                                sequence: wake.sequence,
-                            })
-                        }
-                        _ => None,
+                    .and_then(|payload| {
+                        lash_core::store::claim_plan::TerminalProcessWake::of_payload(
+                            source_key, &payload,
+                        )
                     })
             }
             None => None,
@@ -238,7 +233,7 @@ pub(crate) async fn plan_queued_work_settlement_tx(
         rows.push(lash_core::store::claim_plan::QueuedWorkSettlementRow {
             batch_id: batch_id.clone(),
             claim,
-            consumed_wake,
+            terminal_wake,
         });
     }
     // The shared planner takes the verdict: a settlement is authorized only

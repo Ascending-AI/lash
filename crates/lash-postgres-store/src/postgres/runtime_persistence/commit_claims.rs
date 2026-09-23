@@ -18,24 +18,7 @@ pub(super) async fn complete_queued_work_claims_tx(
         for write in plan.writes() {
             match write {
                 QueuedWorkSettlementWrite::FenceWakeRedelivery { wake, .. } => {
-                    // A validated wake batch always names its source key, so
-                    // the advisory lock is always taken; the `None` arm is a
-                    // corrupt-row path that still writes the fence it can.
-                    if let Some(source_key) = wake.source_key.as_deref() {
-                        lock_process_wake_source_tx(tx, plan.session_id(), source_key).await?;
-                    }
-                    sqlx::query(
-                        crate::process_sql::process_sql()
-                            .fence_postgres
-                            .upsert_max
-                            .sql(),
-                    )
-                    .bind(plan.session_id().as_str())
-                    .bind(wake.process_id.as_str())
-                    .bind(sql_counter_value("wake_allocation_floor", wake.sequence)?)
-                    .execute(&mut **tx)
-                    .await
-                    .map_err(store_sqlx_error)?;
+                    raise_wake_redelivery_fence_tx(tx, plan.session_id(), wake).await?;
                 }
                 QueuedWorkSettlementWrite::SettleClaimedBatch { batch_id } => {
                     let completion = sqlx::query(sql.queued_batches.settle_claimed.sql())

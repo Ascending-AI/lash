@@ -43,7 +43,7 @@ pub(crate) use lash_core_store::process_identity::{
 pub(crate) use lash_core_store::queued_work_vocabulary::{
     DeliveryPolicy, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-    QueuedWorkKind, QueuedWorkPayload,
+    QueuedWorkKind,
 };
 #[cfg(any(test, feature = "testing"))]
 #[allow(unused_imports)]
