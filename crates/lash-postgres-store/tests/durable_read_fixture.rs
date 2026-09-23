@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use lash_core::{
+use lash_core_execution::{
     EffectHost, ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence,
     SessionStoreFactory, TriggerStore,
 };
@@ -636,10 +636,11 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     add_prior_fixture_submission_columns(&pool).await;
     // The enclosing catalog uses the current session-metadata constraints;
     // only the deliberately obsolete checkpoint component remains historical.
-    for constraint in lash_core::store_backend_support::required_constraints::EXPECTED_CONSTRAINTS
-        .iter()
-        .filter_map(|constraint| constraint.postgres)
-        .filter(|constraint| constraint.table == "lash_session_meta")
+    for constraint in
+        lash_core_execution::store_backend_support::required_constraints::EXPECTED_CONSTRAINTS
+            .iter()
+            .filter_map(|constraint| constraint.postgres)
+            .filter(|constraint| constraint.table == "lash_session_meta")
     {
         sqlx::raw_sql(&format!(
             "ALTER TABLE {} DROP CONSTRAINT IF EXISTS {}, ADD CONSTRAINT {} CHECK ({})",
@@ -679,7 +680,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     upgrade_prior_fixture_frame_identity(&pool).await;
     refresh_prior_fixture_node_bodies(&pool).await;
     sqlx::query("UPDATE lash_session_meta SET session_state_version = $1")
-        .bind(i32::try_from(lash_core::store::CURRENT_SESSION_STATE_VERSION).unwrap())
+        .bind(i32::try_from(lash_core_execution::store::CURRENT_SESSION_STATE_VERSION).unwrap())
         .execute(&pool)
         .await
         .expect(
@@ -696,7 +697,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
             )::text",
     )
     .bind(i64::from(
-        lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
     ))
     .execute(&pool)
     .await
@@ -746,7 +747,7 @@ async fn add_prior_fixture_submission_columns(pool: &sqlx::PgPool) {
     .await
     .expect("read the refusal fixture's pending inputs");
     for (input_id, session_id, ingress_json, input_json) in rows {
-        let digest = lash_core::PendingTurnInputDraft::new(
+        let digest = lash_core_execution::PendingTurnInputDraft::new(
             session_id,
             serde_json::from_str(&ingress_json).expect("decode fixture ingress"),
             serde_json::from_str(&input_json).expect("decode fixture input"),
@@ -777,7 +778,9 @@ async fn add_prior_fixture_submission_columns(pool: &sqlx::PgPool) {
 // Author-time envelope refresh only: retain the deliberately obsolete leaf bytes
 // and encoding descriptor so the refusal fixture reaches component admission.
 async fn upgrade_prior_fixture_checkpoint_manifests(pool: &sqlx::PgPool) {
-    use lash_core::store::{BlobRef, SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint};
+    use lash_core_execution::store::{
+        BlobRef, SESSION_CHECKPOINT_SCHEMA_VERSION, SessionCheckpoint,
+    };
     let blobs: Vec<(String, Vec<u8>)> = sqlx::query_as("SELECT hash, content FROM lash_blobs")
         .fetch_all(pool)
         .await
@@ -829,7 +832,7 @@ async fn upgrade_prior_fixture_checkpoint_manifests(pool: &sqlx::PgPool) {
 // error vocabulary, so each body decodes under the current node-body
 // generation once its stamp moves; decoding here is the proof, not a hope.
 async fn upgrade_prior_fixture_graph_node_bodies(pool: &sqlx::PgPool) {
-    use lash_core::session_graph::{SESSION_NODE_BODY_SCHEMA_VERSION, SessionNodeRecord};
+    use lash_core_execution::session_graph::{SESSION_NODE_BODY_SCHEMA_VERSION, SessionNodeRecord};
     let rows: Vec<(String, Option<String>, String)> =
         sqlx::query_as("SELECT node_id, parent_node_id, node_json FROM lash_graph_nodes")
             .fetch_all(pool)
@@ -924,9 +927,9 @@ async fn upgrade_prior_fixture_frame_identity(pool: &sqlx::PgPool) {
     .fetch_one(pool)
     .await
     .expect("read prior fixture frame identity");
-    let frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
+    let frame_key = lash_core_execution::FrameKey::from_caller_material("initial-frame")
         .expect("non-empty initial frame material");
-    let frame_node_id = lash_core::facade_support::frame_node_id(
+    let frame_node_id = lash_core_execution::facade_support::frame_node_id(
         &SessionId::from(fixture::SESSION_ID),
         frame_key.as_str(),
     )
@@ -1023,8 +1026,8 @@ async fn refresh_prior_fixture_node_bodies(pool: &sqlx::PgPool) {
             }
         }
         body["schema_version"] =
-            serde_json::Value::from(lash_core::SESSION_NODE_BODY_SCHEMA_VERSION);
-        let record = lash_core::SessionNodeRecord::decode_storage_body(
+            serde_json::Value::from(lash_core_execution::SESSION_NODE_BODY_SCHEMA_VERSION);
+        let record = lash_core_execution::SessionNodeRecord::decode_storage_body(
             node_id.clone(),
             parent_node_id,
             &body.to_string(),
@@ -1060,41 +1063,42 @@ fn assert_fixture_version() {
 }
 
 fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::FixtureHandles {
-    let clock = Arc::new(lash_core::testing::TestClock::new(timestamp_ms));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
     let runtime = Arc::new(
         storage
             .session_store(fixture::SESSION_ID)
-            .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+            .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
     );
     let processes = Arc::new(
         storage
             .process_registry()
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
     );
     let process_envs = Arc::new(storage.process_env_store());
     let triggers = Arc::new(
         storage
             .trigger_store()
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
             .with_incarnation_for_testing("durable-read-trigger-incarnation"),
     );
     let effects = Arc::new(PostgresEffectHost::with_options_and_clock(
         storage,
         PostgresEffectReplayOptions::default(),
-        Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     ));
     let session_factory = Arc::new(
         storage
             .session_store_factory()
-            .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+            .with_lease_clock_for_testing(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
     );
     fixture::FixtureHandles {
-        clock: Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+        clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
         runtime: runtime as Arc<dyn RuntimePersistence>,
         session_factory: session_factory as Arc<dyn SessionStoreFactory>,
-        processes: Arc::clone(&processes) as Arc<dyn lash_core::ConformanceProcessRegistry>,
+        processes: Arc::clone(&processes)
+            as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
         continuations: processes as Arc<dyn ProcessContinuationStore>,
         process_envs: process_envs as Arc<dyn ProcessExecutionEnvStore>,
         triggers: triggers as Arc<dyn TriggerStore>,

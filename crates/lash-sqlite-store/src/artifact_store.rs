@@ -162,7 +162,7 @@ impl Store {
         artifact_ref: String,
         descriptor: BlobArtifactDescriptor,
         bytes: Vec<u8>,
-        owner: lash_core::ArtifactOwner,
+        owner: lash_core_execution::ArtifactOwner,
     ) -> Result<(), StoreError> {
         let blob_profile = self.options.blob_profile;
         self.conn
@@ -210,8 +210,8 @@ impl Store {
         &self,
         namespace: &'static str,
         artifact_ref: String,
-        from: lash_core::ArtifactOwner,
-        to: lash_core::ArtifactOwner,
+        from: lash_core_execution::ArtifactOwner,
+        to: lash_core_execution::ArtifactOwner,
     ) -> Result<(), StoreError> {
         self.conn
             .write(move |tx| {
@@ -289,7 +289,7 @@ impl Store {
         &self,
         namespace: &'static str,
         artifact_ref: String,
-        owner: lash_core::ArtifactOwner,
+        owner: lash_core_execution::ArtifactOwner,
     ) -> Result<(), StoreError> {
         self.conn
             .write(move |tx| {
@@ -309,11 +309,11 @@ impl Store {
     async fn retire_artifact_owner(
         &self,
         namespace: &'static str,
-        owner: lash_core::ArtifactOwner,
+        owner: lash_core_execution::ArtifactOwner,
     ) -> Result<(), StoreError> {
         self.conn
             .write(move |tx| {
-                if !matches!(owner, lash_core::ArtifactOwner::Execution(_)) {
+                if !matches!(owner, lash_core_execution::ArtifactOwner::Execution(_)) {
                     return Err(rusqlite::Error::InvalidParameterName(
                         "only execution artifact owners can be retired".to_string(),
                     ));
@@ -398,7 +398,7 @@ impl lashlang::LashlangArtifactStore for Store {
 
     async fn publish_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         artifact: &lashlang::ModuleArtifact,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
@@ -431,7 +431,7 @@ impl lashlang::LashlangArtifactStore for Store {
 
     async fn retain_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         module_ref: &lashlang::ModuleRef,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         let bytes = self
@@ -460,8 +460,8 @@ impl lashlang::LashlangArtifactStore for Store {
 
     async fn transfer_module_artifact(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
+        from: &lash_core_execution::ArtifactOwner,
+        to: &lash_core_execution::ArtifactOwner,
         module_ref: &lashlang::ModuleRef,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         self.transfer_artifact_ref_owner(
@@ -476,7 +476,7 @@ impl lashlang::LashlangArtifactStore for Store {
 
     async fn release_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         module_ref: &lashlang::ModuleRef,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         self.release_artifact_ref_owner(
@@ -492,7 +492,7 @@ impl lashlang::LashlangArtifactStore for Store {
 
     async fn retire_module_artifact_owner(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         self.retire_artifact_owner(MODULE_ARTIFACT_NAMESPACE, owner.clone())
             .await
@@ -538,20 +538,20 @@ impl lashlang::LashlangArtifactStore for Store {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessExecutionEnvStore for Store {
+impl lash_core_execution::ProcessExecutionEnvStore for Store {
     async fn publish_process_execution_env(
         &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
+        owner: &lash_core_execution::ArtifactOwner,
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
         bytes: &[u8],
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core::PluginError::Invoke(
+            return Err(lash_core_execution::PluginError::Invoke(
                 "invalid process execution environment reference".into(),
             ));
         }
         if !env_ref.matches_store_bytes(bytes) {
-            return Err(lash_core::PluginError::Session(format!(
+            return Err(lash_core_execution::PluginError::Session(format!(
                 "process execution environment bytes do not match `{env_ref}`"
             )));
         }
@@ -564,15 +564,15 @@ impl lash_core::ProcessExecutionEnvStore for Store {
             owner.clone(),
         )
         .await
-        .map_err(lash_core::artifact_store_plugin_error)
+        .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
     }
 
     async fn transfer_process_execution_env(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core::PluginError> {
+        from: &lash_core_execution::ArtifactOwner,
+        to: &lash_core_execution::ArtifactOwner,
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.transfer_artifact_ref_owner(
             PROCESS_ENV_NAMESPACE,
             env_ref.as_str().to_string(),
@@ -580,38 +580,38 @@ impl lash_core::ProcessExecutionEnvStore for Store {
             to.clone(),
         )
         .await
-        .map_err(lash_core::artifact_store_plugin_error)
+        .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
     }
 
     async fn release_process_execution_env(
         &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core::PluginError> {
+        owner: &lash_core_execution::ArtifactOwner,
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.release_artifact_ref_owner(
             PROCESS_ENV_NAMESPACE,
             env_ref.as_str().to_string(),
             owner.clone(),
         )
         .await
-        .map_err(lash_core::artifact_store_plugin_error)
+        .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
     }
 
     async fn retire_process_execution_env_owner(
         &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lash_core::PluginError> {
+        owner: &lash_core_execution::ArtifactOwner,
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.retire_artifact_owner(PROCESS_ENV_NAMESPACE, owner.clone())
             .await
-            .map_err(lash_core::artifact_store_plugin_error)
+            .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
     }
 
     async fn get_process_execution_env(
         &self,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, lash_core::PluginError> {
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+    ) -> Result<Option<Vec<u8>>, lash_core_execution::PluginError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core::PluginError::Invoke(
+            return Err(lash_core_execution::PluginError::Invoke(
                 "invalid process execution environment reference".into(),
             ));
         }
@@ -622,6 +622,6 @@ impl lash_core::ProcessExecutionEnvStore for Store {
             format!("process execution env `{artifact_ref}`"),
         )
         .await
-        .map_err(lash_core::artifact_store_plugin_error)
+        .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
     }
 }

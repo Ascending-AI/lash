@@ -20,10 +20,10 @@ use lash_sansio::SessionId;
 use std::future::Future;
 use std::sync::Arc;
 
-use lash_core::runtime::{
+use lash_core_execution::runtime::{
     ProcessWakeDelivery, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, RuntimeSubject,
 };
-use lash_core::{
+use lash_core_execution::{
     AttachmentRootSet, LeaseOwnerIdentity, PendingTurnInputDraft, PluginState, QueuedWorkStore,
     RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCommitStore,
     SessionExecutionLeaseStore, SessionStoreFactory, StoreError, ToolState, TurnInput,
@@ -71,8 +71,8 @@ fn commit_at(
 ) -> RuntimeCommit {
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     let commit = RuntimeCommit {
@@ -80,8 +80,8 @@ fn commit_at(
         ..RuntimeCommit::persisted_state_for_test(&state, &[])
     };
     commit
-        .with_operation(lash_core::OperationId::new(
-            lash_core::ExecutionScope::runtime_operation(format!(
+        .with_operation(lash_core_execution::OperationId::new(
+            lash_core_execution::ExecutionScope::runtime_operation(format!(
                 "head-cas:{session_id}:{writer_id}"
             )),
             "commit",
@@ -166,8 +166,8 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
 
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     state.set_tool_state_snapshot(Some(persisted_tool_state_at_generation(3)));
@@ -176,7 +176,9 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
     }));
     state.set_execution_state_snapshot(Some(vec![0xDE, 0xAD, 0xBE, 0xEF].into()));
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(state.session_id.clone()))
+        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
+            state.session_id.clone(),
+        ))
         .await
         .expect("bind session to store");
     let owner = lease_owner("gc-test");
@@ -246,15 +248,15 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
     let process_id = ProcessId::from(format!("process:{text}"));
     let sequence = 1;
     let wake = ProcessWakeDelivery {
-        version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{text}"),
         target_session_id: SessionId::from(session_id.to_string()),
         process_id: process_id.clone(),
-        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
-            attribution: lash_core::RuntimeAttribution::for_session(session_id),
+            attribution: lash_core_execution::RuntimeAttribution::for_session(session_id),
             subject: RuntimeSubject::ProcessEvent {
                 process_id: process_id.clone(),
                 sequence,
@@ -264,11 +266,11 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
             replay: None,
         },
         process_caused_by: None,
-        authority: lash_core::QueuedWorkAuthority::default(),
+        authority: lash_core_execution::QueuedWorkAuthority::default(),
         input: text.to_string(),
         created_at_ms: 0,
     };
-    lash_core::runtime::process_wake_batch_draft(wake)
+    lash_core_execution::runtime::process_wake_batch_draft(wake)
 }
 
 // The raw cross-backend dialect assertion is Postgres-gated. Keep the ordinary
@@ -308,7 +310,7 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
             &lease.fence(),
             &owner,
             QueuedWorkClaimBoundary::Idle,
-            lash_core::testing::queued_work_claim_policy(1),
+            lash_core_execution::testing::queued_work_claim_policy(1),
         )
         .await
         .expect("claim queued work")
@@ -360,7 +362,7 @@ async fn second_claim_on_held_batch_is_not_won() {
             &session_fence,
             &lease_owner("owner-a"),
             QueuedWorkClaimBoundary::Idle,
-            lash_core::testing::queued_work_claim_policy(10),
+            lash_core_execution::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim a")
@@ -374,7 +376,7 @@ async fn second_claim_on_held_batch_is_not_won() {
             &session_fence,
             &lease_owner("owner-b"),
             QueuedWorkClaimBoundary::Idle,
-            lash_core::testing::queued_work_claim_policy(10),
+            lash_core_execution::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("claim b")
@@ -437,7 +439,7 @@ async fn corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() 
                 &lease.fence(),
                 &owner,
                 QueuedWorkClaimBoundary::Idle,
-                lash_core::testing::queued_work_claim_policy(1),
+                lash_core_execution::testing::queued_work_claim_policy(1),
             )
             .await
             .expect_err("half predecessor pair must refuse the claim");
@@ -501,7 +503,7 @@ fn concurrent_claims_never_double_own_a_batch() {
     let barrier = Arc::new(std::sync::Barrier::new(2));
     let run = |owner: &'static str,
                path: std::path::PathBuf,
-               session_fence: lash_core::SessionExecutionLeaseAuthority,
+               session_fence: lash_core_execution::SessionExecutionLeaseAuthority,
                barrier: Arc<std::sync::Barrier>| {
         std::thread::spawn(move || {
             block_on(async move {
@@ -513,10 +515,10 @@ fn concurrent_claims_never_double_own_a_batch() {
                         &session_fence,
                         &lease_owner(owner),
                         QueuedWorkClaimBoundary::Idle,
-                        lash_core::testing::queued_work_claim_policy(10),
+                        lash_core_execution::testing::queued_work_claim_policy(10),
                     )
                     .await
-                    .map(lash_core::QueuedWorkClaimOutcome::claim)
+                    .map(lash_core_execution::QueuedWorkClaimOutcome::claim)
             })
         })
     };
@@ -657,26 +659,26 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
 async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
     let dir = tempfile::tempdir().expect("tempdir");
     let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
-    let request = lash_core::SessionStoreCreateRequest {
+    let request = lash_core_execution::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("unwired-process-owner"),
-        relation: lash_core::SessionRelation::default(),
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::default(),
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let store = factory.create_store(&request).await.expect("create store");
-    let attachment_id =
-        lash_core::AttachmentId::parse("unwired-process-attachment").expect("valid attachment id");
-    let intent = lash_core::AttachmentIntent {
+    let attachment_id = lash_core_execution::AttachmentId::parse("unwired-process-attachment")
+        .expect("valid attachment id");
+    let intent = lash_core_execution::AttachmentIntent {
         attachment_id: attachment_id.clone(),
         session_id: request.session_id,
         canonical_uri: "lash-attachment://unwired-process-attachment".to_string(),
         intent_at_epoch_ms: 1,
-        owner: Some(lash_core::AttachmentOwner::Process {
+        owner: Some(lash_core_execution::AttachmentOwner::Process {
             id: "missing-process".to_string(),
-            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+            incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
         }),
     };
-    let lash_core::AttachmentWriteFence::Granted(permit) = store
+    let lash_core_execution::AttachmentWriteFence::Granted(permit) = store
         .begin_attachment_write(intent.clone())
         .await
         .expect("begin process-owned write")
@@ -704,11 +706,11 @@ async fn sqlite_registry_validation_fails_gc_not_session_open() {
         .await
         .expect("create non-registry Lash database");
     let factory = SqliteSessionStoreFactory::new_with_process_registry(&sessions, &foreign_path);
-    let request = lash_core::SessionStoreCreateRequest {
+    let request = lash_core_execution::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("validation-boundary"),
-        relation: lash_core::SessionRelation::default(),
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::default(),
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
 
     factory

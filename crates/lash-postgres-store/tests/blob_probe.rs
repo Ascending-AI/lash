@@ -26,7 +26,7 @@ impl PostgresBlobProbe {
 
 #[async_trait::async_trait]
 impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
-    async fn blob_exists(&self, blob_ref: &lash_core::BlobRef) -> bool {
+    async fn blob_exists(&self, blob_ref: &lash_core_execution::BlobRef) -> bool {
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM lash_blobs WHERE hash = $1)")
             .bind(blob_ref.as_str())
             .fetch_one(self.storage.pool())
@@ -66,8 +66,8 @@ impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
 
     async fn checkpoint_component_edge_exists(
         &self,
-        checkpoint_ref: &lash_core::BlobRef,
-        blob_ref: &lash_core::BlobRef,
+        checkpoint_ref: &lash_core_execution::BlobRef,
+        blob_ref: &lash_core_execution::BlobRef,
     ) -> Option<bool> {
         Some(
             sqlx::query_scalar(
@@ -84,7 +84,7 @@ impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
         )
     }
 
-    async fn break_factory_gc_scope(&self, checkpoint_ref: &lash_core::BlobRef) -> bool {
+    async fn break_factory_gc_scope(&self, checkpoint_ref: &lash_core_execution::BlobRef) -> bool {
         assert_eq!(
             sqlx::query("UPDATE lash_blobs SET content = '\\xffffffff'::bytea WHERE hash = $1")
                 .bind(checkpoint_ref.as_str())

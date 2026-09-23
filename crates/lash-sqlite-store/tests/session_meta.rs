@@ -1,4 +1,4 @@
-use lash_core::{
+use lash_core_execution::{
     SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, TurnBudget,
 };
 use lash_sansio::SessionId;

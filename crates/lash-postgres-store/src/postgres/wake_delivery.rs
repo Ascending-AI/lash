@@ -5,7 +5,7 @@ use crate::process_sql::process_sql;
 pub(super) async fn claim_pending_wake_deliveries(
     registry: &PostgresProcessRegistry,
     limit: usize,
-) -> Result<Vec<lash_core::WakeDelivery>, PluginError> {
+) -> Result<Vec<lash_core_execution::WakeDelivery>, PluginError> {
     if limit == 0 {
         return Ok(Vec::new());
     }
@@ -19,7 +19,7 @@ pub(super) async fn claim_pending_wake_deliveries(
     let ids = sqlx::query_scalar::<_, String>(process_sql().wake_postgres.select_claimable.sql())
         .bind(limit as i64)
         .bind(now)
-        .bind(lash_core::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS)
+        .bind(lash_core_execution::WakeDiscardReason::NON_BLOCKING_ORDERING_GROUP_LABELS)
         .fetch_all(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;
@@ -43,7 +43,7 @@ pub(super) async fn claim_pending_wake_deliveries(
 pub(super) async fn load_wake_delivery_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     delivery_id: &str,
-) -> Result<lash_core::WakeDelivery, PluginError> {
+) -> Result<lash_core_execution::WakeDelivery, PluginError> {
     let row = sqlx::query(process_sql().wake_postgres.select_report.sql())
         .bind(delivery_id)
         .fetch_optional(&mut **tx)
@@ -55,7 +55,7 @@ pub(super) async fn load_wake_delivery_tx(
 
 pub(super) fn decode_wake_delivery_row(
     row: sqlx::postgres::PgRow,
-) -> Result<lash_core::WakeDelivery, PluginError> {
+) -> Result<lash_core_execution::WakeDelivery, PluginError> {
     registry_transitions::WakeDeliveryRow {
         delivery_id: row.get(0),
         state_label: row.get(1),
@@ -71,24 +71,24 @@ pub(super) fn decode_wake_delivery_row(
 }
 
 pub(super) fn wake_delivery_report<'a>(
-    deliveries: impl IntoIterator<Item = &'a lash_core::WakeDelivery>,
-) -> lash_core::WakeDeliveryReport {
-    lash_core::WakeDeliveryReport::from_deliveries(deliveries)
+    deliveries: impl IntoIterator<Item = &'a lash_core_execution::WakeDelivery>,
+) -> lash_core_execution::WakeDeliveryReport {
+    lash_core_execution::WakeDeliveryReport::from_deliveries(deliveries)
 }
 
 pub(super) async fn update_wake_delivery_state(
     pool: &PgPool,
     delivery_id: &str,
     claim_token: &str,
-    disposition: lash_core::WakeDeliveryDisposition,
-) -> Result<lash_core::WakeDeliveryClaimOutcome, PluginError> {
+    disposition: lash_core_execution::WakeDeliveryDisposition,
+) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, PluginError> {
     let state = disposition.state();
     let reason = disposition.discard_reason();
     let changed = sqlx::query(process_sql().wake.settle_claim.sql())
         .bind(delivery_id)
         .bind(claim_token)
         .bind(state.as_str())
-        .bind(reason.map(lash_core::WakeDiscardReason::as_str))
+        .bind(reason.map(lash_core_execution::WakeDiscardReason::as_str))
         .execute(pool)
         .await
         .map_err(plugin_sqlx_error)?
@@ -97,8 +97,8 @@ pub(super) async fn update_wake_delivery_state(
     // claim token still matches), so exactly one row must change; the shared
     // backstop records the disagreement if not and the existing branch
     // classifies the loss.
-    if !lash_core::store_backend_support::fenced_write_applied(
-        lash_core::store_backend_support::FencedWrite::WakeDeliverySettlement,
+    if !lash_core_execution::store_backend_support::fenced_write_applied(
+        lash_core_execution::store_backend_support::FencedWrite::WakeDeliverySettlement,
         crate::POSTGRES_BACKEND,
         delivery_id,
         changed,
@@ -111,7 +111,7 @@ pub(super) async fn update_wake_delivery_state(
         let current =
             current.ok_or_else(|| registry_transitions::unknown_wake_delivery(delivery_id))?;
         let state = registry_transitions::wake_delivery_state_from_label(delivery_id, &current)?;
-        return Ok(lash_core::WakeDeliveryClaimOutcome::ClaimLost { state });
+        return Ok(lash_core_execution::WakeDeliveryClaimOutcome::ClaimLost { state });
     }
-    Ok(lash_core::WakeDeliveryClaimOutcome::Applied)
+    Ok(lash_core_execution::WakeDeliveryClaimOutcome::Applied)
 }

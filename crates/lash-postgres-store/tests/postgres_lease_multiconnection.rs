@@ -33,14 +33,14 @@
 //! The two independent "hosts" whose local wall clocks are never consulted are
 //! themselves the skew evidence: only database time decides.
 
-use lash_core::{
+use lash_core_execution::{
     ProcessLeases as _, ProcessLifecycle as _, ProcessQuery as _, ProcessRegistrar as _,
 };
 use lash_sansio::ProcessId;
 use std::time::{Duration, Instant};
 
-use lash_core::TestProcessRegistryWriteExt;
-use lash_core::{
+use lash_core_execution::TestProcessRegistryWriteExt;
+use lash_core_execution::{
     LeaseOwnerIdentity, ProcessAwaitOutput, ProcessInput, ProcessLeaseClaimOutcome,
     ProcessProvenance, ProcessRegistration, ProcessStarted, RecoveryContract,
 };
@@ -65,9 +65,9 @@ fn registration(id: &str) -> ProcessRegistration {
         },
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
+        lash_core_execution::ProcessLifecyclePolicy::new(
+            lash_core_execution::ParentScope::Host,
+            lash_core_execution::OnParentEnd::Abandon,
         ),
     )
 }
@@ -133,7 +133,7 @@ async fn wait_until_db_past(storage: &PostgresStorage, target_ms: u64, bound: Du
 }
 
 fn success(tag: &str) -> ProcessAwaitOutput {
-    ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+    ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
         serde_json::json!({ "by": tag }),
     ))
 }
@@ -359,9 +359,9 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     );
 
     // (5) Host B completes with its valid lease.
-    let output = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-        serde_json::json!({ "by": "host-b", "n": 7 }),
-    ));
+    let output = ProcessAwaitOutput::from_tool_output(
+        lash_core_execution::ToolCallOutput::success(serde_json::json!({ "by": "host-b", "n": 7 })),
+    );
     let completed = reg_b
         .complete_process_with_lease(&lease_b, output)
         .await

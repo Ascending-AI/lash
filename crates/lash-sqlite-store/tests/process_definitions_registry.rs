@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
-use lash_core::process_registry::{ProcessDefinitionExpectation, ProcessDefinitionRegistry};
-use lash_core::{ProcessDefinitionRef, SessionId, TriggerOwnerScope};
+use lash_core_execution::process_registry::{
+    ProcessDefinitionExpectation, ProcessDefinitionRegistry,
+};
+use lash_core_execution::{ProcessDefinitionRef, SessionId, TriggerOwnerScope};
 
 fn reference(payload: &str) -> ProcessDefinitionRef {
     ProcessDefinitionRef::unclaimed("test-engine", serde_json::json!({"definition": payload}))
 }
 
-fn clock() -> Arc<dyn lash_core::Clock> {
-    Arc::new(lash_core::facade_support::SystemClock)
+fn clock() -> Arc<dyn lash_core_execution::Clock> {
+    Arc::new(lash_core_execution::facade_support::SystemClock)
 }
 
 #[test]
@@ -32,7 +34,7 @@ fn sqlite_registration_is_cas_fenced_and_durable() {
             .await
             .unwrap()
         {
-            lash_core::ProcessDefinitionRegistration::Admitted(record) => *record,
+            lash_core_execution::ProcessDefinitionRegistration::Admitted(record) => *record,
             other => panic!("first registration admits: {other:?}"),
         };
         assert_eq!(admitted.revision, 1);

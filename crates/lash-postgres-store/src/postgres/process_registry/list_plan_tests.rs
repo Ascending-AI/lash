@@ -20,7 +20,7 @@
 
 use super::*;
 
-async fn plan_for(filter: &lash_core::ProcessListFilter) -> Option<String> {
+async fn plan_for(filter: &lash_core_execution::ProcessListFilter) -> Option<String> {
     let url = std::env::var("LASH_POSTGRES_DATABASE_URL").ok()?;
     let database = crate::testing::IsolatedDatabase::create(&url).await;
     let storage = crate::PostgresStorage::connect(database.url())
@@ -63,10 +63,10 @@ async fn plan_for(filter: &lash_core::ProcessListFilter) -> Option<String> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn pending_cancel_list_uses_the_partial_cancel_index() {
-    let Some(plan) = plan_for(&lash_core::ProcessListFilter {
-        status: lash_core::ProcessStatusFilter::Any,
+    let Some(plan) = plan_for(&lash_core_execution::ProcessListFilter {
+        status: lash_core_execution::ProcessStatusFilter::Any,
         cancel_pending_before_ms: Some(1_700_000_000_000),
-        ..lash_core::ProcessListFilter::default()
+        ..lash_core_execution::ProcessListFilter::default()
     })
     .await
     else {
@@ -80,13 +80,13 @@ async fn pending_cancel_list_uses_the_partial_cancel_index() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn parent_scope_list_uses_the_parent_scope_index() {
-    let Some(plan) = plan_for(&lash_core::ProcessListFilter {
-        status: lash_core::ProcessStatusFilter::Any,
-        parent_scope: Some(lash_core::ParentScope::turn(
+    let Some(plan) = plan_for(&lash_core_execution::ProcessListFilter {
+        status: lash_core_execution::ProcessStatusFilter::Any,
+        parent_scope: Some(lash_core_execution::ParentScope::turn(
             SessionId::from("plan-session"),
-            lash_core::TurnId::from("plan-turn"),
+            lash_core_execution::TurnId::from("plan-turn"),
         )),
-        ..lash_core::ProcessListFilter::default()
+        ..lash_core_execution::ProcessListFilter::default()
     })
     .await
     else {
@@ -100,9 +100,9 @@ async fn parent_scope_list_uses_the_parent_scope_index() {
 
 #[test]
 fn an_unpopulated_filter_leaves_no_predicate_behind() {
-    let sql = list_processes_sql(&lash_core::ProcessListFilter {
-        status: lash_core::ProcessStatusFilter::Any,
-        ..lash_core::ProcessListFilter::default()
+    let sql = list_processes_sql(&lash_core_execution::ProcessListFilter {
+        status: lash_core_execution::ProcessStatusFilter::Any,
+        ..lash_core_execution::ProcessListFilter::default()
     });
     assert_eq!(sql, process_sql().process_postgres.list.sql());
     assert!(
@@ -116,7 +116,9 @@ fn an_unpopulated_filter_leaves_no_predicate_behind() {
 #[test]
 fn the_pending_cancel_index_predicate_is_the_generated_fragment() {
     let predicate =
-        lash_core::store_backend_support::nonterminal_process_status_predicate_sql("status");
+        lash_core_execution::store_backend_support::nonterminal_process_status_predicate_sql(
+            "status",
+        );
     assert_eq!(
         predicate,
         "status NOT IN ('completed', 'failed', 'cancelled', 'abandoned')"

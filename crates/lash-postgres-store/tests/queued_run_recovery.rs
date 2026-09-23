@@ -1,5 +1,5 @@
-use lash_core::llm::types::{LlmRequest, LlmResponse};
-use lash_core::{LlmOutputPart, TurnInput};
+use lash_core_execution::llm::types::{LlmRequest, LlmResponse};
+use lash_core_execution::{LlmOutputPart, TurnInput};
 use lash_postgres_store::PostgresStorage;
 use lash_sansio::sync::MutexExt;
 use sqlx::Row;
@@ -38,31 +38,31 @@ impl Default for RetryProbe {
 
 struct RetryHook(Arc<RetryProbe>);
 
-impl lash_core::facade_support::PluginFactory for RetryHook {
+impl lash_core_execution::facade_support::PluginFactory for RetryHook {
     fn id(&self) -> &'static str {
         "queued-run-retry"
     }
 
     fn build(
         &self,
-        _: &lash_core::facade_support::PluginSessionContext,
+        _: &lash_core_execution::facade_support::PluginSessionContext,
     ) -> std::result::Result<
-        Arc<dyn lash_core::facade_support::SessionPlugin>,
-        lash_core::PluginError,
+        Arc<dyn lash_core_execution::facade_support::SessionPlugin>,
+        lash_core_execution::PluginError,
     > {
         Ok(Arc::new(Self(Arc::clone(&self.0))))
     }
 }
 
-impl lash_core::facade_support::SessionPlugin for RetryHook {
+impl lash_core_execution::facade_support::SessionPlugin for RetryHook {
     fn id(&self) -> &'static str {
         "queued-run-retry"
     }
 
     fn register(
         &self,
-        reg: &mut lash_core::facade_support::PluginRegistrar,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+        reg: &mut lash_core_execution::facade_support::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core_execution::PluginError> {
         let probe = Arc::clone(&self.0);
         reg.output().response(Arc::new(move |context| {
             let probe = Arc::clone(&probe);
@@ -76,14 +76,16 @@ impl lash_core::facade_support::SessionPlugin for RetryHook {
                     .expect("hook barrier remains open")
                     .forget();
                 if attempt == 0 {
-                    return Err(lash_core::PluginError::Invoke(
+                    return Err(lash_core_execution::PluginError::Invoke(
                         "transient response derivation".into(),
                     ));
                 }
-                Ok(lash_core::facade_support::AssistantResponseTransform {
-                    response: context.response,
-                    events: Vec::new(),
-                })
+                Ok(
+                    lash_core_execution::facade_support::AssistantResponseTransform {
+                        response: context.response,
+                        events: Vec::new(),
+                    },
+                )
             })
         }));
         Ok(())
@@ -162,8 +164,8 @@ async fn automatic_queued_retry_reuses_recorded_completion_before_new_arrivals()
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .with_native_queued_work()
-        .native_substrate_config(lash_core::NativeSubstrateConfig {
-            work_cadence: lash_core::WorkCadencePolicy {
+        .native_substrate_config(lash_core_execution::NativeSubstrateConfig {
+            work_cadence: lash_core_execution::WorkCadencePolicy {
                 retry_initial: std::time::Duration::from_millis(50),
                 retry_max: std::time::Duration::from_millis(50),
                 ..Default::default()

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use lash_conformance::TriggerOccurrenceRetentionFaultInjector;
-use lash_core::{ProcessRegistry, TriggerStore};
+use lash_core_execution::{ProcessRegistry, TriggerStore};
 use lash_sansio::sync::MutexExt;
 use lash_sqlite_store::{SqliteProcessRegistry, SqliteSessionStoreFactory, SqliteTriggerStore};
 
@@ -66,7 +66,7 @@ lash_conformance::process_trigger_retention_tests!({
                     .expect("trigger store"),
             ) as Arc<dyn TriggerStore>;
             let sessions = Arc::new(SqliteSessionStoreFactory::new(sessions_root))
-                as Arc<dyn lash_core::SessionStoreFactory>;
+                as Arc<dyn lash_core_execution::SessionStoreFactory>;
             dirs.lock_recover().push(dir);
             lash_conformance::ProcessTriggerRetentionHandles {
                 registry,

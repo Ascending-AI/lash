@@ -4,8 +4,8 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
-pub(crate) use lash_core::store_backend_support::SessionMetaWrite;
-use lash_core::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
+pub(crate) use lash_core_execution::store_backend_support::SessionMetaWrite;
+use lash_core_execution::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
 
 const SESSION_META_CODEC: SessionMetaCodec = SessionMetaCodec::new("SQLite INTEGER");
 
@@ -21,7 +21,7 @@ pub(crate) fn stored_relation_from_row(
             session_id: row.get::<_, Option<String>>(4)?.map(SessionId::from),
             turn_id: row
                 .get::<_, Option<String>>(5)?
-                .map(lash_core::TurnId::from),
+                .map(lash_core_execution::TurnId::from),
             effect_id: row.get(6)?,
             call_id: row.get(7)?,
             process_id: row.get::<_, Option<String>>(8)?.map(ProcessId::from),
@@ -41,7 +41,7 @@ pub(crate) fn stored_relation_from_row(
 pub(crate) fn decode_catalog_relation(
     stored: StoredRelation,
     observer_intent_rows_json: &str,
-) -> Result<lash_core::SessionRelation, StoreError> {
+) -> Result<lash_core_execution::SessionRelation, StoreError> {
     let observer_intent_rows =
         serde_json::from_str(observer_intent_rows_json).map_err(|error| {
             SessionMetaCodec::corrupt(
@@ -90,7 +90,7 @@ pub(crate) fn write_session_meta(
                 stored.source_session_id.as_deref(),
                 stored.source_node_id,
                 crate::clamp_epoch_ms(created_at_ms),
-                lash_core::store::CURRENT_SESSION_STATE_VERSION,
+                lash_core_execution::store::CURRENT_SESSION_STATE_VERSION,
             ],
         )
         .map_err(sqlite_error)?;
@@ -128,7 +128,7 @@ pub(crate) fn write_session_meta(
 pub(crate) fn load_recorded_lineage(
     conn: &Connection,
     session_id: &SessionId,
-) -> Result<Option<lash_core::SessionLineage>, StoreError> {
+) -> Result<Option<lash_core_execution::SessionLineage>, StoreError> {
     let row = conn
         .query_row(
             session_sql().meta.select_lineage.sql(),
@@ -225,7 +225,7 @@ pub(crate) fn load_session_meta(
             ));
         }
         stored.pending_observer_intents.push(
-            lash_core::store_backend_support::StoredObserverIntent {
+            lash_core_execution::store_backend_support::StoredObserverIntent {
                 process_id: ProcessId::from(process_id),
                 process_incarnation,
             },

@@ -1,13 +1,13 @@
 use super::*;
 
 #[async_trait::async_trait]
-impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
+impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
     async fn complete_process(
         &self,
         process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
-        authority: lash_core::ProcessCompletionAuthority,
-    ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
+        authority: lash_core_execution::ProcessCompletionAuthority,
+    ) -> Result<lash_core_execution::ProcessCompletionOutcome, PluginError> {
         // Load (FOR UPDATE), validate the authority against the row's declared
         // disposition, and append the terminal event as one transaction. The
         // `FOR UPDATE` row lock held from the load through the commit is the
@@ -26,7 +26,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         );
         if record.is_terminal() {
             tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core::ProcessCompletionOutcome::from_stored(
+            return Ok(lash_core_execution::ProcessCompletionOutcome::from_stored(
                 record,
                 &await_output,
             ));
@@ -47,10 +47,10 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(match arm {
             ProcessEventAppendArm::Replayed => {
-                lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record }
+                lash_core_execution::ProcessCompletionOutcome::AlreadyApplied { stored: record }
             }
             ProcessEventAppendArm::Inserted => {
-                lash_core::ProcessCompletionOutcome::Committed(record)
+                lash_core_execution::ProcessCompletionOutcome::Committed(record)
             }
         })
     }
@@ -59,7 +59,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         &self,
         lease: &ProcessLease,
         await_output: ProcessAwaitOutput,
-    ) -> Result<lash_core::ProcessCompletionOutcome, PluginError> {
+    ) -> Result<lash_core_execution::ProcessCompletionOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let process_id = lease.process_id.as_str();
         let mut record = require_process_tx(&mut tx, &ProcessId::from(process_id)).await?;
@@ -71,7 +71,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         );
         if record.is_terminal() {
             tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core::ProcessCompletionOutcome::from_stored(
+            return Ok(lash_core_execution::ProcessCompletionOutcome::from_stored(
                 record,
                 &await_output,
             ));
@@ -96,7 +96,9 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         .await?;
         if arm == ProcessEventAppendArm::Replayed {
             tx.commit().await.map_err(plugin_sqlx_error)?;
-            return Ok(lash_core::ProcessCompletionOutcome::AlreadyApplied { stored: record });
+            return Ok(
+                lash_core_execution::ProcessCompletionOutcome::AlreadyApplied { stored: record },
+            );
         }
         // The verdict inside the append sequence authorized this release; the
         // statement's predicate is the backstop and `require_fenced_write_applied`
@@ -109,8 +111,8 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             .await
             .map_err(plugin_sqlx_error)?
             .rows_affected();
-        lash_core::store_backend_support::require_fenced_write_applied(
-            lash_core::store_backend_support::FencedWrite::ProcessLeaseRelease,
+        lash_core_execution::store_backend_support::require_fenced_write_applied(
+            lash_core_execution::store_backend_support::FencedWrite::ProcessLeaseRelease,
             crate::POSTGRES_BACKEND,
             process_id,
             released,
@@ -119,30 +121,35 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             },
         )?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(lash_core::ProcessCompletionOutcome::Committed(record))
+        Ok(lash_core_execution::ProcessCompletionOutcome::Committed(
+            record,
+        ))
     }
 
-    async fn record_parent_end(&self, parent: &lash_core::ParentScope) -> Result<(), PluginError> {
+    async fn record_parent_end(
+        &self,
+        parent: &lash_core_execution::ParentScope,
+    ) -> Result<(), PluginError> {
         parent_end::record(&self.pool, parent, self.clock.timestamp_ms()).await
     }
 
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core::ParentEndPlan>, PluginError> {
+    ) -> Result<Vec<lash_core_execution::ParentEndPlan>, PluginError> {
         parent_end::list_pending(&self.pool, limit).await
     }
 
     async fn get_parent_end_plan(
         &self,
-        parent: &lash_core::ParentScope,
-    ) -> Result<Option<lash_core::ParentEndPlan>, PluginError> {
+        parent: &lash_core_execution::ParentScope,
+    ) -> Result<Option<lash_core_execution::ParentEndPlan>, PluginError> {
         parent_end::get(&self.pool, parent).await
     }
 
     async fn list_parent_end_children(
         &self,
-        parent: &lash_core::ParentScope,
+        parent: &lash_core_execution::ParentScope,
         after: Option<&ProcessId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
@@ -151,7 +158,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
 
     async fn settle_parent_end_plan(
         &self,
-        parent: &lash_core::ParentScope,
+        parent: &lash_core_execution::ParentScope,
     ) -> Result<(), PluginError> {
         parent_end::settle(&self.pool, parent, self.clock.timestamp_ms()).await
     }
@@ -160,7 +167,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         &self,
         after: Option<&str>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core::ParentScope>, PluginError> {
+    ) -> Result<Vec<lash_core_execution::ParentScope>, PluginError> {
         parent_end::list_unrecorded_opener_parents(&self.pool, after, limit).await
     }
 
@@ -182,7 +189,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             now,
         )
         .await?;
-        match lash_core::runtime::prepare_process_start(&record, &started, authority)? {
+        match lash_core_execution::runtime::prepare_process_start(&record, &started, authority)? {
             ProcessStartPlan::AlreadyApplied => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
                 return Ok(ProcessStartOutcome::AlreadyApplied(record));
@@ -228,9 +235,9 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
     async fn request_process_cancel(
         &self,
         process_ref: &ProcessRef,
-        origin: lash_core::CancelOrigin,
+        origin: lash_core_execution::CancelOrigin,
         requester: String,
-        attribution: Option<lash_core::RuntimeReplayAttribution>,
+        attribution: Option<lash_core_execution::RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, PluginError> {
         self.request_process_cancel_reporting_realization(
             process_ref,
@@ -245,21 +252,21 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
     async fn request_process_cancel_reporting_realization(
         &self,
         process_ref: &ProcessRef,
-        origin: lash_core::CancelOrigin,
+        origin: lash_core_execution::CancelOrigin,
         requester: String,
-        attribution: Option<lash_core::RuntimeReplayAttribution>,
-    ) -> Result<(ProcessRecord, lash_core::StoreRealization), PluginError> {
+        attribution: Option<lash_core_execution::RuntimeReplayAttribution>,
+    ) -> Result<(ProcessRecord, lash_core_execution::StoreRealization), PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_ref_tx(&mut tx, process_ref).await?;
         let now = self.clock.timestamp_ms();
-        let request = lash_core::CancelRequest::new(origin, requester, now);
-        match lash_core::runtime::prepare_process_transition(
+        let request = lash_core_execution::CancelRequest::new(origin, requester, now);
+        match lash_core_execution::runtime::prepare_process_transition(
             &record,
             ProcessTransition::RequestCancel(request),
         )? {
             ProcessTransitionPlan::Unchanged => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok((record, lash_core::StoreRealization::Coalesced));
+                return Ok((record, lash_core_execution::StoreRealization::Coalesced));
             }
             ProcessTransitionPlan::Append(mut append) => {
                 if let Some(replay) = append.replay.as_mut() {
@@ -276,7 +283,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             }
         }
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok((record, lash_core::StoreRealization::Realized))
+        Ok((record, lash_core_execution::StoreRealization::Realized))
     }
 
     async fn request_process_abandon(
@@ -286,7 +293,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        match lash_core::runtime::prepare_process_transition(
+        match lash_core_execution::runtime::prepare_process_transition(
             &record,
             ProcessTransition::RequestAbandon(request),
         )? {
@@ -315,7 +322,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
-        let append = match lash_core::runtime::prepare_process_transition(
+        let append = match lash_core_execution::runtime::prepare_process_transition(
             &record,
             ProcessTransition::RecordCallerDeparture,
         )? {
@@ -340,7 +347,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
     async fn set_process_wait_with_authority(
         &self,
         process_id: &ProcessId,
-        wait: lash_core::WaitState,
+        wait: lash_core_execution::WaitState,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
@@ -350,7 +357,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
             &mut tx, process_id, &record, authority, None, lease_now,
         )
         .await?;
-        let request = match lash_core::runtime::prepare_process_transition(
+        let request = match lash_core_execution::runtime::prepare_process_transition(
             &record,
             ProcessTransition::EnterWait(wait),
         )? {
@@ -382,7 +389,7 @@ impl lash_core::ProcessLifecycle for PostgresProcessRegistry {
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
             .await?;
-        let request = match lash_core::runtime::prepare_process_transition(
+        let request = match lash_core_execution::runtime::prepare_process_transition(
             &record,
             ProcessTransition::ClearWait,
         )? {

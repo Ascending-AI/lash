@@ -22,8 +22,8 @@ doctest = false
 [features]
 default = ["lashlang"]
 lashlang = ["dep:lashlang"]
-perf-witness = ["lash-core/perf-witness", "rusqlite/trace"]
-testing = ["lash-core/testing"]
+perf-witness = ["lash-core-execution/perf-witness", "rusqlite/trace"]
+testing = ["lash-core-execution/testing"]
 
 [lints]
 workspace = true
@@ -31,7 +31,7 @@ workspace = true
 [dependencies]
 lash-store-sql = { workspace = true }
 lash-sansio = { workspace = true }
-lash-core = { workspace = true }
+lash-core-execution = { workspace = true }
 lashlang = { workspace = true, optional = true }
 async-trait = { workspace = true }
 flate2 = "1"

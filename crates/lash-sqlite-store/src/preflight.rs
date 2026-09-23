@@ -36,7 +36,7 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use lash_core::{
+use lash_core_execution::{
     DurableScan, DurableScanPage, StoreBackend, StoreError, StorePreflight, StoreReleaseState,
     StoreSchemaDatabase, StoreSchemaStatus, StoreSchemaVerdict,
 };

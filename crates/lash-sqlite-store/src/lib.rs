@@ -3,7 +3,7 @@
 //! The high-performance local **durable** persistence backend for the lash
 //! agent runtime. One factory-wide SQLite durable-core database, opened in WAL journal mode
 //! with a 15-second busy timeout, satisfying the full [`RuntimePersistence`] +
-//! [`AttachmentManifest`] contract from `lash-core`.
+//! [`AttachmentManifest`] contract from `lash-core-store`.
 //!
 //! This crate is a drop-in replacement for `lash-sqlite-store`: it exposes the
 //! same public surface (`Store`, `SqliteProcessRegistry`,
@@ -39,8 +39,8 @@
 //! measured node-and-byte budget for graph, checkpoint, and attachment-adoption
 //! payloads before entering the catalog write transaction.
 //!
-//! [`RuntimePersistence`]: lash_core::RuntimePersistence
-//! [`AttachmentManifest`]: lash_core::AttachmentManifest
+//! [`RuntimePersistence`]: lash_core_execution::RuntimePersistence
+//! [`AttachmentManifest`]: lash_core_execution::AttachmentManifest
 
 use lash_sansio::SessionId;
 mod namespace;
@@ -61,25 +61,25 @@ use std::sync::{Arc, Mutex, OnceLock};
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
-use lash_core::runtime::{
+use lash_core_execution::runtime::{
     QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
     QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
     QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, prepare_process_event_append,
     prepare_process_registration,
 };
-use lash_core::store::queued_work::{
+use lash_core_execution::store::queued_work::{
     ClaimCandidate, MAX_SESSION_COMMAND_BATCHES_PER_CLAIM, QueuedWorkClaimOutcome,
     QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_exact_turn_work_claim_prefix,
     select_leading_session_command, select_turn_work_claim_prefix,
 };
-use lash_core::store::{
+use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
-use lash_core::store_backend_support::{
+use lash_core_execution::store_backend_support::{
     SessionExecutionLeaseRow, lease_owner_from_columns, row_to_session_execution_lease,
 };
-use lash_core::{
+use lash_core_execution::{
     AbandonRequest, AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
@@ -156,7 +156,7 @@ pub(crate) const DURABLE_CORE_DB_FILE: &str = "durable-core.db";
 /// Backend name this store reports in shared fencing diagnostics.
 ///
 /// Every fenced write names its backend so
-/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core::StoreError::FencedWriteVerdictDisagreed)
+/// [`StoreError::FencedWriteVerdictDisagreed`](lash_core_execution::StoreError::FencedWriteVerdictDisagreed)
 /// says which store's locked read and backstop predicate disagreed.
 pub(crate) const SQLITE_BACKEND: &str = "sqlite";
 
@@ -164,7 +164,7 @@ use conn::TxOutcome;
 pub use effect_replay::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
-pub use lash_core::store_backend_support::required_constraints::{
+pub use lash_core_execution::store_backend_support::required_constraints::{
     RequiredConstraintFinding, RequiredConstraintReport,
 };
 pub use preflight::{SqliteStorePreflight, verify_schema_at};
@@ -194,10 +194,10 @@ pub use triggers::SqliteTriggerStore;
 /// tokio-rusqlite handle to one database thread).
 pub struct Store {
     conn: SqliteConnection,
-    turn_cancellation_authority: Option<lash_core::TurnCancellationAuthority>,
-    turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
+    turn_cancellation_authority: Option<lash_core_execution::TurnCancellationAuthority>,
+    turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
     session_id: Arc<OnceLock<SessionId>>,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
     #[cfg(feature = "lashlang")]
     artifact_cache: Mutex<BTreeMap<lashlang::ModuleRef, Arc<lashlang::ModuleArtifact>>>,
     #[cfg(feature = "lashlang")]
@@ -226,11 +226,11 @@ impl Store {
 /// state and handle visibility across all sessions sharing the registry.
 pub struct SqliteProcessRegistry {
     conn: SqliteConnection,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
     process_session_store_root: Option<PathBuf>,
-    wake_delivery_config: lash_core::WakeDeliveryConfig,
+    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     /// Effect hosts whose scope fence registration lifts (ADR 0049).
-    scope_fence_hosts: lash_core::ProcessScopeFenceHosts,
+    scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
     /// This registry's file: bound effect hosts attach it and keep their
     /// process-scope fences in it, beside the process rows (ADR 0049).
     /// `None` for an in-memory registry.
@@ -327,8 +327,8 @@ fn attachment_id_from_sql(
     record_kind: &'static str,
     field: &'static str,
     value: String,
-) -> rusqlite::Result<lash_core::AttachmentId> {
-    lash_core::AttachmentId::parse(&value).map_err(|err| {
+) -> rusqlite::Result<lash_core_execution::AttachmentId> {
+    lash_core_execution::AttachmentId::parse(&value).map_err(|err| {
         sqlite_conversion_error(stored_data_corrupt(
             record_kind,
             format!("{field} is not a valid attachment id: {err}"),
@@ -353,8 +353,8 @@ fn plugin_u64_from_sql(
     record_kind: &'static str,
     field: &'static str,
     value: i64,
-) -> Result<u64, lash_core::PluginError> {
-    u64::try_from(value).map_err(|_| lash_core::PluginError::StoredDataCorrupt {
+) -> Result<u64, lash_core_execution::PluginError> {
+    u64::try_from(value).map_err(|_| lash_core_execution::PluginError::StoredDataCorrupt {
         record_kind: record_kind.to_string(),
         message: format!("{field} must be non-negative, got {value}"),
     })
@@ -383,21 +383,25 @@ fn plugin_sql_monotonic_counter_value(
     counter: &'static str,
     current: u64,
     value: u64,
-) -> Result<i64, lash_core::PluginError> {
-    i64::try_from(value).map_err(|_| lash_core::PluginError::MonotonicCounterOverflow {
-        counter: counter.to_string(),
-        current,
-    })
+) -> Result<i64, lash_core_execution::PluginError> {
+    i64::try_from(value).map_err(
+        |_| lash_core_execution::PluginError::MonotonicCounterOverflow {
+            counter: counter.to_string(),
+            current,
+        },
+    )
 }
 
 fn plugin_sql_counter_value(
     counter: &'static str,
     value: u64,
-) -> Result<i64, lash_core::PluginError> {
-    i64::try_from(value).map_err(|_| lash_core::PluginError::MonotonicCounterOverflow {
-        counter: counter.to_string(),
-        current: value,
-    })
+) -> Result<i64, lash_core_execution::PluginError> {
+    i64::try_from(value).map_err(
+        |_| lash_core_execution::PluginError::MonotonicCounterOverflow {
+            counter: counter.to_string(),
+            current: value,
+        },
+    )
 }
 
 fn map_record_decode_error(record_kind: &'static str, error: StoreError) -> StoreError {
@@ -498,17 +502,21 @@ fn clamp_epoch_ms(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-fn process_sqlite_error(err: rusqlite::Error) -> lash_core::PluginError {
-    lash_core::PluginError::Session(err.to_string())
+fn process_sqlite_error(err: rusqlite::Error) -> lash_core_execution::PluginError {
+    lash_core_execution::PluginError::Session(err.to_string())
 }
 
-fn process_decode_error(err: serde_json::Error) -> lash_core::PluginError {
-    lash_core::PluginError::Session(format!("failed to decode process registry row: {err}"))
+fn process_decode_error(err: serde_json::Error) -> lash_core_execution::PluginError {
+    lash_core_execution::PluginError::Session(format!(
+        "failed to decode process registry row: {err}"
+    ))
 }
 
-fn process_encode_json<T: serde::Serialize>(value: &T) -> Result<String, lash_core::PluginError> {
+fn process_encode_json<T: serde::Serialize>(
+    value: &T,
+) -> Result<String, lash_core_execution::PluginError> {
     serde_json::to_string(value).map_err(|err| {
-        lash_core::PluginError::Session(format!("failed to encode process row: {err}"))
+        lash_core_execution::PluginError::Session(format!("failed to encode process row: {err}"))
     })
 }
 
@@ -611,8 +619,8 @@ pub struct StoredSessionCheckpoint {
 }
 
 type BoundArtifactStores = (
-    Arc<dyn lash_core::ProcessExecutionEnvStore>,
-    lash_core::ProcessEngineRegistry,
+    Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
+    lash_core_execution::ProcessEngineRegistry,
 );
 type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
 
@@ -626,7 +634,7 @@ pub struct SqliteSessionStoreFactory {
     root: PathBuf,
     process_registry_path: Option<PathBuf>,
     options: StoreOptions,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
     #[cfg(feature = "testing")]
     fault_injector: Option<testing::SqliteFaultInjector>,
     /// The bound effect host's journal file: the retained-evidence sweep
@@ -634,13 +642,15 @@ pub struct SqliteSessionStoreFactory {
     /// catalog holds (ADR 0067). Shared by every clone of the factory.
     effect_journal_path: Arc<std::sync::Mutex<Option<PathBuf>>>,
     turn_cancel_closure_owner:
-        Arc<std::sync::Mutex<Option<lash_core::TurnCancelClosureOwnerBinding>>>,
-    effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core::EffectHost>>>>,
+        Arc<std::sync::Mutex<Option<lash_core_execution::TurnCancelClosureOwnerBinding>>>,
+    effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
     artifact_stores: SharedArtifactStores,
 }
 
 impl SqliteSessionStoreFactory {
-    async fn resume_artifact_owner_retirements(&self) -> Result<(), lash_core::StoreError> {
+    async fn resume_artifact_owner_retirements(
+        &self,
+    ) -> Result<(), lash_core_execution::StoreError> {
         let effect_host = self
             .effect_host
             .lock()
@@ -659,21 +669,21 @@ impl SqliteSessionStoreFactory {
         let scopes = effect_host
             .pending_artifact_owner_retirements()
             .await
-            .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+            .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
         for scope in scopes {
-            let owner = lash_core::ArtifactOwner::execution(scope.clone());
+            let owner = lash_core_execution::ArtifactOwner::execution(scope.clone());
             process_env_store
                 .retire_process_execution_env_owner(&owner)
                 .await
-                .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+                .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
             process_engines
                 .retire_artifact_owner(&owner)
                 .await
-                .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+                .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
             effect_host
                 .complete_artifact_owner_retirement(&scope)
                 .await
-                .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
+                .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
         }
         Ok(())
     }
@@ -685,7 +695,7 @@ impl SqliteSessionStoreFactory {
             root,
             process_registry_path: None,
             options: StoreOptions::default(),
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
@@ -702,7 +712,7 @@ impl SqliteSessionStoreFactory {
             root,
             process_registry_path: None,
             options,
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
@@ -722,7 +732,7 @@ impl SqliteSessionStoreFactory {
             root: root.into(),
             process_registry_path: Some(process_registry_path.into()),
             options: StoreOptions::default(),
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
@@ -741,7 +751,7 @@ impl SqliteSessionStoreFactory {
             root: root.into(),
             process_registry_path: Some(process_registry_path.into()),
             options,
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             #[cfg(feature = "testing")]
             fault_injector: None,
             effect_journal_path: Arc::new(std::sync::Mutex::new(None)),
@@ -751,7 +761,7 @@ impl SqliteSessionStoreFactory {
         }
     }
 
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
+    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
         self.clock = clock;
         self
     }
@@ -772,27 +782,27 @@ impl SqliteSessionStoreFactory {
     /// Open and project one committed session through SQLite's read-only mode.
     ///
     /// The raw SQLite handle stays private so callers receive only the
-    /// canonical [`lash_core::SessionReadView`], which has no mutating store
+    /// canonical [`lash_core_execution::SessionReadView`], which has no mutating store
     /// operations. This path does not mutate durable session, lease, claim, or
     /// graph state. SQLite may materialize its `-wal` and `-shm` wal-index
     /// sidecars while reading a cold WAL catalog. Consequently a catalog on
     /// read-only media is inspectable only when the required sidecars already
     /// exist; otherwise the SQLite failure surfaces as
-    /// [`lash_core::StoreError::Backend`]. `immutable=1` is deliberately not
+    /// [`lash_core_execution::StoreError::Backend`]. `immutable=1` is deliberately not
     /// used because another process may still hold a writer.
     pub async fn open_read_only(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<lash_core::SessionReadView>, lash_core::StoreError> {
-        lash_core::store::validate_session_id(session_id)?;
+    ) -> Result<Option<lash_core_execution::SessionReadView>, lash_core_execution::StoreError> {
+        lash_core_execution::store::validate_session_id(session_id)?;
         let path = self.catalog_path();
         if !path.exists() {
             return Ok(None);
         }
         let store = Store::open_bound_readonly(&path, session_id)
             .await
-            .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?;
-        lash_core::store::load_persisted_session_read_view(&store).await
+            .map_err(|error| lash_core_execution::StoreError::Backend(error.to_string()))?;
+        lash_core_execution::store::load_persisted_session_read_view(&store).await
     }
 }
 
@@ -807,7 +817,7 @@ impl SqliteSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<Store>, StoreError> {
-        lash_core::store::validate_session_id(&request.session_id)?;
+        lash_core_execution::store::validate_session_id(&request.session_id)?;
         std::fs::create_dir_all(&self.root).map_err(|err| StoreError::Backend(err.to_string()))?;
         let path = self.catalog_path();
         let store = Arc::new(
@@ -846,7 +856,7 @@ impl SqliteSessionStoreFactory {
                     .is_some();
                 if deleted {
                     return Ok(TxOutcome::Rollback(Err(
-                        lash_core::StoreError::SessionDeleted {
+                        lash_core_execution::StoreError::SessionDeleted {
                             session_id: meta.session_id,
                         },
                     )));
@@ -903,16 +913,16 @@ impl SqliteSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for SqliteSessionStoreFactory {
-    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
         let catalog = lifecycle::canonical_catalog_identity(&self.catalog_path());
         *self
             .turn_cancel_closure_owner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = (effect_host
             .turn_control_authority_owner()
-            == lash_core::TurnControlAuthorityOwner::EffectHost)
+            == lash_core_execution::TurnControlAuthorityOwner::EffectHost)
             .then(|| {
-                lash_core::TurnCancelClosureOwnerBinding::new(
+                lash_core_execution::TurnCancelClosureOwnerBinding::new(
                     format!("sqlite-catalog:{}", catalog.display()),
                     Arc::clone(effect_host),
                 )
@@ -931,8 +941,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
 
     fn bind_artifact_stores(
         &self,
-        process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-        process_engines: lash_core::ProcessEngineRegistry,
+        process_env_store: Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
+        process_engines: lash_core_execution::ProcessEngineRegistry,
     ) {
         *self
             .artifact_stores
@@ -943,13 +953,15 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
 
     async fn reclaim_retained_evidence(
         &self,
-        bound: lash_core::store::RetentionBound,
-    ) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
+        bound: lash_core_execution::store::RetentionBound,
+    ) -> lash_core_execution::MaintenanceResult<lash_core_execution::store::RetentionReport> {
         let report = crate::retention::reclaim(self, bound)
             .await
             .map_err(|failure| *failure)?;
         if let Err(error) = self.resume_artifact_owner_retirements().await {
-            return Err(lash_core::MaintenanceFailure::failed(error, report));
+            return Err(lash_core_execution::MaintenanceFailure::failed(
+                error, report,
+            ));
         }
         Ok(report)
     }
@@ -965,7 +977,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        lash_core::store::validate_session_id(&request.session_id)
+        lash_core_execution::store::validate_session_id(&request.session_id)
             .map_err(|error| error.to_string())?;
         Ok(self
             .open_existing_bound_store(request)
@@ -976,7 +988,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     async fn read_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<lash_core::SessionReadView>, lash_core::StoreError> {
+    ) -> Result<Option<lash_core_execution::SessionReadView>, lash_core_execution::StoreError> {
         self.open_read_only(session_id).await
     }
 
@@ -1001,7 +1013,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
-        lash_core::store::validate_session_id(session_id)?;
+        lash_core_execution::store::validate_session_id(session_id)?;
         let path = self.catalog_path();
         if !path.exists() {
             return Ok(None);
@@ -1029,7 +1041,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     async fn pending_turn_cancel_closure_pins(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
         let Some(store) = self.open_existing_store_by_id(session_id).await? else {
             return Ok(Vec::new());
         };
@@ -1038,7 +1050,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
 
     async fn retire_turn_cancel_closure_scope(
         &self,
-        scope: &lash_core::ExecutionScope,
+        scope: &lash_core_execution::ExecutionScope,
     ) -> Result<(), StoreError> {
         let scope = scope.clone();
         let scope_id = scope
@@ -1071,7 +1083,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                         .map_err(sqlite_error)?;
                     drop(statement);
                     for (session_id, encoded) in rows {
-                        let authorization: lash_core::TurnCancelClosureAuthorization =
+                        let authorization: lash_core_execution::TurnCancelClosureAuthorization =
                             serde_json::from_str(&encoded).map_err(|error| {
                                 StoreError::StoredDataCorrupt {
                                     record_kind: "TurnCancelClosureAuthorization",
@@ -1116,7 +1128,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         request: &SessionStoreCreateRequest,
         now_epoch_ms: u64,
     ) -> Result<Option<bool>, StoreError> {
-        lash_core::store::validate_session_id(&request.session_id)?;
+        lash_core_execution::store::validate_session_id(&request.session_id)?;
         let path = self.catalog_path();
         if !path.exists() {
             return Ok(Some(false));
@@ -1141,7 +1153,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
+        lash_core_execution::store::validate_session_id(session_id)
+            .map_err(|error| error.to_string())?;
         let path = self.catalog_path();
         if !path.exists() {
             return Ok(false);
@@ -1172,9 +1185,9 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     async fn delete_session(
         &self,
         session_id: &SessionId,
-    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
-        lash_core::store::validate_session_id(session_id)
-            .map_err(lash_core::MaintenanceFailure::failed_before_any_work)?;
+    ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
+        lash_core_execution::store::validate_session_id(session_id)
+            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
         let report =
             delete_session_from_catalog(&self.root, session_id, self.options.connection_policy)
                 .await?;
@@ -1186,8 +1199,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             )
             .await
             .map_err(|message| {
-                lash_core::MaintenanceFailure::failed(
-                    lash_core::StoreError::Backend(message),
+                lash_core_execution::MaintenanceFailure::failed(
+                    lash_core_execution::StoreError::Backend(message),
                     report.clone(),
                 )
             })?;
@@ -1195,22 +1208,27 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         Ok(report)
     }
 
-    async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, lash_core::StoreError> {
+    async fn pin(
+        &self,
+        node_id: &str,
+    ) -> Result<lash_core_execution::ForkPoint, lash_core_execution::StoreError> {
         pin_in_catalog(&self.root, node_id, self.options.connection_policy).await
     }
 
-    async fn unpin(&self, node_id: &str) -> Result<(), lash_core::StoreError> {
+    async fn unpin(&self, node_id: &str) -> Result<(), lash_core_execution::StoreError> {
         unpin_in_catalog(&self.root, node_id, self.options.connection_policy).await
     }
 
-    async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>, lash_core::StoreError> {
+    async fn fork_points(
+        &self,
+    ) -> Result<Vec<lash_core_execution::ForkPoint>, lash_core_execution::StoreError> {
         fork_points_in_catalog(&self.root, self.options.connection_policy).await
     }
 
     async fn fork_at(
         &self,
-        request: &lash_core::ForkSessionRequest,
-    ) -> Result<lash_core::ForkSessionReceipt, lash_core::StoreError> {
+        request: &lash_core_execution::ForkSessionRequest,
+    ) -> Result<lash_core_execution::ForkSessionReceipt, lash_core_execution::StoreError> {
         fork_at_in_catalog(
             &self.root,
             request,
@@ -1279,7 +1297,7 @@ fn list_session_summaries(
 }
 
 #[async_trait::async_trait]
-impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
+impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
     fn can_prove_process_owner_death(&self) -> bool {
         self.process_registry_path.is_some()
     }
@@ -1287,10 +1305,13 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<std::collections::BTreeSet<lash_core::AttachmentId>, lash_core::StoreError> {
+    ) -> Result<
+        std::collections::BTreeSet<lash_core_execution::AttachmentId>,
+        lash_core_execution::StoreError,
+    > {
         let path = self.catalog_path();
         if !path.exists() {
-            return Err(lash_core::StoreError::Backend(format!(
+            return Err(lash_core_execution::StoreError::Backend(format!(
                 "attachment GC aborted: durable-core catalog {} does not exist, so live attachment refs cannot be enumerated",
                 path.display()
             )));
@@ -1306,25 +1327,30 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
         )
         .await
         .map_err(|err| {
-            lash_core::StoreError::Backend(format!(
+            lash_core_execution::StoreError::Backend(format!(
                 "attachment GC aborted: durable-core catalog {} could not be opened: {err}",
                 path.display()
             ))
         })?;
-        lash_core::AttachmentManifest::forget_aged_uncommitted_intents(
+        lash_core_execution::AttachmentManifest::forget_aged_uncommitted_intents(
             &store,
             intent_grace_cutoff_epoch_ms,
         )
         .await?;
-        Ok(lash_core::AttachmentManifest::list_all_refs(&store)
-            .await?
-            .into_iter()
-            .collect())
+        Ok(
+            lash_core_execution::AttachmentManifest::list_all_refs(&store)
+                .await?
+                .into_iter()
+                .collect(),
+        )
     }
 
     async fn list_condemnations(
         &self,
-    ) -> Result<Vec<lash_core::AttachmentCondemnationRecord>, lash_core::StoreError> {
+    ) -> Result<
+        Vec<lash_core_execution::AttachmentCondemnationRecord>,
+        lash_core_execution::StoreError,
+    > {
         let store = self
             .open_catalog_for_maintenance("condemnation enumeration")
             .await?;
@@ -1333,23 +1359,27 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
 
     async fn has_live_attachment_ref(
         &self,
-        id: &lash_core::AttachmentId,
+        id: &lash_core_execution::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, lash_core::StoreError> {
+    ) -> Result<bool, lash_core_execution::StoreError> {
         let store = self.open_catalog_for_maintenance("root re-check").await?;
-        lash_core::AttachmentManifest::has_live_ref_for_id(&store, id, intent_grace_cutoff_epoch_ms)
-            .await
+        lash_core_execution::AttachmentManifest::has_live_ref_for_id(
+            &store,
+            id,
+            intent_grace_cutoff_epoch_ms,
+        )
+        .await
     }
 
-    fn fence(&self) -> lash_core::AttachmentGcFence {
-        lash_core::AttachmentGcFence::Fenced
+    fn fence(&self) -> lash_core_execution::AttachmentGcFence {
+        lash_core_execution::AttachmentGcFence::Fenced
     }
 
     async fn condemn_attachment(
         &self,
-        id: &lash_core::AttachmentId,
+        id: &lash_core_execution::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<lash_core::AttachmentCondemnation, lash_core::StoreError> {
+    ) -> Result<lash_core_execution::AttachmentCondemnation, lash_core_execution::StoreError> {
         let store = self.open_catalog_for_maintenance("condemnation").await?;
         store
             .condemn_attachment(id, intent_grace_cutoff_epoch_ms)
@@ -1358,16 +1388,16 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
 
     async fn arm_attachment_delete(
         &self,
-        id: &lash_core::AttachmentId,
-    ) -> Result<lash_core::AttachmentDeleteArming, lash_core::StoreError> {
+        id: &lash_core_execution::AttachmentId,
+    ) -> Result<lash_core_execution::AttachmentDeleteArming, lash_core_execution::StoreError> {
         let store = self.open_catalog_for_maintenance("delete arming").await?;
         store.arm_attachment_delete(id).await
     }
 
     async fn release_attachment_condemnation(
         &self,
-        id: &lash_core::AttachmentId,
-    ) -> Result<(), lash_core::StoreError> {
+        id: &lash_core_execution::AttachmentId,
+    ) -> Result<(), lash_core_execution::StoreError> {
         let store = self
             .open_catalog_for_maintenance("condemnation release")
             .await?;
@@ -1376,8 +1406,8 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
 
     async fn recover_abandoned_attachment_write(
         &self,
-        id: &lash_core::AttachmentId,
-    ) -> Result<(), lash_core::StoreError> {
+        id: &lash_core_execution::AttachmentId,
+    ) -> Result<(), lash_core_execution::StoreError> {
         let store = self
             .open_catalog_for_maintenance("abandoned attachment write recovery")
             .await?;
@@ -1386,8 +1416,8 @@ impl lash_core::AttachmentRootSet for SqliteSessionStoreFactory {
 
     async fn retire_attachment_condemnation(
         &self,
-        id: &lash_core::AttachmentId,
-    ) -> Result<(), lash_core::StoreError> {
+        id: &lash_core_execution::AttachmentId,
+    ) -> Result<(), lash_core_execution::StoreError> {
         let store = self
             .open_catalog_for_maintenance("condemnation retirement")
             .await?;

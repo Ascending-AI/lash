@@ -156,7 +156,7 @@ pub(crate) async fn require_process_ref_tx(
 
 pub(crate) fn decode_matching_process(
     row: sqlx::postgres::PgRow,
-    filter: &lash_core::ProcessListFilter,
+    filter: &lash_core_execution::ProcessListFilter,
 ) -> Result<Option<ProcessRecord>, PluginError> {
     let json: String = row.get(0);
     let record = serde_json::from_str(&json).map_err(process_decode_error)?;
@@ -263,7 +263,7 @@ pub(crate) async fn next_process_event_sequence_tx(
         None
     };
     let sequence =
-        lash_core::runtime::allocate_process_event_sequence(last_sequence, sender_floor)?;
+        lash_core_execution::runtime::allocate_process_event_sequence(last_sequence, sender_floor)?;
     Ok((last_sequence, sequence))
 }
 
@@ -308,7 +308,7 @@ pub(crate) async fn apply_process_event_append_tx(
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
-    wake_delivery_config: lash_core::WakeDeliveryConfig,
+    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     authorization: ProcessEventWriteAuthorization<'_>,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
     let process_id = record.id.clone();
@@ -321,7 +321,7 @@ pub(crate) async fn apply_process_event_append_tx(
     let wake_session_id = wake_session_id_tx(tx, &process_id).await?;
     let (last_sequence, sequence) =
         next_process_event_sequence_tx(tx, &process_id, wake_session_id.as_ref()).await?;
-    let prepared = lash_core::runtime::prepare_process_event_append(
+    let prepared = lash_core_execution::runtime::prepare_process_event_append(
         record,
         request,
         sequence,
@@ -331,7 +331,7 @@ pub(crate) async fn apply_process_event_append_tx(
         wake_session_id.as_ref(),
     )?;
     match prepared {
-        lash_core::facade_support::ProcessEventAppendPlan::Replay {
+        lash_core_execution::facade_support::ProcessEventAppendPlan::Replay {
             event,
             repair_record,
             wake_delivery,
@@ -342,14 +342,14 @@ pub(crate) async fn apply_process_event_append_tx(
             Ok((
                 ProcessEventAppendReceipt {
                     last_event_sequence: record.last_event_sequence,
-                    realization: lash_core::StoreRealization::Coalesced,
+                    realization: lash_core_execution::StoreRealization::Coalesced,
                     event,
                     wake_delivery,
                 },
                 ProcessEventAppendArm::Replayed,
             ))
         }
-        lash_core::facade_support::ProcessEventAppendPlan::Insert {
+        lash_core_execution::facade_support::ProcessEventAppendPlan::Insert {
             event,
             projected_record,
             wake_delivery,
@@ -361,11 +361,11 @@ pub(crate) async fn apply_process_event_append_tx(
                     // (FIG-3388): the row is locked by `load_process_lease_row_tx`
                     // and the release write's predicate backstops this call.
                     let current = load_process_lease_row_tx(tx, &process_id).await?;
-                    let verdict = lash_core::store_backend_support::process_lease_verdict(
+                    let verdict = lash_core_execution::store_backend_support::process_lease_verdict(
                         current
                             .as_ref()
                             .map(registry_transitions::ProcessLeaseRow::facts),
-                        lash_core::store_backend_support::ProcessLeaseAuthority {
+                        lash_core_execution::store_backend_support::ProcessLeaseAuthority {
                             lease_token: &lease.lease_token,
                             fencing_token: lease.fencing_token,
                         },
@@ -394,10 +394,12 @@ pub(crate) async fn apply_process_event_append_tx(
             if record.is_terminal() {
                 crate::process_registry::parent_end::record_tx(
                     tx,
-                    &lash_core::ParentScope::process(lash_core::ProcessRef::new(
-                        process_id.clone(),
-                        record.incarnation,
-                    )),
+                    &lash_core_execution::ParentScope::process(
+                        lash_core_execution::ProcessRef::new(
+                            process_id.clone(),
+                            record.incarnation,
+                        ),
+                    ),
                     occurred_at_ms,
                 )
                 .await?;
@@ -408,7 +410,7 @@ pub(crate) async fn apply_process_event_append_tx(
             Ok((
                 ProcessEventAppendReceipt {
                     last_event_sequence: event.sequence,
-                    realization: lash_core::StoreRealization::Realized,
+                    realization: lash_core_execution::StoreRealization::Realized,
                     event,
                     wake_delivery,
                 },
@@ -423,7 +425,7 @@ pub(crate) async fn append_process_event_tx(
     record: &mut ProcessRecord,
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
-    wake_delivery_config: lash_core::WakeDeliveryConfig,
+    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
 ) -> Result<ProcessEventAppendReceipt, PluginError> {
     apply_process_event_append_tx(
         tx,
@@ -458,13 +460,13 @@ pub(crate) async fn advance_wake_allocation_floor_tx(
 
 pub(crate) async fn insert_wake_delivery_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    wake: Option<&lash_core::ProcessWakeDelivery>,
-    config: lash_core::WakeDeliveryConfig,
+    wake: Option<&lash_core_execution::ProcessWakeDelivery>,
+    config: lash_core_execution::WakeDeliveryConfig,
 ) -> Result<(), PluginError> {
     let Some(wake) = wake else {
         return Ok(());
     };
-    let delivery = lash_core::WakeDelivery::pending(wake.clone(), config)?;
+    let delivery = lash_core_execution::WakeDelivery::pending(wake.clone(), config)?;
     sqlx::query(process_sql().wake_postgres.insert_pending.sql())
         .bind(&delivery.delivery_id)
         .bind(delivery.wake.process_id.as_str())

@@ -33,23 +33,25 @@ lash_conformance::wake_delivery_crash_tests!({
         return;
     };
     reset(storage.pool()).await;
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
+        1_800_000_000_000,
+    ));
     let factory = Arc::new(
         storage
             .session_store_factory()
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
     ) as Arc<dyn SessionStoreFactory>;
     let registry = Arc::new(
         storage
             .process_registry_with_wake_delivery_config(
-                lash_core::WakeDeliveryConfig::new(10_000)
+                lash_core_execution::WakeDeliveryConfig::new(10_000)
                     .expect("valid test retention")
                     .with_enqueuing_stale_after_ms(25)
                     .expect("valid short stale-claim age"),
             )
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
-    ) as Arc<dyn lash_core::ConformanceProcessRegistry>;
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
+    ) as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
+    let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
@@ -74,7 +76,7 @@ lash_conformance::wake_delivery_ordering_tests!({
     };
     reset(storage.pool()).await;
     let registry = Arc::new(storage.process_registry());
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
+    let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (

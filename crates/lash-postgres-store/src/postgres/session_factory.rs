@@ -8,13 +8,13 @@ mod store;
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for PostgresSessionStoreFactory {
-    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
+    fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {
         *self
             .turn_cancel_closure_owner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = (effect_host
             .turn_control_authority_owner()
-            == lash_core::TurnControlAuthorityOwner::EffectHost)
+            == lash_core_execution::TurnControlAuthorityOwner::EffectHost)
             .then(|| Arc::clone(effect_host));
         *self
             .effect_host
@@ -24,8 +24,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     fn bind_artifact_stores(
         &self,
-        process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-        process_engines: lash_core::ProcessEngineRegistry,
+        process_env_store: Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
+        process_engines: lash_core_execution::ProcessEngineRegistry,
     ) {
         *self
             .artifact_stores
@@ -36,13 +36,15 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn reclaim_retained_evidence(
         &self,
-        bound: lash_core::store::RetentionBound,
-    ) -> lash_core::MaintenanceResult<lash_core::store::RetentionReport> {
+        bound: lash_core_execution::store::RetentionBound,
+    ) -> lash_core_execution::MaintenanceResult<lash_core_execution::store::RetentionReport> {
         let report = crate::evidence_retention::reclaim(self, bound)
             .await
             .map_err(|failure| *failure)?;
         if let Err(error) = self.resume_artifact_owner_retirements().await {
-            return Err(lash_core::MaintenanceFailure::failed(error, report));
+            return Err(lash_core_execution::MaintenanceFailure::failed(
+                error, report,
+            ));
         }
         Ok(report)
     }
@@ -58,7 +60,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        lash_core::store::validate_session_id(&request.session_id)
+        lash_core_execution::store::validate_session_id(&request.session_id)
             .map_err(|error| error.to_string())?;
         Ok(self
             .open_existing_session_store(request)
@@ -70,7 +72,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
-        lash_core::store::validate_session_id(session_id)?;
+        lash_core_execution::store::validate_session_id(session_id)?;
         let store = self.store_for(session_id.clone());
         if store.load_session_meta().await?.is_some() {
             Ok(Some(Arc::new(store)))
@@ -82,14 +84,14 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn pending_turn_cancel_closure_pins(
         &self,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::TurnCancelClosureAuthorization>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
         self.store_for(session_id.clone())
             .pending_turn_cancel_closure_pins()
             .await
     }
     async fn retire_turn_cancel_closure_scope(
         &self,
-        scope: &lash_core::ExecutionScope,
+        scope: &lash_core_execution::ExecutionScope,
     ) -> Result<(), StoreError> {
         crate::turn_cancel_closure::retire_scope(&self.pool, scope).await?;
         if let Some(owner) = self.turn_cancel_closure_owner_binding() {
@@ -105,7 +107,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         request: &SessionStoreCreateRequest,
         now_epoch_ms: u64,
     ) -> Result<Option<bool>, StoreError> {
-        lash_core::store::validate_session_id(&request.session_id)?;
+        lash_core_execution::store::validate_session_id(&request.session_id)?;
         sqlx::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
                 .family
@@ -121,7 +123,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        lash_core::store::validate_session_id(session_id).map_err(|error| error.to_string())?;
+        lash_core_execution::store::validate_session_id(session_id)
+            .map_err(|error| error.to_string())?;
         sqlx::query_scalar(session_sql().deleted_postgres.exists.sql())
             .bind(session_id.as_str())
             .fetch_one(&self.pool)
@@ -132,20 +135,22 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn delete_session(
         &self,
         session_id: &SessionId,
-    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
-        lash_core::store::validate_session_id(session_id)
-            .map_err(lash_core::MaintenanceFailure::failed_before_any_work)?;
+    ) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
+        lash_core_execution::store::validate_session_id(session_id)
+            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)?;
         let mut tx = self.pool.begin().await.map_err(|err| {
-            lash_core::MaintenanceFailure::failed_before_any_work(store_sqlx_error(err))
+            lash_core_execution::MaintenanceFailure::failed_before_any_work(store_sqlx_error(err))
         })?;
-        let mut report = lash_core::SessionBlobReclaimReport::default();
+        let mut report = lash_core_execution::SessionBlobReclaimReport::default();
         if let Err(error) = delete_session_tx(&mut tx, session_id, &mut report).await {
             report.deleted_blob_count = 0;
-            return Err(lash_core::MaintenanceFailure::failed(error, report));
+            return Err(lash_core_execution::MaintenanceFailure::failed(
+                error, report,
+            ));
         }
         if let Err(error) = tx.commit().await {
             report.deleted_blob_count = 0;
-            return Err(lash_core::MaintenanceFailure::failed(
+            return Err(lash_core_execution::MaintenanceFailure::failed(
                 store_sqlx_error(error),
                 report,
             ));
@@ -153,7 +158,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         Ok(report)
     }
 
-    async fn pin(&self, node_id: &str) -> Result<lash_core::ForkPoint, StoreError> {
+    async fn pin(&self, node_id: &str) -> Result<lash_core_execution::ForkPoint, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         let (source_session_id, checkpoint_ref) =
             crate::support::retained_checkpoint_tx(&mut tx, node_id)
@@ -183,7 +188,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         {
             let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
             tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(lash_core::ForkPoint {
+            return Ok(lash_core_execution::ForkPoint {
                 node_id: node_id.to_string().into(),
                 checkpoint_ref: checkpoint_ref.into(),
                 source_session_id: SessionId::from(source_session_id),
@@ -212,7 +217,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .map_err(store_sqlx_error)?;
         let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core::ForkPoint {
+        Ok(lash_core_execution::ForkPoint {
             node_id: node_id.to_string().into(),
             checkpoint_ref: checkpoint_ref.into(),
             source_session_id,
@@ -240,7 +245,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         tx.commit().await.map_err(store_sqlx_error)
     }
 
-    async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>, StoreError> {
+    async fn fork_points(&self) -> Result<Vec<lash_core_execution::ForkPoint>, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         sqlx::query(
             crate::connection_sql::connection_sql()
@@ -257,7 +262,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let mut points = Vec::with_capacity(rows.len());
         for row in rows {
             let node_id: String = row.get(0);
-            points.push(lash_core::ForkPoint {
+            points.push(lash_core_execution::ForkPoint {
                 config: crate::support::retained_fork_config_tx(&mut tx, &node_id).await?,
                 node_id: node_id.into(),
                 checkpoint_ref: BlobRef(row.get(1)),
@@ -271,8 +276,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
 
     async fn fork_at(
         &self,
-        request: &lash_core::ForkSessionRequest,
-    ) -> Result<lash_core::ForkSessionReceipt, StoreError> {
+        request: &lash_core_execution::ForkSessionRequest,
+    ) -> Result<lash_core_execution::ForkSessionReceipt, StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         // Target identity fences precede source-retention fences. This unlocked
         // fast path only decides already-materialized targets and permanent
@@ -393,9 +398,9 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 });
             }
             let parent_node_id = facts.1.clone();
-            edge_path.push(lash_core::store::ForkNodeFacts {
+            edge_path.push(lash_core_execution::store::ForkNodeFacts {
                 node_id: facts.0.into(),
-                parent_node_id: facts.1.map(lash_core::NodeId::from),
+                parent_node_id: facts.1.map(lash_core_execution::NodeId::from),
                 owning_session_id: SessionId::from(facts.2),
                 generation,
             });
@@ -411,12 +416,13 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             expected_generation -= 1;
         }
         edge_path.reverse();
-        let fork_plan = lash_core::store::ForkPlan::derive(&request.session_id, edge_path)?;
-        let config = lash_core::PersistedSessionConfig::from(&request.policy);
-        let head = lash_core::store::SessionHeadMeta::assemble(
+        let fork_plan =
+            lash_core_execution::store::ForkPlan::derive(&request.session_id, edge_path)?;
+        let config = lash_core_execution::PersistedSessionConfig::from(&request.policy);
+        let head = lash_core_execution::store::SessionHeadMeta::assemble(
             &request.session_id,
-            lash_core::store::SessionHeadPayload {
-                schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+            lash_core_execution::store::SessionHeadPayload {
+                schema_version: lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
                 session_id: request.session_id.clone(),
                 config,
                 current_frame_node_id: Some({
@@ -470,7 +476,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core::ForkSessionReceipt {
+        Ok(lash_core_execution::ForkSessionReceipt {
             session_id: request.session_id.clone(),
             node_id: request.node_id.clone(),
             source_session_id,
@@ -488,10 +494,10 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
     async fn read_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<lash_core::SessionReadView>, StoreError> {
-        lash_core::store::validate_session_id(session_id)?;
+    ) -> Result<Option<lash_core_execution::SessionReadView>, StoreError> {
+        lash_core_execution::store::validate_session_id(session_id)?;
         let store = self.store_for(session_id.clone());
-        lash_core::store::load_persisted_session_read_view(&store).await
+        lash_core_execution::store::load_persisted_session_read_view(&store).await
     }
 }
 
@@ -507,7 +513,7 @@ impl PostgresSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
+impl lash_core_execution::AttachmentRootSet for PostgresSessionStoreFactory {
     fn can_prove_process_owner_death(&self) -> bool {
         self.process_registry_shared
     }
@@ -515,7 +521,10 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<std::collections::BTreeSet<lash_core::AttachmentId>, lash_core::StoreError> {
+    ) -> Result<
+        std::collections::BTreeSet<lash_core_execution::AttachmentId>,
+        lash_core_execution::StoreError,
+    > {
         // Age is only a post-terminal retention policy. This single DELETE
         // composes age with durable owner-death proof: a later committed turn
         // supersedes a turn owner, a missing process row proves a process owner
@@ -556,15 +565,18 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
 
     async fn list_condemnations(
         &self,
-    ) -> Result<Vec<lash_core::AttachmentCondemnationRecord>, lash_core::StoreError> {
+    ) -> Result<
+        Vec<lash_core_execution::AttachmentCondemnationRecord>,
+        lash_core_execution::StoreError,
+    > {
         crate::attachments::list_attachment_condemnations(&self.pool).await
     }
 
     async fn has_live_attachment_ref(
         &self,
-        id: &lash_core::AttachmentId,
+        id: &lash_core_execution::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, lash_core::StoreError> {
+    ) -> Result<bool, lash_core_execution::StoreError> {
         let cutoff = clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
         let row = sqlx::query(self.live_attachment_ref_sql())
             .bind(id.as_str())
@@ -575,15 +587,15 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         Ok(row.is_some())
     }
 
-    fn fence(&self) -> lash_core::AttachmentGcFence {
-        lash_core::AttachmentGcFence::Fenced
+    fn fence(&self) -> lash_core_execution::AttachmentGcFence {
+        lash_core_execution::AttachmentGcFence::Fenced
     }
 
     async fn condemn_attachment(
         &self,
-        id: &lash_core::AttachmentId,
+        id: &lash_core_execution::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<lash_core::AttachmentCondemnation, lash_core::StoreError> {
+    ) -> Result<lash_core_execution::AttachmentCondemnation, lash_core_execution::StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         // The same per-digest lock a writer's `begin_attachment_write` takes:
         // the root predicate below and that writer's manifest insert cannot
@@ -599,7 +611,7 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
             .is_some();
         if rooted {
             tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(lash_core::AttachmentCondemnation::RootPresent);
+            return Ok(lash_core_execution::AttachmentCondemnation::RootPresent);
         }
         let inserted = sqlx::query(
             crate::attachments::attachment_sql()
@@ -630,17 +642,17 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         }
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(if inserted == 1 {
-            lash_core::AttachmentCondemnation::Condemned
+            lash_core_execution::AttachmentCondemnation::Condemned
         } else {
             // A peer sweeper owns this digest. Skip on contention.
-            lash_core::AttachmentCondemnation::AlreadyCondemned
+            lash_core_execution::AttachmentCondemnation::AlreadyCondemned
         })
     }
 
     async fn arm_attachment_delete(
         &self,
-        id: &lash_core::AttachmentId,
-    ) -> Result<lash_core::AttachmentDeleteArming, lash_core::StoreError> {
+        id: &lash_core_execution::AttachmentId,
+    ) -> Result<lash_core_execution::AttachmentDeleteArming, lash_core_execution::StoreError> {
         // Under the same per-digest advisory key the writer half takes, and in a
         // transaction: a bare pooled UPDATE could commit *inside* a writer's
         // open `begin_attachment_write` — after it read `condemned` and before
@@ -661,31 +673,31 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
         .rows_affected();
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(if armed == 1 {
-            lash_core::AttachmentDeleteArming::Armed
+            lash_core_execution::AttachmentDeleteArming::Armed
         } else {
             // A writer revoked the condemnation: the delete is never issued.
-            lash_core::AttachmentDeleteArming::Revoked
+            lash_core_execution::AttachmentDeleteArming::Revoked
         })
     }
 
     async fn release_attachment_condemnation(
         &self,
-        id: &lash_core::AttachmentId,
-    ) -> Result<(), lash_core::StoreError> {
+        id: &lash_core_execution::AttachmentId,
+    ) -> Result<(), lash_core_execution::StoreError> {
         crate::attachments::release_attachment_condemnation(&self.pool, id.as_str()).await
     }
 
     async fn recover_abandoned_attachment_write(
         &self,
-        id: &lash_core::AttachmentId,
-    ) -> Result<(), lash_core::StoreError> {
+        id: &lash_core_execution::AttachmentId,
+    ) -> Result<(), lash_core_execution::StoreError> {
         crate::attachments::recover_abandoned_attachment_write(&self.pool, id.as_str()).await
     }
 
     async fn retire_attachment_condemnation(
         &self,
-        id: &lash_core::AttachmentId,
-    ) -> Result<(), lash_core::StoreError> {
+        id: &lash_core_execution::AttachmentId,
+    ) -> Result<(), lash_core_execution::StoreError> {
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
         sqlx::query(
@@ -706,7 +718,7 @@ impl lash_core::AttachmentRootSet for PostgresSessionStoreFactory {
 pub(crate) async fn delete_session_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    report: &mut lash_core::SessionBlobReclaimReport,
+    report: &mut lash_core_execution::SessionBlobReclaimReport,
 ) -> Result<(), StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
     crate::turn_cancel_closure::ensure_session_not_pinned_tx(tx, session_id).await?;
@@ -861,12 +873,12 @@ pub(crate) async fn delete_session_tx(
 pub(crate) async fn delete_process_sessions_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_ids: &[SessionId],
-) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
     if session_ids.is_empty() {
-        return Ok(lash_core::SessionBlobReclaimReport::default());
+        return Ok(lash_core_execution::SessionBlobReclaimReport::default());
     }
     let session_id_texts: Vec<_> = session_ids.iter().map(SessionId::as_str).collect();
-    let mut report = lash_core::SessionBlobReclaimReport::default();
+    let mut report = lash_core_execution::SessionBlobReclaimReport::default();
     let outcome: Result<(), StoreError> = async {
         crate::runtime_persistence::lock_session_history_mutations_tx(tx, session_ids).await?;
         crate::turn_cancel_closure::ensure_sessions_not_pinned_tx(tx, session_ids).await?;
@@ -970,7 +982,9 @@ pub(crate) async fn delete_process_sessions_tx(
             // The caller owns the transaction and rolls it back on this stop;
             // no physical delete in the partial report can survive.
             report.deleted_blob_count = 0;
-            Err(lash_core::MaintenanceFailure::failed(error, report))
+            Err(lash_core_execution::MaintenanceFailure::failed(
+                error, report,
+            ))
         }
     }
 }

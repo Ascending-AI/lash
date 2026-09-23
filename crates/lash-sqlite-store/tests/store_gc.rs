@@ -3,8 +3,8 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core::store::GraphAppend;
-use lash_core::{
+use lash_core_execution::store::GraphAppend;
+use lash_core_execution::{
     Message, MessageRole, ModelSpec, Part, PluginState, RuntimeCommit, RuntimeSessionState,
     SessionCommitStore, SessionPolicy, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
     StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState, facade_support::shared_parts,
@@ -41,7 +41,7 @@ fn user_message(id: &str, content: &str) -> Message {
 }
 
 async fn factory_state(
-    store: &std::sync::Arc<dyn lash_core::RuntimePersistence>,
+    store: &std::sync::Arc<dyn lash_core_execution::RuntimePersistence>,
     session_id: &SessionId,
     head_revision: u64,
 ) -> RuntimeSessionState {
@@ -53,7 +53,9 @@ async fn factory_state(
     RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         head_revision,
-        ..RuntimeSessionState::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
+        ..RuntimeSessionState::new(SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+        ))
     }
 }
 
@@ -67,14 +69,16 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         turn_index: 1,
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     state.set_tool_state_snapshot(Some(tool_state));
     state.set_plugin_state(Some(plugin_state));
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(state.session_id.clone()))
+        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
+            state.session_id.clone(),
+        ))
         .await
         .expect("bind session to store");
     state.ensure_agent_frame_initialized();
@@ -99,11 +103,11 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
         .expect("read checkpoint")
         .expect("checkpoint manifest");
     let dynamic_ref = checkpoint
-        .component_ref(lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT)
+        .component_ref(lash_core_execution::store::TOOL_STATE_CHECKPOINT_COMPONENT)
         .expect("dynamic state ref")
         .clone();
     let plugin_ref = checkpoint
-        .component_ref(lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
+        .component_ref(lash_core_execution::store::PLUGIN_STATE_CHECKPOINT_COMPONENT)
         .expect("plugin snapshot ref")
         .clone();
     assert!(
@@ -164,8 +168,8 @@ async fn sqlite_catalog_indexes_usage_by_session() {
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("usage-index"),
-            relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
         })
         .await
         .expect("create store");
@@ -193,13 +197,13 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("chat/alpha"),
-        relation: lash_core::SessionRelation::Child {
+        relation: lash_core_execution::SessionRelation::Child {
             parent_session_id: SessionId::from("preserved-parent"),
             caused_by: None,
         },
         policy: SessionPolicy {
             model: model_spec("first-model"),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
         },
     };
 
@@ -215,10 +219,10 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
     let reopened = factory
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
-            relation: lash_core::SessionRelation::Root,
+            relation: lash_core_execution::SessionRelation::Root,
             policy: SessionPolicy {
                 model: model_spec("second-model"),
-                ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+                ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
             },
             ..request
         })
@@ -240,10 +244,10 @@ async fn sqlite_factory_is_explicitly_usable_as_session_store_factory() {
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("explicit"),
-        relation: lash_core::SessionRelation::Root,
+        relation: lash_core_execution::SessionRelation::Root,
         policy: SessionPolicy {
             model: model_spec("model"),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
         },
     };
 
@@ -265,10 +269,10 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
-        relation: lash_core::SessionRelation::Root,
+        relation: lash_core_execution::SessionRelation::Root,
         policy: SessionPolicy {
             model: model_spec("model"),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
         },
     };
     let deleted_store = factory
@@ -353,8 +357,8 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let store_for = |session_id: &SessionId| SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
-        relation: lash_core::SessionRelation::Root,
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let first = factory
         .create_store(&store_for(&SessionId::from("first")))
@@ -367,20 +371,22 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let first_state = factory_state(&first, &SessionId::from("first"), 0).await;
     let second_state = factory_state(&second, &SessionId::from("second"), 0).await;
     let commit = |state: &RuntimeSessionState| {
-        let frame_key = lash_core::FrameKey::from_caller_material("shared-frame-key")
+        let frame_key = lash_core_execution::FrameKey::from_caller_material("shared-frame-key")
             .expect("non-empty frame material");
-        let frame_node_id =
-            lash_core::facade_support::frame_node_id(&state.session_id, frame_key.as_str());
-        let node = lash_core::SessionNodeRecord {
+        let frame_node_id = lash_core_execution::facade_support::frame_node_id(
+            &state.session_id,
+            frame_key.as_str(),
+        );
+        let node = lash_core_execution::SessionNodeRecord {
             node_id: frame_node_id.to_string().into(),
             parent_node_id: None,
             timestamp: "2026-07-26T00:00:00Z".to_string(),
-            payload: lash_core::SessionNodePayload::FrameOpen {
+            payload: lash_core_execution::SessionNodePayload::FrameOpen {
                 frame_key,
-                reason: lash_core::AgentFrameReason::initial(),
-                assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::new(
-                    lash_core::TurnBudget::Unbounded,
-                )),
+                reason: lash_core_execution::AgentFrameReason::initial(),
+                assignment: lash_core_execution::AgentFrameAssignment::from_policy(
+                    SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+                ),
                 protocol_turn_options: Default::default(),
             },
         };
@@ -410,12 +416,16 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         .await
         .expect("second session derives a distinct node id");
 
-    let frame_key = lash_core::FrameKey::from_caller_material("shared-frame-key")
+    let frame_key = lash_core_execution::FrameKey::from_caller_material("shared-frame-key")
         .expect("non-empty frame material");
-    let first_node_id =
-        lash_core::facade_support::frame_node_id(&first_state.session_id, frame_key.as_str());
-    let second_node_id =
-        lash_core::facade_support::frame_node_id(&second_state.session_id, frame_key.as_str());
+    let first_node_id = lash_core_execution::facade_support::frame_node_id(
+        &first_state.session_id,
+        frame_key.as_str(),
+    );
+    let second_node_id = lash_core_execution::facade_support::frame_node_id(
+        &second_state.session_id,
+        frame_key.as_str(),
+    );
     assert_ne!(first_node_id, second_node_id);
     assert!(first.load_node(&first_node_id).await.unwrap().is_some());
     assert!(second.load_node(&second_node_id).await.unwrap().is_some());
@@ -428,8 +438,8 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
-        relation: lash_core::SessionRelation::Root,
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let first = factory
         .create_store(&request(&SessionId::from("leaf-a")))
@@ -441,19 +451,21 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         .expect("second store");
     let first_state = factory_state(&first, &SessionId::from("leaf-a"), 0).await;
     let second_state = factory_state(&second, &SessionId::from("leaf-b"), 0).await;
-    let frame_key =
-        lash_core::FrameKey::from_caller_material("leaf-a-node").expect("non-empty frame material");
-    let frame_node_id =
-        lash_core::facade_support::frame_node_id(&first_state.session_id, frame_key.as_str());
-    let node = lash_core::SessionNodeRecord {
+    let frame_key = lash_core_execution::FrameKey::from_caller_material("leaf-a-node")
+        .expect("non-empty frame material");
+    let frame_node_id = lash_core_execution::facade_support::frame_node_id(
+        &first_state.session_id,
+        frame_key.as_str(),
+    );
+    let node = lash_core_execution::SessionNodeRecord {
         node_id: frame_node_id.to_string().into(),
         parent_node_id: None,
         timestamp: "2026-07-26T00:00:00Z".to_string(),
-        payload: lash_core::SessionNodePayload::FrameOpen {
+        payload: lash_core_execution::SessionNodePayload::FrameOpen {
             frame_key,
-            reason: lash_core::AgentFrameReason::initial(),
-            assignment: lash_core::AgentFrameAssignment::from_policy(SessionPolicy::new(
-                lash_core::TurnBudget::Unbounded,
+            reason: lash_core_execution::AgentFrameReason::initial(),
+            assignment: lash_core_execution::AgentFrameAssignment::from_policy(SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
             )),
             protocol_turn_options: Default::default(),
         },
@@ -498,8 +510,8 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
-        relation: lash_core::SessionRelation::Root,
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let first = factory
         .create_store(&request(&SessionId::from("maintenance-a")))
@@ -512,10 +524,10 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     let source_key = "maintenance-b-source";
     let cancelled = second
         .enqueue_pending_turn_input(
-            lash_core::PendingTurnInputDraft::new(
+            lash_core_execution::PendingTurnInputDraft::new(
                 "maintenance-b",
-                lash_core::TurnInputIngress::NextTurn,
-                lash_core::TurnInput::text("dedupe fence"),
+                lash_core_execution::TurnInputIngress::NextTurn,
+                lash_core_execution::TurnInput::text("dedupe fence"),
             )
             .with_source_key(source_key),
         )
@@ -531,10 +543,10 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     assert_eq!(first_report.removed_pending_turn_input_tombstone_count, 0);
     let replay = second
         .enqueue_pending_turn_input(
-            lash_core::PendingTurnInputDraft::new(
+            lash_core_execution::PendingTurnInputDraft::new(
                 "maintenance-b",
-                lash_core::TurnInputIngress::NextTurn,
-                lash_core::TurnInput::text("dedupe fence"),
+                lash_core_execution::TurnInputIngress::NextTurn,
+                lash_core_execution::TurnInput::text("dedupe fence"),
             )
             .with_source_key(source_key),
         )
@@ -543,7 +555,7 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     assert_eq!(replay.input_id, cancelled.input_id);
     assert_eq!(
         replay.state.kind(),
-        lash_core::TurnInputStateKind::Cancelled
+        lash_core_execution::runtime::TurnInputStateKind::Cancelled
     );
 
     let second_report = second.vacuum().await.expect("vacuum second session");
@@ -559,8 +571,8 @@ async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("graph-read-error"),
-            relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
         })
         .await
         .expect("create store");
@@ -592,8 +604,8 @@ async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("graph-node-decode-error"),
-            relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
         })
         .await
         .expect("create store");
@@ -643,8 +655,8 @@ async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("usage-read-error"),
-            relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
         })
         .await
         .expect("create store");
@@ -676,8 +688,8 @@ async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
     let live_req = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("unbound-vacuum-live"),
-        relation: lash_core::SessionRelation::Root,
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let live_store = factory
         .create_store(&live_req)
@@ -685,10 +697,10 @@ async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
         .expect("create live store");
     let cancelled = live_store
         .enqueue_pending_turn_input(
-            lash_core::PendingTurnInputDraft::new(
+            lash_core_execution::PendingTurnInputDraft::new(
                 "unbound-vacuum-live",
-                lash_core::TurnInputIngress::NextTurn,
-                lash_core::TurnInput::text("input"),
+                lash_core_execution::TurnInputIngress::NextTurn,
+                lash_core_execution::TurnInput::text("input"),
             )
             .with_source_key("test-key"),
         )
@@ -703,8 +715,8 @@ async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
     let del_req = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("unbound-vacuum-del"),
-        relation: lash_core::SessionRelation::Root,
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let del_store = factory
         .create_store(&del_req)
@@ -738,7 +750,7 @@ async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
     assert!(
         matches!(
             err.stop,
-            lash_core::MaintenanceStop::Failed(StoreError::SessionNotBound)
+            lash_core_execution::MaintenanceStop::Failed(StoreError::SessionNotBound)
         ),
         "expected SessionNotBound, got {err:?}"
     );
@@ -779,13 +791,16 @@ fn raw_node_ids(factory: &SqliteSessionStoreFactory, sql: &str) -> Vec<String> {
 async fn commit_single_root_node(
     factory: &SqliteSessionStoreFactory,
     session_id: &SessionId,
-) -> (std::sync::Arc<dyn lash_core::RuntimePersistence>, String) {
+) -> (
+    std::sync::Arc<dyn lash_core_execution::RuntimePersistence>,
+    String,
+) {
     let store = factory
         .create_store(&SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
-            relation: lash_core::SessionRelation::Root,
-            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
         })
         .await
         .expect("create store");
@@ -866,13 +881,13 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         drop(store);
         leaf
     };
-    let policy = SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+    let policy = SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded);
     factory
-        .fork_at(&lash_core::ForkSessionRequest {
+        .fork_at(&lash_core_execution::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("orphan-fork-child"),
             node_id: parent_leaf.clone().into(),
-            relation: lash_core::SessionRelation::Root,
+            relation: lash_core_execution::SessionRelation::Root,
             policy: policy.clone(),
         })
         .await
@@ -882,27 +897,28 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
             .open_existing_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("orphan-fork-child"),
-                relation: lash_core::SessionRelation::Root,
+                relation: lash_core_execution::SessionRelation::Root,
                 policy,
             })
             .await
             .expect("open forked child")
             .expect("forked child exists");
-        let mut child_state = lash_core::store::load_persisted_session_state(child.as_ref())
-            .await
-            .expect("load child state")
-            .expect("child state exists");
+        let mut child_state =
+            lash_core_execution::store::load_persisted_session_state(child.as_ref())
+                .await
+                .expect("load child state")
+                .expect("child state exists");
         let parent_node_id = child_state.session_graph.leaf_node_id.clone();
         child_state
             .session_graph
-            .apply_append(&lash_core::store::GraphAppend::Extend {
-                nodes: vec![lash_core::SessionNodeRecord {
+            .apply_append(&lash_core_execution::store::GraphAppend::Extend {
+                nodes: vec![lash_core_execution::SessionNodeRecord {
                     node_id: "orphan-fork-child-node".to_string().into(),
                     parent_node_id,
                     timestamp: "2026-08-17T00:00:00Z".to_string(),
-                    payload: lash_core::SessionNodePayload::Event {
-                        event: lash_core::SessionHistoryRecord::Protocol(
-                            lash_core::ProtocolEvent::typed(
+                    payload: lash_core_execution::SessionNodePayload::Event {
+                        event: lash_core_execution::SessionHistoryRecord::Protocol(
+                            lash_core_execution::ProtocolEvent::typed(
                                 "orphan-fork-child-event",
                                 serde_json::json!({ "content": "child node" }),
                             )

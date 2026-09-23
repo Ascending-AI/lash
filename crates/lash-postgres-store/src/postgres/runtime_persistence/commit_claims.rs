@@ -10,9 +10,9 @@ use super::*;
 /// fence must land first.
 pub(super) async fn complete_queued_work_claims_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    plans: &[lash_core::store::claim_plan::QueuedWorkSettlementPlan],
+    plans: &[lash_core_execution::store::claim_plan::QueuedWorkSettlementPlan],
 ) -> Result<(), StoreError> {
-    use lash_core::store::claim_plan::QueuedWorkSettlementWrite;
+    use lash_core_execution::store::claim_plan::QueuedWorkSettlementWrite;
     let sql = crate::turn_ingress::turn_ingress_sql();
     for plan in plans {
         for write in plan.writes() {
@@ -35,8 +35,8 @@ pub(super) async fn complete_queued_work_claims_tx(
                     // legitimately miss. A miss is recorded as evidence and
                     // then fails closed with the same supersession this site
                     // has always returned.
-                    lash_core::store_backend_support::require_fenced_write_applied(
-                        lash_core::store_backend_support::FencedWrite::QueuedWorkClaimSettlement,
+                    lash_core_execution::store_backend_support::require_fenced_write_applied(
+                        lash_core_execution::store_backend_support::FencedWrite::QueuedWorkClaimSettlement,
                         crate::POSTGRES_BACKEND,
                         batch_id.as_str(),
                         completion.rows_affected(),
@@ -53,9 +53,9 @@ pub(super) async fn complete_queued_work_claims_tx(
 /// (FIG-1065). One conditional write serves both regimes (ADR 0069 §5).
 pub(crate) async fn complete_turn_input_claims_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    plans: &[lash_core::store::claim_plan::TurnInputSettlementPlan],
+    plans: &[lash_core_execution::store::claim_plan::TurnInputSettlementPlan],
 ) -> Result<(), StoreError> {
-    use lash_core::store::claim_plan::TurnInputSettlementRegime;
+    use lash_core_execution::store::claim_plan::TurnInputSettlementRegime;
     let pending_inputs = &crate::turn_ingress::turn_ingress_sql().pending_inputs;
     let unclaimed_settlement_statement = pending_inputs.settle_unclaimed.sql();
     let claimed_settlement_statement = pending_inputs.settle_claimed.sql();
@@ -93,8 +93,8 @@ pub(crate) async fn complete_turn_input_claims_tx(
             // transaction, so the predicate cannot legitimately miss. A miss
             // is recorded as evidence and then fails closed with the same
             // supersession this site has always returned.
-            lash_core::store_backend_support::require_fenced_write_applied(
-                lash_core::store::claim_plan::TurnInputSettlementPlan::fenced_write(step),
+            lash_core_execution::store_backend_support::require_fenced_write_applied(
+                lash_core_execution::store::claim_plan::TurnInputSettlementPlan::fenced_write(step),
                 crate::POSTGRES_BACKEND,
                 step.input_id.as_str(),
                 settlement.rows_affected(),

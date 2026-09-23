@@ -40,7 +40,7 @@ pub(super) async fn recent_events(
     registry: &SqliteProcessRegistry,
     process_id: &ProcessId,
     limit: usize,
-) -> Result<Vec<ProcessEvent>, lash_core::PluginError> {
+) -> Result<Vec<ProcessEvent>, lash_core_execution::PluginError> {
     let process_id = ProcessId::from(process_id.to_string());
     registry
         .conn
@@ -89,7 +89,7 @@ pub(super) async fn wake_allocation_floor_for_testing(
     registry: &SqliteProcessRegistry,
     target_session_id: &SessionId,
     process_id: &ProcessId,
-) -> Result<Option<u64>, lash_core::PluginError> {
+) -> Result<Option<u64>, lash_core_execution::PluginError> {
     let target_session_id = SessionId::from(target_session_id.to_string());
     let process_id = ProcessId::from(process_id.to_string());
     registry
@@ -118,7 +118,7 @@ impl SqliteProcessRegistry {
     pub(crate) fn retained_process_lease_fencing_token_conn(
         conn: &Connection,
         process_id: &ProcessId,
-    ) -> Result<u64, lash_core::PluginError> {
+    ) -> Result<u64, lash_core_execution::PluginError> {
         conn.query_row(
             process_sql().lease_sqlite.select_fencing_token.sql(),
             params![process_id.as_str()],
@@ -134,7 +134,7 @@ impl SqliteProcessRegistry {
     pub(crate) fn require_process_conn(
         conn: &rusqlite::Connection,
         process_id: &ProcessId,
-    ) -> Result<ProcessRecord, lash_core::PluginError> {
+    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
         if let Some(record) = Self::load_process_conn(conn, process_id)? {
             return Ok(record);
         }
@@ -150,14 +150,16 @@ impl SqliteProcessRegistry {
             process_id,
             tombstone
                 .map(|(terminal_label, pruned_at_ms)| {
-                    Ok::<_, lash_core::PluginError>(registry_transitions::ProcessTombstoneStamp {
-                        terminal_label,
-                        pruned_at_ms: plugin_u64_from_sql(
-                            "ProcessTombstone",
-                            "pruned_at_ms",
-                            pruned_at_ms,
-                        )?,
-                    })
+                    Ok::<_, lash_core_execution::PluginError>(
+                        registry_transitions::ProcessTombstoneStamp {
+                            terminal_label,
+                            pruned_at_ms: plugin_u64_from_sql(
+                                "ProcessTombstone",
+                                "pruned_at_ms",
+                                pruned_at_ms,
+                            )?,
+                        },
+                    )
                 })
                 .transpose()?,
         ))
@@ -166,7 +168,7 @@ impl SqliteProcessRegistry {
     pub(crate) fn require_process_ref_conn(
         conn: &rusqlite::Connection,
         process_ref: &ProcessRef,
-    ) -> Result<ProcessRecord, lash_core::PluginError> {
+    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
         if let Some(record) = Self::load_process_conn(conn, &process_ref.process_id)? {
             if record.incarnation == process_ref.incarnation {
                 return Ok(record);
@@ -232,7 +234,7 @@ impl SqliteProcessRegistry {
         by: ProcessObserverBy,
         add: bool,
         expected_incarnation: Option<ProcessIncarnation>,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         let session_id = SessionId::from(session_id.to_string());
         let process_id = ProcessId::from(process_id.to_string());
         let now = self.clock.timestamp_ms();
@@ -290,7 +292,7 @@ impl SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         target: Option<&str>,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         let process_id = ProcessId::from(process_id.to_string());
         let target = target.map(ToOwned::to_owned);
         let now = self.clock.timestamp_ms();
@@ -348,7 +350,7 @@ impl SqliteProcessRegistry {
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_with_clock(
             path,
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
             session_store_root,
         )
         .await
@@ -356,7 +358,7 @@ impl SqliteProcessRegistry {
 
     pub async fn open_with_clock(
         path: &Path,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
         session_store_root: impl Into<PathBuf>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_configured(path, clock, session_store_root.into()).await
@@ -378,17 +380,17 @@ impl SqliteProcessRegistry {
         apply_pragmas(&conn, StoreBacking::File).await?;
         Ok(Self {
             conn,
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             process_session_store_root: Some(session_store_root.into()),
-            wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
-            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
+            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             path: Some(path.to_path_buf()),
         })
     }
 
     async fn open_configured(
         path: &Path,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
         process_session_store_root: PathBuf,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open(path).await?;
@@ -398,18 +400,18 @@ impl SqliteProcessRegistry {
             conn,
             clock,
             process_session_store_root: Some(process_session_store_root),
-            wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
-            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
+            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             path: Some(path.to_path_buf()),
         })
     }
 
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_clock(Arc::new(lash_core::facade_support::SystemClock)).await
+        Self::memory_with_clock(Arc::new(lash_core_execution::facade_support::SystemClock)).await
     }
 
     pub async fn memory_with_clock(
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_in_memory().await?;
         ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry).await?;
@@ -418,13 +420,16 @@ impl SqliteProcessRegistry {
             conn,
             clock,
             process_session_store_root: None,
-            wake_delivery_config: lash_core::WakeDeliveryConfig::default(),
-            scope_fence_hosts: lash_core::ProcessScopeFenceHosts::default(),
+            wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
+            scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             path: None,
         })
     }
 
-    pub fn with_wake_delivery_config(mut self, config: lash_core::WakeDeliveryConfig) -> Self {
+    pub fn with_wake_delivery_config(
+        mut self,
+        config: lash_core_execution::WakeDeliveryConfig,
+    ) -> Self {
         self.wake_delivery_config = config;
         self
     }
@@ -432,9 +437,9 @@ impl SqliteProcessRegistry {
     pub(crate) fn load_process_conn(
         conn: &Connection,
         process_id: &ProcessId,
-    ) -> Result<Option<ProcessRecord>, lash_core::PluginError> {
+    ) -> Result<Option<ProcessRecord>, lash_core_execution::PluginError> {
         if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
-            return Err(lash_core::PluginError::Session(reason.into()));
+            return Err(lash_core_execution::PluginError::Session(reason.into()));
         }
         let json: Option<String> = conn
             .query_row(
@@ -451,7 +456,7 @@ impl SqliteProcessRegistry {
     pub(crate) fn save_process_conn(
         conn: &Connection,
         record: &ProcessRecord,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         let change_seq = Self::next_change_seq_conn(conn)?;
         conn.execute(
             process_sql().process.update_mutable_columns.sql(),
@@ -469,7 +474,9 @@ impl SqliteProcessRegistry {
         Ok(())
     }
 
-    pub(crate) fn next_change_seq_conn(conn: &Connection) -> Result<u64, lash_core::PluginError> {
+    pub(crate) fn next_change_seq_conn(
+        conn: &Connection,
+    ) -> Result<u64, lash_core_execution::PluginError> {
         conn.execute(process_sql().clock_sqlite.bump.sql(), [])
             .map_err(process_sqlite_error)?;
         conn.query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
@@ -481,7 +488,7 @@ impl SqliteProcessRegistry {
     pub(crate) fn wake_session_id_conn(
         conn: &Connection,
         process_id: &ProcessId,
-    ) -> Result<Option<SessionId>, lash_core::PluginError> {
+    ) -> Result<Option<SessionId>, lash_core_execution::PluginError> {
         conn.query_row(
             process_sql().process.select_wake_session_id.sql(),
             params![process_id.as_str()],
@@ -495,7 +502,7 @@ impl SqliteProcessRegistry {
         conn: &Connection,
         process_id: &ProcessId,
         replay_key: &str,
-    ) -> Result<Option<ProcessEvent>, lash_core::PluginError> {
+    ) -> Result<Option<ProcessEvent>, lash_core_execution::PluginError> {
         let row: Option<String> = conn
             .query_row(
                 process_sql().event.select_by_replay_key.sql(),
@@ -526,9 +533,10 @@ impl SqliteProcessRegistry {
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core::WakeDeliveryConfig,
+        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
         authorization: ProcessEventWriteAuthorization<'_>,
-    ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core::PluginError> {
+    ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
+    {
         let process_id = record.id.clone();
         let replay_lookup =
             if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
@@ -549,7 +557,7 @@ impl SqliteProcessRegistry {
             wake_session_id.as_ref(),
         )?;
         match prepared {
-            lash_core::facade_support::ProcessEventAppendPlan::Replay {
+            lash_core_execution::facade_support::ProcessEventAppendPlan::Replay {
                 event,
                 repair_record,
                 wake_delivery,
@@ -570,14 +578,14 @@ impl SqliteProcessRegistry {
                 Ok((
                     ProcessEventAppendReceipt {
                         last_event_sequence: record.last_event_sequence,
-                        realization: lash_core::StoreRealization::Coalesced,
+                        realization: lash_core_execution::StoreRealization::Coalesced,
                         event,
                         wake_delivery,
                     },
                     ProcessEventAppendArm::Replayed { repaired },
                 ))
             }
-            lash_core::facade_support::ProcessEventAppendPlan::Insert {
+            lash_core_execution::facade_support::ProcessEventAppendPlan::Insert {
                 event,
                 projected_record,
                 wake_delivery,
@@ -590,18 +598,19 @@ impl SqliteProcessRegistry {
                         // held and the release statement's predicate backstops
                         // this call.
                         let current = Self::load_process_lease_row_conn(conn, &process_id)?;
-                        let verdict = lash_core::store_backend_support::process_lease_verdict(
-                            current
-                                .as_ref()
-                                .map(registry_transitions::ProcessLeaseRow::facts),
-                            lash_core::store_backend_support::ProcessLeaseAuthority {
-                                lease_token: &lease.lease_token,
-                                fencing_token: lease.fencing_token,
-                            },
-                            occurred_at_ms,
-                        );
+                        let verdict =
+                            lash_core_execution::store_backend_support::process_lease_verdict(
+                                current
+                                    .as_ref()
+                                    .map(registry_transitions::ProcessLeaseRow::facts),
+                                lash_core_execution::store_backend_support::ProcessLeaseAuthority {
+                                    lease_token: &lease.lease_token,
+                                    fencing_token: lease.fencing_token,
+                                },
+                                occurred_at_ms,
+                            );
                         if !verdict.is_current() {
-                            return Err(lash_core::PluginError::ProcessLeaseSuperseded {
+                            return Err(lash_core_execution::PluginError::ProcessLeaseSuperseded {
                                 process_id,
                             });
                         }
@@ -628,10 +637,12 @@ impl SqliteProcessRegistry {
                 if record.is_terminal() {
                     super::parent_end::record_conn(
                         conn,
-                        &lash_core::ParentScope::process(lash_core::ProcessRef::new(
-                            process_id.clone(),
-                            record.incarnation,
-                        )),
+                        &lash_core_execution::ParentScope::process(
+                            lash_core_execution::ProcessRef::new(
+                                process_id.clone(),
+                                record.incarnation,
+                            ),
+                        ),
                         occurred_at_ms,
                     )?;
                 }
@@ -649,7 +660,7 @@ impl SqliteProcessRegistry {
                 Ok((
                     ProcessEventAppendReceipt {
                         last_event_sequence: event.sequence,
-                        realization: lash_core::StoreRealization::Realized,
+                        realization: lash_core_execution::StoreRealization::Realized,
                         event,
                         wake_delivery,
                     },
@@ -664,8 +675,8 @@ impl SqliteProcessRegistry {
         record: &mut ProcessRecord,
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
-        wake_delivery_config: lash_core::WakeDeliveryConfig,
-    ) -> Result<(ProcessEventAppendReceipt, bool), lash_core::PluginError> {
+        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+    ) -> Result<(ProcessEventAppendReceipt, bool), lash_core_execution::PluginError> {
         let (receipt, arm) = Self::apply_process_event_append_conn(
             conn,
             record,
@@ -679,13 +690,13 @@ impl SqliteProcessRegistry {
 
     pub(crate) fn insert_wake_delivery_conn(
         conn: &Connection,
-        wake: Option<&lash_core::ProcessWakeDelivery>,
-        config: lash_core::WakeDeliveryConfig,
-    ) -> Result<(), lash_core::PluginError> {
+        wake: Option<&lash_core_execution::ProcessWakeDelivery>,
+        config: lash_core_execution::WakeDeliveryConfig,
+    ) -> Result<(), lash_core_execution::PluginError> {
         let Some(wake) = wake else {
             return Ok(());
         };
-        let delivery = lash_core::WakeDelivery::pending(wake.clone(), config)?;
+        let delivery = lash_core_execution::WakeDelivery::pending(wake.clone(), config)?;
         conn.execute(
             process_sql().wake_sqlite.insert_pending.sql(),
             params![
@@ -707,7 +718,7 @@ impl SqliteProcessRegistry {
         conn: &Connection,
         process_id: &ProcessId,
         target_session_id: Option<&SessionId>,
-    ) -> Result<(Option<u64>, u64), lash_core::PluginError> {
+    ) -> Result<(Option<u64>, u64), lash_core_execution::PluginError> {
         let last_sequence = conn
             .query_row(
                 process_sql().event.select_max_sequence.sql(),
@@ -732,8 +743,10 @@ impl SqliteProcessRegistry {
             .flatten()
             .map(|floor| plugin_u64_from_sql("WakeAllocationFloor", "allocation_floor", floor))
             .transpose()?;
-        let sequence =
-            lash_core::runtime::allocate_process_event_sequence(last_sequence, sender_floor)?;
+        let sequence = lash_core_execution::runtime::allocate_process_event_sequence(
+            last_sequence,
+            sender_floor,
+        )?;
         Ok((last_sequence, sequence))
     }
 
@@ -742,7 +755,7 @@ impl SqliteProcessRegistry {
         target_session_id: Option<&SessionId>,
         process_id: &ProcessId,
         sequence: u64,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         let Some(target_session_id) = target_session_id else {
             return Ok(());
         };
@@ -765,7 +778,8 @@ impl SqliteProcessRegistry {
     pub(crate) fn load_process_lease_row_conn(
         conn: &Connection,
         process_id: &ProcessId,
-    ) -> Result<Option<registry_transitions::ProcessLeaseRow>, lash_core::PluginError> {
+    ) -> Result<Option<registry_transitions::ProcessLeaseRow>, lash_core_execution::PluginError>
+    {
         conn.query_row(
             process_sql().lease_sqlite.select_by_process.sql(),
             params![process_id.as_str()],
@@ -787,7 +801,7 @@ impl SqliteProcessRegistry {
     pub(crate) fn load_process_lease_conn(
         conn: &Connection,
         process_id: &ProcessId,
-    ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
+    ) -> Result<Option<ProcessLease>, lash_core_execution::PluginError> {
         Ok(Self::load_process_lease_row_conn(conn, process_id)?
             .and_then(|row| row.project(process_id)))
     }
@@ -801,7 +815,7 @@ impl SqliteProcessRegistry {
         fencing_token: u64,
         now: u64,
         lease_ttl_ms: u64,
-    ) -> Result<ProcessLease, lash_core::PluginError> {
+    ) -> Result<ProcessLease, lash_core_execution::PluginError> {
         let lease = registry_transitions::acquired_process_lease(
             process_id,
             owner,
@@ -836,8 +850,8 @@ impl SqliteProcessRegistry {
 /// carry the inner `Result` back so the caller recovers the value or the
 /// `PluginError` after the transaction resolves.
 pub(crate) fn tx_outcome<T>(
-    result: Result<T, lash_core::PluginError>,
-) -> TxOutcome<Result<T, lash_core::PluginError>> {
+    result: Result<T, lash_core_execution::PluginError>,
+) -> TxOutcome<Result<T, lash_core_execution::PluginError>> {
     match result {
         Ok(value) => TxOutcome::Commit(Ok(value)),
         Err(err) => TxOutcome::Rollback(Err(err)),
@@ -847,11 +861,11 @@ pub(crate) fn tx_outcome<T>(
 /// The journal key of a process scope, as the fence table stores it.
 pub(super) fn process_scope_fence_key(
     process_id: &ProcessId,
-) -> Result<String, lash_core::PluginError> {
-    lash_core::ExecutionScope::process(process_id)
+) -> Result<String, lash_core_execution::PluginError> {
+    lash_core_execution::ExecutionScope::process(process_id)
         .journal_identity()
         .map(|identity| identity.key().to_string())
-        .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+        .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))
 }
 
 /// This registry's registration truth for a bound effect host (ADR 0049).
@@ -860,11 +874,11 @@ pub(super) struct SqliteRegistrationProbe {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessRegistrationProbe for SqliteRegistrationProbe {
+impl lash_core_execution::ProcessRegistrationProbe for SqliteRegistrationProbe {
     async fn process_is_registered(
         &self,
         process_id: &ProcessId,
-    ) -> Result<bool, lash_core::PluginError> {
+    ) -> Result<bool, lash_core_execution::PluginError> {
         let process_id = ProcessId::from(process_id.to_string());
         self.conn
             .call(move |connection| {

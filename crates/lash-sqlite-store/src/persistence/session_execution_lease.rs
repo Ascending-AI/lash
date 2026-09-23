@@ -7,7 +7,7 @@ impl SessionExecutionLeaseStore for Store {
         session_id: &SessionId,
         owner: &LeaseOwnerIdentity,
         executor_id: &str,
-        claim_nonce: &lash_core::LeaseClaimNonce,
+        claim_nonce: &lash_core_execution::LeaseClaimNonce,
         lease_ttl_ms: u64,
     ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
@@ -94,7 +94,7 @@ impl SessionExecutionLeaseStore for Store {
                     });
                     let acquired = acquire_session_execution_lease_conn(
                         tx,
-                        lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {
+                        lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity {
                             session_id: &session_id,
                             owner: &owner,
                             executor_id: &executor_id,
@@ -158,11 +158,11 @@ impl SessionExecutionLeaseStore for Store {
                     // The shared verdict is the decision. `now` is this store's
                     // injected host clock, which is also what a simulation
                     // steers.
-                    let current = lash_core::store_backend_support::require_renewable_session_execution_lease(
+                    let current = lash_core_execution::store_backend_support::require_renewable_session_execution_lease(
                         observed.as_ref(),
                         &fence,
                         now,
-                        lash_core::store_backend_support::FenceTimeAuthority::EmbeddedHost,
+                        lash_core_execution::store_backend_support::FenceTimeAuthority::EmbeddedHost,
                         "sqlite_write_transaction",
                     )?;
                     let expires_at = now.saturating_add(lease_ttl_ms);
@@ -191,8 +191,8 @@ impl SessionExecutionLeaseStore for Store {
                     // statement, but it is no longer a second source of the
                     // verdict. Under the write transaction it cannot disagree
                     // with the locked read, so any other row count is a defect.
-                    lash_core::store_backend_support::require_fenced_write_applied(
-                        lash_core::store_backend_support::FencedWrite::SessionExecutionLeaseRenewal,
+                    lash_core_execution::store_backend_support::require_fenced_write_applied(
+                        lash_core_execution::store_backend_support::FencedWrite::SessionExecutionLeaseRenewal,
                         SQLITE_BACKEND,
                         fence.session_id.as_str(),
                         u64::try_from(renewed).unwrap_or(u64::MAX),
@@ -233,7 +233,7 @@ impl SessionExecutionLeaseStore for Store {
                     // transaction, then let the shared verdict decide.
                     let observed =
                         load_session_execution_lease_row_conn(tx, &completion.session_id)?;
-                    lash_core::store_backend_support::require_releasable_session_execution_lease(
+                    lash_core_execution::store_backend_support::require_releasable_session_execution_lease(
                         observed.as_ref(),
                         &completion,
                         "sqlite_write_transaction",
@@ -241,8 +241,8 @@ impl SessionExecutionLeaseStore for Store {
                     let released = release_session_execution_lease_conn(tx, &completion)?;
                     // Backstop: the five-column predicate stays on the release
                     // statement and must agree with the verdict.
-                    lash_core::store_backend_support::require_fenced_write_applied(
-                        lash_core::store_backend_support::FencedWrite::SessionExecutionLeaseRelease,
+                    lash_core_execution::store_backend_support::require_fenced_write_applied(
+                        lash_core_execution::store_backend_support::FencedWrite::SessionExecutionLeaseRelease,
                         SQLITE_BACKEND,
                         completion.session_id.as_str(),
                         u64::from(released),
@@ -264,7 +264,7 @@ impl SessionExecutionLeaseStore for Store {
     async fn get_session_execution_lease(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core::SessionExecutionLeaseObservation, StoreError> {
+    ) -> Result<lash_core_execution::SessionExecutionLeaseObservation, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
         let observed_at_epoch_ms = self.clock.timestamp_ms();
         self.conn
@@ -282,12 +282,12 @@ impl SessionExecutionLeaseStore for Store {
                     Ok(Some(row_to_session_execution_lease(&session_id, row)?))
                 })(
                 );
-                Ok(
-                    outcome.map(|lease| lash_core::SessionExecutionLeaseObservation {
+                Ok(outcome.map(
+                    |lease| lash_core_execution::SessionExecutionLeaseObservation {
                         observed_at_epoch_ms,
                         lease,
-                    }),
-                )
+                    },
+                ))
             })
             .await
             .map_err(sqlite_error)?

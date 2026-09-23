@@ -27,27 +27,29 @@ impl lash_conformance::WakeDeliveryOrderingGroupFaultInjector
 lash_conformance::wake_delivery_crash_tests!({
     let dir = tempfile::tempdir().expect("tempdir");
     let process_registry_path = dir.path().join("processes.db");
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_800_000_000_000));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
+        1_800_000_000_000,
+    ));
     let registry = Arc::new(
         SqliteProcessRegistry::open_with_clock(
             &process_registry_path,
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
             dir.path().join("sessions"),
         )
         .await
         .expect("open process registry")
         .with_wake_delivery_config(
-            lash_core::WakeDeliveryConfig::new(10_000)
+            lash_core_execution::WakeDeliveryConfig::new(10_000)
                 .expect("valid test retention")
                 .with_enqueuing_stale_after_ms(25)
                 .expect("valid short stale-claim age"),
         ),
-    ) as Arc<dyn lash_core::ConformanceProcessRegistry>;
+    ) as Arc<dyn lash_core_execution::ConformanceProcessRegistry>;
     let factory = Arc::new(
         SqliteSessionStoreFactory::new_with_process_registry(dir.path(), process_registry_path)
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
     ) as Arc<dyn SessionStoreFactory>;
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
+    let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (
@@ -70,7 +72,7 @@ lash_conformance::wake_delivery_ordering_tests!({
             .await
             .expect("open process registry"),
     );
-    let process_work = Arc::new(lash_core::NativeProcessWork::for_registry(
+    let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
     ));
     (

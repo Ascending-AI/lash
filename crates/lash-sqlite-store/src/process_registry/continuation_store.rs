@@ -7,7 +7,7 @@ impl ProcessContinuationStore for SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         handover: PersistedSegmentHandover,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.put_segment_handover_impl(process_id, handover).await
     }
 
@@ -15,7 +15,7 @@ impl ProcessContinuationStore for SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         segment_ordinal: u64,
-    ) -> Result<Option<PersistedSegmentHandover>, lash_core::PluginError> {
+    ) -> Result<Option<PersistedSegmentHandover>, lash_core_execution::PluginError> {
         self.get_segment_handover_impl(process_id, segment_ordinal)
             .await
     }
@@ -23,14 +23,14 @@ impl ProcessContinuationStore for SqliteProcessRegistry {
     async fn latest_segment_handover(
         &self,
         process_id: &ProcessId,
-    ) -> Result<Option<PersistedSegmentHandover>, lash_core::PluginError> {
+    ) -> Result<Option<PersistedSegmentHandover>, lash_core_execution::PluginError> {
         self.latest_segment_handover_impl(process_id).await
     }
 
     async fn delete_segment_handovers(
         &self,
         process_id: &ProcessId,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.delete_segment_handovers_impl(process_id).await
     }
 }

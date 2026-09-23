@@ -66,8 +66,8 @@ async fn postgres_artifact_release_observes_owner_that_commits_ahead_of_it() {
     reset(storage.pool()).await;
     let store = storage.lashlang_artifact_store();
     let module = artifact("race");
-    let owner_a = lash_core::ArtifactOwner::host("artifact-race-a");
-    let owner_b = lash_core::ArtifactOwner::host("artifact-race-b");
+    let owner_a = lash_core_execution::ArtifactOwner::host("artifact-race-a");
+    let owner_b = lash_core_execution::ArtifactOwner::host("artifact-race-b");
     store
         .publish_module_artifact(&owner_a, &module)
         .await
@@ -125,8 +125,8 @@ async fn postgres_concurrent_final_artifact_releases_converge_to_absent_bytes() 
     reset(storage.pool()).await;
     let store = storage.lashlang_artifact_store();
     let module = artifact("releases");
-    let owner_a = lash_core::ArtifactOwner::host("final-release-a");
-    let owner_b = lash_core::ArtifactOwner::host("final-release-b");
+    let owner_a = lash_core_execution::ArtifactOwner::host("final-release-a");
+    let owner_b = lash_core_execution::ArtifactOwner::host("final-release-b");
     store
         .publish_module_artifact(&owner_a, &module)
         .await
@@ -173,9 +173,9 @@ async fn postgres_artifact_retirement_fences_a_late_publisher() {
     reset(storage.pool()).await;
     let store = storage.lashlang_artifact_store();
     let module = artifact("process late(root: str) -> str { finish root }");
-    let owner = lash_core::ArtifactOwner::execution(lash_core::ExecutionScope::runtime_operation(
-        "late-publisher",
-    ));
+    let owner = lash_core_execution::ArtifactOwner::execution(
+        lash_core_execution::ExecutionScope::runtime_operation("late-publisher"),
+    );
     store
         .publish_module_artifact(&owner, &module)
         .await

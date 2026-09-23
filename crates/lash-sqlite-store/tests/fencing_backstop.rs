@@ -23,8 +23,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use lash_core::store_backend_support::{FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET};
-use lash_core::{LeaseOwnerIdentity, QueuedWorkStore, SessionExecutionLeaseStore, StoreError};
+use lash_core_execution::store_backend_support::{
+    FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
+};
+use lash_core_execution::{
+    LeaseOwnerIdentity, QueuedWorkStore, SessionExecutionLeaseStore, StoreError,
+};
 use lash_sansio::SessionId;
 use lash_sqlite_store::Store;
 use tracing_subscriber::layer::{Context, SubscriberExt};
@@ -335,15 +339,15 @@ fn restore_queued_work_claim(path: &Path) {
     clippy::expect_used,
     reason = "test fixture wiring: a failure here is a broken fixture, and panicking names it"
 )]
-async fn enqueue_one(store: &Store, session_id: &SessionId) -> lash_core::BatchId {
+async fn enqueue_one(store: &Store, session_id: &SessionId) -> lash_core_execution::BatchId {
     store
         .enqueue_queued_work(
-            lash_core::runtime::QueuedWorkBatchDraft::new(
+            lash_core_execution::runtime::QueuedWorkBatchDraft::new(
                 session_id.as_str(),
-                lash_core::runtime::DeliveryPolicy::EarliestSafeBoundary,
-                lash_core::runtime::QueuedWorkBatchPayloads::from(
-                    lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                        lash_core::facade_support::frame_node_id(session_id, "frame"),
+                lash_core_execution::runtime::DeliveryPolicy::EarliestSafeBoundary,
+                lash_core_execution::runtime::QueuedWorkBatchPayloads::from(
+                    lash_core_execution::runtime::TurnWorkPayload::agent_frame_task(
+                        lash_core_execution::facade_support::frame_node_id(session_id, "frame"),
                         "task",
                         None,
                     ),
@@ -385,8 +389,8 @@ async fn a_lost_queued_work_claim_fails_closed_and_records_the_disagreement() {
             &session_id,
             &lease.fence(),
             &owner,
-            lash_core::runtime::QueuedWorkClaimBoundary::Idle,
-            lash_core::testing::queued_work_claim_policy(10),
+            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
+            lash_core_execution::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("the claim call itself succeeds");
@@ -395,7 +399,10 @@ async fn a_lost_queued_work_claim_fails_closed_and_records_the_disagreement() {
     // Obligation one: the caller receives exactly what it always received —
     // a lost race, not an error.
     assert!(
-        matches!(outcome, lash_core::QueuedWorkClaimOutcome::Refused(_)),
+        matches!(
+            outcome,
+            lash_core_execution::QueuedWorkClaimOutcome::Refused(_)
+        ),
         "a lost fenced claim must report no claim, got {outcome:?}"
     );
 
@@ -421,8 +428,8 @@ async fn a_lost_queued_work_claim_fails_closed_and_records_the_disagreement() {
             &session_id,
             &lease.fence(),
             &owner,
-            lash_core::runtime::QueuedWorkClaimBoundary::Idle,
-            lash_core::testing::queued_work_claim_policy(10),
+            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
+            lash_core_execution::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("the retried claim succeeds")
@@ -465,8 +472,8 @@ async fn a_queued_work_claim_the_verdict_refuses_never_reaches_the_write() {
                 &session_id,
                 &lease.fence(),
                 &owner,
-                lash_core::runtime::QueuedWorkClaimBoundary::Idle,
-                lash_core::testing::queued_work_claim_policy(10),
+                lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
+                lash_core_execution::testing::queued_work_claim_policy(10),
             )
             .await
             .expect("the first claim succeeds")
@@ -479,14 +486,17 @@ async fn a_queued_work_claim_the_verdict_refuses_never_reaches_the_write() {
             &session_id,
             &lease.fence(),
             &owner,
-            lash_core::runtime::QueuedWorkClaimBoundary::Idle,
-            lash_core::testing::queued_work_claim_policy(10),
+            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
+            lash_core_execution::testing::queued_work_claim_policy(10),
         )
         .await
         .expect("the second claim call itself succeeds");
 
     assert!(
-        matches!(second, lash_core::QueuedWorkClaimOutcome::Refused(_)),
+        matches!(
+            second,
+            lash_core_execution::QueuedWorkClaimOutcome::Refused(_)
+        ),
         "a generation must not claim a row it already holds, got {second:?}"
     );
     assert!(

@@ -3,7 +3,7 @@
 //! Each assertion pins the exact predicate text — indentation included — that
 //! the statement carried before the cutover, so a generated fragment cannot
 //! change a query's bytes without failing here. The fragments themselves are
-//! pinned in `lash_core::store_backend_support::process_lifecycle_sql`.
+//! pinned in `lash_core_execution::store_backend_support::process_lifecycle_sql`.
 //!
 //! FIG-3384 moved these statements onto the single-owner layout: the
 //! predicates are now `{{term(column)}}` tokens the renderer expands at
@@ -167,7 +167,7 @@ fn wake_delivery_statements_keep_their_previous_bytes() {
 /// statement-level half of that proof is the assertions above, which pin the
 /// bytes the `format!` sites produced before FIG-3384 moved them here.
 mod vocabulary_tokens {
-    use lash_core::store_backend_support as vocabulary;
+    use lash_core_execution::store_backend_support as vocabulary;
     use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm, render};
 
     /// How a backend registers its expansions: one entry per term, each the

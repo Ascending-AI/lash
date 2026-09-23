@@ -7,8 +7,8 @@ use lash_sansio::SessionId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lash_core::store::load_persisted_session_state;
-use lash_core::{
+use lash_core_execution::store::load_persisted_session_state;
+use lash_core_execution::{
     ForkSessionRequest, OperationId, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory,
     facade_support::InMemorySessionStoreFactory,
@@ -26,7 +26,7 @@ fn request(session_id: impl Into<SessionId>) -> SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: session_id.into(),
         relation: SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     }
 }
 
@@ -44,8 +44,8 @@ async fn create_state(
         .expect("create benchmark store");
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     (store, state)
@@ -88,7 +88,7 @@ async fn fork_store(
         session_id: SessionId::from(session_id.to_string()),
         node_id: node_id.to_string().into(),
         relation: SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     factory
         .fork_at(&fork_request)

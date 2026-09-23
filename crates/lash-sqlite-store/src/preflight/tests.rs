@@ -11,7 +11,7 @@
 
 use std::time::Duration;
 
-use lash_core::{StorePreflight, StoreSchemaOutcome, StoreSchemaVerdict};
+use lash_core_execution::{StorePreflight, StoreSchemaOutcome, StoreSchemaVerdict};
 
 use super::{SqliteDatabase, SqliteStorePreflight, verify_schema_at};
 use crate::Store;
@@ -283,11 +283,11 @@ fn rewind_user_version(path: &std::path::Path, version: i64) {
 /// two properties that make the answer usable: an item nobody can read is still
 /// an item, and a surface nobody read is never an empty one.
 mod walk {
-    use lash_core::{
+    use lash_core_execution::{
         DurablePayload, DurableScan, DurableSurface, ScanCoverage, StorePreflight,
         store::EXECUTION_STATE_CHECKPOINT_COMPONENT,
     };
-    use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _};
+    use lash_core_execution::{ProcessLifecycle as _, ProcessRegistrar as _};
     use lash_sansio::{ProcessId, SessionId};
 
     use super::super::SqliteStorePreflight;
@@ -301,27 +301,29 @@ mod walk {
         DurableSurface::SessionExecutionState,
     ];
 
-    fn registration(id: &str) -> lash_core::ProcessRegistration {
-        lash_core::ProcessRegistration::new(
+    fn registration(id: &str) -> lash_core_execution::ProcessRegistration {
+        lash_core_execution::ProcessRegistration::new(
             id,
-            lash_core::ProcessInput::External {
+            lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
-            lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
+            lash_core_execution::RecoveryContract::ExternallyOwned,
+            lash_core_execution::ProcessProvenance::session(
+                lash_core_execution::SessionScope::new("session"),
+            ),
+            lash_core_execution::ProcessLifecyclePolicy::new(
+                lash_core_execution::ParentScope::Host,
+                lash_core_execution::OnParentEnd::Abandon,
             ),
         )
         .with_wake_session_id(Some(SessionId::from("wake-session")))
     }
 
-    fn handover(segment_ordinal: u64) -> lash_core::PersistedSegmentHandover {
-        lash_core::PersistedSegmentHandover {
+    fn handover(segment_ordinal: u64) -> lash_core_execution::PersistedSegmentHandover {
+        lash_core_execution::PersistedSegmentHandover {
             segment_ordinal,
-            handover: lash_core::SegmentHandover {
-                reason: lash_core::BoundaryReason::JournalBudget,
+            handover: lash_core_execution::SegmentHandover {
+                reason: lash_core_execution::BoundaryReason::JournalBudget,
                 program_hash: "program-v1".to_string(),
                 engine_state: vec![segment_ordinal as u8],
             },
@@ -331,7 +333,7 @@ mod walk {
     /// Park one handover under a live process and, when asked, a second under a
     /// process that has already reached a terminal outcome.
     async fn park_segment(registry: &SqliteProcessRegistry, process_id: &ProcessId) {
-        use lash_core::ProcessContinuationStore;
+        use lash_core_execution::ProcessContinuationStore;
         registry
             .register_process(registration(process_id))
             .await
@@ -346,10 +348,10 @@ mod walk {
         registry
             .complete_process(
                 process_id,
-                lash_core::ProcessAwaitOutput::from_tool_output(
-                    lash_core::ToolCallOutput::success(serde_json::json!({"ok": true})),
+                lash_core_execution::ProcessAwaitOutput::from_tool_output(
+                    lash_core_execution::ToolCallOutput::success(serde_json::json!({"ok": true})),
                 ),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core_execution::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete process");
@@ -406,7 +408,10 @@ mod walk {
         .expect("link the frozen source IR with a complete process signature")
         .artifact;
         store
-            .publish_module_artifact(&lash_core::ArtifactOwner::host("preflight-test"), &artifact)
+            .publish_module_artifact(
+                &lash_core_execution::ArtifactOwner::host("preflight-test"),
+                &artifact,
+            )
             .await
             .expect("persist module artifact");
         drop(store);
@@ -651,11 +656,11 @@ mod walk {
         let mut components = std::collections::BTreeMap::new();
         components.insert(
             EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
-            lash_core::HydratedCheckpointComponent::changed(body.clone()),
+            lash_core_execution::HydratedCheckpointComponent::changed(body.clone()),
         );
         let stored = store
-            .put_checkpoint(&lash_core::HydratedSessionCheckpoint {
-                turn_state: lash_core::PersistedTurnState::default(),
+            .put_checkpoint(&lash_core_execution::HydratedSessionCheckpoint {
+                turn_state: lash_core_execution::PersistedTurnState::default(),
                 components,
             })
             .await
@@ -734,11 +739,11 @@ mod walk {
         let mut components = std::collections::BTreeMap::new();
         components.insert(
             "something_else".to_string(),
-            lash_core::HydratedCheckpointComponent::changed(vec![1, 2, 3]),
+            lash_core_execution::HydratedCheckpointComponent::changed(vec![1, 2, 3]),
         );
         let stored = store
-            .put_checkpoint(&lash_core::HydratedSessionCheckpoint {
-                turn_state: lash_core::PersistedTurnState::default(),
+            .put_checkpoint(&lash_core_execution::HydratedSessionCheckpoint {
+                turn_state: lash_core_execution::PersistedTurnState::default(),
                 components,
             })
             .await

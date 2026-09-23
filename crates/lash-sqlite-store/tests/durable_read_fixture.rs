@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core::{
+use lash_core_execution::{
     EffectHost, ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence,
     SessionStoreFactory, TriggerStore,
 };
@@ -499,15 +499,17 @@ fn pin_release_stamp_instant(core_path: &Path, timestamp_ms: u64) {
 
 async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles {
     std::fs::create_dir_all(root).expect("create SQLite fixture root");
-    let clock = Arc::new(lash_core::testing::TestClock::new(timestamp_ms));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
     // Durable core carries its own `await_event_meta` row, seeded by the schema
     // with `randomblob(32)`. Pin it before anything is written, so that nothing
     // the fixture seeds can be derived from a secret that changes per run.
     let core_path = root.join("durable-core.db");
-    let priming_runtime =
-        Store::open_with_clock(&core_path, Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-            .await
-            .expect("prime SQLite durable-core fixture schema");
+    let priming_runtime = Store::open_with_clock(
+        &core_path,
+        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+    )
+    .await
+    .expect("prime SQLite durable-core fixture schema");
     drop(priming_runtime);
     rusqlite::Connection::open(&core_path)
         .expect("open SQLite durable-core fixture for deterministic secret")
@@ -518,15 +520,18 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         .expect("install deterministic SQLite durable-core await-event signing secret");
     pin_release_stamp_instant(&core_path, timestamp_ms);
     let runtime = Arc::new(
-        Store::open_with_clock(&core_path, Arc::clone(&clock) as Arc<dyn lash_core::Clock>)
-            .await
-            .expect("open SQLite durable-core fixture")
-            .with_commit_count_seed_for_testing(0),
+        Store::open_with_clock(
+            &core_path,
+            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+        )
+        .await
+        .expect("open SQLite durable-core fixture")
+        .with_commit_count_seed_for_testing(0),
     );
     let processes = Arc::new(
         SqliteProcessRegistry::open_with_clock(
             &root.join("processes.db"),
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
             root.join("process-sessions"),
         )
         .await
@@ -535,7 +540,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     let triggers = Arc::new(
         SqliteTriggerStore::open_with_clock(
             &root.join("triggers.db"),
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
         )
         .await
         .expect("open SQLite trigger fixture")
@@ -544,7 +549,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     let effect_path = root.join("effects.db");
     let priming_effects = SqliteEffectHost::open_with_clock(
         &effect_path,
-        Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
     .await
     .expect("prime SQLite effect fixture schema");
@@ -559,20 +564,21 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     let effects = Arc::new(
         SqliteEffectHost::open_with_clock(
             &effect_path,
-            Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
         )
         .await
         .expect("open SQLite effect fixture"),
     );
     let session_factory = Arc::new(
         SqliteSessionStoreFactory::new(root)
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core::Clock>),
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
     );
     fixture::FixtureHandles {
-        clock: Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
+        clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
         runtime: Arc::clone(&runtime) as Arc<dyn RuntimePersistence>,
         session_factory: session_factory as Arc<dyn SessionStoreFactory>,
-        processes: Arc::clone(&processes) as Arc<dyn lash_core::ConformanceProcessRegistry>,
+        processes: Arc::clone(&processes)
+            as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
         continuations: processes as Arc<dyn ProcessContinuationStore>,
         process_envs: runtime as Arc<dyn ProcessExecutionEnvStore>,
         triggers: triggers as Arc<dyn TriggerStore>,

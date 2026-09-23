@@ -140,7 +140,7 @@ fn install_perf_statement_witness(connection: &Connection) {
         rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
         Some(|event: rusqlite::trace::TraceEvent<'_>| {
             if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
-                lash_core::perf_witness::record_sql_statement(&statement.sql());
+                lash_core_execution::perf_witness::record_sql_statement(&statement.sql());
             }
         }),
     );

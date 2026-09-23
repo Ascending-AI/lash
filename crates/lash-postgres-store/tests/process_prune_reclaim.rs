@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use lash_core::{
+use lash_core_execution::{
     ProcessLifecycle as _, ProcessRegistrar as _, ProcessRegistry, ProcessRetention as _,
     SessionStoreFactory,
 };
@@ -88,37 +88,41 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
     let registry = storage.process_registry();
     let registered = registry
         .register_process(
-            lash_core::ProcessRegistration::new(
+            lash_core_execution::ProcessRegistration::new(
                 "postgres-prune-cleanup",
-                lash_core::ProcessInput::Engine {
+                lash_core_execution::ProcessInput::Engine {
                     kind: "test-engine".to_string(),
                     payload: serde_json::json!({"module_ref": "module-postgres"}),
                 },
-                lash_core::RecoveryContract::Rerunnable,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::RecoveryContract::Rerunnable,
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             )
-            .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
-                "process-env:postgres-cleanup",
-            ))),
+            .with_execution_env_ref(Some(
+                lash_core_execution::ProcessExecutionEnvRef::new("process-env:postgres-cleanup"),
+            )),
         )
         .await
         .expect("register cleanup process");
     registry
         .complete_process(
             &registered.id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            lash_core::ProcessCompletionAuthority::workflow_key("postgres-prune-cleanup"),
+            lash_core_execution::ProcessAwaitOutput::from_tool_output(
+                lash_core_execution::ToolCallOutput::success(serde_json::Value::Null),
+            ),
+            lash_core_execution::ProcessCompletionAuthority::workflow_key("postgres-prune-cleanup"),
         )
         .await
         .expect("complete cleanup process");
     registry
-        .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .prune_terminal_processes(
+            u64::MAX,
+            None,
+            lash_core_execution::ProjectionWatermark::NoProjector,
+        )
         .await
         .expect("prune with cleanup evidence");
     drop(registry);
@@ -138,8 +142,8 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
         .expect("ack cleanup evidence");
     assert_eq!(
         acknowledgement,
-        lash_core::ProcessArtifactCleanupAck::Acknowledged {
-            process_ref: lash_core::ProcessRef::from_record(&registered),
+        lash_core_execution::ProcessArtifactCleanupAck::Acknowledged {
+            process_ref: lash_core_execution::ProcessRef::from_record(&registered),
         }
     );
     assert!(
@@ -160,40 +164,44 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
     reset(&storage).await;
     let registry = storage.process_registry();
     let process = registry
-        .register_process(lash_core::ProcessRegistration::new(
+        .register_process(lash_core_execution::ProcessRegistration::new(
             "postgres-prune-queued-run",
-            lash_core::ProcessInput::External {
+            lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
-            lash_core::RecoveryContract::ExternallyOwned,
-            lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
+            lash_core_execution::RecoveryContract::ExternallyOwned,
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::ProcessLifecyclePolicy::new(
+                lash_core_execution::ParentScope::Host,
+                lash_core_execution::OnParentEnd::Abandon,
             ),
         ))
         .await
         .expect("register process");
-    let session_id = lash_core::facade_support::process_runtime_session_ids(&process.id)[0].clone();
+    let session_id =
+        lash_core_execution::facade_support::process_runtime_session_ids(&process.id)[0].clone();
     let factory = storage.session_store_factory_with_shared_process_registry();
     let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
-            relation: lash_core::SessionRelation::default(),
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::default(),
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create process-owned session");
     let input = store
-        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+        .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
             &session_id,
-            lash_core::TurnInputIngress::NextTurn,
-            lash_core::TurnInput::text("queued before prune"),
+            lash_core_execution::TurnInputIngress::NextTurn,
+            lash_core_execution::TurnInput::text("queued before prune"),
         ))
         .await
         .expect("enqueue pending input");
-    let owner = lash_core::LeaseOwnerIdentity::opaque("prune-run-owner", "prune-run-incarnation");
+    let owner =
+        lash_core_execution::LeaseOwnerIdentity::opaque("prune-run-owner", "prune-run-incarnation");
     let lease = store
         .try_claim_session_execution_lease(&session_id, &owner, "prune-run-executor", 60_000)
         .await
@@ -203,12 +211,12 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
     let admission = store
         .begin_or_resume_queued_run(
             &lease.authority(),
-            lash_core::store::BeginQueuedRun {
+            lash_core_execution::store::BeginQueuedRun {
                 session_id: session_id.clone(),
                 identity: None,
-                request: lash_core::store::QueuedRunRequest::Automatic,
-                configuration: lash_core::PersistedSessionConfig::new(
-                    lash_core::TurnBudget::Unbounded,
+                request: lash_core_execution::store::QueuedRunRequest::Automatic,
+                configuration: lash_core_execution::PersistedSessionConfig::new(
+                    lash_core_execution::TurnBudget::Unbounded,
                 ),
                 expected_head_revision: 0,
                 initial_turn_index: 1,
@@ -223,13 +231,13 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
             &owner,
             64,
             &admission.configuration,
-            lash_core::testing::queued_work_claim_policy(64),
+            lash_core_execution::testing::queued_work_claim_policy(64),
         )
         .await
         .expect("freeze queued input");
     assert_eq!(
         selected.admission.members,
-        Some(vec![lash_core::store::QueuedRunMember::Input(
+        Some(vec![lash_core_execution::store::QueuedRunMember::Input(
             input.input_id
         )])
     );
@@ -250,10 +258,10 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
     let terminal = registry
         .complete_process(
             &process.id,
-            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                serde_json::Value::Null,
-            )),
-            lash_core::ProcessCompletionAuthority::external_owner(),
+            lash_core_execution::ProcessAwaitOutput::from_tool_output(
+                lash_core_execution::ToolCallOutput::success(serde_json::Value::Null),
+            ),
+            lash_core_execution::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete process");
@@ -261,7 +269,7 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
         .prune_terminal_processes(
             terminal.updated_at_ms.saturating_add(1),
             None,
-            lash_core::ProjectionWatermark::NoProjector,
+            lash_core_execution::ProjectionWatermark::NoProjector,
         )
         .await
         .expect("prune process-owned session");

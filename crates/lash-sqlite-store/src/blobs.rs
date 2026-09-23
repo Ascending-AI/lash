@@ -227,7 +227,7 @@ impl Store {
                     profile,
                     body_ref,
                 )?;
-                lash_core::store::ensure_checkpoint_component_hash_agreement(
+                lash_core_execution::store::ensure_checkpoint_component_hash_agreement(
                     key,
                     body_ref,
                     &descriptor.blob_ref,
@@ -240,8 +240,8 @@ impl Store {
                     profile,
                 )?;
                 #[cfg(feature = "perf-witness")]
-                lash_core::perf_witness::record_hash_pass(body.len());
-                lash_core::store::ensure_checkpoint_component_hash_agreement(
+                lash_core_execution::perf_witness::record_hash_pass(body.len());
+                lash_core_execution::store::ensure_checkpoint_component_hash_agreement(
                     key,
                     &stored_ref,
                     &descriptor.blob_ref,
@@ -281,7 +281,7 @@ impl Store {
     ) -> Result<(), StoreError> {
         let mut referenced = std::collections::BTreeSet::new();
         for (key, component) in &checkpoint.components {
-            lash_core::store::ensure_checkpoint_component_encoding_version(
+            lash_core_execution::store::ensure_checkpoint_component_encoding_version(
                 key,
                 component.encoding_version(),
             )?;
@@ -393,7 +393,7 @@ impl Store {
             })?;
             components.insert(
                 key.clone(),
-                lash_core::HydratedCheckpointComponent::hydrated(
+                lash_core_execution::HydratedCheckpointComponent::hydrated(
                     descriptor.clone(),
                     std::sync::Arc::clone(body),
                 ),
@@ -408,7 +408,7 @@ impl Store {
     pub(crate) fn load_usage_deltas_conn(
         conn: &Connection,
         session_id: &SessionId,
-    ) -> Result<Vec<lash_core::TokenLedgerEntry>, StoreError> {
+    ) -> Result<Vec<lash_core_execution::TokenLedgerEntry>, StoreError> {
         let mut stmt = conn
             .prepare(
                 crate::session_sql::session_sql()
@@ -419,7 +419,7 @@ impl Store {
             .map_err(sqlite_error)?;
         let rows = stmt
             .query_map(params![session_id.as_str()], |row| {
-                let usage = lash_core::TokenUsage {
+                let usage = lash_core_execution::TokenUsage {
                     input_tokens: row.get(2)?,
                     output_tokens: row.get(3)?,
                     cache_read_input_tokens: row.get(4)?,
@@ -428,11 +428,11 @@ impl Store {
                 };
                 let usage_disposition_json: String = row.get(7)?;
                 Ok((
-                    lash_core::TokenLedgerEntry {
+                    lash_core_execution::TokenLedgerEntry {
                         source: row.get(0)?,
                         model: row.get(1)?,
                         usage,
-                        usage_disposition: lash_core::LedgerUsageDisposition::Reported,
+                        usage_disposition: lash_core_execution::LedgerUsageDisposition::Reported,
                     },
                     usage_disposition_json,
                 ))
@@ -504,7 +504,9 @@ impl Store {
             .map_err(sqlite_error)
     }
 
-    pub async fn load_usage_deltas(&self) -> Result<Vec<lash_core::TokenLedgerEntry>, StoreError> {
+    pub async fn load_usage_deltas(
+        &self,
+    ) -> Result<Vec<lash_core_execution::TokenLedgerEntry>, StoreError> {
         let session_id = self.selected_session_id()?;
         self.conn
             .call(move |conn| {
@@ -519,9 +521,9 @@ impl Store {
 /// 52 catalogs are refused outright, so every value here was written by this encoding.
 pub(crate) fn decode_usage_disposition(
     stored: &str,
-) -> Result<lash_core::LedgerUsageDisposition, StoreError> {
-    let disposition: lash_core::LedgerUsageDisposition =
-        serde_json::from_str(stored).map_err(|error| {
+) -> Result<lash_core_execution::LedgerUsageDisposition, StoreError> {
+    let disposition: lash_core_execution::LedgerUsageDisposition = serde_json::from_str(stored)
+        .map_err(|error| {
             stored_data_corrupt(
                 "TokenLedgerEntry",
                 format_args!("failed to decode usage disposition: {error}"),
@@ -538,7 +540,7 @@ pub(crate) fn decode_usage_disposition(
 
 /// Encode one usage disposition for the durable column.
 pub(crate) fn encode_usage_disposition(
-    disposition: &lash_core::LedgerUsageDisposition,
+    disposition: &lash_core_execution::LedgerUsageDisposition,
 ) -> Result<String, StoreError> {
     serde_json::to_string(disposition).map_err(|error| {
         StoreError::Backend(format!("failed to encode usage disposition: {error}"))

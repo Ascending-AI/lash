@@ -10,14 +10,14 @@
 //! lock up front and cannot interleave with a competing claimant.
 //!
 //! SQLite's authoritative lease clock is the host's injected
-//! [`Clock`](lash_core::Clock): this store runs in the same clock domain as its
+//! [`Clock`](lash_core_execution::Clock): this store runs in the same clock domain as its
 //! host, and every other durable stamp in the crate already comes from there.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core::facade_support::effect_replay_driver;
-use lash_core::facade_support::effect_replay_driver::{
+use lash_core_execution::facade_support::effect_replay_driver;
+use lash_core_execution::facade_support::effect_replay_driver::{
     AcceptedGroupChild, CompletionKeys, EffectCancelOutcome, EffectCancelRequest,
     EffectClaimDecision, EffectClaimObservation, EffectClaimRequest, EffectCommitState,
     EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
@@ -27,7 +27,7 @@ use lash_core::facade_support::effect_replay_driver::{
     EffectRowStatus, EffectTerminal, StoreEffectReplayDriver, StoredChildArbitration,
     StoredEffectRow, StoredGroupSettlement, UnsettledGroupChild, decide_effect_claim,
 };
-use lash_core::{
+use lash_core_execution::{
     EffectJournalRetirement, EffectRetirementGate, ExecutionScope, GroupExecutors,
     RuntimeEffectControllerError, RuntimeError, StoreEffectGroupClosing, StoreEffectGroupDrain,
     facade_support::LeaseTimings,
@@ -287,7 +287,7 @@ pub struct SqliteEffectReplayOptions {
     /// attempt body after the decision commits (ADR 0099 §7). Construction-
     /// level like `lease_timings`: the bound is operational, never semantic —
     /// it changes how long the finalizer waits, never what it commits.
-    pub drain_budget: lash_core::EffectGroupDrainBudget,
+    pub drain_budget: lash_core_execution::EffectGroupDrainBudget,
 }
 
 /// Deployment-level SQLite effect host.
@@ -332,7 +332,7 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteEffectHost {
     }
 }
 
-lash_core::impl_store_replay_await_event_resolver!(impl lash_core::AwaitEventResolver for SqliteEffectHost);
+lash_core_execution::impl_store_replay_await_event_resolver!(impl lash_core_execution::AwaitEventResolver for SqliteEffectHost);
 
 #[async_trait::async_trait]
 impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
@@ -344,7 +344,7 @@ impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
         self.fence_database.clone()
     }
 
-    fn bind_process_registry(&self, binding: lash_core::ProcessRegistryBinding) {
+    fn bind_process_registry(&self, binding: lash_core_execution::ProcessRegistryBinding) {
         if let Some(path) = binding.fence_database {
             self.registry.request(path.clone());
             self.closure_registry.request(path);
@@ -363,7 +363,7 @@ impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
         let scope_id = scope.journal_identity()?.key().to_string();
         let scope_json = serde_json::to_string(scope).map_err(|error| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::RecordEncodingFailed,
+                lash_core_execution::RuntimeErrorCode::RecordEncodingFailed,
                 error.to_string(),
             )
         })?;
@@ -374,7 +374,7 @@ impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
                     error.to_string(),
                 )
             })?;
@@ -393,13 +393,13 @@ impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
             })
             .await
             .map_err(|error| RuntimeError::new(
-                lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
                 error.to_string(),
             ))?
             .then_some(())
             .ok_or_else(|| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::EffectScopeRetired,
+                    lash_core_execution::RuntimeErrorCode::EffectScopeRetired,
                     format!(
                         "effect scope `{}` has been retired and cannot admit a cancellation-closure participant",
                         scope.journal_identity().expect("validated scope").key()
@@ -428,7 +428,7 @@ impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::SqliteEffectJournalRetirement,
+                    lash_core_execution::RuntimeErrorCode::SqliteEffectJournalRetirement,
                     error.to_string(),
                 )
             })
@@ -447,7 +447,7 @@ impl effect_replay_driver::StoreReplayAdapter for SqliteRuntimeEffectController 
     }
 }
 
-lash_core::impl_store_replay_await_event_resolver!(impl lash_core::AwaitEventResolver for SqliteRuntimeEffectController);
+lash_core_execution::impl_store_replay_await_event_resolver!(impl lash_core_execution::AwaitEventResolver for SqliteRuntimeEffectController);
 
 impl effect_replay_driver::StoreReplayController for SqliteRuntimeEffectController {
     fn execution_scope(&self) -> &ExecutionScope {
@@ -462,7 +462,7 @@ impl SqliteEffectHost {
 
     pub async fn open_with_clock(
         path: &Path,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_with_options_and_clock(path, SqliteEffectReplayOptions::default(), clock).await
     }
@@ -474,7 +474,7 @@ impl SqliteEffectHost {
         Self::open_with_options_and_clock(
             path,
             options,
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
         )
         .await
     }
@@ -486,7 +486,7 @@ impl SqliteEffectHost {
     pub async fn open_with_options_and_clock(
         path: &Path,
         options: SqliteEffectReplayOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
         // Opening creates the database before the host is returned, so the
@@ -527,7 +527,7 @@ impl SqliteEffectHost {
     /// in scope, and every path resolves through it, the open of a group, a
     /// retry, and the loser drain alike. Until it is called this host refuses
     /// every group method with
-    /// [`EffectGroupUnsupported`](lash_core::RuntimeErrorCode::EffectGroupUnsupported)
+    /// [`EffectGroupUnsupported`](lash_core_execution::RuntimeErrorCode::EffectGroupUnsupported)
     /// rather than journaling a group nothing can run.
     ///
     /// Registering the *same* resolver again is a no-op; registering a different
@@ -574,7 +574,7 @@ impl SqliteRuntimeEffectController {
     pub async fn open_with_clock(
         path: &Path,
         scope: ExecutionScope,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_with_options_and_clock(path, scope, SqliteEffectReplayOptions::default(), clock)
             .await
@@ -589,7 +589,7 @@ impl SqliteRuntimeEffectController {
             path,
             scope,
             options,
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
         )
         .await
     }
@@ -602,7 +602,7 @@ impl SqliteRuntimeEffectController {
         path: &Path,
         scope: ExecutionScope,
         options: SqliteEffectReplayOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         validate_effect_host_path(path)?;
         let binding_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -629,7 +629,7 @@ impl SqliteRuntimeEffectController {
     #[cfg(feature = "testing")]
     pub async fn memory_with_clock(
         scope: ExecutionScope,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::memory_with_options_and_clock(scope, SqliteEffectReplayOptions::default(), clock)
             .await
@@ -643,7 +643,7 @@ impl SqliteRuntimeEffectController {
         Self::memory_with_options_and_clock(
             scope,
             options,
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
         )
         .await
     }
@@ -652,7 +652,7 @@ impl SqliteRuntimeEffectController {
     pub async fn memory_with_options_and_clock(
         scope: ExecutionScope,
         options: SqliteEffectReplayOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Ok(Self {
             inner: open_effect_replay_memory_driver(options, clock).await?,
@@ -696,7 +696,7 @@ async fn open_effect_replay_driver(
     binding_path: &Path,
     backing: StoreBacking,
     options: SqliteEffectReplayOptions,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
     registry: Arc<RegistryAttachment>,
 ) -> tokio_rusqlite::Result<Arc<SqliteEffectReplay>> {
     let conn = SqliteConnection::open(path).await?;
@@ -728,7 +728,7 @@ async fn open_effect_replay_driver(
 #[cfg(feature = "testing")]
 async fn open_effect_replay_memory_driver(
     options: SqliteEffectReplayOptions,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
 ) -> tokio_rusqlite::Result<Arc<SqliteEffectReplay>> {
     let conn = SqliteConnection::open_in_memory().await?;
     ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay).await?;
@@ -759,7 +759,7 @@ async fn open_effect_replay_memory_driver(
 fn build_effect_replay_driver(
     conn: SqliteConnection,
     options: SqliteEffectReplayOptions,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
     signing_secret: Vec<u8>,
     completion_keys: CompletionKeys,
     registry: Arc<RegistryAttachment>,
@@ -797,7 +797,7 @@ pub struct SqliteEffectReplayRowStore {
     conn: SqliteConnection,
     /// SQLite's authoritative lease clock, shared with the driver's sleep clock
     /// because the store and its host share one clock domain.
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
     /// The bound process registry whose file holds process-scope fences.
     registry: Arc<RegistryAttachment>,
     /// This store's identity in the process-wide settlement-notifier registry:
@@ -930,7 +930,7 @@ pub(crate) fn purge_rows_under_fenced_scopes(
         )?;
         for key in keyed.query_map([], |row| row.get::<_, String>(0))? {
             let key = key?;
-            if let Some(scope) = lash_core::ExecutionScope::from_journal_key(&key) {
+            if let Some(scope) = lash_core_execution::ExecutionScope::from_journal_key(&key) {
                 #[expect(
                     clippy::expect_used,
                     reason = "`ExecutionScope` is a derived-`Serialize` enum of strings, so encoding it cannot fail"
@@ -947,7 +947,8 @@ pub(crate) fn purge_rows_under_fenced_scopes(
         )?;
         for scope_json in waited.query_map([], |row| row.get::<_, String>(0))? {
             let scope_json = scope_json?;
-            if let Ok(scope) = serde_json::from_str::<lash_core::ExecutionScope>(&scope_json)
+            if let Ok(scope) =
+                serde_json::from_str::<lash_core_execution::ExecutionScope>(&scope_json)
                 && let Ok(identity) = scope.journal_identity()
             {
                 scopes.push((identity.key().to_string(), scope_json));

@@ -8,13 +8,13 @@ use crate::*;
 /// times the size of the report alone (`clippy::result_large_err`); the
 /// factory's trait method, whose signature the trait fixes, unboxes it.
 pub(crate) type ReclaimResult = Result<
-    lash_core::store::RetentionReport,
-    Box<lash_core::MaintenanceFailure<lash_core::store::RetentionReport>>,
+    lash_core_execution::store::RetentionReport,
+    Box<lash_core_execution::MaintenanceFailure<lash_core_execution::store::RetentionReport>>,
 >;
 
 pub(crate) async fn reclaim(
     factory: &PostgresSessionStoreFactory,
-    bound: lash_core::store::RetentionBound,
+    bound: lash_core_execution::store::RetentionBound,
 ) -> ReclaimResult {
     async {
         let mut tx = factory.pool.begin().await.map_err(store_sqlx_error)?;
@@ -70,7 +70,7 @@ pub(crate) async fn reclaim(
         .map_err(store_sqlx_error)?
         .rows_affected() as usize;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core::store::RetentionReport {
+        Ok(lash_core_execution::store::RetentionReport {
             removed_receipt_count,
             removed_usage_delta_count,
             removed_attachment_root_count,
@@ -78,7 +78,9 @@ pub(crate) async fn reclaim(
         })
     }
     .await
-    .map_err(|error| Box::new(lash_core::MaintenanceFailure::failed_before_any_work(error)))
+    .map_err(|error| {
+        Box::new(lash_core_execution::MaintenanceFailure::failed_before_any_work(error))
+    })
 }
 
 /// Retire every session-free runtime-operation scope that the facade minted
@@ -107,9 +109,9 @@ async fn retire_quiescent_operation_scopes(
     )
     .fetch_all(&mut **tx)
     .await?;
-    let mut scopes: Vec<lash_core::ExecutionScope> = keyed
+    let mut scopes: Vec<lash_core_execution::ExecutionScope> = keyed
         .iter()
-        .filter_map(|key| lash_core::ExecutionScope::from_journal_key(key))
+        .filter_map(|key| lash_core_execution::ExecutionScope::from_journal_key(key))
         .chain(
             waited
                 .iter()
@@ -118,8 +120,8 @@ async fn retire_quiescent_operation_scopes(
         .filter(|scope| {
             matches!(
                 scope,
-                lash_core::ExecutionScope::RuntimeOperation { operation_id }
-                    if lash_core::store::is_facade_minted_operation_id(operation_id)
+                lash_core_execution::ExecutionScope::RuntimeOperation { operation_id }
+                    if lash_core_execution::store::is_facade_minted_operation_id(operation_id)
             )
         })
         .collect();
@@ -128,7 +130,9 @@ async fn retire_quiescent_operation_scopes(
     let mut retired = 0;
     let mut live_receipt_keys = Vec::new();
     for scope in scopes {
-        let Ok(receipt_key) = lash_core::store::plugin_operation_receipt_storage_key(&scope) else {
+        let Ok(receipt_key) =
+            lash_core_execution::store::plugin_operation_receipt_storage_key(&scope)
+        else {
             continue;
         };
         let Ok(identity) = scope.journal_identity() else {

@@ -99,7 +99,7 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
     async fn load_whole_graph(
         &self,
         session_id: &SessionId,
-    ) -> Result<lash_core::SessionGraph, StoreError> {
+    ) -> Result<lash_core_execution::SessionGraph, StoreError> {
         let mut tx = self
             .storage
             .pool()
@@ -109,7 +109,7 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
         let leaf_node_id = load_session_head_meta_tx(&mut tx, session_id, false)
             .await?
             .and_then(|meta| meta.leaf_node_id)
-            .map(lash_core::NodeId::into_inner);
+            .map(lash_core_execution::NodeId::into_inner);
         let graph = load_whole_graph_tx(&mut tx, session_id, leaf_node_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(graph)

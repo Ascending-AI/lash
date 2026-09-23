@@ -653,7 +653,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 }
                 Some(EffectCommitState::Pending) => {
                     return Err(RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::PostgresEffectReplayLeaseLost,
+                        lash_core_execution::RuntimeErrorCode::PostgresEffectReplayLeaseLost,
                         format!(
                             "final commit for child `{}` of group {group_key} lost \
                              its lease fence: the row is still pending but the \
@@ -909,7 +909,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     async fn scope_is_quiescent(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError> {
         let read_error = |error: String| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
                 error,
             )
         };
@@ -975,17 +975,17 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     /// always reported and what a caller prunes against.
     async fn retire_journal(
         &self,
-        retirement: &lash_core::EffectJournalRetirement,
+        retirement: &lash_core_execution::EffectJournalRetirement,
     ) -> Result<usize, RuntimeError> {
         let retirement_error = |error: sqlx::Error| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
                 error.to_string(),
             )
         };
         let sql = effect_sql();
         let (children_sql, membership_sql, groups_sql, key, fenced_scope) = match retirement {
-            lash_core::EffectJournalRetirement::Session { session_id } => (
+            lash_core_execution::EffectJournalRetirement::Session { session_id } => (
                 sql.replay.delete_by_session.sql(),
                 sql.group_child.delete_by_session.sql(),
                 sql.group.delete_by_session.sql(),
@@ -996,8 +996,8 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 clippy::expect_used,
                 reason = "`retired_scope` is `Some` for exactly the two variants this arm matches, and neither carries a session id whose validation could refuse the journal identity"
             )]
-            lash_core::EffectJournalRetirement::Process { .. }
-            | lash_core::EffectJournalRetirement::RuntimeOperation { .. } => {
+            lash_core_execution::EffectJournalRetirement::Process { .. }
+            | lash_core_execution::EffectJournalRetirement::RuntimeOperation { .. } => {
                 let scope = retirement
                     .retired_scope()
                     .expect("scope-exact retirements name their scope");
@@ -1031,11 +1031,11 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             // proof and the deletions.
             let scope_json = serde_json::to_string(scope).map_err(|err| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                    lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
                     err.to_string(),
                 )
             })?;
-            if retirement.gate() == Some(lash_core::EffectRetirementGate::WhenQuiescent)
+            if retirement.gate() == Some(lash_core_execution::EffectRetirementGate::WhenQuiescent)
                 && !scope_is_quiescent(&mut tx, &key, &scope_json)
                     .await
                     .map_err(retirement_error)?
@@ -1056,7 +1056,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         // deletions they refuse.
         if matches!(
             retirement,
-            lash_core::EffectJournalRetirement::Session { .. }
+            lash_core_execution::EffectJournalRetirement::Session { .. }
         ) {
             let pins = sqlx::query(sql.group_postgres.select_session_pins.sql())
                 .bind(&key)
@@ -1067,7 +1067,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
                 let first_key: String = first.get("group_key");
                 tx.rollback().await.map_err(retirement_error)?;
                 return Err(RuntimeError::new(
-                    lash_core::RuntimeErrorCode::EffectGroupLifecyclePinned,
+                    lash_core_execution::RuntimeErrorCode::EffectGroupLifecyclePinned,
                     format!(
                         "session `{key}` still owns {} effect group(s) that are live or closing (first: `{first_key}`); session deletion is refused until they settle",
                         pins.len()
@@ -1107,7 +1107,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
     async fn reinstate_scope(&self, scope_id: &str) -> Result<(), RuntimeError> {
         let retirement_error = |error: sqlx::Error| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
                 error.to_string(),
             )
         };
@@ -1125,7 +1125,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
 
     async fn pending_artifact_owner_retirements(
         &self,
-    ) -> Result<Vec<lash_core::ExecutionScope>, RuntimeError> {
+    ) -> Result<Vec<lash_core_execution::ExecutionScope>, RuntimeError> {
         let keys: Vec<String> = sqlx::query_scalar(
             effect_sql()
                 .fence_postgres
@@ -1136,15 +1136,15 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         .await
         .map_err(|error| {
             RuntimeError::new(
-                lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
                 error.to_string(),
             )
         })?;
         keys.into_iter()
             .map(|key| {
-                lash_core::ExecutionScope::from_journal_key(&key).ok_or_else(|| {
+                lash_core_execution::ExecutionScope::from_journal_key(&key).ok_or_else(|| {
                     RuntimeError::new(
-                        lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                        lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
                         format!("invalid retired effect scope key `{key}`"),
                     )
                 })
@@ -1159,7 +1159,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .await
             .map_err(|error| {
                 RuntimeError::new(
-                    lash_core::RuntimeErrorCode::PostgresEffectJournalRetirement,
+                    lash_core_execution::RuntimeErrorCode::PostgresEffectJournalRetirement,
                     error.to_string(),
                 )
             })?;

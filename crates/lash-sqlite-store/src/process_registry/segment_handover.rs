@@ -6,7 +6,7 @@ impl SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         handover: PersistedSegmentHandover,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         let process_id = ProcessId::from(process_id.to_string());
         self.conn
             .write_flow(move |tx| {
@@ -25,7 +25,7 @@ impl SqliteProcessRegistry {
                         if existing == encoded {
                             return Ok(());
                         }
-                        return Err(lash_core::PluginError::Session(format!(
+                        return Err(lash_core_execution::PluginError::Session(format!(
                             "process `{process_id}` segment {} handover conflict",
                             handover.segment_ordinal
                         )));
@@ -56,7 +56,7 @@ impl SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
         segment_ordinal: u64,
-    ) -> Result<Option<PersistedSegmentHandover>, lash_core::PluginError> {
+    ) -> Result<Option<PersistedSegmentHandover>, lash_core_execution::PluginError> {
         let process_id = ProcessId::from(process_id.to_string());
         self.conn
             .call(move |conn| {
@@ -81,7 +81,7 @@ impl SqliteProcessRegistry {
     pub(super) async fn latest_segment_handover_impl(
         &self,
         process_id: &ProcessId,
-    ) -> Result<Option<PersistedSegmentHandover>, lash_core::PluginError> {
+    ) -> Result<Option<PersistedSegmentHandover>, lash_core_execution::PluginError> {
         let process_id = ProcessId::from(process_id.to_string());
         self.conn
             .call(move |conn| {
@@ -106,7 +106,7 @@ impl SqliteProcessRegistry {
     pub(super) async fn delete_segment_handovers_impl(
         &self,
         process_id: &ProcessId,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         let process_id = ProcessId::from(process_id.to_string());
         self.conn
             .write_flow(move |tx| {

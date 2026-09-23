@@ -41,7 +41,7 @@ pub(super) fn canonical_catalog_identity(path: &Path) -> PathBuf {
 impl SqliteSessionStoreFactory {
     pub(super) fn turn_cancel_closure_owner_binding(
         &self,
-    ) -> Option<lash_core::TurnCancelClosureOwnerBinding> {
+    ) -> Option<lash_core_execution::TurnCancelClosureOwnerBinding> {
         self.turn_cancel_closure_owner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -54,9 +54,9 @@ impl Store {
         path: &Path,
         session_id: &SessionId,
         options: StoreOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
         process_registry_path: Option<&Path>,
-        turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
+        turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         let store = Self::open_with_options_clock_and_process_registry(
@@ -84,7 +84,7 @@ impl Store {
         Self::open_direct(
             path,
             StoreOptions::default(),
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
             "Store::open",
         )
         .await
@@ -92,7 +92,7 @@ impl Store {
 
     pub async fn open_with_clock(
         path: &Path,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_direct(
             path,
@@ -110,7 +110,7 @@ impl Store {
         Self::open_direct(
             path,
             options,
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
             "Store::open_with_options",
         )
         .await
@@ -119,7 +119,7 @@ impl Store {
     pub async fn open_with_options_and_clock(
         path: &Path,
         options: StoreOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_direct(path, options, clock, "Store::open_with_options_and_clock").await
     }
@@ -127,7 +127,7 @@ impl Store {
     async fn open_direct(
         path: &Path,
         options: StoreOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
         constructor: &'static str,
     ) -> tokio_rusqlite::Result<Self> {
         let store = Self::open_with_options_clock_and_process_registry(
@@ -148,9 +148,9 @@ impl Store {
     pub(crate) async fn open_with_options_clock_and_process_registry(
         path: &Path,
         options: StoreOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
         process_registry_path: Option<&Path>,
-        turn_cancel_closure_owner: Option<lash_core::TurnCancelClosureOwnerBinding>,
+        turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
@@ -175,10 +175,10 @@ impl Store {
                 )
             })
             .await?;
-        let authority = lash_core::TurnCancellationAuthority::new(
+        let authority = lash_core_execution::TurnCancellationAuthority::new(
             format!("sqlite:{}", path.to_string_lossy()),
             Arc::new(
-                lash_core::facade_support::await_event_coordinator::DirectAwaitEventResolver(
+                lash_core_execution::facade_support::await_event_coordinator::DirectAwaitEventResolver(
                     crate::await_event::sqlite_await_events(
                         conn.clone(),
                         Arc::new(crate::scope_fence::RegistryAttachment::default()),
@@ -223,7 +223,7 @@ impl Store {
             turn_cancellation_authority: None,
             turn_cancel_closure_owner: None,
             session_id: Arc::new(OnceLock::new()),
-            clock: Arc::new(lash_core::facade_support::SystemClock),
+            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             #[cfg(feature = "lashlang")]
             artifact_cache: Mutex::new(BTreeMap::new()),
             #[cfg(feature = "lashlang")]
@@ -260,14 +260,14 @@ impl Store {
                 blob_profile: BuiltinBlobProfile::LowLatency,
                 ..StoreOptions::default()
             },
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
             "Store::memory",
         )
         .await
     }
 
     pub async fn memory_with_clock(
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::memory_direct(
             StoreOptions {
@@ -283,7 +283,7 @@ impl Store {
     pub async fn memory_with_options(options: StoreOptions) -> tokio_rusqlite::Result<Self> {
         Self::memory_direct(
             options,
-            Arc::new(lash_core::facade_support::SystemClock),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
             "Store::memory_with_options",
         )
         .await
@@ -291,14 +291,14 @@ impl Store {
 
     pub async fn memory_with_options_and_clock(
         options: StoreOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::memory_direct(options, clock, "Store::memory_with_options_and_clock").await
     }
 
     async fn memory_direct(
         options: StoreOptions,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
         constructor: &'static str,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_in_memory_with_policy(options.connection_policy).await?;
@@ -315,10 +315,10 @@ impl Store {
                 )
             })
             .await?;
-        let authority = lash_core::TurnCancellationAuthority::new(
+        let authority = lash_core_execution::TurnCancellationAuthority::new(
             format!("sqlite-memory:{}", uuid::Uuid::new_v4()),
             Arc::new(
-                lash_core::facade_support::await_event_coordinator::DirectAwaitEventResolver(
+                lash_core_execution::facade_support::await_event_coordinator::DirectAwaitEventResolver(
                     crate::await_event::sqlite_await_events(
                         conn.clone(),
                         Arc::new(crate::scope_fence::RegistryAttachment::default()),
@@ -385,7 +385,7 @@ impl Store {
                     if let Some(recorded) =
                         crate::session_meta::load_recorded_lineage(tx, &meta.session_id)?
                     {
-                        lash_core::store_backend_support::guard_session_meta_relation_rewrite(
+                        lash_core_execution::store_backend_support::guard_session_meta_relation_rewrite(
                             &meta.session_id,
                             &recorded,
                             &meta.relation,

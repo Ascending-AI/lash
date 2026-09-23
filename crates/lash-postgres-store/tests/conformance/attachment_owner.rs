@@ -11,22 +11,27 @@ lash_conformance::attachment_owner_cold_replay_tests!({
     let storage = Arc::new(storage);
     let scope = durable_turn_scope("attachment-owner-cold-replay", "attachment-owner-turn");
     let first = Arc::new(storage.runtime_effect_controller(scope.clone()))
-        as Arc<dyn lash_core::RuntimeEffectController>;
+        as Arc<dyn lash_core_execution::RuntimeEffectController>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let reopen_effect_controller = {
         let storage = Arc::clone(&storage);
         Arc::new(move || {
             let controller = Arc::new(storage.runtime_effect_controller(scope.clone()))
-                as Arc<dyn lash_core::RuntimeEffectController>;
+                as Arc<dyn lash_core_execution::RuntimeEffectController>;
             Box::pin(async move { controller })
                 as std::pin::Pin<
-                    Box<dyn Future<Output = Arc<dyn lash_core::RuntimeEffectController>> + Send>,
+                    Box<
+                        dyn Future<Output = Arc<dyn lash_core_execution::RuntimeEffectController>>
+                            + Send,
+                    >,
                 >
         })
     };
-    let clock = Arc::new(lash_core::testing::TestClock::new(
-        lash_core::ClockWallTime::timestamp_ms(&lash_core::facade_support::SystemClock)
-            .saturating_sub(100_000),
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(
+        lash_core_execution::ClockWallTime::timestamp_ms(
+            &lash_core_execution::facade_support::SystemClock,
+        )
+        .saturating_sub(100_000),
     ));
     let factory = Arc::new(
         storage
@@ -43,7 +48,9 @@ lash_conformance::attachment_owner_cold_replay_tests!({
         lash_conformance::AttachmentOwnerColdReplayBackend {
             session_store_factory: factory,
             process_registry: registry,
-            attachment_store: Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+            attachment_store: Arc::new(
+                lash_core_execution::facade_support::InMemoryAttachmentStore::new(),
+            ),
             first_effect_controller: Some(first),
             reopen_effect_controller,
             clock,

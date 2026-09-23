@@ -18,7 +18,7 @@
 //! schema-open path runs before any runtime exists, and the field is deployment
 //! metadata rather than a durable domain fact that replay depends on.
 
-use lash_core::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
+use lash_core_execution::{StoreComponentVersion, StoreReleaseStamp, StoreReleaseState};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use crate::session_sql::session_sql;
@@ -127,7 +127,7 @@ pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
         )
         .optional()?;
     if let Some(existing) = existing
-        && !lash_core::release_stamp_advances(&existing, BUILD_RELEASE)
+        && !lash_core_execution::release_stamp_advances(&existing, BUILD_RELEASE)
     {
         return Ok(());
     }

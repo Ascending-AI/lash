@@ -6,12 +6,12 @@
 //! allowed to leave behind — and a host would only obscure which write did what.
 
 use super::*;
-use lash_core::{
+use lash_core_execution::{
     ChildDrainOutcome, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome,
 };
 
-use lash_core::facade_support::effect_replay_driver::{
+use lash_core_execution::facade_support::effect_replay_driver::{
     AcceptedGroupChild, EffectCancelOutcome, EffectCancelRequest, EffectClaimObservation,
     EffectCommitState, EffectDischargeOutcome, EffectDischargeRequest, EffectFinalizeOutcome,
     EffectGroupChildCommitOutcome, EffectGroupChildCommitRequest, EffectGroupLifecycle,
@@ -27,7 +27,7 @@ fn stored_effect_corruption_is_non_retryable() {
     }));
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::SqliteEffectReplayStore
+        lash_core_execution::RuntimeErrorCode::SqliteEffectReplayStore
     );
     assert!(!error.code.is_retryable());
 }
@@ -46,7 +46,7 @@ async fn row_store() -> SqliteEffectReplayRowStore {
     SqliteEffectReplayRowStore {
         completion_keys: CompletionKeys::Unsupported,
         conn,
-        clock: Arc::new(lash_core::facade_support::SystemClock),
+        clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
         settlement_key: super::settlement_notify::SettlementNotifierKey::for_memory(),
     }
@@ -58,39 +58,43 @@ async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution
     let controller = SqliteRuntimeEffectController::memory(scope.clone())
         .await
         .expect("open the in-memory effect journal");
-    let v2_identity = lash_core::derive_tool_intent_identity(
+    let v2_identity = lash_core_execution::derive_tool_intent_identity(
         &SessionId::from("cutover-session"),
         "cutover-turn",
         Some("cutover-call"),
         0,
     )
     .expect("derive the v2 identity");
-    let v2_invocation = lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(scope.clone(), v2_identity.replay_key.clone())
+    let v2_invocation = lash_core_execution::RuntimeEffectInvocation::new(
+        lash_core_execution::EffectAddress::new(scope.clone(), v2_identity.replay_key.clone())
             .expect("valid cutover address"),
-        lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 0, 0),
+        lash_core_execution::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 0, 0),
         "cutover-effect",
     )
-    .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
+    .with_replay_attribution(lash_core_execution::RuntimeReplayAttribution::ToolIntent(
         v2_identity.clone(),
     ));
-    let v1_replay_key = lash_core::facade_support::legacy_tool_intent_v1_lookup_key(&v2_invocation)
-        .expect("derive the pre-cutover lookup key");
+    let v1_replay_key =
+        lash_core_execution::facade_support::legacy_tool_intent_v1_lookup_key(&v2_invocation)
+            .expect("derive the pre-cutover lookup key");
     let mut v1_identity = v2_identity;
     v1_identity.replay_key = v1_replay_key.clone();
-    let v1_invocation = lash_core::RuntimeEffectInvocation::new(
-        lash_core::EffectAddress::new(scope, v1_replay_key).expect("valid v1 cutover address"),
-        lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 0, 0),
+    let v1_invocation = lash_core_execution::RuntimeEffectInvocation::new(
+        lash_core_execution::EffectAddress::new(scope, v1_replay_key)
+            .expect("valid v1 cutover address"),
+        lash_core_execution::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 0, 0),
         "cutover-effect",
     )
-    .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(v1_identity));
-    let command = lash_core::RuntimeEffectCommand::ExecCode {
+    .with_replay_attribution(lash_core_execution::RuntimeReplayAttribution::ToolIntent(
+        v1_identity,
+    ));
+    let command = lash_core_execution::RuntimeEffectCommand::ExecCode {
         language: "cutover-witness".to_string(),
         code: "return 1".to_string(),
     };
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let outcome = || lash_core::RuntimeEffectOutcome::ExecCode {
-        result: Box::new(Ok(lash_core::ExecResponse {
+    let outcome = || lash_core_execution::RuntimeEffectOutcome::ExecCode {
+        result: Box::new(Ok(lash_core_execution::ExecResponse {
             observations: Vec::new(),
             calls: Vec::new(),
             printed_images: Vec::new(),
@@ -104,8 +108,8 @@ async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution
     let first_executions = Arc::clone(&executions);
     controller
         .execute_effect(
-            lash_core::RuntimeEffectEnvelope::new(v1_invocation, command.clone()),
-            lash_core::RuntimeEffectLocalExecutor::testing(move |_| async move {
+            lash_core_execution::RuntimeEffectEnvelope::new(v1_invocation, command.clone()),
+            lash_core_execution::RuntimeEffectLocalExecutor::testing(move |_| async move {
                 first_executions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(outcome())
             }),
@@ -117,8 +121,8 @@ async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution
     let replay_executions = Arc::clone(&executions);
     let error = controller
         .execute_effect(
-            lash_core::RuntimeEffectEnvelope::new(v2_invocation, command),
-            lash_core::RuntimeEffectLocalExecutor::testing(move |_| async move {
+            lash_core_execution::RuntimeEffectEnvelope::new(v2_invocation, command),
+            lash_core_execution::RuntimeEffectLocalExecutor::testing(move |_| async move {
                 replay_executions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(outcome())
             }),
@@ -128,7 +132,7 @@ async fn strict_replay_refuses_a_pre_cutover_tool_intent_row_without_reexecution
 
     assert_eq!(
         error.code,
-        lash_core::RuntimeErrorCode::ToolIntentReplayKeyFormatCutover
+        lash_core_execution::RuntimeErrorCode::ToolIntentReplayKeyFormatCutover
     );
     assert!(error.message.contains("tool-intent:v1:"));
     assert!(error.message.contains("tool-intent:v2:"));
@@ -144,8 +148,8 @@ fn group_record() -> EffectGroupRecord {
         group_key: GROUP.to_string(),
         scope_id: SCOPE.to_string(),
         session_id: Some(SessionId::from("s1")),
-        wake: lash_core::GroupWakePolicy::All,
-        loser_disposition: lash_core::LoserPolicy::RunToCompletion,
+        wake: lash_core_execution::GroupWakePolicy::All,
+        loser_disposition: lash_core_execution::LoserPolicy::RunToCompletion,
         expected_children: 2,
         lifecycle: EffectGroupLifecycle::Live,
         created_at_ms: 1_000,
@@ -690,14 +694,14 @@ async fn retirement_removes_a_group_and_its_children_together() {
             GROUP,
             &[EffectGroupLifecyclePhase::Live],
             &EffectGroupLifecycle::Settled {
-                disposition: lash_core::LoserPolicy::RunToCompletion,
+                disposition: lash_core_execution::LoserPolicy::RunToCompletion,
             },
         )
         .await
         .expect("settle the group lifecycle");
 
     let removed = store
-        .retire_journal(&lash_core::EffectJournalRetirement::Session {
+        .retire_journal(&lash_core_execution::EffectJournalRetirement::Session {
             session_id: SessionId::from("s1"),
         })
         .await
@@ -908,7 +912,7 @@ async fn reopening_a_group_reports_the_recorded_row_rather_than_the_one_offered(
 
     let mut shrunk = group_record();
     shrunk.expected_children = 1;
-    shrunk.loser_disposition = lash_core::LoserPolicy::Cancel;
+    shrunk.loser_disposition = lash_core_execution::LoserPolicy::Cancel;
     shrunk.created_at_ms = 9_999;
     let reopened = store
         .open_group(&shrunk, &[])
@@ -928,16 +932,16 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
 
     let dir = tempfile::tempdir().expect("effect journal directory");
     let path = dir.path().join("effects.db");
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_000));
+    let clock = Arc::new(lash_core_execution::testing::TestClock::new(1_000));
     let scope = ExecutionScope::turn("cold-session", "cold-turn");
     let envelope = RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope.clone(), "cold-effect")
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(scope.clone(), "cold-effect")
                 .expect("valid cold effect address"),
-            lash_core::RuntimeAttribution::for_turn("cold-session", "cold-turn", 1, 0),
+            lash_core_execution::RuntimeAttribution::for_turn("cold-session", "cold-turn", 1, 0),
             "cold-effect",
         ),
-        lash_core::RuntimeEffectCommand::ExecCode {
+        lash_core_execution::RuntimeEffectCommand::ExecCode {
             language: "conformance".to_string(),
             code: "external-effect".to_string(),
         },
@@ -1005,7 +1009,7 @@ async fn cold_successor_claim_gets_its_full_lease_after_sqlite_admission() {
                 envelope,
                 RuntimeEffectLocalExecutor::testing(move |_| async move {
                     Ok(RuntimeEffectOutcome::ExecCode {
-                        result: Box::new(Ok(lash_core::ExecResponse {
+                        result: Box::new(Ok(lash_core_execution::ExecResponse {
                             observations: Vec::new(),
                             calls: Vec::new(),
                             printed_images: Vec::new(),
@@ -1052,7 +1056,7 @@ async fn effect_lease_writes_refuse_expiry_during_sqlite_admission() {
         ensure_versioned_schema(&conn, SqliteDatabase::EffectReplay)
             .await
             .expect("provision effect schema");
-        let clock = Arc::new(lash_core::testing::TestClock::new(1_000));
+        let clock = Arc::new(lash_core_execution::testing::TestClock::new(1_000));
         let store = Arc::new(SqliteEffectReplayRowStore {
             completion_keys: CompletionKeys::Issued,
             conn,
@@ -1351,7 +1355,7 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
         conn: SqliteConnection::open(&path)
             .await
             .expect("open the staging connection"),
-        clock: Arc::new(lash_core::facade_support::SystemClock),
+        clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         registry: Arc::new(crate::scope_fence::RegistryAttachment::default()),
         settlement_key: super::settlement_notify::SettlementNotifierKey::for_file(&path),
     };
@@ -1413,25 +1417,25 @@ async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row()
     let controller = SqliteRuntimeEffectController::memory(scope.clone())
         .await
         .expect("open the in-memory effect journal");
-    let triggers: Arc<dyn lash_core::TriggerStore> = Arc::new(
+    let triggers: Arc<dyn lash_core_execution::TriggerStore> = Arc::new(
         crate::SqliteTriggerStore::memory()
             .await
             .expect("open the in-memory trigger store"),
     );
-    let owner_scope =
-        lash_core::TriggerOwnerScope::host("trigger-driver").expect("trigger owner scope");
+    let owner_scope = lash_core_execution::TriggerOwnerScope::host("trigger-driver")
+        .expect("trigger owner scope");
     let envelope = || {
         RuntimeEffectEnvelope::new(
-            lash_core::RuntimeEffectInvocation::new(
-                lash_core::EffectAddress::new(scope.clone(), "trigger-driver:list")
+            lash_core_execution::RuntimeEffectInvocation::new(
+                lash_core_execution::EffectAddress::new(scope.clone(), "trigger-driver:list")
                     .expect("valid trigger address"),
-                lash_core::RuntimeAttribution::none(),
+                lash_core_execution::RuntimeAttribution::none(),
                 "trigger-driver:list",
             ),
-            lash_core::RuntimeEffectCommand::Trigger {
-                command: Box::new(lash_core::TriggerCommand::List {
+            lash_core_execution::RuntimeEffectCommand::Trigger {
+                command: Box::new(lash_core_execution::TriggerCommand::List {
                     owner_scope: owner_scope.clone(),
-                    filter: lash_core::TriggerSubscriptionFilter::default(),
+                    filter: lash_core_execution::TriggerSubscriptionFilter::default(),
                 }),
             },
         )
@@ -1444,7 +1448,7 @@ async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row()
     assert!(matches!(
         &recorded,
         RuntimeEffectOutcome::Trigger { result }
-            if matches!(result.as_ref(), Ok(lash_core::TriggerCommandOutcome::List { records }) if records.is_empty())
+            if matches!(result.as_ref(), Ok(lash_core_execution::TriggerCommandOutcome::List { records }) if records.is_empty())
     ));
 
     controller.start_replay();

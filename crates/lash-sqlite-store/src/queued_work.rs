@@ -152,8 +152,10 @@ impl QueuedBatchRow {
     ///
     /// Exposed as one value rather than two fields so a call site cannot pass
     /// a generation that belongs to a different row's token.
-    pub(crate) fn claim_facts(&self) -> lash_core::store_backend_support::WorkRowClaimFacts<'_> {
-        lash_core::store_backend_support::WorkRowClaimFacts {
+    pub(crate) fn claim_facts(
+        &self,
+    ) -> lash_core_execution::store_backend_support::WorkRowClaimFacts<'_> {
+        lash_core_execution::store_backend_support::WorkRowClaimFacts {
             claim_token: self.claim_token.as_deref(),
             claim_session_lease_generation: self.claim_session_lease_generation,
         }
@@ -344,7 +346,7 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
 pub(crate) fn plan_queued_work_settlement_conn(
     conn: &Connection,
     completed: &QueuedWorkCompletion,
-) -> Result<lash_core::store::claim_plan::QueuedWorkSettlementPlan, StoreError> {
+) -> Result<lash_core_execution::store::claim_plan::QueuedWorkSettlementPlan, StoreError> {
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
     let mut rows = Vec::with_capacity(completed.batch_ids.len());
     for batch_id in &completed.batch_ids {
@@ -367,7 +369,7 @@ pub(crate) fn plan_queued_work_settlement_conn(
         let claim = observed
             .map(|(claim_id, claim_token, generation)| {
                 Ok(
-                    lash_core::store::claim_plan::QueuedWorkSettlementRowClaim {
+                    lash_core_execution::store::claim_plan::QueuedWorkSettlementRowClaim {
                         claim_id,
                         claim_token,
                         claim_session_lease_generation: u64::try_from(generation).map_err(
@@ -408,19 +410,24 @@ pub(crate) fn plan_queued_work_settlement_conn(
                 .map(decode_queued_payload)
                 .transpose()?
                 .and_then(|payload| {
-                    lash_core::store::claim_plan::TerminalProcessWake::of_payload(None, &payload)
+                    lash_core_execution::store::claim_plan::TerminalProcessWake::of_payload(
+                        None, &payload,
+                    )
                 }),
             None => None,
         };
-        rows.push(lash_core::store::claim_plan::QueuedWorkSettlementRow {
-            batch_id: batch_id.clone(),
-            claim,
-            terminal_wake,
-        });
+        rows.push(
+            lash_core_execution::store::claim_plan::QueuedWorkSettlementRow {
+                batch_id: batch_id.clone(),
+                claim,
+                terminal_wake,
+            },
+        );
     }
     // The shared planner takes the verdict: a settlement is authorized only
     // while every covered row still carries this claim's id and lease token.
-    lash_core::store::claim_plan::plan_queued_work_settlement(completed, rows).into_result()
+    lash_core_execution::store::claim_plan::plan_queued_work_settlement(completed, rows)
+        .into_result()
 }
 
 /// Raise session `session_id`'s redelivery fence to `max(floor, sequence)`
@@ -432,7 +439,7 @@ pub(crate) fn plan_queued_work_settlement_conn(
 pub(crate) fn raise_wake_redelivery_fence_conn(
     conn: &Connection,
     session_id: &SessionId,
-    wake: &lash_core::store::claim_plan::TerminalProcessWake,
+    wake: &lash_core_execution::store::claim_plan::TerminalProcessWake,
 ) -> Result<(), StoreError> {
     let allocation_floor = i64::try_from(wake.sequence).map_err(|_| {
         stored_data_corrupt(

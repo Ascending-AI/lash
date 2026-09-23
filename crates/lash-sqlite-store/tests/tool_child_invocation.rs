@@ -19,7 +19,7 @@ use std::time::Duration;
 use lash_conformance::{
     ToolChildDeferrableRouting, ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec,
 };
-use lash_core::EffectHost;
+use lash_core_execution::EffectHost;
 use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions, SqliteProcessRegistry};
 
 /// A world over one database file.
@@ -31,7 +31,7 @@ use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions, SqliteProce
 async fn world(path: PathBuf, spec: ToolChildWorldSpec) -> ToolChildWorld {
     let ttl = Duration::from_millis(spec.lease_ttl_ms);
     let options = SqliteEffectReplayOptions {
-        lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
+        lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
             .expect("the law asks for a ttl at least three renew intervals wide"),
         drain_budget: Default::default(),
     };
@@ -69,7 +69,7 @@ fn fixture() -> (tempfile::TempDir, &'static str, ToolChildLawFixture) {
                 SqliteProcessRegistry::open(&path, sessions)
                     .await
                     .expect("open the scenario's SQLite process registry"),
-            ) as Arc<dyn lash_core::ProcessRegistry>
+            ) as Arc<dyn lash_core_execution::ProcessRegistry>
         })
     });
     (

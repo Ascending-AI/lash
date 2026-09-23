@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use lash_conformance::{DrainEndWorld, DrainEndWorldFactory};
-use lash_core::store::RuntimePersistence;
-use lash_core::{EffectHost, ProcessRegistry, SessionStoreFactory};
+use lash_core_execution::store::RuntimePersistence;
+use lash_core_execution::{EffectHost, ProcessRegistry, SessionStoreFactory};
 use lash_sansio::SessionId;
 use lash_sqlite_store::{SqliteEffectHost, SqliteProcessRegistry, SqliteSessionStoreFactory};
 async fn sqlite_drain_end_host(effects_db: &std::path::Path) -> Arc<dyn EffectHost> {
@@ -29,11 +29,13 @@ async fn sqlite_drain_end_world(dir: &std::path::Path) -> DrainEndWorld {
         dir.join("processes.db"),
     );
     let store = store_factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create the drain-end session store");

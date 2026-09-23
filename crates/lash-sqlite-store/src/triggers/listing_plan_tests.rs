@@ -16,8 +16,8 @@
 //! honest about what it costs.
 
 use super::*;
-use lash_core::TriggerOccurrenceFilter;
-use lash_core::TriggerSubscriptionFilter;
+use lash_core_execution::TriggerOccurrenceFilter;
+use lash_core_execution::TriggerSubscriptionFilter;
 
 /// Enough rows, and an `ANALYZE`, for the planner to be making a real choice
 /// rather than defaulting on an empty table.

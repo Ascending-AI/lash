@@ -14,8 +14,8 @@ use lash_sansio::TurnId;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use lash_core::AwaitEventResolver as _;
-use lash_core::{AwaitEventWaitIdentity, ExecutionScope};
+use lash_core_execution::AwaitEventResolver as _;
+use lash_core_execution::{AwaitEventWaitIdentity, ExecutionScope};
 use lash_sqlite_store::{
     SqliteEffectHost, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
 };
@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if args.next().is_some() {
             return Err("unexpected helper arguments".into());
         }
-        let clock = Arc::new(lash_core::testing::TestClock::new(
+        let clock = Arc::new(lash_core_execution::testing::TestClock::new(
             if action == "queued_recover" {
                 1_000_000
             } else {
@@ -148,7 +148,7 @@ async fn run_turn_action(
     marker: Option<PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let store = Arc::new(lash_sqlite_store::Store::open(database).await?)
-        as Arc<dyn lash_core::RuntimePersistence>;
+        as Arc<dyn lash_core_execution::RuntimePersistence>;
     let effect_database = database.with_extension("effects.db");
     let scope = lash_conformance::cold_process_turn_scope(nonce);
     let controller = Arc::new(
@@ -156,7 +156,7 @@ async fn run_turn_action(
             &effect_database,
             scope,
             SqliteEffectReplayOptions {
-                lease_timings: lash_core::facade_support::LeaseTimings::new(
+                lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
                     cold_process_effect_driver::RECOVERY_TTL,
                     cold_process_effect_driver::RECOVERY_RENEW,
                 )?,
@@ -182,7 +182,7 @@ async fn run_effect_action(
         database,
         scope,
         SqliteEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::new(
+            lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
                 cold_process_effect_driver::RECOVERY_TTL,
                 cold_process_effect_driver::RECOVERY_RENEW,
             )?,

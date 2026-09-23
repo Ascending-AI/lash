@@ -3,8 +3,8 @@ use super::*;
 struct Fig1293EchoTools;
 static FIG1293_BLOCKING_CHILD_RUNS: AtomicUsize = AtomicUsize::new(0);
 
-fn fig1293_echo_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn fig1293_echo_tool() -> lash_core_execution::ToolDefinition {
+    lash_core_execution::ToolDefinition::raw(
         "tool:fig1293_echo",
         "fig1293_echo",
         "Return the supplied literal value.",
@@ -24,19 +24,22 @@ fn fig1293_echo_tool() -> lash_core::ToolDefinition {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ToolProvider for Fig1293EchoTools {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+impl lash_core_execution::ToolProvider for Fig1293EchoTools {
+    fn tool_manifests(&self) -> Vec<lash_core_execution::ToolManifest> {
         vec![fig1293_echo_tool().manifest()]
     }
 
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core_execution::ToolContract>> {
         (name == "fig1293_echo").then(|| Arc::new(fig1293_echo_tool().contract()))
     }
 
-    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+    async fn execute(
+        &self,
+        call: lash_core_execution::ToolCall<'_>,
+    ) -> lash_core_execution::ToolAttemptOutcome {
         (async {
             if call.args.get("value") == Some(&serde_json::json!("fail")) {
-                return lash_core::ToolOutcome::err_fmt("fig1293 injected batch failure");
+                return lash_core_execution::ToolOutcome::err_fmt("fig1293 injected batch failure");
             }
             if call.args.get("value") == Some(&serde_json::json!("block"))
                 && FIG1293_BLOCKING_CHILD_RUNS.fetch_add(1, Ordering::SeqCst) == 0
@@ -44,7 +47,7 @@ impl lash_core::ToolProvider for Fig1293EchoTools {
                 std::future::pending::<()>().await;
                 unreachable!("FIG-1293 blocking child is dropped by cancellation")
             }
-            lash_core::ToolOutcome::ok(serde_json::json!({
+            lash_core_execution::ToolOutcome::ok(serde_json::json!({
                 "echo": call.args.get("value").cloned().unwrap_or_default(),
             }))
         })
@@ -53,8 +56,8 @@ impl lash_core::ToolProvider for Fig1293EchoTools {
     }
 }
 
-fn fig1293_factories() -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
-    let echo: Arc<dyn lash_core::ToolProvider> = Arc::new(Fig1293EchoTools);
+fn fig1293_factories() -> Vec<Arc<dyn lash_core_execution::facade_support::PluginFactory>> {
+    let echo: Arc<dyn lash_core_execution::ToolProvider> = Arc::new(Fig1293EchoTools);
     vec![
         Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
@@ -62,42 +65,47 @@ fn fig1293_factories() -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>>
             lash_subagents::CapabilityRegistry::new().with(Arc::new(
                 lash_subagents::StaticCapability::new(
                     "default",
-                    lash_core::facade_support::SessionSpec::inherit(),
+                    lash_core_execution::facade_support::SessionSpec::inherit(),
                 ),
             )),
         ))),
-        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+        Arc::new(lash_core_execution::plugin::StaticPluginFactory::new(
             "fig1293-echo",
-            lash_core::facade_support::PluginSpec::new().with_tool_provider(echo),
+            lash_core_execution::facade_support::PluginSpec::new().with_tool_provider(echo),
         )),
     ]
 }
 
-fn fig1293_policy() -> lash_core::SessionPolicy {
-    let mut policy = lash_core::testing::mock_session_policy();
+fn fig1293_policy() -> lash_core_execution::SessionPolicy {
+    let mut policy = lash_core_execution::testing::mock_session_policy();
     policy.session_id = Some(SessionId::from("fig1293-restate-migrated-tools"));
     policy
 }
 
-fn fig1293_state(policy: &lash_core::SessionPolicy) -> lash_core::RuntimeSessionState {
-    lash_core::RuntimeSessionState {
+fn fig1293_state(
+    policy: &lash_core_execution::SessionPolicy,
+) -> lash_core_execution::RuntimeSessionState {
+    lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from("fig1293-restate-migrated-tools"),
         policy: policy.clone(),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     }
 }
 
-fn fig1293_input() -> lash_core::TurnInput {
-    let mut input = lash_core::TurnInput::text("finish once");
+fn fig1293_input() -> lash_core_execution::TurnInput {
+    let mut input = lash_core_execution::TurnInput::text("finish once");
     input.trace_turn_id = Some(TurnId::from("fig1293-restate-migrated-turn".to_string()));
     input
 }
 
-fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsize>) {
+fn fig1293_model() -> (
+    lash_core_execution::facade_support::ProviderHandle,
+    Arc<AtomicUsize>,
+) {
     let model_calls = Arc::new(AtomicUsize::new(0));
-    let provider = lash_core::testing::TestProvider::builder()
+    let provider = lash_core_execution::testing::TestProvider::builder()
         .kind("stub")
         .complete({
             let model_calls = Arc::clone(&model_calls);
@@ -105,9 +113,9 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
                 let model_calls = Arc::clone(&model_calls);
                 async move {
                     Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
-                        0 => lash_core::LlmResponse {
+                        0 => lash_core_execution::LlmResponse {
                             parts: vec![
-                                lash_core::LlmOutputPart::ToolCall {
+                                lash_core_execution::LlmOutputPart::ToolCall {
                                     call_id: "fig1293-process-cancel".to_string(),
                                     tool_name: "cancel_process".to_string(),
                                     input_json: serde_json::json!({
@@ -116,7 +124,7 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
                                     .to_string(),
                                     replay: None,
                                 },
-                                lash_core::LlmOutputPart::ToolCall {
+                                lash_core_execution::LlmOutputPart::ToolCall {
                                     call_id: "fig1293-spawn-agent".to_string(),
                                     tool_name: "spawn_agent".to_string(),
                                     input_json: serde_json::json!({
@@ -126,7 +134,7 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
                                     .to_string(),
                                     replay: None,
                                 },
-                                lash_core::LlmOutputPart::ToolCall {
+                                lash_core_execution::LlmOutputPart::ToolCall {
                                     call_id: "fig1293-batch".to_string(),
                                     tool_name: "batch".to_string(),
                                     input_json: serde_json::json!({
@@ -140,23 +148,23 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
                                 },
                             ],
                             response_metadata: Default::default(),
-                            ..lash_core::LlmResponse::default()
+                            ..lash_core_execution::LlmResponse::default()
                         },
-                        1 => lash_core::LlmResponse {
-                            parts: vec![lash_core::LlmOutputPart::Text {
+                        1 => lash_core_execution::LlmResponse {
+                            parts: vec![lash_core_execution::LlmOutputPart::Text {
                                 text: "child literal".to_string(),
                                 response_meta: None,
                             }],
                             response_metadata: Default::default(),
-                            ..lash_core::LlmResponse::default()
+                            ..lash_core_execution::LlmResponse::default()
                         },
-                        2 => lash_core::LlmResponse {
-                            parts: vec![lash_core::LlmOutputPart::Text {
+                        2 => lash_core_execution::LlmResponse {
+                            parts: vec![lash_core_execution::LlmOutputPart::Text {
                                 text: "migrated tools complete".to_string(),
                                 response_meta: None,
                             }],
                             response_metadata: Default::default(),
-                            ..lash_core::LlmResponse::default()
+                            ..lash_core_execution::LlmResponse::default()
                         },
                         index => panic!("unexpected FIG-1293 PostgreSQL model call {index}"),
                     })
@@ -168,16 +176,16 @@ fn fig1293_model() -> (lash_core::facade_support::ProviderHandle, Arc<AtomicUsiz
     (provider, model_calls)
 }
 
-fn fig1293_fault_batch_model() -> lash_core::facade_support::ProviderHandle {
+fn fig1293_fault_batch_model() -> lash_core_execution::facade_support::ProviderHandle {
     let model_calls = Arc::new(AtomicUsize::new(0));
-    lash_core::testing::TestProvider::builder()
+    lash_core_execution::testing::TestProvider::builder()
         .kind("stub")
         .complete(move |_| {
             let model_calls = Arc::clone(&model_calls);
             async move {
                 Ok(match model_calls.fetch_add(1, Ordering::SeqCst) {
-                    0 => lash_core::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::ToolCall {
+                    0 => lash_core_execution::LlmResponse {
+                        parts: vec![lash_core_execution::LlmOutputPart::ToolCall {
                             call_id: "fig1293-fault-batch".to_string(),
                             tool_name: "batch".to_string(),
                             input_json: serde_json::json!({
@@ -191,15 +199,15 @@ fn fig1293_fault_batch_model() -> lash_core::facade_support::ProviderHandle {
                             replay: None,
                         }],
                         response_metadata: Default::default(),
-                        ..lash_core::LlmResponse::default()
+                        ..lash_core_execution::LlmResponse::default()
                     },
-                    _ => lash_core::LlmResponse {
-                        parts: vec![lash_core::LlmOutputPart::Text {
+                    _ => lash_core_execution::LlmResponse {
+                        parts: vec![lash_core_execution::LlmOutputPart::Text {
                             text: "fault batch complete".to_string(),
                             response_meta: None,
                         }],
                         response_metadata: Default::default(),
-                        ..lash_core::LlmResponse::default()
+                        ..lash_core_execution::LlmResponse::default()
                     },
                 })
             }
@@ -208,29 +216,29 @@ fn fig1293_fault_batch_model() -> lash_core::facade_support::ProviderHandle {
         .into_handle()
 }
 
-async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core::ProcessRegistry>) {
+async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core_execution::ProcessRegistry>) {
     registry
         .register_process_with_observers(
-            lash_core::ProcessRegistration::new(
+            lash_core_execution::ProcessRegistration::new(
                 "fig1293-control-target",
-                lash_core::ProcessInput::External {
+                lash_core_execution::ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "fig1293"}),
                 },
                 // The control target is a fixture-owned external process. It
                 // must not enter the durable worker worklist, whose racing
                 // `first_started` events would make the signal sequence depend
                 // on scheduler timing instead of the law's literal journal.
-                lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::RecoveryContract::ExternallyOwned,
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             )
-            .with_extra_event_types([lash_core::ProcessEventType {
+            .with_extra_event_types([lash_core_execution::ProcessEventType {
                 name: "signal.stdin".to_string(),
-                payload_schema: lash_core::LashSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+                payload_schema: lash_core_execution::LashSchema::any(),
+                semantics: lash_core_execution::ProcessEventSemanticsSpec::default(),
             }]),
             &[SessionId::from("fig1293-restate-migrated-tools")],
         )
@@ -240,44 +248,45 @@ async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core::ProcessRegist
 
 async fn fig1293_runtime(
     effect_host: Arc<dyn EffectHost>,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    provider: lash_core::facade_support::ProviderHandle,
-    store: Arc<dyn lash_core::RuntimePersistence>,
-    policy: lash_core::SessionPolicy,
-    initial_state: lash_core::RuntimeSessionState,
+    registry: Arc<dyn lash_core_execution::ProcessRegistry>,
+    provider: lash_core_execution::facade_support::ProviderHandle,
+    store: Arc<dyn lash_core_execution::RuntimePersistence>,
+    policy: lash_core_execution::SessionPolicy,
+    initial_state: lash_core_execution::RuntimeSessionState,
 ) -> lash_core::facade_support::LashRuntime {
-    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let watched = lash_core_execution::facade_support::watch_process_registry(registry);
     let factories = fig1293_factories();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
+    let mut host = lash_core_execution::facade_support::RuntimeHostConfig::in_memory(
+        lash_core_execution::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core_execution::QueuedWorkBatchingConfig::new(1),
     );
     host = host.with_effect_host(effect_host);
-    host.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider),
-    );
+    host.providers.provider_resolver =
+        Arc::new(lash_core_execution::facade_support::SingleProviderResolver::new(provider));
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::new(
-            Arc::new(lash_core::facade_support::PluginHost::new(
+            Arc::new(lash_core_execution::facade_support::PluginHost::new(
                 factories.clone(),
             )),
             host.clone(),
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            Arc::new(lash_core_execution::facade_support::InMemorySessionStoreFactory::new()),
             lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
-            Arc::new(lash_core::NoQueuedWork::new()),
-            lash_core::testing::runtime_lease_owner(),
+            Arc::new(lash_core_execution::NoQueuedWork::new()),
+            lash_core_execution::testing::runtime_lease_owner(),
         ),
     )
     .expect("valid test native substrate config");
-    let process_work = lash_core::ProcessWorkWiring::new(
+    let process_work = lash_core_execution::ProcessWorkWiring::new(
         watched.clone(),
-        Arc::new(lash_core::NativeProcessWork::new(&watched, worker)),
+        Arc::new(lash_core_execution::NativeProcessWork::new(
+            &watched, worker,
+        )),
     );
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-            lash_core::testing::runtime_lease_owner(),
+            lash_core_execution::CommitBudget::bounded(1024 * 1024, 512),
+            lash_core_execution::QueuedWorkBatchingConfig::new(1),
+            lash_core_execution::testing::runtime_lease_owner(),
         )
         .with_session_id("fig1293-restate-migrated-tools")
         .with_policy(policy)
@@ -295,9 +304,9 @@ async fn fig1293_runtime(
 async fn run_fig1293_turn(
     runtime: &mut lash_core::facade_support::LashRuntime,
     effect_host: &dyn EffectHost,
-) -> lash_core::facade_support::AssembledTurn {
+) -> lash_core_execution::facade_support::AssembledTurn {
     let controller = effect_host
-        .scoped(lash_core::AdmittedScope::turn(
+        .scoped(lash_core_execution::AdmittedScope::turn(
             "fig1293-restate-migrated-tools",
             "fig1293-restate-migrated-turn",
         ))
@@ -307,8 +316,8 @@ async fn run_fig1293_turn(
 
 async fn run_fig1293_turn_with_controller(
     runtime: &mut lash_core::facade_support::LashRuntime,
-    controller: lash_core::ScopedEffectController<'_>,
-) -> lash_core::facade_support::AssembledTurn {
+    controller: lash_core_execution::ScopedEffectController<'_>,
+) -> lash_core_execution::facade_support::AssembledTurn {
     runtime
         .stream_turn(
             fig1293_input(),
@@ -342,7 +351,7 @@ async fn reset_fig1293_rows(storage: &PostgresStorage) {
 }
 
 fn fig1293_literal_outputs(
-    turn: &lash_core::facade_support::AssembledTurn,
+    turn: &lash_core_execution::facade_support::AssembledTurn,
 ) -> Vec<(String, serde_json::Value)> {
     turn.tool_calls
         .iter()
@@ -350,7 +359,7 @@ fn fig1293_literal_outputs(
         .collect()
 }
 
-async fn assert_fig1293_literal_outputs(turn: &lash_core::facade_support::AssembledTurn) {
+async fn assert_fig1293_literal_outputs(turn: &lash_core_execution::facade_support::AssembledTurn) {
     let outputs = fig1293_literal_outputs(turn);
     assert_eq!(
         outputs,
@@ -391,18 +400,18 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
         .expect("connect FIG-1293 PostgreSQL host");
     reset_fig1293_rows(&storage).await;
 
-    let inline_registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let inline_registry: Arc<dyn lash_core_execution::ProcessRegistry> =
+        Arc::new(lash_core_execution::TestLocalProcessRegistry::default());
     fig1293_seed_control_target(&inline_registry).await;
     let (inline_model, inline_model_calls) = fig1293_model();
     let native_effect_host: Arc<dyn EffectHost> =
-        Arc::new(lash_core::facade_support::NativeEffectHost::default());
+        Arc::new(lash_core_execution::facade_support::NativeEffectHost::default());
     let inline_policy = fig1293_policy();
     let mut native = fig1293_runtime(
         Arc::clone(&native_effect_host),
         Arc::clone(&inline_registry),
         inline_model,
-        Arc::new(lash_core::facade_support::InMemorySessionStore::new()),
+        Arc::new(lash_core_execution::facade_support::InMemorySessionStore::new()),
         inline_policy.clone(),
         fig1293_state(&inline_policy),
     )
@@ -416,15 +425,15 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     assert_fig1293_literal_outputs(&inline_turn).await;
     assert_eq!(inline_model_calls.load(Ordering::SeqCst), 3);
 
-    let postgres_registry: Arc<dyn lash_core::ProcessRegistry> =
+    let postgres_registry: Arc<dyn lash_core_execution::ProcessRegistry> =
         Arc::new(storage.process_registry());
     fig1293_seed_control_target(&postgres_registry).await;
     let (postgres_model, postgres_model_calls) = fig1293_model();
     let first_effect_host: Arc<dyn EffectHost> = Arc::new(storage.effect_host());
     let postgres_policy = fig1293_policy();
     let postgres_state = fig1293_state(&postgres_policy);
-    let postgres_store: Arc<dyn lash_core::RuntimePersistence> =
-        Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    let postgres_store: Arc<dyn lash_core_execution::RuntimePersistence> =
+        Arc::new(lash_core_execution::facade_support::InMemorySessionStore::new());
     let mut first = fig1293_runtime(
         Arc::clone(&first_effect_host),
         Arc::clone(&postgres_registry),
@@ -585,7 +594,7 @@ fn fig1293_row_identity(envelope: &RuntimeEffectEnvelope) -> (String, String) {
         ),
         RuntimeEffectCommand::PresentToolResult { call_id, .. } => call_id.clone(),
         RuntimeEffectCommand::Process { command } => match command.as_ref() {
-            lash_core::ProcessCommand::Start { registration, .. } => {
+            lash_core_execution::ProcessCommand::Start { registration, .. } => {
                 format!("start:{}", registration.id)
             }
             _ => envelope.invocation.effect_id().to_string(),
@@ -648,16 +657,20 @@ fn fig1293_identities(rows: &[(&str, &str)]) -> Vec<(String, String)> {
 async fn fig1293_crash_and_redrive(
     database_url: &str,
     crash_after: CrashAfter,
-    model: lash_core::facade_support::ProviderHandle,
+    model: lash_core_execution::facade_support::ProviderHandle,
     // What else must have happened on the first host before it is aborted.
     first_host_ready: fn() -> bool,
-) -> (PostgresStorage, lash_core::facade_support::AssembledTurn) {
+) -> (
+    PostgresStorage,
+    lash_core_execution::facade_support::AssembledTurn,
+) {
     let storage = PostgresStorage::connect(database_url)
         .await
         .expect("connect FIG-1293 PostgreSQL crash host");
     reset_fig1293_rows(&storage).await;
 
-    let registry: Arc<dyn lash_core::ProcessRegistry> = Arc::new(storage.process_registry());
+    let registry: Arc<dyn lash_core_execution::ProcessRegistry> =
+        Arc::new(storage.process_registry());
     fig1293_seed_control_target(&registry).await;
     let base_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
     let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -669,8 +682,8 @@ async fn fig1293_crash_and_redrive(
     });
     let policy = fig1293_policy();
     let state = fig1293_state(&policy);
-    let store: Arc<dyn lash_core::RuntimePersistence> =
-        Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    let store: Arc<dyn lash_core_execution::RuntimePersistence> =
+        Arc::new(lash_core_execution::facade_support::InMemorySessionStore::new());
     let mut first = fig1293_runtime(
         Arc::clone(&effect_host),
         Arc::clone(&registry),
@@ -909,7 +922,7 @@ async fn fig1293_protocol_batch_partial_failure_redrives_from_retained_membershi
     strict_host.start_replay();
     for (value, envelope, recorded_outcome_json) in attempts {
         let strict_controller = strict_host
-            .scoped(lash_core::AdmittedScope::turn(
+            .scoped(lash_core_execution::AdmittedScope::turn(
                 "fig1293-restate-migrated-tools",
                 "fig1293-restate-migrated-turn",
             ))

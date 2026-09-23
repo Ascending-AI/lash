@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn load_wake_delivery_conn(
     conn: &Connection,
     delivery_id: &str,
-) -> Result<lash_core::WakeDelivery, lash_core::PluginError> {
+) -> Result<lash_core_execution::WakeDelivery, lash_core_execution::PluginError> {
     let row = conn
         .query_row(
             process_sql().wake_sqlite.select_report.sql(),
@@ -39,17 +39,17 @@ pub(super) fn load_wake_delivery_conn(
 }
 
 pub(super) fn wake_delivery_report<'a>(
-    deliveries: impl IntoIterator<Item = &'a lash_core::WakeDelivery>,
-) -> lash_core::WakeDeliveryReport {
-    lash_core::WakeDeliveryReport::from_deliveries(deliveries)
+    deliveries: impl IntoIterator<Item = &'a lash_core_execution::WakeDelivery>,
+) -> lash_core_execution::WakeDeliveryReport {
+    lash_core_execution::WakeDeliveryReport::from_deliveries(deliveries)
 }
 
 pub(super) async fn update_wake_delivery_state(
     conn: &SqliteConnection,
     delivery_id: &str,
     claim_token: &str,
-    disposition: lash_core::WakeDeliveryDisposition,
-) -> Result<lash_core::WakeDeliveryClaimOutcome, lash_core::PluginError> {
+    disposition: lash_core_execution::WakeDeliveryDisposition,
+) -> Result<lash_core_execution::WakeDeliveryClaimOutcome, lash_core_execution::PluginError> {
     let state = disposition.state();
     let reason = disposition.discard_reason();
     let delivery_id = delivery_id.to_string();
@@ -63,7 +63,7 @@ pub(super) async fn update_wake_delivery_state(
                         delivery_id,
                         claim_token,
                         state.as_str(),
-                        reason.map(lash_core::WakeDiscardReason::as_str)
+                        reason.map(lash_core_execution::WakeDiscardReason::as_str)
                     ],
                 )
                 .map_err(process_sqlite_error)?;
@@ -71,8 +71,8 @@ pub(super) async fn update_wake_delivery_state(
             // enqueuing and the claim token still matches), so exactly one row
             // must change; the shared backstop records the disagreement if not
             // and the existing branch classifies the loss.
-            if !lash_core::store_backend_support::fenced_write_applied(
-                lash_core::store_backend_support::FencedWrite::WakeDeliverySettlement,
+            if !lash_core_execution::store_backend_support::fenced_write_applied(
+                lash_core_execution::store_backend_support::FencedWrite::WakeDeliverySettlement,
                 crate::SQLITE_BACKEND,
                 &delivery_id,
                 u64::try_from(changed).unwrap_or(u64::MAX),
@@ -88,9 +88,9 @@ pub(super) async fn update_wake_delivery_state(
                     .ok_or_else(|| registry_transitions::unknown_wake_delivery(&delivery_id))?;
                 let state =
                     registry_transitions::wake_delivery_state_from_label(&delivery_id, &current)?;
-                return Ok(lash_core::WakeDeliveryClaimOutcome::ClaimLost { state });
+                return Ok(lash_core_execution::WakeDeliveryClaimOutcome::ClaimLost { state });
             }
-            Ok(lash_core::WakeDeliveryClaimOutcome::Applied)
+            Ok(lash_core_execution::WakeDeliveryClaimOutcome::Applied)
         })()))
     })
     .await

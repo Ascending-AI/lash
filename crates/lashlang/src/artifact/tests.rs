@@ -237,7 +237,7 @@ fn malformed_artifact_json_remains_an_undecodable_codec_error() {
 /// never the immutability check on an already-published ref.
 #[tokio::test(flavor = "current_thread")]
 async fn publish_refuses_an_artifact_whose_refs_do_not_match_its_content() {
-    let owner = lash_core::ArtifactOwner::host("fig-3088");
+    let owner = lash_core_execution::ArtifactOwner::host("fig-3088");
     let honest = process_typed_artifact("event");
 
     // A forged `module_ref`: the content is the "payload" program, the ref is

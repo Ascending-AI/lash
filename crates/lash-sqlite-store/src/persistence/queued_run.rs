@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::store::{
+use lash_core_execution::store::{
     BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunProgress,
     QueuedRunRequest, QueuedRunTerminal, SelectedQueuedRun,
 };
@@ -15,7 +15,7 @@ fn conflict(session_id: &SessionId) -> StoreError {
     }
 }
 
-fn scope_key(scope: &lash_core::ExecutionScope) -> Result<String, StoreError> {
+fn scope_key(scope: &lash_core_execution::ExecutionScope) -> Result<String, StoreError> {
     scope
         .journal_identity()
         .map(|identity| identity.key().to_owned())
@@ -25,7 +25,7 @@ fn scope_key(scope: &lash_core::ExecutionScope) -> Result<String, StoreError> {
 pub(super) fn load_run_conn(
     tx: &Connection,
     session_id: &SessionId,
-    scope: Option<&lash_core::ExecutionScope>,
+    scope: Option<&lash_core_execution::ExecutionScope>,
 ) -> Result<Option<QueuedRunAdmission>, StoreError> {
     let sql = run_sql();
     let payload: Option<(String, String, i64)> = match scope {
@@ -246,7 +246,7 @@ impl Store {
     }
     pub(super) async fn run_by_scope(
         &self,
-        scope: &lash_core::ExecutionScope,
+        scope: &lash_core_execution::ExecutionScope,
     ) -> Result<Option<QueuedRunAdmission>, StoreError> {
         let Some(session_id) = scope.session_id().cloned() else {
             return Ok(None);
@@ -330,10 +330,10 @@ impl Store {
     pub(super) async fn select_run(
         &self,
         fence: &SessionExecutionLeaseAuthority,
-        scope: &lash_core::ExecutionScope,
+        scope: &lash_core_execution::ExecutionScope,
         owner: &LeaseOwnerIdentity,
         max_inputs: usize,
-        configuration: &lash_core::PersistedSessionConfig,
+        configuration: &lash_core_execution::PersistedSessionConfig,
         policy: QueuedWorkClaimPolicy,
     ) -> Result<SelectedQueuedRun, StoreError> {
         let fence = fence.clone();
@@ -378,7 +378,7 @@ impl Store {
                                 &fence,
                                 &owner,
                                 max_inputs,
-                                lash_core::TurnInputClaimMode::NextTurn,
+                                lash_core_execution::TurnInputClaimMode::NextTurn,
                             )?,
                             &fence.session_id,
                         )?
@@ -502,7 +502,13 @@ fn reclaim_run_members_conn(
     fence: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     members: &[QueuedRunMember],
-) -> Result<(Vec<lash_core::TurnInputClaim>, Vec<QueuedWorkClaim>), StoreError> {
+) -> Result<
+    (
+        Vec<lash_core_execution::TurnInputClaim>,
+        Vec<QueuedWorkClaim>,
+    ),
+    StoreError,
+> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     let mut inputs = Vec::new();
     let mut batches = Vec::new();
@@ -572,7 +578,7 @@ fn reclaim_run_members_conn(
                 }) {
                     return Err(conflict(&fence.session_id));
                 }
-                Some(lash_core::TurnInputClaim {
+                Some(lash_core_execution::TurnInputClaim {
                     session_id: fence.session_id.clone(),
                     owner: owner.clone(),
                     claim_id: head
@@ -585,8 +591,8 @@ fn reclaim_run_members_conn(
                         .ok_or_else(|| conflict(&fence.session_id))?,
                     fencing_token: head.claim_fencing_token,
                     session_lease_generation: fence.fencing_token,
-                    data: lash_core::runtime::TurnInputClaimData {
-                        mode: lash_core::TurnInputClaimMode::NextTurn,
+                    data: lash_core_execution::runtime::TurnInputClaimData {
+                        mode: lash_core_execution::TurnInputClaimMode::NextTurn,
                         inputs: inputs.into_iter().map(|(_, input)| input).collect(),
                         applications: Vec::new(),
                     },
@@ -599,7 +605,7 @@ fn reclaim_run_members_conn(
                     &fence.session_id,
                     fence,
                     owner,
-                    lash_core::TurnInputClaimMode::NextTurn,
+                    lash_core_execution::TurnInputClaimMode::NextTurn,
                     inputs,
                 )?,
                 &fence.session_id,
@@ -651,7 +657,7 @@ fn reclaim_run_members_conn(
                         .ok_or_else(|| conflict(&fence.session_id))?,
                     fencing_token: head.claim_fencing_token,
                     session_lease_generation: fence.fencing_token,
-                    data: lash_core::store_backend_support::queued_work_claim_data(
+                    data: lash_core_execution::store_backend_support::queued_work_claim_data(
                         hydrated, None, None,
                     )?,
                 })
@@ -687,14 +693,14 @@ fn reclaim_run_members_conn(
 pub(super) fn settle_run_members_conn(
     tx: &Connection,
     fence: &SessionExecutionLeaseAuthority,
-    scope: &lash_core::ExecutionScope,
+    scope: &lash_core_execution::ExecutionScope,
 ) -> Result<(), StoreError> {
     tx.execute(
         run_sql().cancel_inputs.sql(),
         params![
             fence.session_id.as_str(),
             scope_key(scope)?,
-            lash_core::TurnInputStateKind::Cancelled.as_str()
+            lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str()
         ],
     )
     .map_err(sqlite_error)?;

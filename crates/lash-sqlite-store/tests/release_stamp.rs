@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use lash_conformance::{ReleaseStampDeployment, release_stamp_conformance};
-use lash_core::{StoreError, StorePreflight, StoreSchemaStatus};
+use lash_core_execution::{StoreError, StorePreflight, StoreSchemaStatus};
 use lash_sqlite_store::{SqliteStorePreflight, Store};
 
 struct SqliteDeployment {

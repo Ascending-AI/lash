@@ -14,25 +14,30 @@ pub(super) async fn delete_session_from_catalog(
     root: &Path,
     session_id: &SessionId,
     policy: SqliteConnectionPolicy,
-) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
+) -> lash_core_execution::MaintenanceResult<lash_core_execution::SessionBlobReclaimReport> {
     let path = root.join(DURABLE_CORE_DB_FILE);
     if !path.exists() {
-        return Ok(lash_core::SessionBlobReclaimReport::default());
+        return Ok(lash_core_execution::SessionBlobReclaimReport::default());
     }
     let session_id = SessionId::from(session_id.to_string());
     let conn = SqliteConnection::open_with_policy(&path, policy)
         .await
         .map_err(|err| {
-            lash_core::MaintenanceFailure::failed_before_any_work(lash_core::StoreError::Backend(
-                err.to_string(),
-            ))
+            lash_core_execution::MaintenanceFailure::failed_before_any_work(
+                lash_core_execution::StoreError::Backend(err.to_string()),
+            )
         })?;
     ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
         .await
-        .map_err(|err| lash_core::MaintenanceFailure::failed_before_any_work(sqlite_error(err)))?;
+        .map_err(|err| {
+            lash_core_execution::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
+        })?;
     conn.write_flow(move |tx| {
-        let mut report = lash_core::SessionBlobReclaimReport::default();
-        let outcome: Result<lash_core::SessionBlobReclaimReport, lash_core::StoreError> = (|| {
+        let mut report = lash_core_execution::SessionBlobReclaimReport::default();
+        let outcome: Result<
+            lash_core_execution::SessionBlobReclaimReport,
+            lash_core_execution::StoreError,
+        > = (|| {
             let pending_count = tx
                 .query_row(
                     crate::turn_ingress::turn_ingress_sql()
@@ -44,16 +49,18 @@ pub(super) async fn delete_session_from_catalog(
                 )
                 .map_err(sqlite_error)?;
             let pending_count = usize::try_from(pending_count).map_err(|_| {
-                lash_core::StoreError::StoredDataCorrupt {
+                lash_core_execution::StoreError::StoredDataCorrupt {
                     record_kind: "TurnCancelClosureAuthorization",
                     message: "negative pending closure count".to_string(),
                 }
             })?;
             if pending_count != 0 {
-                return Err(lash_core::StoreError::TurnCancelClosureLifecyclePinned {
-                    session_id: session_id.clone(),
-                    pending_count,
-                });
+                return Err(
+                    lash_core_execution::StoreError::TurnCancelClosureLifecyclePinned {
+                        session_id: session_id.clone(),
+                        pending_count,
+                    },
+                );
             }
             let existed = tx
                 .query_row(
@@ -249,25 +256,26 @@ pub(super) async fn delete_session_from_catalog(
                 enumerated_blob_count = report.enumerated_blob_count,
                 retained_blob_count = report.retained_blob_count,
                 deleted_blob_count = report.deleted_blob_count,
-                sweep = ?lash_core::MaintenanceReport::sweep(&report),
+                sweep = ?lash_core_execution::MaintenanceReport::sweep(&report),
                 "session delete reclaimed owner-scoped blobs"
             );
             Ok(report.clone())
-        })(
-        );
+        })();
         Ok(match outcome {
             Ok(value) => TxOutcome::Commit(Ok(value)),
             Err(err) => {
                 report.deleted_blob_count = 0;
-                TxOutcome::Rollback(Err(lash_core::MaintenanceFailure::failed(err, report)))
+                TxOutcome::Rollback(Err(lash_core_execution::MaintenanceFailure::failed(
+                    err, report,
+                )))
             }
         })
     })
     .await
     .map_err(|err| {
-        lash_core::MaintenanceFailure::failed_before_any_work(lash_core::StoreError::Backend(
-            err.to_string(),
-        ))
+        lash_core_execution::MaintenanceFailure::failed_before_any_work(
+            lash_core_execution::StoreError::Backend(err.to_string()),
+        )
     })?
 }
 

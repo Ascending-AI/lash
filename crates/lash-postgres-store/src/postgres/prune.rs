@@ -47,7 +47,7 @@ pub(super) async fn prune_process_rows_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{
+    use lash_core_execution::{
         ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessQuery as _,
         ProcessRegistrar as _,
     };
@@ -69,14 +69,14 @@ mod tests {
         registry
             .register_process(ProcessRegistration::new(
                 &process_id,
-                lash_core::ProcessInput::External {
+                lash_core_execution::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::RecoveryContract::ExternallyOwned,
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             ))
             .await
@@ -84,10 +84,10 @@ mod tests {
         registry
             .complete_process(
                 &process_id,
-                ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core_execution::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete rollback process");

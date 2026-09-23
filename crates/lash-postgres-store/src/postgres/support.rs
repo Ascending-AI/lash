@@ -86,7 +86,7 @@ pub(crate) async fn retention_source_holds_checkpoint_tx(
 pub(crate) async fn retained_fork_config_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     node_id: &str,
-) -> Result<lash_core::PersistedSessionConfig, StoreError> {
+) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
     let frame_node_id = crate::runtime_persistence::nearest_frame_node_id_tx(tx, node_id)
         .await?
         .ok_or_else(|| StoreError::MissingFrameOpenAncestor {
@@ -102,7 +102,7 @@ pub(crate) async fn retained_fork_config_tx(
         })?;
     let parent_node_id = row.get(0);
     let node_json: String = row.get(1);
-    lash_core::SessionNodeRecord::decode_storage_body(
+    lash_core_execution::SessionNodeRecord::decode_storage_body(
         frame_node_id.clone(),
         parent_node_id,
         &node_json,
@@ -317,7 +317,11 @@ where
             record_kind,
             message: format!("failed to decode {record_kind}: {err}"),
         })?;
-    lash_core::store::ensure_supported_record_schema_version(record_kind, &value, expected)?;
+    lash_core_execution::store::ensure_supported_record_schema_version(
+        record_kind,
+        &value,
+        expected,
+    )?;
     rmp_serde::from_slice(bytes).map_err(|err| StoreError::StoredDataCorrupt {
         record_kind,
         message: format!("failed to decode {record_kind}: {err}"),
@@ -501,12 +505,12 @@ pub(crate) async fn put_checkpoint_tx(
             HydratedCheckpointComponent::Hydrated { body, .. } => {
                 let stored_ref = BlobRef::for_content(body);
                 #[cfg(feature = "perf-witness")]
-                lash_core::perf_witness::record_hash_pass(body.len());
+                lash_core_execution::perf_witness::record_hash_pass(body.len());
                 (stored_ref, body)
             }
             HydratedCheckpointComponent::Unchanged { .. } => continue,
         };
-        lash_core::store::ensure_checkpoint_component_hash_agreement(
+        lash_core_execution::store::ensure_checkpoint_component_hash_agreement(
             key,
             &stored_ref,
             &descriptor.blob_ref,
@@ -542,7 +546,7 @@ pub(crate) async fn get_checkpoint_tx(
     let manifest: SessionCheckpoint = decode_versioned_msgpack_record(
         &bytes,
         "SessionCheckpoint",
-        lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
+        lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
     )?;
     manifest.validate_component_encoding_versions()?;
     let bodies = checkpoint_component_bodies_tx(tx, &manifest).await?;
@@ -556,7 +560,7 @@ pub(crate) async fn get_checkpoint_tx(
         })?;
         components.insert(
             key.clone(),
-            lash_core::HydratedCheckpointComponent::hydrated(
+            lash_core_execution::HydratedCheckpointComponent::hydrated(
                 descriptor.clone(),
                 std::sync::Arc::clone(body),
             ),
@@ -630,10 +634,10 @@ fn decode_session_head_meta_row(
     let head_revision: i64 = row.get(1);
     let leaf_node_id: Option<String> = row.get(2);
     let checkpoint_ref: Option<String> = row.get(3);
-    let payload: SessionHeadPayload = lash_core::store::decode_versioned_json_record(
+    let payload: SessionHeadPayload = lash_core_execution::store::decode_versioned_json_record(
         &head_json,
         "SessionHeadMeta",
-        lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
     )
     .map_err(|error| match error {
         StoreError::Backend(message) => StoreError::StoredDataCorrupt {
@@ -647,7 +651,7 @@ fn decode_session_head_meta_row(
         payload,
         u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
         checkpoint_ref.map(Into::into),
-        leaf_node_id.map(lash_core::NodeId::from),
+        leaf_node_id.map(lash_core_execution::NodeId::from),
     )?))
 }
 
@@ -666,7 +670,7 @@ pub(crate) async fn load_usage_deltas_tx(
             Ok(TokenLedgerEntry {
                 source: row.get(0),
                 model: row.get(1),
-                usage: lash_core::TokenUsage {
+                usage: lash_core_execution::TokenUsage {
                     input_tokens: row.get(2),
                     output_tokens: row.get(3),
                     cache_read_input_tokens: row.get(4),
@@ -685,9 +689,9 @@ pub(crate) async fn load_graph_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     leaf_node_id: Option<String>,
-) -> Result<lash_core::SessionGraph, StoreError> {
+) -> Result<lash_core_execution::SessionGraph, StoreError> {
     let Some(leaf_node_id) = leaf_node_id else {
-        return Ok(lash_core::SessionGraph::default());
+        return Ok(lash_core_execution::SessionGraph::default());
     };
     let leaf_generation =
         sqlx::query_scalar::<_, i64>(session_sql().graph_postgres.select_live_generation.sql())
@@ -707,7 +711,7 @@ pub(crate) async fn load_whole_graph_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     leaf_node_id: Option<String>,
-) -> Result<lash_core::SessionGraph, StoreError> {
+) -> Result<lash_core_execution::SessionGraph, StoreError> {
     load_readable_graph_tx(tx, session_id, None, leaf_node_id).await
 }
 
@@ -716,7 +720,7 @@ async fn load_readable_graph_tx(
     session_id: &SessionId,
     generation_ceiling: Option<i64>,
     leaf_node_id: Option<String>,
-) -> Result<lash_core::SessionGraph, StoreError> {
+) -> Result<lash_core_execution::SessionGraph, StoreError> {
     // One statement per filter shape, chosen exhaustively: a single statement
     // carrying `$2::BIGINT IS NULL OR generation <= $2` cannot use an index for
     // either shape, and this read is the whole session graph.
@@ -758,7 +762,7 @@ async fn load_readable_graph_tx(
         })?;
         if matches!(
             node.payload,
-            lash_core::SessionNodePayload::FrameOpen { .. }
+            lash_core_execution::SessionNodePayload::FrameOpen { .. }
         ) {
             expected_frame_node_id = Some(node_id.clone());
         }
@@ -786,12 +790,14 @@ async fn load_readable_graph_tx(
             message: format!("readable path does not end at leaf `{leaf_node_id}`"),
         });
     }
-    lash_core::SessionGraph::from_nodes(nodes, leaf_node_id.map(lash_core::NodeId::from)).map_err(
-        |error| StoreError::StoredDataCorrupt {
-            record_kind: "SessionGraph",
-            message: error.to_string(),
-        },
+    lash_core_execution::SessionGraph::from_nodes(
+        nodes,
+        leaf_node_id.map(lash_core_execution::NodeId::from),
     )
+    .map_err(|error| StoreError::StoredDataCorrupt {
+        record_kind: "SessionGraph",
+        message: error.to_string(),
+    })
 }
 
 pub(crate) async fn commit_attachment_refs_tx(
@@ -883,9 +889,9 @@ pub(crate) async fn commit_attachment_refs_tx(
 /// here was written by this encoding.
 pub(crate) fn decode_usage_disposition(
     stored: &str,
-) -> Result<lash_core::LedgerUsageDisposition, StoreError> {
-    let disposition: lash_core::LedgerUsageDisposition =
-        serde_json::from_str(stored).map_err(|error| StoreError::StoredDataCorrupt {
+) -> Result<lash_core_execution::LedgerUsageDisposition, StoreError> {
+    let disposition: lash_core_execution::LedgerUsageDisposition = serde_json::from_str(stored)
+        .map_err(|error| StoreError::StoredDataCorrupt {
             record_kind: "TokenLedgerEntry",
             message: format!("failed to decode usage disposition: {error}"),
         })?;
@@ -900,7 +906,7 @@ pub(crate) fn decode_usage_disposition(
 
 /// Encode one usage disposition for the durable column.
 pub(crate) fn encode_usage_disposition(
-    disposition: &lash_core::LedgerUsageDisposition,
+    disposition: &lash_core_execution::LedgerUsageDisposition,
 ) -> Result<String, StoreError> {
     serde_json::to_string(disposition).map_err(|error| {
         StoreError::Backend(format!("failed to encode usage disposition: {error}"))

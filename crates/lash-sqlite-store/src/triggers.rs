@@ -312,7 +312,9 @@ fn trigger_sql() -> &'static TriggerSql {
 /// The rendered listing statement `filter`'s shape is served by, for the
 /// conformance assertion that the owner filter is pushed into SQL rather than
 /// applied in Rust.
-pub(crate) fn subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilter) -> &'static str {
+pub(crate) fn subscription_list_sql(
+    filter: &lash_core_execution::TriggerSubscriptionFilter,
+) -> &'static str {
     trigger_sql()
         .subscription
         .list_for(subscription_list_shape(filter))
@@ -326,18 +328,22 @@ mod listing_plan_tests;
 
 pub struct SqliteTriggerStore {
     conn: SqliteConnection,
-    clock: Arc<dyn lash_core::Clock>,
+    clock: Arc<dyn lash_core_execution::Clock>,
     fixed_incarnation: Option<String>,
 }
 
 impl SqliteTriggerStore {
     pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_clock(path, Arc::new(lash_core::facade_support::SystemClock)).await
+        Self::open_with_clock(
+            path,
+            Arc::new(lash_core_execution::facade_support::SystemClock),
+        )
+        .await
     }
 
     pub async fn open_with_clock(
         path: &Path,
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open(path).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::Triggers).await?;
@@ -350,11 +356,11 @@ impl SqliteTriggerStore {
     }
 
     pub async fn memory() -> tokio_rusqlite::Result<Self> {
-        Self::memory_with_clock(Arc::new(lash_core::facade_support::SystemClock)).await
+        Self::memory_with_clock(Arc::new(lash_core_execution::facade_support::SystemClock)).await
     }
 
     pub async fn memory_with_clock(
-        clock: Arc<dyn lash_core::Clock>,
+        clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         let conn = SqliteConnection::open_in_memory().await?;
         ensure_versioned_schema(&conn, SqliteDatabase::Triggers).await?;
@@ -372,17 +378,22 @@ impl SqliteTriggerStore {
         self
     }
 
-    fn encode_json<T: serde::Serialize>(value: &T) -> Result<String, lash_core::PluginError> {
+    fn encode_json<T: serde::Serialize>(
+        value: &T,
+    ) -> Result<String, lash_core_execution::PluginError> {
         serde_json::to_string(value).map_err(|err| {
-            lash_core::PluginError::Session(format!("failed to encode trigger row: {err}"))
+            lash_core_execution::PluginError::Session(format!(
+                "failed to encode trigger row: {err}"
+            ))
         })
     }
 
     fn decode_subscription(
         json: String,
-    ) -> Result<lash_core::TriggerSubscriptionRecord, lash_core::PluginError> {
+    ) -> Result<lash_core_execution::TriggerSubscriptionRecord, lash_core_execution::PluginError>
+    {
         serde_json::from_str(&json).map_err(|err| {
-            lash_core::PluginError::Session(format!(
+            lash_core_execution::PluginError::Session(format!(
                 "failed to decode trigger subscription row: {err}"
             ))
         })
@@ -390,9 +401,10 @@ impl SqliteTriggerStore {
 
     fn decode_occurrence(
         json: String,
-    ) -> Result<lash_core::TriggerOccurrenceRecord, lash_core::PluginError> {
+    ) -> Result<lash_core_execution::TriggerOccurrenceRecord, lash_core_execution::PluginError>
+    {
         serde_json::from_str(&json).map_err(|err| {
-            lash_core::PluginError::Session(format!(
+            lash_core_execution::PluginError::Session(format!(
                 "failed to decode trigger occurrence row: {err}"
             ))
         })
@@ -403,9 +415,10 @@ impl SqliteTriggerStore {
         subscription_json: String,
         process_id: ProcessId,
         created_at_ms: i64,
-        reservation_status: lash_core::TriggerDeliveryReservationOutcome,
-    ) -> Result<lash_core::TriggerDeliveryReservation, lash_core::PluginError> {
-        Ok(lash_core::TriggerDeliveryReservation {
+        reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome,
+    ) -> Result<lash_core_execution::TriggerDeliveryReservation, lash_core_execution::PluginError>
+    {
+        Ok(lash_core_execution::TriggerDeliveryReservation {
             occurrence: Self::decode_occurrence(occurrence_json)?,
             subscription: Self::decode_subscription(subscription_json)?,
             process_id,
@@ -421,7 +434,10 @@ impl SqliteTriggerStore {
         &self,
         sql: &'static str,
         values: Vec<rusqlite::types::Value>,
-    ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::TriggerDeliveryReservation>,
+        lash_core_execution::PluginError,
+    > {
         self.conn
             .call(move |conn| {
                 Ok((|| {
@@ -445,7 +461,7 @@ impl SqliteTriggerStore {
                             subscription_json,
                             ProcessId::from(process_id),
                             created_at_ms,
-                            lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
+                            lash_core_execution::TriggerDeliveryReservationOutcome::AlreadyReserved,
                         )?);
                     }
                     Ok(deliveries)
@@ -457,8 +473,8 @@ impl SqliteTriggerStore {
 }
 
 fn trigger_tx_outcome<T>(
-    result: Result<T, lash_core::PluginError>,
-) -> TxOutcome<Result<T, lash_core::PluginError>> {
+    result: Result<T, lash_core_execution::PluginError>,
+) -> TxOutcome<Result<T, lash_core_execution::PluginError>> {
     match result {
         Ok(value) => TxOutcome::Commit(Ok(value)),
         Err(err) => TxOutcome::Rollback(Err(err)),
@@ -466,7 +482,9 @@ fn trigger_tx_outcome<T>(
 }
 
 /// The listing statement shape `filter` is served by.
-fn subscription_list_shape(filter: &lash_core::TriggerSubscriptionFilter) -> SubscriptionListShape {
+fn subscription_list_shape(
+    filter: &lash_core_execution::TriggerSubscriptionFilter,
+) -> SubscriptionListShape {
     SubscriptionListShape::of(
         filter.registrant_scope_id.is_some(),
         filter.subscription_key.is_some(),
@@ -480,7 +498,7 @@ fn subscription_list_shape(filter: &lash_core::TriggerSubscriptionFilter) -> Sub
 /// Exhaustive over the shape, so a new listing statement cannot be added
 /// without deciding what it binds.
 fn subscription_list_values(
-    filter: &lash_core::TriggerSubscriptionFilter,
+    filter: &lash_core_execution::TriggerSubscriptionFilter,
     shape: SubscriptionListShape,
 ) -> Vec<rusqlite::types::Value> {
     let text =
@@ -507,7 +525,7 @@ fn subscription_list_values(
 /// of the filter's half-open `[start, end)`, which
 /// `TriggerOccurrenceFilter::matches` then narrows exactly.
 fn occurrence_list_values(
-    filter: &lash_core::TriggerOccurrenceFilter,
+    filter: &lash_core_execution::TriggerOccurrenceFilter,
     shape: OccurrenceListShape,
 ) -> Vec<rusqlite::types::Value> {
     let text =
@@ -533,27 +551,27 @@ fn occurrence_list_values(
 }
 
 #[async_trait::async_trait]
-impl lash_core::TriggerStore for SqliteTriggerStore {
+impl lash_core_execution::TriggerStore for SqliteTriggerStore {
     async fn execute_command(
         &self,
         operation_id: &str,
-        command: lash_core::TriggerCommand,
-    ) -> Result<lash_core::TriggerEffectResult, lash_core::PluginError> {
+        command: lash_core_execution::TriggerCommand,
+    ) -> Result<lash_core_execution::TriggerEffectResult, lash_core_execution::PluginError> {
         let owner_valid = match command.owner_scope() {
-            lash_core::TriggerOwnerScope::Session { session_id } => {
+            lash_core_execution::TriggerOwnerScope::Session { session_id } => {
                 crate::namespace::is_valid_opaque_key(session_id)
             }
-            lash_core::TriggerOwnerScope::Host { binding_id } => {
+            lash_core_execution::TriggerOwnerScope::Host { binding_id } => {
                 crate::namespace::is_valid_opaque_key(binding_id.trim())
             }
-            lash_core::TriggerOwnerScope::Platform => true,
+            lash_core_execution::TriggerOwnerScope::Platform => true,
         };
         if !crate::namespace::is_valid_opaque_key(operation_id.trim()) || !owner_valid {
-            return Ok(Err(lash_core::TriggerOperationError::Invalid {
+            return Ok(Err(lash_core_execution::TriggerOperationError::Invalid {
                 message: "invalid trigger operation or owner identifier".into(),
             }));
         }
-        if let lash_core::TriggerCommand::List {
+        if let lash_core_execution::TriggerCommand::List {
             owner_scope,
             mut filter,
         } = command
@@ -562,18 +580,19 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             return self
                 .list_subscriptions(filter)
                 .await
-                .map(|records| Ok(lash_core::TriggerCommandOutcome::List { records }));
+                .map(|records| Ok(lash_core_execution::TriggerCommandOutcome::List { records }));
         }
         let public_operation_id = operation_id.to_string();
-        let operation_id = lash_core::facade_support::trigger_operation_receipt_id(
+        let operation_id = lash_core_execution::facade_support::trigger_operation_receipt_id(
             command.owner_scope(),
             operation_id,
         );
-        let request_fingerprint = lash_core::facade_support::trigger_command_fingerprint(&command);
+        let request_fingerprint =
+            lash_core_execution::facade_support::trigger_command_fingerprint(&command);
         let fixed_incarnation = self.fixed_incarnation.clone();
         let owner_scope = command.owner_scope().clone();
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
-        let subscription_id = lash_core::facade_support::deterministic_subscription_id(
+        let subscription_id = lash_core_execution::facade_support::deterministic_subscription_id(
             &owner_scope,
             &subscription_key,
         );
@@ -592,7 +611,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         .map_err(process_sqlite_error)?;
                     if let Some((stored_hash, json)) = receipt {
                         if stored_hash != request_fingerprint {
-                            return Ok(Err(lash_core::TriggerOperationError::Conflict {
+                            return Ok(Err(lash_core_execution::TriggerOperationError::Conflict {
                                 subscription_key,
                                 existing_revision: None,
                                 existing_definition_fingerprint: Some(stored_hash),
@@ -603,12 +622,12 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             }));
                         }
                         return serde_json::from_str(&json).map_err(|err| {
-                            lash_core::PluginError::Session(format!(
+                            lash_core_execution::PluginError::Session(format!(
                                 "failed to decode trigger mutation receipt: {err}"
                             ))
                         });
                     }
-                    let result = if let lash_core::TriggerCommand::Prune {
+                    let result = if let lash_core_execution::TriggerCommand::Prune {
                         owner_scope,
                         actor,
                         subscription_keys,
@@ -629,7 +648,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             )?);
                         }
                         drop(stmt);
-                        lash_core::facade_support::evaluate_trigger_prune(
+                        lash_core_execution::facade_support::evaluate_trigger_prune(
                             records,
                             owner_scope.clone(),
                             actor.clone(),
@@ -648,27 +667,27 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                             .map(Self::decode_subscription)
                             .transpose()?;
                         if let Some(incarnation) = fixed_incarnation {
-                            lash_core::facade_support::evaluate_trigger_mutation_with_incarnation(
+                            lash_core_execution::facade_support::evaluate_trigger_mutation_with_incarnation(
                                 current,
                                 command,
                                 now,
                                 incarnation,
                             )?
                         } else {
-                            lash_core::facade_support::evaluate_trigger_mutation(
+                            lash_core_execution::facade_support::evaluate_trigger_mutation(
                                 current, command, now,
                             )?
                         }
                     };
                     let records = match &result {
-                        Ok(lash_core::TriggerCommandOutcome::Mutation { receipt }) => {
+                        Ok(lash_core_execution::TriggerCommandOutcome::Mutation { receipt }) => {
                             vec![&receipt.record_snapshot]
                         }
-                        Ok(lash_core::TriggerCommandOutcome::Prune { receipts }) => receipts
+                        Ok(lash_core_execution::TriggerCommandOutcome::Prune { receipts }) => receipts
                             .iter()
                             .map(|receipt| &receipt.record_snapshot)
                             .collect(),
-                        Ok(lash_core::TriggerCommandOutcome::List { .. }) | Err(_) => Vec::new(),
+                        Ok(lash_core_execution::TriggerCommandOutcome::List { .. }) | Err(_) => Vec::new(),
                     };
                     for record in records {
                         let sql_revision = plugin_sql_counter_value(
@@ -716,8 +735,9 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn list_subscriptions(
         &self,
-        filter: lash_core::TriggerSubscriptionFilter,
-    ) -> Result<Vec<lash_core::TriggerSubscriptionRecord>, lash_core::PluginError> {
+        filter: lash_core_execution::TriggerSubscriptionFilter,
+    ) -> Result<Vec<lash_core_execution::TriggerSubscriptionRecord>, lash_core_execution::PluginError>
+    {
         self.conn
             .call(move |conn| {
                 Ok((|| {
@@ -759,7 +779,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     async fn delete_session_subscriptions(
         &self,
         session_id: &SessionId,
-    ) -> Result<usize, lash_core::PluginError> {
+    ) -> Result<usize, lash_core_execution::PluginError> {
         let session_id = SessionId::from(session_id.to_string());
         let now = self.clock.timestamp_ms();
         self.conn
@@ -799,7 +819,9 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     let mut deleted = 0usize;
                     for (subscription_id, mut record) in subscriptions {
                         let next_revision =
-                            lash_core::facade_support::next_trigger_store_revision(&record)?;
+                            lash_core_execution::facade_support::next_trigger_store_revision(
+                                &record,
+                            )?;
                         record.tombstone(now);
                         record.revision = next_revision;
                         record.updated_at_ms = now;
@@ -828,10 +850,11 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn ingest_occurrence(
         &self,
-        request: lash_core::TriggerOccurrenceRequest,
-    ) -> Result<lash_core::TriggerIngressReceipt, lash_core::PluginError> {
-        lash_core::facade_support::validate_trigger_occurrence_request(&request)?;
-        let occurrence_id = lash_core::facade_support::deterministic_occurrence_id(&request);
+        request: lash_core_execution::TriggerOccurrenceRequest,
+    ) -> Result<lash_core_execution::TriggerIngressReceipt, lash_core_execution::PluginError> {
+        lash_core_execution::facade_support::validate_trigger_occurrence_request(&request)?;
+        let occurrence_id =
+            lash_core_execution::facade_support::deterministic_occurrence_id(&request);
         let occurred_at_ms = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
@@ -847,17 +870,17 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         .map_err(process_sqlite_error)?;
                     let (record, is_new) = if let Some(existing_json) = existing {
                         let record = Self::decode_occurrence(existing_json)?;
-                        if !lash_core::facade_support::trigger_occurrence_request_matches_record(
+                        if !lash_core_execution::facade_support::trigger_occurrence_request_matches_record(
                             &request, &record,
                         ) {
-                            return Err(lash_core::durable_identity_conflict(format!(
+                            return Err(lash_core_execution::durable_identity_conflict(format!(
                                 "trigger occurrence idempotency conflict for `{}`",
                                 request.idempotency_key
                             )));
                         }
                         (record, false)
                     } else {
-                        let record = lash_core::TriggerOccurrenceRecord {
+                        let record = lash_core_execution::TriggerOccurrenceRecord {
                             occurrence_id: occurrence_id.clone(),
                             source_type: request.source_type,
                             source_key: request.source_key,
@@ -884,18 +907,18 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                     };
                     let reservations = match (
                         is_new,
-                        record.outcome == lash_core::TriggerOccurrenceOutcome::Fired,
+                        record.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired,
                     ) {
                         (true, true) => reserve_sqlite_deliveries(tx, &record, occurred_at_ms)?,
                         (false, true) => sqlite_delivery_snapshots(
                             tx,
                             &record,
-                            lash_core::TriggerDeliveryReservationOutcome::AlreadyReserved,
+                            lash_core_execution::TriggerDeliveryReservationOutcome::AlreadyReserved,
                         )?,
                         (_, false) => Vec::new(),
                     };
                     if is_new
-                        && record.outcome == lash_core::TriggerOccurrenceOutcome::Fired
+                        && record.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired
                         && reservations.is_empty()
                     {
                         tx.execute(
@@ -904,10 +927,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         )
                         .map_err(process_sqlite_error)?;
                     }
-                    Ok(lash_core::TriggerIngressReceipt {
+                    Ok(lash_core_execution::TriggerIngressReceipt {
                         occurrence: record,
                         reservations,
-                        realization: lash_core::StoreRealization::from_wrote(is_new),
+                        realization: lash_core_execution::StoreRealization::from_wrote(is_new),
                     })
                 })()))
             })
@@ -917,8 +940,9 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn list_occurrences(
         &self,
-        filter: lash_core::TriggerOccurrenceFilter,
-    ) -> Result<Vec<lash_core::TriggerOccurrenceRecord>, lash_core::PluginError> {
+        filter: lash_core_execution::TriggerOccurrenceFilter,
+    ) -> Result<Vec<lash_core_execution::TriggerOccurrenceRecord>, lash_core_execution::PluginError>
+    {
         self.conn
             .call(move |conn| {
                 Ok((|| {
@@ -956,7 +980,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     async fn list_deliveries_by_occurrence_id(
         &self,
         occurrence_id: &str,
-    ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::TriggerDeliveryReservation>,
+        lash_core_execution::PluginError,
+    > {
         self.list_deliveries_with(
             trigger_sql().delivery.list_by_occurrence_id.sql(),
             vec![occurrence_id.to_string().into()],
@@ -967,7 +994,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     async fn list_deliveries_by_subscription_id(
         &self,
         subscription_id: &str,
-    ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::TriggerDeliveryReservation>,
+        lash_core_execution::PluginError,
+    > {
         self.list_deliveries_with(
             trigger_sql().delivery.list_by_subscription_id.sql(),
             vec![subscription_id.to_string().into()],
@@ -978,7 +1008,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     async fn list_deliveries_by_process_id(
         &self,
         process_id: &ProcessId,
-    ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::TriggerDeliveryReservation>,
+        lash_core_execution::PluginError,
+    > {
         self.list_deliveries_with(
             trigger_sql().delivery.list_by_process_id.sql(),
             vec![process_id.to_string().into()],
@@ -988,12 +1021,17 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn list_deliveries(
         &self,
-    ) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::TriggerDeliveryReservation>,
+        lash_core_execution::PluginError,
+    > {
         self.list_deliveries_with(trigger_sql().delivery.list_all.sql(), Vec::new())
             .await
     }
 
-    async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, lash_core::PluginError> {
+    async fn list_delivery_process_ids(
+        &self,
+    ) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
         self.conn
             .call(|conn| {
                 Ok((|| {
@@ -1014,7 +1052,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn list_delivery_retention_candidates(
         &self,
-    ) -> Result<Vec<lash_core::TriggerDeliveryRetentionCandidate>, lash_core::PluginError> {
+    ) -> Result<
+        Vec<lash_core_execution::TriggerDeliveryRetentionCandidate>,
+        lash_core_execution::PluginError,
+    > {
         self.conn
             .call(|conn| {
                 Ok((|| {
@@ -1023,7 +1064,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         .map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map([], |row| {
-                            Ok(lash_core::TriggerDeliveryRetentionCandidate {
+                            Ok(lash_core_execution::TriggerDeliveryRetentionCandidate {
                                 occurrence_id: row.get(0)?,
                                 subscription_id: row.get(1)?,
                                 process_id: ProcessId::from(row.get::<_, String>(2)?),
@@ -1040,7 +1081,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn list_session_owner_ids_for_retention(
         &self,
-    ) -> Result<Vec<SessionId>, lash_core::PluginError> {
+    ) -> Result<Vec<SessionId>, lash_core_execution::PluginError> {
         self.conn
             .call(|conn| {
                 Ok((|| {
@@ -1071,13 +1112,18 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn reconcile_trigger_retention(
         &self,
-        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
+        candidates: &[lash_core_execution::TriggerDeliveryRetentionCandidate],
         deleted_session_ids: &[SessionId],
-    ) -> Result<lash_core::TriggerRetentionReconciliationReport, lash_core::PluginError> {
+    ) -> Result<
+        lash_core_execution::TriggerRetentionReconciliationReport,
+        lash_core_execution::PluginError,
+    > {
         let candidates_json = serde_json::to_string(candidates).map_err(process_decode_error)?;
         let deleted_owner_scopes = deleted_session_ids
             .iter()
-            .map(|session_id| lash_core::TriggerOwnerScope::session(session_id).namespace())
+            .map(|session_id| {
+                lash_core_execution::TriggerOwnerScope::session(session_id).namespace()
+            })
             .collect::<Vec<_>>();
         let deleted_owner_scopes_json =
             serde_json::to_string(&deleted_owner_scopes).map_err(process_decode_error)?;
@@ -1116,7 +1162,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                 )?;
 
                 tx.commit()?;
-                Ok(lash_core::TriggerRetentionReconciliationReport {
+                Ok(lash_core_execution::TriggerRetentionReconciliationReport {
                     reclaimed_delivery_count,
                     reclaimed_occurrence_count,
                     reclaimed_subscription_count,
@@ -1129,8 +1175,8 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
     async fn delete_delivery_retention_candidates(
         &self,
-        candidates: &[lash_core::TriggerDeliveryRetentionCandidate],
-    ) -> Result<usize, lash_core::PluginError> {
+        candidates: &[lash_core_execution::TriggerDeliveryRetentionCandidate],
+    ) -> Result<usize, lash_core_execution::PluginError> {
         if candidates.is_empty() {
             return Ok(0);
         }
@@ -1158,10 +1204,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     async fn reclaim_trigger_occurrences(
         &self,
         cutoff_epoch_ms: u64,
-    ) -> lash_core::TriggerOccurrenceReclamationResult {
+    ) -> lash_core_execution::TriggerOccurrenceReclamationResult {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         let partial = Arc::new(Mutex::new(
-            lash_core::TriggerOccurrenceReclamationReport::default(),
+            lash_core_execution::TriggerOccurrenceReclamationReport::default(),
         ));
         let partial_for_call = Arc::clone(&partial);
         self.conn
@@ -1172,9 +1218,9 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                         let mut stmt = conn
                             .prepare(sql.occurrence_sqlite.select_reclamation_scope.sql())
                             .map_err(|error| {
-                                lash_core::MaintenanceFailure::failed_before_any_work(Box::new(
-                                    process_sqlite_error(error),
-                                ))
+                                lash_core_execution::MaintenanceFailure::failed_before_any_work(
+                                    Box::new(process_sqlite_error(error)),
+                                )
                             })?;
                         let rows = stmt
                             .query_map(params![cutoff_epoch_ms], |row| {
@@ -1187,24 +1233,24 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                 ))
                             })
                             .map_err(|error| {
-                                lash_core::MaintenanceFailure::failed_before_any_work(Box::new(
-                                    process_sqlite_error(error),
-                                ))
+                                lash_core_execution::MaintenanceFailure::failed_before_any_work(
+                                    Box::new(process_sqlite_error(error)),
+                                )
                             })?;
                         rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
-                            lash_core::MaintenanceFailure::failed_before_any_work(Box::new(
-                                process_sqlite_error(error),
-                            ))
+                            lash_core_execution::MaintenanceFailure::failed_before_any_work(
+                                Box::new(process_sqlite_error(error)),
+                            )
                         })?
                     };
 
                     let first = &rows[0];
-                    let mut report = lash_core::TriggerOccurrenceReclamationReport {
+                    let mut report = lash_core_execution::TriggerOccurrenceReclamationReport {
                         inspected_occurrence_count: first.0 as usize,
                         live_fan_out_count: first.1 as usize,
                         grace_deferred_count: first.2 as usize,
                         audit_retained_count: first.3 as usize,
-                        ..lash_core::TriggerOccurrenceReclamationReport::default()
+                        ..lash_core_execution::TriggerOccurrenceReclamationReport::default()
                     };
                     *partial_for_call
                         .lock()
@@ -1221,7 +1267,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
                                 params![occurrence_id, cutoff_epoch_ms],
                             )
                             .map_err(|error| {
-                                lash_core::MaintenanceFailure::failed(
+                                lash_core_execution::MaintenanceFailure::failed(
                                     Box::new(process_sqlite_error(error)),
                                     report.clone(),
                                 )
@@ -1240,7 +1286,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
             })
             .await
             .map_err(|error| {
-                lash_core::MaintenanceFailure::failed(
+                lash_core_execution::MaintenanceFailure::failed(
                     Box::new(process_sqlite_error(error)),
                     partial
                         .lock()
@@ -1253,7 +1299,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     async fn prune_mutation_receipts(
         &self,
         cutoff_epoch_ms: u64,
-    ) -> Result<usize, lash_core::PluginError> {
+    ) -> Result<usize, lash_core_execution::PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         self.conn
             .call(move |conn| {
@@ -1269,7 +1315,7 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
     async fn prune_non_fired_occurrences(
         &self,
         cutoff_epoch_ms: u64,
-    ) -> Result<usize, lash_core::PluginError> {
+    ) -> Result<usize, lash_core_execution::PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         self.conn
             .call(move |conn| {
@@ -1285,9 +1331,10 @@ impl lash_core::TriggerStore for SqliteTriggerStore {
 
 fn reserve_sqlite_deliveries(
     tx: &rusqlite::Transaction<'_>,
-    occurrence: &lash_core::TriggerOccurrenceRecord,
+    occurrence: &lash_core_execution::TriggerOccurrenceRecord,
     created_at_ms: u64,
-) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+) -> Result<Vec<lash_core_execution::TriggerDeliveryReservation>, lash_core_execution::PluginError>
+{
     let sql = trigger_sql();
     let mut values: Vec<rusqlite::types::Value> = vec![
         occurrence.source_type.clone().into(),
@@ -1296,7 +1343,7 @@ fn reserve_sqlite_deliveries(
     let statement = match occurrence.session_id.as_deref() {
         Some(session_id) => {
             values.push(
-                lash_core::TriggerOwnerScope::session(session_id)
+                lash_core_execution::TriggerOwnerScope::session(session_id)
                     .namespace()
                     .into(),
             );
@@ -1328,7 +1375,7 @@ fn reserve_sqlite_deliveries(
     for subscription in subscriptions {
         let sql_revision =
             plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
-        let process_id = lash_core::facade_support::deterministic_delivery_process_id(
+        let process_id = lash_core_execution::facade_support::deterministic_delivery_process_id(
             &occurrence.occurrence_id,
             &subscription.subscription_id,
             &subscription.incarnation,
@@ -1347,23 +1394,24 @@ fn reserve_sqlite_deliveries(
             ],
         )
         .map_err(process_sqlite_error)?;
-        reservations.push(lash_core::TriggerDeliveryReservation {
+        reservations.push(lash_core_execution::TriggerDeliveryReservation {
             occurrence: occurrence.clone(),
             subscription,
             process_id,
             created_at_ms,
-            reservation_status: lash_core::TriggerDeliveryReservationOutcome::Reserved,
+            reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome::Reserved,
         });
     }
-    lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);
+    lash_core_execution::facade_support::sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }
 
 fn sqlite_delivery_snapshots(
     tx: &rusqlite::Transaction<'_>,
-    occurrence: &lash_core::TriggerOccurrenceRecord,
-    reservation_status: lash_core::TriggerDeliveryReservationOutcome,
-) -> Result<Vec<lash_core::TriggerDeliveryReservation>, lash_core::PluginError> {
+    occurrence: &lash_core_execution::TriggerOccurrenceRecord,
+    reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome,
+) -> Result<Vec<lash_core_execution::TriggerDeliveryReservation>, lash_core_execution::PluginError>
+{
     let mut stmt = tx
         .prepare(trigger_sql().delivery.select_snapshots_by_occurrence.sql())
         .map_err(process_sqlite_error)?;
@@ -1379,7 +1427,7 @@ fn sqlite_delivery_snapshots(
     let mut reservations = Vec::new();
     for row in rows {
         let (process_id, created_at_ms, snapshot_json) = row.map_err(process_sqlite_error)?;
-        reservations.push(lash_core::TriggerDeliveryReservation {
+        reservations.push(lash_core_execution::TriggerDeliveryReservation {
             occurrence: occurrence.clone(),
             subscription: SqliteTriggerStore::decode_subscription(snapshot_json)?,
             process_id: ProcessId::from(process_id),
@@ -1387,7 +1435,7 @@ fn sqlite_delivery_snapshots(
             reservation_status: reservation_status.clone(),
         });
     }
-    lash_core::facade_support::sort_trigger_delivery_reservations(&mut reservations);
+    lash_core_execution::facade_support::sort_trigger_delivery_reservations(&mut reservations);
     Ok(reservations)
 }
 
@@ -1398,26 +1446,28 @@ fn sqlite_delivery_snapshots(
 #[cfg(test)]
 mod revision_column_tests {
     use super::*;
-    use lash_core::{TriggerCommand, TriggerStore as _};
+    use lash_core_execution::{TriggerCommand, TriggerStore as _};
 
     fn register_command(owner: &str, key: &str, source_type: &'static str) -> TriggerCommand {
-        let source_key =
-            lash_core::facade_support::empty_trigger_source_key(source_type).expect("source key");
+        let source_key = lash_core_execution::facade_support::empty_trigger_source_key(source_type)
+            .expect("source key");
         TriggerCommand::Register {
-            owner_scope: lash_core::TriggerOwnerScope::session(owner),
-            actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(owner)),
-            draft: lash_core::TriggerSubscriptionDraft::for_process(
+            owner_scope: lash_core_execution::TriggerOwnerScope::session(owner),
+            actor: lash_core_execution::ProcessOriginator::session(
+                lash_core_execution::SessionScope::new(owner),
+            ),
+            draft: lash_core_execution::TriggerSubscriptionDraft::for_process(
                 key,
-                lash_core::ProcessExecutionEnvRef::new(format!("process-env:{owner}")),
+                lash_core_execution::ProcessExecutionEnvRef::new(format!("process-env:{owner}")),
                 source_type,
                 source_key,
-                lash_core::ProcessInput::Engine {
+                lash_core_execution::ProcessInput::Engine {
                     kind: "test".to_string(),
                     payload: serde_json::json!({ "owner": owner }),
                 },
-                lash_core::ProcessIdentity::new("test"),
+                lash_core_execution::ProcessIdentity::new("test"),
             )
-            .with_payload_schema(lash_core::LashSchema::any()),
+            .with_payload_schema(lash_core_execution::LashSchema::any()),
         }
     }
 
@@ -1428,10 +1478,10 @@ mod revision_column_tests {
     }
 
     fn receipt_of(
-        outcome: lash_core::TriggerCommandOutcome,
-    ) -> Box<lash_core::TriggerMutationReceipt> {
+        outcome: lash_core_execution::TriggerCommandOutcome,
+    ) -> Box<lash_core_execution::TriggerMutationReceipt> {
         match outcome {
-            lash_core::TriggerCommandOutcome::Mutation { receipt } => receipt,
+            lash_core_execution::TriggerCommandOutcome::Mutation { receipt } => receipt,
             other => panic!("expected a mutation receipt, got {other:?}"),
         }
     }
@@ -1477,10 +1527,10 @@ mod revision_column_tests {
         );
 
         // The delivery row copies the same counter through the same helper.
-        let source_key =
-            lash_core::facade_support::empty_trigger_source_key(source_type).expect("source key");
+        let source_key = lash_core_execution::facade_support::empty_trigger_source_key(source_type)
+            .expect("source key");
         let ingress = store
-            .ingest_occurrence(lash_core::TriggerOccurrenceRequest::new(
+            .ingest_occurrence(lash_core_execution::TriggerOccurrenceRequest::new(
                 source_type,
                 source_key,
                 serde_json::json!({ "button": "Blue" }),
@@ -1510,10 +1560,10 @@ mod revision_column_tests {
                 .execute_command(
                     "disable",
                     TriggerCommand::Disable {
-                        owner_scope: lash_core::TriggerOwnerScope::session("owner"),
-                        actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
-                            "owner",
-                        )),
+                        owner_scope: lash_core_execution::TriggerOwnerScope::session("owner"),
+                        actor: lash_core_execution::ProcessOriginator::session(
+                            lash_core_execution::SessionScope::new("owner"),
+                        ),
                         subscription_key: "counter-key".to_string(),
                         expected_revision: registered_revision,
                     },

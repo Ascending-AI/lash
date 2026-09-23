@@ -2,10 +2,14 @@ use super::*;
 use crate::process_registry::sql::process_sql;
 use lash_sansio::ProcessId;
 
-pub(crate) fn max_change_sequence(watermark: lash_core::ProjectionWatermark) -> Option<i64> {
+pub(crate) fn max_change_sequence(
+    watermark: lash_core_execution::ProjectionWatermark,
+) -> Option<i64> {
     match watermark {
-        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
-        lash_core::ProjectionWatermark::NoProjector => None,
+        lash_core_execution::ProjectionWatermark::UpTo(cursor) => {
+            Some(cursor.store_sequence() as i64)
+        }
+        lash_core_execution::ProjectionWatermark::NoProjector => None,
     }
 }
 
@@ -14,7 +18,7 @@ pub(crate) fn compact_process_tombstones_conn(
     cutoff_epoch_ms: i64,
     max_change_seq: Option<i64>,
     outstanding_trigger_delivery_process_ids: &[ProcessId],
-) -> Result<usize, lash_core::PluginError> {
+) -> Result<usize, lash_core_execution::PluginError> {
     let outstanding_trigger_delivery_process_ids =
         serde_json::to_string(outstanding_trigger_delivery_process_ids)
             .map_err(process_decode_error)?;
@@ -56,7 +60,7 @@ pub(crate) fn processes_changed_since_conn(
     conn: &Connection,
     cursor: ProcessChangeCursor,
     limit: usize,
-) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core::PluginError> {
+) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core_execution::PluginError> {
     let tx = conn.unchecked_transaction().map_err(process_sqlite_error)?;
     let result = processes_changed_since_tx(&tx, cursor, limit);
     if result.is_ok() {
@@ -69,7 +73,7 @@ fn processes_changed_since_tx(
     conn: &Connection,
     cursor: ProcessChangeCursor,
     limit: usize,
-) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core::PluginError> {
+) -> Result<(Vec<ProcessChange>, ProcessChangeCursor), lash_core_execution::PluginError> {
     let horizon = conn
         .query_row(
             process_sql().clock_sqlite.select_compaction_horizon.sql(),
@@ -83,10 +87,12 @@ fn processes_changed_since_tx(
         horizon,
     )?;
     if cursor.store_sequence() < horizon {
-        return Err(lash_core::PluginError::ProcessChangeCursorPruned {
-            requested_cursor: cursor,
-            tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
-        });
+        return Err(
+            lash_core_execution::PluginError::ProcessChangeCursorPruned {
+                requested_cursor: cursor,
+                tombstone_compaction_horizon: ProcessChangeCursor::from_store_sequence(horizon),
+            },
+        );
     }
     if limit == 0 {
         return Ok((Vec::new(), cursor));
@@ -135,7 +141,7 @@ pub(crate) fn prune_terminal_processes_conn(
     pruned_at_ms: i64,
     filter: Option<ProcessListFilter>,
     max_change_seq: Option<u64>,
-) -> Result<ProcessPruneReport, lash_core::PluginError> {
+) -> Result<ProcessPruneReport, lash_core_execution::PluginError> {
     let prunable = prunable_terminal_process_ids_conn(conn, cutoff, filter, max_change_seq)?;
     crate::process_registry::parent_end::reclaim_settled_plans_conn(conn, cutoff)?;
     if prunable.is_empty() {
@@ -154,7 +160,7 @@ fn prune_process_rows_conn(
     conn: &Connection,
     prunable: &[ProcessId],
     pruned_at_ms: i64,
-) -> Result<ProcessPruneReport, lash_core::PluginError> {
+) -> Result<ProcessPruneReport, lash_core_execution::PluginError> {
     let process_ids_json = serde_json::to_string(&prunable).map_err(process_decode_error)?;
     let process_count = prunable.len() as i64;
     conn.execute(
@@ -180,7 +186,7 @@ fn prune_process_rows_conn(
         )
         .map_err(process_sqlite_error)?;
     if inserted_tombstones != prunable.len() {
-        return Err(lash_core::PluginError::Session(format!(
+        return Err(lash_core_execution::PluginError::Session(format!(
             "process prune candidate/tombstone divergence: expected {}, inserted {inserted_tombstones}",
             prunable.len()
         )));
@@ -194,9 +200,9 @@ fn prune_process_rows_conn(
                 |row| row.get(0),
             )
             .map_err(process_sqlite_error)?;
-        let record: lash_core::ProcessRecord =
+        let record: lash_core_execution::ProcessRecord =
             serde_json::from_str(&record_json).map_err(process_decode_error)?;
-        let cleanup = lash_core::ProcessArtifactCleanup::from_record(&record);
+        let cleanup = lash_core_execution::ProcessArtifactCleanup::from_record(&record);
         let cleanup_json = serde_json::to_string(&cleanup).map_err(process_decode_error)?;
         conn.execute(
             process_sql().cleanup_sqlite.insert.sql(),
@@ -232,7 +238,7 @@ fn prune_process_rows_conn(
         .map_err(process_sqlite_error)?;
 
     if pruned_processes != prunable.len() {
-        return Err(lash_core::PluginError::Session(format!(
+        return Err(lash_core_execution::PluginError::Session(format!(
             "process prune candidate/tombstone divergence: expected {}, deleted {pruned_processes}",
             prunable.len()
         )));
@@ -253,7 +259,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
     cutoff: i64,
     filter: Option<ProcessListFilter>,
     max_change_seq: Option<u64>,
-) -> Result<Vec<ProcessId>, lash_core::PluginError> {
+) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
     let max_change_seq = max_change_seq.map(|seq| seq as i64);
     let mut stmt = conn
         .prepare(process_sql().process_sqlite.list_prunable_terminal.sql())
@@ -283,7 +289,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
 mod tests {
     use super::*;
     use crate::process_registry::tx_outcome;
-    use lash_core::{
+    use lash_core_execution::{
         ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessQuery as _,
         ProcessRegistrar as _,
     };
@@ -298,14 +304,14 @@ mod tests {
         registry
             .register_process(ProcessRegistration::new(
                 &process_id,
-                lash_core::ProcessInput::External {
+                lash_core_execution::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
-                lash_core::RecoveryContract::ExternallyOwned,
-                lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+                lash_core_execution::RecoveryContract::ExternallyOwned,
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::ProcessLifecyclePolicy::new(
+                    lash_core_execution::ParentScope::Host,
+                    lash_core_execution::OnParentEnd::Abandon,
                 ),
             ))
             .await
@@ -313,10 +319,10 @@ mod tests {
         registry
             .complete_process(
                 &process_id,
-                ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core_execution::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete rollback process");

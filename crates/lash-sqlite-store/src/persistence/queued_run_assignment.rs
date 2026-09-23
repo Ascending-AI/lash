@@ -1,11 +1,11 @@
 use super::*;
-use lash_core::store::QueuedRunMember;
+use lash_core_execution::store::QueuedRunMember;
 
 pub(super) fn assign_checkpoint_members_conn(
     tx: &Connection,
     session_id: &SessionId,
-    turn_id: &lash_core::TurnId,
-    input: Option<&lash_core::TurnInputClaim>,
+    turn_id: &lash_core_execution::TurnId,
+    input: Option<&lash_core_execution::TurnInputClaim>,
     queued: Option<&QueuedWorkClaim>,
 ) -> Result<(), StoreError> {
     if input.is_none() && queued.is_none() {

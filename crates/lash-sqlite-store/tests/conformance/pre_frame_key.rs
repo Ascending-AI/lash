@@ -3,19 +3,24 @@ use super::*;
 fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffectOutcome) {
     let call_id = "continue-as-call";
     let envelope = RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
-                lash_core::ExecutionScope::turn("cutover-session", "cutover-turn"),
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(
+                lash_core_execution::ExecutionScope::turn("cutover-session", "cutover-turn"),
                 "continue-as-attempt-replay",
             )
             .expect("valid cutover effect address"),
-            lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 3, 1),
+            lash_core_execution::RuntimeAttribution::for_turn(
+                "cutover-session",
+                "cutover-turn",
+                3,
+                1,
+            ),
             "continue-as-attempt",
         ),
         RuntimeEffectCommand::ToolAttempt {
-            call: lash_core::PreparedToolCall::from_parts(
+            call: lash_core_execution::PreparedToolCall::from_parts(
                 call_id,
-                lash_core::ToolId::from("tool:continue_as"),
+                lash_core_execution::ToolId::from("tool:continue_as"),
                 "continue_as",
                 serde_json::json!({ "task": "continue after redrive" }),
                 None,
@@ -27,24 +32,26 @@ fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffe
         },
     );
     let outcome = RuntimeEffectOutcome::ToolAttempt {
-        launch: Box::new(lash_core::ToolAttemptLaunch::Done {
-            record: Box::new(lash_core::ToolCallRecord {
+        launch: Box::new(lash_core_execution::ToolAttemptLaunch::Done {
+            record: Box::new(lash_core_execution::ToolCallRecord {
                 call_id: Some(call_id.to_string()),
                 tool: "continue_as".to_string(),
                 args: serde_json::json!({ "task": "continue after redrive" }),
-                output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true }))
-                    .with_control(lash_core::ToolControl::SwitchAgentFrame {
-                        frame_key: lash_core::FrameKey::from_call_site(
-                            &SessionId::from("cutover-session"),
-                            "cutover-frame",
-                            call_id,
-                        ),
-                        initial_nodes: Vec::new(),
-                        task: Some("continue after redrive".to_string()),
-                    }),
+                output: lash_core_execution::ToolCallOutput::success(
+                    serde_json::json!({ "ok": true }),
+                )
+                .with_control(lash_core_execution::ToolControl::SwitchAgentFrame {
+                    frame_key: lash_core_execution::FrameKey::from_call_site(
+                        &SessionId::from("cutover-session"),
+                        "cutover-frame",
+                        call_id,
+                    ),
+                    initial_nodes: Vec::new(),
+                    task: Some("continue after redrive".to_string()),
+                }),
                 duration_ms: 4,
             }),
-            intents: lash_core::ToolIntents::v3(Vec::new()),
+            intents: lash_core_execution::ToolIntents::v3(Vec::new()),
         }),
         triggers: Vec::new(),
         capture: None,

@@ -11,8 +11,8 @@
 
 use std::sync::LazyLock;
 
-use lash_core::WakeDeliveryState;
-use lash_core::store_backend_support as vocabulary;
+use lash_core_execution::WakeDeliveryState;
+use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
     artifact_cleanup::ArtifactCleanupStatements, definitions::DefinitionStatements,
     events::EventStatements, leases::LeaseStatements, observers::ObserverStatements,
@@ -64,8 +64,8 @@ fn wake_delivery_state_equals(column: &str, state: WakeDeliveryState) -> String 
 
 /// The process family's domain vocabulary, as this backend supplies it.
 ///
-/// Every expansion is generated from `lash_core::ProcessStatus` or
-/// `lash_core::WakeDeliveryState`. The term names are the domain's, not a
+/// Every expansion is generated from `lash_core_execution::ProcessStatus` or
+/// `lash_core_execution::WakeDeliveryState`. The term names are the domain's, not a
 /// dialect's, and are identical in the SQLite store.
 const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
     VocabularyTerm::new(
@@ -895,7 +895,7 @@ pub(crate) fn process_sql() -> &'static ProcessSql {
 /// they exist to use — so each combination is its own named statement rather
 /// than a template with a hole. The caller binds the always-bound ten
 /// parameters and then, in this same order, the clauses' own.
-pub(crate) fn list_processes_sql(filter: &lash_core::ProcessListFilter) -> &'static str {
+pub(crate) fn list_processes_sql(filter: &lash_core_execution::ProcessListFilter) -> &'static str {
     let statements = &process_sql().process_postgres;
     match (
         filter.parent_scope.is_some(),

@@ -88,11 +88,11 @@ lash_store_sql::statements! {
 const ATTACHMENT_OWNER: Vocabulary = Vocabulary::new(&[
     VocabularyTerm::new(
         "turn_attachment_owner",
-        lash_core::store_backend_support::turn_attachment_owner_predicate_sql,
+        lash_core_execution::store_backend_support::turn_attachment_owner_predicate_sql,
     ),
     VocabularyTerm::new(
         "process_attachment_owner",
-        lash_core::store_backend_support::process_attachment_owner_predicate_sql,
+        lash_core_execution::store_backend_support::process_attachment_owner_predicate_sql,
     ),
 ]);
 
@@ -231,7 +231,7 @@ pub(crate) async fn release_attachment_condemnation(
 /// corrupt row cannot be mistaken for sweep-owned maintenance work.
 pub(crate) async fn list_attachment_condemnations(
     pool: &PgPool,
-) -> Result<Vec<lash_core::AttachmentCondemnationRecord>, StoreError> {
+) -> Result<Vec<lash_core_execution::AttachmentCondemnationRecord>, StoreError> {
     let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
         attachment_sql().condemnation.select_all.sql(),
     )
@@ -243,7 +243,7 @@ pub(crate) async fn list_attachment_condemnations(
         .map(|(digest, phase, write_token, write_session_id)| {
             let digest =
                 attachment_id_from_sql("attachment condemnation", "attachment_id", digest)?;
-            lash_core::store::decode_attachment_condemnation_record(
+            lash_core_execution::store::decode_attachment_condemnation_record(
                 digest,
                 &phase,
                 write_token.is_some(),
@@ -305,10 +305,10 @@ impl AttachmentManifest for PostgresSessionStore {
     async fn begin_attachment_write(
         &self,
         intent: AttachmentIntent,
-    ) -> Result<lash_core::AttachmentWriteFence, StoreError> {
+    ) -> Result<lash_core_execution::AttachmentWriteFence, StoreError> {
         let pool = self.pool.clone();
         {
-            let write_id = lash_core::AttachmentWriteToken::new();
+            let write_id = lash_core_execution::AttachmentWriteToken::new();
             let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
             crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, &intent.session_id)
                 .await?;
@@ -336,7 +336,7 @@ impl AttachmentManifest for PostgresSessionStore {
                 // these bytes cannot land inside it.
                 Some(("deleting", _)) | Some(("condemned", true)) => {
                     tx.commit().await.map_err(store_sqlx_error)?;
-                    return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
+                    return Ok(lash_core_execution::AttachmentWriteFence::ReclamationInFlight);
                 }
                 // Keep the condemnation present and own it with this attempt's
                 // identity until the backend put settles.
@@ -351,7 +351,7 @@ impl AttachmentManifest for PostgresSessionStore {
                         .rows_affected();
                     if claimed == 0 {
                         tx.commit().await.map_err(store_sqlx_error)?;
-                        return Ok(lash_core::AttachmentWriteFence::ReclamationInFlight);
+                        return Ok(lash_core_execution::AttachmentWriteFence::ReclamationInFlight);
                     }
                 }
                 None => {}
@@ -376,7 +376,7 @@ impl AttachmentManifest for PostgresSessionStore {
                     intent
                         .owner
                         .as_ref()
-                        .and_then(lash_core::AttachmentOwner::incarnation)
+                        .and_then(lash_core_execution::AttachmentOwner::incarnation)
                         .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
                         .transpose()
                         .map_err(|_| {
@@ -390,8 +390,8 @@ impl AttachmentManifest for PostgresSessionStore {
                 .await
                 .map_err(store_sqlx_error)?;
             tx.commit().await.map_err(store_sqlx_error)?;
-            Ok(lash_core::AttachmentWriteFence::Granted(
-                lash_core::AttachmentWritePermit::new(write_id),
+            Ok(lash_core_execution::AttachmentWriteFence::Granted(
+                lash_core_execution::AttachmentWritePermit::new(write_id),
             ))
         }
     }
@@ -399,7 +399,7 @@ impl AttachmentManifest for PostgresSessionStore {
     async fn complete_attachment_write(
         &self,
         intent: &AttachmentIntent,
-        permit: lash_core::AttachmentWritePermit,
+        permit: lash_core_execution::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         let pool = self.pool.clone();
         let digest = intent.attachment_id.clone();
@@ -439,7 +439,7 @@ impl AttachmentManifest for PostgresSessionStore {
     async fn abort_attachment_write(
         &self,
         intent: &AttachmentIntent,
-        permit: lash_core::AttachmentWritePermit,
+        permit: lash_core_execution::AttachmentWritePermit,
     ) -> Result<(), StoreError> {
         let pool = self.pool.clone();
         let attachment_id = intent.attachment_id.to_string();
@@ -515,7 +515,7 @@ impl AttachmentManifest for PostgresSessionStore {
                         .get::<Option<i64>, _>(7)
                         .map(|value| u64_from_sql("AttachmentManifest", "owner_incarnation", value))
                         .transpose()?;
-                    let owner = lash_core::store::decode_attachment_owner(
+                    let owner = lash_core_execution::store::decode_attachment_owner(
                         owner_kind.as_deref(),
                         owner_id,
                         owner_incarnation,

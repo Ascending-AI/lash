@@ -31,7 +31,7 @@ impl<S: tracing::Subscriber> Layer<S> for Warnings {
 lash_conformance::attachment_owner_degraded_tests!({
     let dir = tempfile::tempdir().unwrap();
     let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
-        as Arc<dyn lash_core::SessionStoreFactory>;
+        as Arc<dyn lash_core_execution::SessionStoreFactory>;
     (dir, factory)
 });
 
@@ -54,7 +54,7 @@ async fn attachment_constructors_warn_exactly_once_with_fields() {
         let warnings = Warnings::default();
         let subscriber = tracing_subscriber::registry().with(warnings.clone());
         async {
-            let clock = Arc::new(lash_core::facade_support::SystemClock);
+            let clock = Arc::new(lash_core_execution::facade_support::SystemClock);
             match path {
                 "Store::open" => {
                     Store::open(&db).await.unwrap();

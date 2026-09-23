@@ -10,23 +10,28 @@ async fn postgres_completion_closure(
     scope: &ExecutionScope,
 ) -> (
     Arc<dyn RuntimePersistence>,
-    lash_core::SessionExecutionLease,
-    lash_core::TurnCancelClosureAuthorization,
+    lash_core_execution::SessionExecutionLease,
+    lash_core_execution::TurnCancelClosureAuthorization,
 ) {
-    let address = lash_core::runtime::TurnAddress::new(session, "turn");
+    let address = lash_core_execution::runtime::TurnAddress::new(session, "turn");
     let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create PostgreSQL closure session");
     let lease = store
         .try_claim_session_execution_lease(
             &address.session_id,
-            &lash_core::LeaseOwnerIdentity::opaque(session, format!("{session}:incarnation")),
+            &lash_core_execution::LeaseOwnerIdentity::opaque(
+                session,
+                format!("{session}:incarnation"),
+            ),
             &format!("{session}:executor"),
             60_000,
         )
@@ -35,7 +40,7 @@ async fn postgres_completion_closure(
         .acquired()
         .expect("PostgreSQL closure lane is free");
     let scoped = host
-        .scoped(lash_core::testing::store_fixtures::durable_admission(scope))
+        .scoped(lash_core_execution::testing::store_fixtures::durable_admission(scope))
         .expect("scope PostgreSQL owner");
     let binding = host
         .turn_control_binding(&scoped)
@@ -51,33 +56,33 @@ async fn postgres_completion_closure(
         .await
         .expect("persist PostgreSQL admitted scope");
     let resolver = binding.resolver();
-    let authorization = lash_core::TurnCancelClosureAuthorization::new(
+    let authorization = lash_core_execution::TurnCancelClosureAuthorization::new(
         address.clone(),
         binding.binding_id(),
         scope.clone(),
         resolver
             .await_event_key(
                 &address.execution_scope(),
-                lash_core::AwaitEventWaitIdentity::TurnCancelGate,
+                lash_core_execution::AwaitEventWaitIdentity::TurnCancelGate,
             )
             .await
             .expect("PostgreSQL base key"),
         resolver
             .await_event_key(
                 &address.execution_scope(),
-                lash_core::AwaitEventWaitIdentity::TurnCancelEscalation,
+                lash_core_execution::AwaitEventWaitIdentity::TurnCancelEscalation,
             )
             .await
             .expect("PostgreSQL escalation key"),
         resolver
             .await_event_key(
                 &address.execution_scope(),
-                lash_core::AwaitEventWaitIdentity::TurnTerminal,
+                lash_core_execution::AwaitEventWaitIdentity::TurnTerminal,
             )
             .await
             .expect("PostgreSQL terminal key"),
-        lash_core::TurnCancelClosureProposal::CompletionSealed,
-        lash_core::TurnCancelIntentSnapshot::Absent,
+        lash_core_execution::TurnCancelClosureProposal::CompletionSealed,
+        lash_core_execution::TurnCancelIntentSnapshot::Absent,
         &lease.fence(),
     )
     .expect("materialize PostgreSQL closure");
@@ -107,16 +112,16 @@ async fn postgres_direct_effect_retirement_serializes_with_bound_catalog() {
         .await
         .expect("authorize PostgreSQL closure");
 
-    let retirement = || lash_core::EffectJournalRetirement::for_scope(&scope).unwrap();
+    let retirement = || lash_core_execution::EffectJournalRetirement::for_scope(&scope).unwrap();
     let blocked = host
         .retire_effect_journal(retirement())
         .await
         .expect_err("direct PostgreSQL owner retirement observes catalog participant");
     assert_eq!(
         blocked.code,
-        lash_core::RuntimeErrorCode::EffectScopeNotQuiescent
+        lash_core_execution::RuntimeErrorCode::EffectScopeNotQuiescent
     );
-    let authority = lash_core::TurnCancellationAuthority::new(
+    let authority = lash_core_execution::TurnCancellationAuthority::new(
         effect_host.turn_control_binding_id(),
         effect_host.clone(),
     );
@@ -155,9 +160,11 @@ async fn postgres_direct_effect_retirement_serializes_with_bound_catalog() {
         &late_scope,
     )
     .await;
-    host.retire_effect_journal(lash_core::EffectJournalRetirement::for_scope(&late_scope).unwrap())
-        .await
-        .expect("retire PostgreSQL owner before authorization");
+    host.retire_effect_journal(
+        lash_core_execution::EffectJournalRetirement::for_scope(&late_scope).unwrap(),
+    )
+    .await
+    .expect("retire PostgreSQL owner before authorization");
     late_store
         .authorize_turn_cancel_closure(&late_lease.fence(), &late_authorization)
         .await
@@ -276,7 +283,7 @@ async fn postgres_scope_retirement_waits_for_the_admission_lock() {
     let retiring_scope = scope.clone();
     let mut retirement = tokio::spawn(async move {
         host.retire_effect_journal(
-            lash_core::EffectJournalRetirement::for_scope(&retiring_scope)
+            lash_core_execution::EffectJournalRetirement::for_scope(&retiring_scope)
                 .expect("runtime-operation scopes retire"),
         )
         .await

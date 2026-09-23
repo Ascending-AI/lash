@@ -15,8 +15,8 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
-use lash_core::store::SessionCheckpoint;
-use lash_core::{
+use lash_core_execution::store::SessionCheckpoint;
+use lash_core_execution::{
     BlobRef, CheckpointComponentDescriptor, DurablePayload, DurableScan, DurableSurface,
     ScanCoverage, StorePreflight,
 };
@@ -127,7 +127,7 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     storage
         .lashlang_artifact_store()
         .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("postgres-preflight-test"),
+            &lash_core_execution::ArtifactOwner::host("postgres-preflight-test"),
             &artifact,
         )
         .await
@@ -459,10 +459,10 @@ async fn a_deep_page_resumes_after_the_last_session_scanned_not_the_last_item() 
 fn encoded_manifest(execution_state_ref: &str) -> Vec<u8> {
     let mut components = std::collections::BTreeMap::new();
     components.insert(
-        lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
+        lash_core_execution::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
         CheckpointComponentDescriptor {
             blob_ref: BlobRef(execution_state_ref.to_string()),
-            encoding_version: lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+            encoding_version: lash_core_execution::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
         },
     );
     encode_manifest(components)
@@ -476,8 +476,8 @@ fn encode_manifest(
     components: std::collections::BTreeMap<String, CheckpointComponentDescriptor>,
 ) -> Vec<u8> {
     let manifest = SessionCheckpoint {
-        schema_version: lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
-        turn_state: lash_core::PersistedTurnState::default(),
+        schema_version: lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
+        turn_state: lash_core_execution::PersistedTurnState::default(),
         components,
     };
     let mut bytes = Vec::new();

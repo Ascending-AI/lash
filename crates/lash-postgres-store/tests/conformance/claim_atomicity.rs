@@ -1,4 +1,6 @@
-use lash_core::{QueuedWorkStore, RuntimePersistence, SessionExecutionLeaseStore, StoreError};
+use lash_core_execution::{
+    QueuedWorkStore, RuntimePersistence, SessionExecutionLeaseStore, StoreError,
+};
 use lash_sansio::SessionId;
 use std::sync::Arc;
 #[path = "../../../lash-core/tests/support/queued_claim_atomicity.rs"]
@@ -56,13 +58,13 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
     super::reset(storage.pool()).await;
     let session_id = "postgres-fence-corrupt";
     let store = storage.session_store(session_id);
-    let owner = lash_core::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
+    let owner = lash_core_execution::LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
     let lease = store
         .try_claim_session_execution_lease_with_token(
             &SessionId::from(session_id),
             &owner,
             "postgres-conformance-executor",
-            &lash_core::LeaseClaimNonce::new(),
+            &lash_core_execution::LeaseClaimNonce::new(),
             120_000,
         )
         .await
@@ -70,10 +72,10 @@ async fn postgres_negative_and_exhausted_queued_work_fences_are_typed_when_confi
         .acquired()
         .expect("session lease acquired");
     let batch = store
-        .enqueue_queued_work(lash_core::runtime::QueuedWorkBatchDraft::new(
+        .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
             session_id,
-            lash_core::DeliveryPolicy::EarliestSafeBoundary,
-            lash_core::runtime::SessionCommand::RefreshToolCatalog {
+            lash_core_execution::DeliveryPolicy::EarliestSafeBoundary,
+            lash_core_execution::runtime::SessionCommand::RefreshToolCatalog {
                 reason: "fence test".to_string(),
             },
         ))

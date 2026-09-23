@@ -4,8 +4,8 @@ use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
-pub(crate) use lash_core::store_backend_support::SessionMetaWrite;
-use lash_core::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
+pub(crate) use lash_core_execution::store_backend_support::SessionMetaWrite;
+use lash_core_execution::store_backend_support::{CausalColumns, SessionMetaCodec, StoredRelation};
 
 const SESSION_META_CODEC: SessionMetaCodec = SessionMetaCodec::new("PostgreSQL BIGINT");
 
@@ -23,7 +23,7 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> StoredRelation {
                 .map(SessionId::from),
             turn_id: row
                 .get::<Option<String>, _>("caused_by_turn_id")
-                .map(lash_core::TurnId::from),
+                .map(lash_core_execution::TurnId::from),
             effect_id: row.get("caused_by_effect_id"),
             call_id: row.get("caused_by_call_id"),
             process_id: row
@@ -47,7 +47,7 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> StoredRelation {
 pub(crate) fn decode_catalog_relation(
     stored: StoredRelation,
     observer_intent_rows_json: &str,
-) -> Result<lash_core::SessionRelation, StoreError> {
+) -> Result<lash_core_execution::SessionRelation, StoreError> {
     let observer_intent_rows =
         serde_json::from_str(observer_intent_rows_json).map_err(|error| {
             SessionMetaCodec::corrupt(
@@ -71,7 +71,7 @@ pub(crate) fn decode_catalog_relation(
 pub(crate) async fn load_recorded_lineage_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-) -> Result<Option<lash_core::SessionLineage>, StoreError> {
+) -> Result<Option<lash_core_execution::SessionLineage>, StoreError> {
     let row = sqlx::query(session_sql().meta.select_lineage.sql())
         .bind(session_id.as_str())
         .fetch_optional(&mut **tx)
@@ -122,7 +122,7 @@ pub(crate) async fn write_session_meta_tx(
         .bind(stored.source_session_id.as_deref())
         .bind(&stored.source_node_id)
         .bind(i64::try_from(created_at_ms).unwrap_or(i64::MAX))
-        .bind(lash_core::store::CURRENT_SESSION_STATE_VERSION as i32)
+        .bind(lash_core_execution::store::CURRENT_SESSION_STATE_VERSION as i32)
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -205,7 +205,7 @@ pub(crate) async fn load_session_meta(
             ));
         }
         stored.pending_observer_intents.push(
-            lash_core::store_backend_support::StoredObserverIntent {
+            lash_core_execution::store_backend_support::StoredObserverIntent {
                 process_id: ProcessId::from(process_id),
                 process_incarnation,
             },

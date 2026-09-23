@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use lash_core::{ProcessRegistry, SessionStoreFactory};
+use lash_core_execution::{ProcessRegistry, SessionStoreFactory};
 use lash_sqlite_store::{SqliteProcessRegistry, SqliteSessionStoreFactory};
 
 #[path = "blob_probe.rs"]

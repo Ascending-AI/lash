@@ -8,8 +8,8 @@ use lash_sansio::TurnId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lash_core::store::GraphAppend;
-use lash_core::{
+use lash_core_execution::store::GraphAppend;
+use lash_core_execution::{
     AttachmentId, CommitBudget, CommitBudgetLimit, PersistedSessionConfig, ProtocolEvent,
     RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionHistoryRecord,
     SessionNodePayload, SessionNodeRecord, SessionPolicy, SessionRelation,
@@ -87,9 +87,10 @@ fn realistic_commit(
     logical_bytes: usize,
     sample: usize,
 ) -> RuntimeCommit {
-    let frame_key = lash_core::FrameKey::from_caller_material("benchmark-frame")
+    let frame_key = lash_core_execution::FrameKey::from_caller_material("benchmark-frame")
         .expect("non-empty frame material");
-    let frame_node_id = lash_core::facade_support::frame_node_id(session_id, frame_key.as_str());
+    let frame_node_id =
+        lash_core_execution::facade_support::frame_node_id(session_id, frame_key.as_str());
     let nodes = (0..row_shape.graph)
         .map(|index| {
             let node_id = if index == 0 {
@@ -110,9 +111,9 @@ fn realistic_commit(
                 payload: if index == 0 {
                     SessionNodePayload::FrameOpen {
                         frame_key: frame_key.clone(),
-                        reason: lash_core::AgentFrameReason::initial(),
-                        assignment: lash_core::AgentFrameAssignment::from_policy(
-                            SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                        reason: lash_core_execution::AgentFrameReason::initial(),
+                        assignment: lash_core_execution::AgentFrameAssignment::from_policy(
+                            SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
                         ),
                         protocol_turn_options: Default::default(),
                     }
@@ -149,14 +150,14 @@ fn realistic_commit(
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         policy: SessionPolicy {
-            model: lash_core::ModelSpec::builder("benchmark-model")
+            model: lash_core_execution::ModelSpec::builder("benchmark-model")
                 .context_window_tokens(200_000)
                 .build()
                 .expect("benchmark model"),
-            ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+            ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
         },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(
@@ -172,7 +173,7 @@ fn realistic_commit(
         let len = 64 + (index % 5) * 32;
         commit.checkpoint.components.insert(
             format!("benchmark/small/{index:02}"),
-            lash_core::HydratedCheckpointComponent::changed(seeded_bytes(
+            lash_core_execution::HydratedCheckpointComponent::changed(seeded_bytes(
                 len,
                 0x51_4d_41_4c_4c ^ ((sample as u64) << 16) ^ index as u64,
             )),
@@ -181,20 +182,20 @@ fn realistic_commit(
     for index in 0..LARGE_CHECKPOINT_COMPONENTS {
         commit.checkpoint.components.insert(
             format!("benchmark/body/{index}"),
-            lash_core::HydratedCheckpointComponent::changed(Vec::new()),
+            lash_core_execution::HydratedCheckpointComponent::changed(Vec::new()),
         );
     }
     commit.committed_attachment_ids = attachment_ids;
     commit.adopted_intent_rows = row_shape.adoption as u64;
     let turn_id = TurnId::from(format!("commit-size-benchmark-{sample}"));
     let (mut commit, _) = commit
-        .with_operation(lash_core::store::OperationId::new(
-            lash_core::ExecutionScope::turn(session_id, turn_id),
+        .with_operation(lash_core_execution::store::OperationId::new(
+            lash_core_execution::ExecutionScope::turn(session_id, turn_id),
             "commit",
         ))
         .expect("derive benchmark graph node ids");
 
-    let baseline = lash_core::testing::measure_runtime_commit_budget(&commit)
+    let baseline = lash_core_execution::testing::measure_runtime_commit_budget(&commit)
         .expect("measure benchmark baseline")
         .total_bytes;
     assert!(
@@ -208,7 +209,7 @@ fn realistic_commit(
         let len = per_large_body + usize::from(index < remainder);
         commit.checkpoint.components.insert(
             format!("benchmark/body/{index}"),
-            lash_core::HydratedCheckpointComponent::changed(seeded_bytes(
+            lash_core_execution::HydratedCheckpointComponent::changed(seeded_bytes(
                 len,
                 0x42_4f_44_59 ^ ((sample as u64) << 16) ^ index as u64,
             )),
@@ -307,7 +308,7 @@ fn percentile(samples: &mut [Duration], percentile: f64) -> Duration {
 }
 
 fn assert_reference_admission(commit: &RuntimeCommit) {
-    let measured = lash_core::testing::measure_runtime_commit_budget(commit)
+    let measured = lash_core_execution::testing::measure_runtime_commit_budget(commit)
         .expect("measure benchmark commit with production accounting");
     let mut bounded = commit.clone();
     bounded.commit_budget = CommitBudget::bounded(RECOMMENDED_BYTES, RECOMMENDED_ROWS);
@@ -328,7 +329,7 @@ fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
         logical_bytes,
         0,
     );
-    let expected = lash_core::testing::measure_runtime_commit_budget(&commit)
+    let expected = lash_core_execution::testing::measure_runtime_commit_budget(&commit)
         .expect("measure benchmark commit with production accounting");
 
     assert_eq!(expected.total_bytes, logical_bytes);
@@ -342,7 +343,7 @@ fn measured_budget_matches_seeded_checkpoint_and_adoption_rows() {
     );
     assert!(matches!(
         bounded.validate_budget(),
-        Err(lash_core::StoreError::CommitByteBudgetExceeded {
+        Err(lash_core_execution::StoreError::CommitByteBudgetExceeded {
             session_config_bytes,
             graph_delta_bytes,
             checkpoint_bytes,
@@ -418,7 +419,7 @@ async fn measured_commit_size_curve() {
                             pending_observer_intents: Vec::new(),
                             session_id: session_id.clone(),
                             relation: SessionRelation::Root,
-                            policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
                         })
                         .await
                         .expect("create SQLite benchmark store"),
@@ -428,15 +429,16 @@ async fn measured_commit_size_curve() {
                     _ => unreachable!(),
                 };
                 let commit = realistic_commit(&session_id, case.rows, case.logical_bytes, sample);
-                let sample_measurement = lash_core::testing::measure_runtime_commit_budget(&commit)
-                    .expect("measure benchmark commit with production accounting");
+                let sample_measurement =
+                    lash_core_execution::testing::measure_runtime_commit_budget(&commit)
+                        .expect("measure benchmark commit with production accounting");
                 assert_eq!(sample_measurement.total_bytes, case.logical_bytes);
                 assert_eq!(sample_measurement.graph_rows, case.rows.graph);
                 assert_eq!(sample_measurement.adopted_intent_rows, case.rows.adoption);
                 assert_eq!(sample_measurement.total_rows, case.rows.total());
                 assert_reference_admission(&commit);
                 store
-                    .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
+                    .admit_and_bind_session(&lash_core_execution::SessionBinding::root(session_id))
                     .await
                     .expect("bind benchmark session to store");
                 match backend {

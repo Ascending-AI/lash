@@ -5,7 +5,7 @@
 //! reclaim law is asserted through raw catalog reads, and the conformance file is
 //! at its line budget.
 
-use lash_core::SessionStoreFactory;
+use lash_core_execution::SessionStoreFactory;
 use lash_postgres_store::PostgresStorage;
 use lash_sansio::SessionId;
 
@@ -73,7 +73,8 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     reset(&storage).await;
     let pool = storage.pool().clone();
     let factory = storage.session_store_factory();
-    let policy = lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded);
+    let policy =
+        lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded);
 
     async fn resident_node_ids(pool: &sqlx::PgPool) -> Vec<String> {
         sqlx::query_scalar::<_, String>("SELECT node_id FROM lash_graph_nodes ORDER BY node_id")
@@ -94,20 +95,20 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     async fn commit_single_root_node(
         factory: &impl SessionStoreFactory,
         session_id: &SessionId,
-        policy: &lash_core::SessionPolicy,
+        policy: &lash_core_execution::SessionPolicy,
     ) -> String {
         let store = factory
-            .create_store(&lash_core::SessionStoreCreateRequest {
+            .create_store(&lash_core_execution::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
-                relation: lash_core::SessionRelation::Root,
+                relation: lash_core_execution::SessionRelation::Root,
                 policy: policy.clone(),
             })
             .await
             .expect("create store");
-        let mut state = lash_core::RuntimeSessionState {
+        let mut state = lash_core_execution::RuntimeSessionState {
             session_id: SessionId::from(session_id.to_string()),
-            ..lash_core::RuntimeSessionState::new(policy.clone())
+            ..lash_core_execution::RuntimeSessionState::new(policy.clone())
         };
         state.ensure_agent_frame_initialized();
         let leaf = state
@@ -116,10 +117,9 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             .clone()
             .expect("root leaf node id");
         store
-            .commit_runtime_state(lash_core::store::RuntimeCommit::persisted_state_for_test(
-                &state,
-                &[],
-            ))
+            .commit_runtime_state(
+                lash_core_execution::store::RuntimeCommit::persisted_state_for_test(&state, &[]),
+            )
             .await
             .expect("commit root node");
         leaf.to_string()
@@ -148,41 +148,42 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     let parent_leaf =
         commit_single_root_node(&factory, &SessionId::from("orphan-fork-parent"), &policy).await;
     factory
-        .fork_at(&lash_core::ForkSessionRequest {
+        .fork_at(&lash_core_execution::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("orphan-fork-child"),
             node_id: parent_leaf.clone().into(),
-            relation: lash_core::SessionRelation::Root,
+            relation: lash_core_execution::SessionRelation::Root,
             policy: policy.clone(),
         })
         .await
         .expect("fork at the parent's live tip");
     {
         let child = factory
-            .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            .open_existing_store(&lash_core_execution::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("orphan-fork-child"),
-                relation: lash_core::SessionRelation::Root,
+                relation: lash_core_execution::SessionRelation::Root,
                 policy: policy.clone(),
             })
             .await
             .expect("open forked child")
             .expect("forked child exists");
-        let mut child_state = lash_core::store::load_persisted_session_state(child.as_ref())
-            .await
-            .expect("load child state")
-            .expect("child state exists");
+        let mut child_state =
+            lash_core_execution::store::load_persisted_session_state(child.as_ref())
+                .await
+                .expect("load child state")
+                .expect("child state exists");
         let parent_node_id = child_state.session_graph.leaf_node_id.clone();
         child_state
             .session_graph
-            .apply_append(&lash_core::store::GraphAppend::Extend {
-                nodes: vec![lash_core::SessionNodeRecord {
+            .apply_append(&lash_core_execution::store::GraphAppend::Extend {
+                nodes: vec![lash_core_execution::SessionNodeRecord {
                     node_id: "orphan-fork-child-node".to_string().into(),
                     parent_node_id,
                     timestamp: "2026-08-17T00:00:00Z".to_string(),
-                    payload: lash_core::SessionNodePayload::Event {
-                        event: lash_core::SessionHistoryRecord::Protocol(
-                            lash_core::ProtocolEvent::typed(
+                    payload: lash_core_execution::SessionNodePayload::Event {
+                        event: lash_core_execution::SessionHistoryRecord::Protocol(
+                            lash_core_execution::ProtocolEvent::typed(
                                 "orphan-fork-child-event",
                                 serde_json::json!({ "content": "child node" }),
                             )
@@ -193,10 +194,12 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
             })
             .expect("append child node");
         child
-            .commit_runtime_state(lash_core::store::RuntimeCommit::persisted_state_for_test(
-                &child_state,
-                &[],
-            ))
+            .commit_runtime_state(
+                lash_core_execution::store::RuntimeCommit::persisted_state_for_test(
+                    &child_state,
+                    &[],
+                ),
+            )
             .await
             .expect("advance forked child");
     }

@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_conformance::{DrainEndWorld, DrainEndWorldFactory};
-use lash_core::store::RuntimePersistence;
-use lash_core::{EffectHost, ProcessRegistry, SessionStoreFactory};
+use lash_core_execution::store::RuntimePersistence;
+use lash_core_execution::{EffectHost, ProcessRegistry, SessionStoreFactory};
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 use lash_sansio::SessionId;
 
@@ -24,7 +24,7 @@ fn postgres_drain_end_host(storage: &PostgresStorage) -> Arc<dyn EffectHost> {
     let host = PostgresEffectHost::with_options(
         storage,
         PostgresEffectReplayOptions {
-            lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
+            lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
                 .expect("a ttl three renew intervals wide"),
             drain_budget: Default::default(),
         },
@@ -35,11 +35,13 @@ fn postgres_drain_end_host(storage: &PostgresStorage) -> Arc<dyn EffectHost> {
 async fn postgres_drain_end_world(storage: PostgresStorage) -> DrainEndWorld {
     let store_factory = storage.session_store_factory_with_shared_process_registry();
     let store = store_factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create the drain-end session store");

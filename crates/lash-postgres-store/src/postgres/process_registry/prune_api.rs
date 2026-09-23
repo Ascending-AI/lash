@@ -1,10 +1,12 @@
 use super::*;
 use lash_sansio::ProcessId;
 
-fn watermark_change_seq(watermark: lash_core::ProjectionWatermark) -> Option<i64> {
+fn watermark_change_seq(watermark: lash_core_execution::ProjectionWatermark) -> Option<i64> {
     match watermark {
-        lash_core::ProjectionWatermark::UpTo(cursor) => Some(cursor.store_sequence() as i64),
-        lash_core::ProjectionWatermark::NoProjector => None,
+        lash_core_execution::ProjectionWatermark::UpTo(cursor) => {
+            Some(cursor.store_sequence() as i64)
+        }
+        lash_core_execution::ProjectionWatermark::NoProjector => None,
     }
 }
 
@@ -13,7 +15,7 @@ async fn select_prunable<'c>(
     sql: &str,
     cutoff: i64,
     max_change_seq: Option<i64>,
-    filter: Option<&lash_core::ProcessListFilter>,
+    filter: Option<&lash_core_execution::ProcessListFilter>,
 ) -> Result<Vec<ProcessId>, PluginError> {
     let rows = sqlx::query(sql)
         .bind(cutoff)
@@ -39,8 +41,8 @@ async fn select_prunable<'c>(
 pub(super) async fn prunable_terminal_processes(
     registry: &PostgresProcessRegistry,
     cutoff_epoch_ms: u64,
-    filter: Option<lash_core::ProcessListFilter>,
-    watermark: lash_core::ProjectionWatermark,
+    filter: Option<lash_core_execution::ProcessListFilter>,
+    watermark: lash_core_execution::ProjectionWatermark,
 ) -> Result<Vec<ProcessId>, PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     select_prunable(
@@ -56,8 +58,8 @@ pub(super) async fn prunable_terminal_processes(
 pub(super) async fn complete_process_artifact_cleanup(
     registry: &PostgresProcessRegistry,
     process_id: &ProcessId,
-    incarnation: lash_core::ProcessIncarnation,
-) -> Result<lash_core::ProcessArtifactCleanupAck, PluginError> {
+    incarnation: lash_core_execution::ProcessIncarnation,
+) -> Result<lash_core_execution::ProcessArtifactCleanupAck, PluginError> {
     let (removed, current_incarnation): (bool, Option<i64>) = sqlx::query_as(
         process_sql()
             .cleanup_postgres
@@ -69,25 +71,27 @@ pub(super) async fn complete_process_artifact_cleanup(
     .fetch_one(&registry.pool)
     .await
     .map_err(plugin_sqlx_error)?;
-    let process_ref = lash_core::ProcessRef::new(process_id.clone(), incarnation);
+    let process_ref = lash_core_execution::ProcessRef::new(process_id.clone(), incarnation);
     Ok(match current_incarnation {
         Some(found) => {
-            let found = lash_core::ProcessIncarnation::from_registration_sequence(
+            let found = lash_core_execution::ProcessIncarnation::from_registration_sequence(
                 plugin_u64_from_sql("ProcessRecord", "incarnation", found)?,
             );
             if found != incarnation {
-                lash_core::ProcessArtifactCleanupAck::StaleIncarnation {
+                lash_core_execution::ProcessArtifactCleanupAck::StaleIncarnation {
                     expected: process_ref,
-                    found: lash_core::ProcessRef::new(process_id.clone(), found),
+                    found: lash_core_execution::ProcessRef::new(process_id.clone(), found),
                 }
             } else if removed {
-                lash_core::ProcessArtifactCleanupAck::Acknowledged { process_ref }
+                lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_ref }
             } else {
-                lash_core::ProcessArtifactCleanupAck::Unknown { process_ref }
+                lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_ref }
             }
         }
-        None if removed => lash_core::ProcessArtifactCleanupAck::Acknowledged { process_ref },
-        None => lash_core::ProcessArtifactCleanupAck::Unknown { process_ref },
+        None if removed => {
+            lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_ref }
+        }
+        None => lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_ref },
     })
 }
 
@@ -123,8 +127,8 @@ async fn reclaim_settled_parent_end_plans_tx(
 pub(super) async fn prune_terminal_processes(
     registry: &PostgresProcessRegistry,
     cutoff_epoch_ms: u64,
-    filter: Option<lash_core::ProcessListFilter>,
-    watermark: lash_core::ProjectionWatermark,
+    filter: Option<lash_core_execution::ProcessListFilter>,
+    watermark: lash_core_execution::ProjectionWatermark,
 ) -> Result<ProcessPruneReport, PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
     let pruned_at_ms = registry.clock.timestamp_ms() as i64;

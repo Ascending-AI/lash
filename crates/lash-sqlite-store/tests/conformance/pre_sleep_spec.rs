@@ -13,17 +13,22 @@ const PRE_SLEEP_SPEC_EFFECT_GENERATION: i32 = 21;
 
 fn sleep_effect_envelope() -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(
                 durable_turn_scope("cutover-session", "cutover-turn"),
                 "sleep-replay",
             )
             .expect("valid sleep effect address"),
-            lash_core::RuntimeAttribution::for_turn("cutover-session", "cutover-turn", 1, 0),
+            lash_core_execution::RuntimeAttribution::for_turn(
+                "cutover-session",
+                "cutover-turn",
+                1,
+                0,
+            ),
             "sleep",
         ),
         RuntimeEffectCommand::Sleep {
-            spec: lash_core::SleepSpec::For { duration_ms: 5 },
+            spec: lash_core_execution::SleepSpec::For { duration_ms: 5 },
         },
     )
 }

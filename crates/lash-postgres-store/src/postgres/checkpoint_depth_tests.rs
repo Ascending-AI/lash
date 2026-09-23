@@ -7,7 +7,7 @@ fn checkpoint_with_changed_components(depth: usize) -> HydratedSessionCheckpoint
             .map(|index| {
                 (
                     format!("arbitrary/depth-invariance/{index:05}"),
-                    lash_core::HydratedCheckpointComponent::changed(
+                    lash_core_execution::HydratedCheckpointComponent::changed(
                         format!("depth-invariance-body-{index:05}").into_bytes(),
                     ),
                 )
@@ -26,7 +26,7 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
             .map(|(key, descriptor)| {
                 (
                     key.clone(),
-                    lash_core::HydratedCheckpointComponent::unchanged(descriptor),
+                    lash_core_execution::HydratedCheckpointComponent::unchanged(descriptor),
                 )
             })
             .collect(),

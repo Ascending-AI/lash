@@ -12,7 +12,7 @@ pub(super) async fn claim_process_lease(
     process_id: &ProcessId,
     owner: &LeaseOwnerIdentity,
     lease_ttl_ms: u64,
-) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
+) -> Result<ProcessLeaseClaimOutcome, lash_core_execution::PluginError> {
     let process_id = ProcessId::from(process_id.to_string());
     let owner = owner.clone();
     let now = registry.clock.timestamp_ms();
@@ -77,7 +77,7 @@ pub(super) async fn reclaim_process_lease(
     owner: &LeaseOwnerIdentity,
     _observed_holder: &ProcessLease,
     lease_ttl_ms: u64,
-) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
+) -> Result<ProcessLeaseClaimOutcome, lash_core_execution::PluginError> {
     let process_id = ProcessId::from(process_id.to_string());
     let owner = owner.clone();
     let now = registry.clock.timestamp_ms();
@@ -128,7 +128,7 @@ pub(super) async fn renew_process_lease(
     registry: &SqliteProcessRegistry,
     lease: &ProcessLease,
     lease_ttl_ms: u64,
-) -> Result<ProcessLease, lash_core::PluginError> {
+) -> Result<ProcessLease, lash_core_execution::PluginError> {
     let lease = lease.clone();
     let now = registry.clock.timestamp_ms();
     registry
@@ -166,7 +166,7 @@ pub(super) async fn renew_process_lease(
 pub(super) async fn get_process_lease(
     registry: &SqliteProcessRegistry,
     process_id: &ProcessId,
-) -> Result<Option<ProcessLease>, lash_core::PluginError> {
+) -> Result<Option<ProcessLease>, lash_core_execution::PluginError> {
     let process_id = ProcessId::from(process_id.to_string());
     registry
         .conn
@@ -183,7 +183,7 @@ pub(super) async fn get_process_lease(
 pub(super) async fn get_process_leases(
     registry: &SqliteProcessRegistry,
     process_ids: &[ProcessId],
-) -> Result<Vec<Option<ProcessLease>>, lash_core::PluginError> {
+) -> Result<Vec<Option<ProcessLease>>, lash_core_execution::PluginError> {
     if process_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -227,7 +227,7 @@ pub(super) async fn get_process_leases(
 pub(super) async fn complete_process_lease(
     registry: &SqliteProcessRegistry,
     completion: &ProcessLeaseCompletion,
-) -> Result<(), lash_core::PluginError> {
+) -> Result<(), lash_core_execution::PluginError> {
     // The same release decision `complete_process_with_lease` makes
     // (FIG-3388): read the row under the write flow's lock, run the shared
     // verdict, and let the one release statement's predicate backstop it. A
@@ -241,11 +241,11 @@ pub(super) async fn complete_process_lease(
             Ok(tx_outcome((|| {
                 let process_id = completion.process_id.clone();
                 let current = SqliteProcessRegistry::load_process_lease_row_conn(tx, &process_id)?;
-                let verdict = lash_core::store_backend_support::process_lease_verdict(
+                let verdict = lash_core_execution::store_backend_support::process_lease_verdict(
                     current
                         .as_ref()
                         .map(registry_transitions::ProcessLeaseRow::facts),
-                    lash_core::store_backend_support::ProcessLeaseAuthority {
+                    lash_core_execution::store_backend_support::ProcessLeaseAuthority {
                         lease_token: &completion.lease_token,
                         fencing_token: completion.fencing_token,
                     },
@@ -253,8 +253,8 @@ pub(super) async fn complete_process_lease(
                 );
                 if !matches!(
                     verdict,
-                    lash_core::store_backend_support::ProcessLeaseVerdict::Current
-                        | lash_core::store_backend_support::ProcessLeaseVerdict::Expired
+                    lash_core_execution::store_backend_support::ProcessLeaseVerdict::Current
+                        | lash_core_execution::store_backend_support::ProcessLeaseVerdict::Expired
                 ) {
                     return Ok(());
                 }
@@ -271,12 +271,12 @@ pub(super) async fn complete_process_lease(
                         ],
                     )
                     .map_err(process_sqlite_error)? as u64;
-                lash_core::store_backend_support::require_fenced_write_applied(
-                    lash_core::store_backend_support::FencedWrite::ProcessLeaseRelease,
+                lash_core_execution::store_backend_support::require_fenced_write_applied(
+                    lash_core_execution::store_backend_support::FencedWrite::ProcessLeaseRelease,
                     crate::SQLITE_BACKEND,
                     process_id.as_str(),
                     released,
-                    || lash_core::PluginError::ProcessLeaseSuperseded {
+                    || lash_core_execution::PluginError::ProcessLeaseSuperseded {
                         process_id: process_id.clone(),
                     },
                 )
@@ -287,13 +287,13 @@ pub(super) async fn complete_process_lease(
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessLeases for SqliteProcessRegistry {
+impl lash_core_execution::ProcessLeases for SqliteProcessRegistry {
     async fn claim_process_lease(
         &self,
         process_id: &ProcessId,
         owner: &LeaseOwnerIdentity,
         lease_ttl_ms: u64,
-    ) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
+    ) -> Result<ProcessLeaseClaimOutcome, lash_core_execution::PluginError> {
         leases::claim_process_lease(self, process_id, owner, lease_ttl_ms).await
     }
 
@@ -303,7 +303,7 @@ impl lash_core::ProcessLeases for SqliteProcessRegistry {
         owner: &LeaseOwnerIdentity,
         observed_holder: &ProcessLease,
         lease_ttl_ms: u64,
-    ) -> Result<ProcessLeaseClaimOutcome, lash_core::PluginError> {
+    ) -> Result<ProcessLeaseClaimOutcome, lash_core_execution::PluginError> {
         leases::reclaim_process_lease(self, process_id, owner, observed_holder, lease_ttl_ms).await
     }
 
@@ -311,28 +311,28 @@ impl lash_core::ProcessLeases for SqliteProcessRegistry {
         &self,
         lease: &ProcessLease,
         lease_ttl_ms: u64,
-    ) -> Result<ProcessLease, lash_core::PluginError> {
+    ) -> Result<ProcessLease, lash_core_execution::PluginError> {
         leases::renew_process_lease(self, lease, lease_ttl_ms).await
     }
 
     async fn get_process_lease(
         &self,
         process_id: &ProcessId,
-    ) -> Result<Option<ProcessLease>, lash_core::PluginError> {
+    ) -> Result<Option<ProcessLease>, lash_core_execution::PluginError> {
         leases::get_process_lease(self, process_id).await
     }
 
     async fn get_process_leases(
         &self,
         process_ids: &[ProcessId],
-    ) -> Result<Vec<Option<ProcessLease>>, lash_core::PluginError> {
+    ) -> Result<Vec<Option<ProcessLease>>, lash_core_execution::PluginError> {
         leases::get_process_leases(self, process_ids).await
     }
 
     async fn complete_process_lease(
         &self,
         completion: &ProcessLeaseCompletion,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         leases::complete_process_lease(self, completion).await
     }
 }

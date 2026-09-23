@@ -8,7 +8,7 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
     fence: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     boundary: QueuedWorkClaimBoundary,
-    batch_ids: &[lash_core::BatchId],
+    batch_ids: &[lash_core_execution::BatchId],
     policy: QueuedWorkClaimPolicy,
 ) -> Result<SelectedQueuedWorkClaimOutcome, StoreError> {
     ensure_session_execution_lease_conn(tx, session_id, fence, now)?;
@@ -24,7 +24,7 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
     let sql_batch_ids = encode_json(
         &batch_ids
             .iter()
-            .map(lash_core::BatchId::as_str)
+            .map(lash_core_execution::BatchId::as_str)
             .collect::<Vec<_>>(),
     )?;
     let present_ids = {
@@ -104,13 +104,13 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
         .iter()
         .map(|row| {
             (
-                lash_core::BatchId::from(row.batch_id.clone()),
+                lash_core_execution::BatchId::from(row.batch_id.clone()),
                 row.claim_id.clone(),
             )
         })
         .collect::<Vec<_>>();
     let interrupted_positions =
-        lash_core::store::queued_work::select_interrupted_exact_claim_indices(
+        lash_core_execution::store::queued_work::select_interrupted_exact_claim_indices(
             &validation_batch_claims,
             batch_ids,
         )
@@ -118,7 +118,7 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
             StoreError::SelectedQueuedWorkRequiresInterruptedComposition {
                 required_batch_ids: required_batch_ids
                     .into_iter()
-                    .map(lash_core::BatchId::into_inner)
+                    .map(lash_core_execution::BatchId::into_inner)
                     .collect(),
             }
         })?;
@@ -136,7 +136,7 @@ pub(super) fn claim_selected_queued_work_sqlite_conn(
         let mut requested_batches = std::collections::BTreeMap::new();
         for row in &requested_rows {
             let batch = queued_work_batch_from_conn(tx, row.clone())?;
-            if batch.work_class() != lash_core::store::QueuedWorkClass::TurnWork {
+            if batch.work_class() != lash_core_execution::store::QueuedWorkClass::TurnWork {
                 return Ok(SelectedQueuedWorkClaimOutcome::new(
                     None,
                     already_satisfied_batch_ids,

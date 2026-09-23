@@ -130,14 +130,18 @@ enum ArtifactStoreFailure {
 }
 
 impl ArtifactStoreFailure {
-    fn into_plugin_error(self) -> lash_core::PluginError {
+    fn into_plugin_error(self) -> lash_core_execution::PluginError {
         match self {
-            Self::OwnerRetired => lash_core::artifact_owner_retired_error(),
-            Self::DestinationOwnerRetired => lash_core::artifact_destination_owner_retired_error(),
-            Self::StagingEdgeMissing { artifact } => {
-                lash_core::artifact_staging_edge_missing_error(artifact)
+            Self::OwnerRetired => {
+                lash_core_execution::runtime::process::artifact_owner_retired_error()
             }
-            Self::Backend(message) => lash_core::PluginError::Session(message),
+            Self::DestinationOwnerRetired => {
+                lash_core_execution::runtime::process::artifact_destination_owner_retired_error()
+            }
+            Self::StagingEdgeMissing { artifact } => {
+                lash_core_execution::runtime::process::artifact_staging_edge_missing_error(artifact)
+            }
+            Self::Backend(message) => lash_core_execution::PluginError::Session(message),
         }
     }
 
@@ -197,7 +201,7 @@ impl PostgresLashlangArtifactStore {
         namespace: &str,
         artifact_ref: &str,
         bytes: &[u8],
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
     ) -> Result<(), ArtifactStoreFailure> {
         let (owner_kind, owner_id) = owner
             .storage_parts()
@@ -270,7 +274,7 @@ impl PostgresLashlangArtifactStore {
         &self,
         namespace: &str,
         artifact_ref: &str,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
     ) -> Result<(), ArtifactStoreFailure> {
         let (owner_kind, owner_id) = owner
             .storage_parts()
@@ -323,8 +327,8 @@ impl PostgresLashlangArtifactStore {
         &self,
         namespace: &str,
         artifact_ref: &str,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
+        from: &lash_core_execution::ArtifactOwner,
+        to: &lash_core_execution::ArtifactOwner,
     ) -> Result<(), ArtifactStoreFailure> {
         let (from_kind, from_id) = from
             .storage_parts()
@@ -410,7 +414,7 @@ impl PostgresLashlangArtifactStore {
         &self,
         namespace: &str,
         artifact_ref: &str,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
     ) -> Result<(), ArtifactStoreFailure> {
         let (owner_kind, owner_id) = owner
             .storage_parts()
@@ -448,9 +452,9 @@ impl PostgresLashlangArtifactStore {
     async fn retire_namespaced_owner(
         &self,
         namespace: &str,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
     ) -> Result<(), ArtifactStoreFailure> {
-        if !matches!(owner, lash_core::ArtifactOwner::Execution(_)) {
+        if !matches!(owner, lash_core_execution::ArtifactOwner::Execution(_)) {
             return Err(ArtifactStoreFailure::Backend(
                 "only execution artifact owners can be retired".to_string(),
             ));
@@ -528,7 +532,7 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
 
     async fn publish_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         artifact: &lashlang::ModuleArtifact,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(artifact.module_ref.as_str()) {
@@ -559,7 +563,7 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
 
     async fn retain_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         module_ref: &lashlang::ModuleRef,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         self.retain_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref.as_str(), owner)
@@ -569,8 +573,8 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
 
     async fn transfer_module_artifact(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
+        from: &lash_core_execution::ArtifactOwner,
+        to: &lash_core_execution::ArtifactOwner,
         module_ref: &lashlang::ModuleRef,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         self.transfer_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, module_ref.as_str(), from, to)
@@ -580,7 +584,7 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
 
     async fn release_module_artifact(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
         module_ref: &lashlang::ModuleRef,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         self.release_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, module_ref.as_str(), owner)
@@ -590,7 +594,7 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
 
     async fn retire_module_artifact_owner(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        owner: &lash_core_execution::ArtifactOwner,
     ) -> Result<(), lashlang::ArtifactStoreError> {
         self.retire_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, owner)
             .await
@@ -621,20 +625,20 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
+impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
     async fn publish_process_execution_env(
         &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
+        owner: &lash_core_execution::ArtifactOwner,
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
         bytes: &[u8],
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core::PluginError::Invoke(
+            return Err(lash_core_execution::PluginError::Invoke(
                 "invalid process execution environment reference".into(),
             ));
         }
         if !env_ref.matches_store_bytes(bytes) {
-            return Err(lash_core::PluginError::Session(format!(
+            return Err(lash_core_execution::PluginError::Session(format!(
                 "process execution environment bytes do not match `{env_ref}`"
             )));
         }
@@ -645,10 +649,10 @@ impl lash_core::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
 
     async fn transfer_process_execution_env(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core::PluginError> {
+        from: &lash_core_execution::ArtifactOwner,
+        to: &lash_core_execution::ArtifactOwner,
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.transfer_namespaced_owner(PROCESS_ENV_NAMESPACE, env_ref.as_str(), from, to)
             .await
             .map_err(ArtifactStoreFailure::into_plugin_error)
@@ -656,9 +660,9 @@ impl lash_core::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
 
     async fn release_process_execution_env(
         &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core::PluginError> {
+        owner: &lash_core_execution::ArtifactOwner,
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.release_namespaced_owner(PROCESS_ENV_NAMESPACE, env_ref.as_str(), owner)
             .await
             .map_err(ArtifactStoreFailure::into_plugin_error)
@@ -666,8 +670,8 @@ impl lash_core::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
 
     async fn retire_process_execution_env_owner(
         &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lash_core::PluginError> {
+        owner: &lash_core_execution::ArtifactOwner,
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.retire_namespaced_owner(PROCESS_ENV_NAMESPACE, owner)
             .await
             .map_err(ArtifactStoreFailure::into_plugin_error)
@@ -675,15 +679,15 @@ impl lash_core::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
 
     async fn get_process_execution_env(
         &self,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, lash_core::PluginError> {
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+    ) -> Result<Option<Vec<u8>>, lash_core_execution::PluginError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core::PluginError::Invoke(
+            return Err(lash_core_execution::PluginError::Invoke(
                 "invalid process execution environment reference".into(),
             ));
         }
         self.get_namespaced_bytes(PROCESS_ENV_NAMESPACE, env_ref.as_str())
             .await
-            .map_err(|err| lash_core::PluginError::Session(err.to_string()))
+            .map_err(|err| lash_core_execution::PluginError::Session(err.to_string()))
     }
 }

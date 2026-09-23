@@ -52,8 +52,8 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
             "refusal-probe",
             DeliveryPolicy::EarliestSafeBoundary,
-            lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                lash_core::facade_support::frame_node_id(
+            lash_core_execution::runtime::TurnWorkPayload::agent_frame_task(
+                lash_core_execution::facade_support::frame_node_id(
                     &SessionId::from("refusal-probe"),
                     "frame",
                 ),
@@ -68,7 +68,7 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
         &SessionId::from("refusal-probe"),
         lease.fencing_token,
         QueuedWorkClaimBoundary::Idle,
-        &lash_core::testing::queued_work_claim_policy(10),
+        &lash_core_execution::testing::queued_work_claim_policy(10),
     )
     .await
     .unwrap();
@@ -93,7 +93,7 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
                 &lease.fence(),
                 &owner,
                 QueuedWorkClaimBoundary::Idle,
-                lash_core::testing::queued_work_claim_policy(10)
+                lash_core_execution::testing::queued_work_claim_policy(10)
             )
             .await
             .unwrap()

@@ -817,7 +817,7 @@ async fn backfill_checkpoint_blob_refs_tx(
         let manifest: SessionCheckpoint = decode_versioned_msgpack_record(
             &bytes,
             "SessionCheckpoint",
-            lash_core::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
+            lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
         )?;
         let component_refs = manifest
             .components

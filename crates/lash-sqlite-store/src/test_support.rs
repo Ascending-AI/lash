@@ -3,7 +3,9 @@
 //! production store traits carry none.
 
 use super::*;
-use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport};
+use lash_core_execution::store::{
+    ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
+};
 
 #[async_trait::async_trait]
 impl StoreTestSupport for Store {

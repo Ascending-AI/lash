@@ -22,32 +22,32 @@ fn one_process_module(process_name: &str, param: &str) -> lashlang::Program {
     )
 }
 
-use lash_core::{
+use lash_core_execution::{
     ProcessExecutionEnvStore as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
     ProcessRegistrar as _,
 };
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
 
-use lash_core::ProcessInput;
+use lash_core_execution::ProcessInput;
 use lashlang::LashlangArtifactStore;
 
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 struct FailOnceProcessEnvStore {
-    inner: Arc<lash_core::InMemoryProcessExecutionEnvStore>,
+    inner: Arc<lash_core_execution::InMemoryProcessExecutionEnvStore>,
     retire_failures: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessExecutionEnvStore for FailOnceProcessEnvStore {
+impl lash_core_execution::ProcessExecutionEnvStore for FailOnceProcessEnvStore {
     async fn publish_process_execution_env(
         &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
+        owner: &lash_core_execution::ArtifactOwner,
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
         bytes: &[u8],
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.inner
             .publish_process_execution_env(owner, env_ref, bytes)
             .await
@@ -55,10 +55,10 @@ impl lash_core::ProcessExecutionEnvStore for FailOnceProcessEnvStore {
 
     async fn transfer_process_execution_env(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core::PluginError> {
+        from: &lash_core_execution::ArtifactOwner,
+        to: &lash_core_execution::ArtifactOwner,
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.inner
             .transfer_process_execution_env(from, to, env_ref)
             .await
@@ -66,9 +66,9 @@ impl lash_core::ProcessExecutionEnvStore for FailOnceProcessEnvStore {
 
     async fn release_process_execution_env(
         &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core::PluginError> {
+        owner: &lash_core_execution::ArtifactOwner,
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+    ) -> Result<(), lash_core_execution::PluginError> {
         self.inner
             .release_process_execution_env(owner, env_ref)
             .await
@@ -76,8 +76,8 @@ impl lash_core::ProcessExecutionEnvStore for FailOnceProcessEnvStore {
 
     async fn retire_process_execution_env_owner(
         &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lash_core::PluginError> {
+        owner: &lash_core_execution::ArtifactOwner,
+    ) -> Result<(), lash_core_execution::PluginError> {
         if self
             .retire_failures
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
@@ -85,7 +85,7 @@ impl lash_core::ProcessExecutionEnvStore for FailOnceProcessEnvStore {
             })
             .is_ok()
         {
-            return Err(lash_core::PluginError::Session(
+            return Err(lash_core_execution::PluginError::Session(
                 "injected environment retirement failure".to_string(),
             ));
         }
@@ -94,8 +94,8 @@ impl lash_core::ProcessExecutionEnvStore for FailOnceProcessEnvStore {
 
     async fn get_process_execution_env(
         &self,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, lash_core::PluginError> {
+        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
+    ) -> Result<Option<Vec<u8>>, lash_core_execution::PluginError> {
         self.inner.get_process_execution_env(env_ref).await
     }
 }
@@ -106,23 +106,24 @@ struct FailOnceLashlangRetirementEngine {
 }
 
 #[async_trait::async_trait]
-impl lash_core::ProcessEngine for FailOnceLashlangRetirementEngine {
+impl lash_core_execution::ProcessEngine for FailOnceLashlangRetirementEngine {
     fn kind(&self) -> &'static str {
         "fig677-recovery-engine"
     }
 
     async fn run(
         &self,
-        _context: lash_core::ProcessEngineRunContext<'_>,
+        _context: lash_core_execution::ProcessEngineRunContext<'_>,
         _payload: serde_json::Value,
-    ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
+    ) -> Result<lash_core_execution::ProcessRunOutcome, lash_core_execution::ProcessInfraError>
+    {
         unreachable!("the cleanup recovery fixture never runs a process")
     }
 
     async fn retire_artifact_owner(
         &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lash_core::PluginError> {
+        owner: &lash_core_execution::ArtifactOwner,
+    ) -> Result<(), lash_core_execution::PluginError> {
         if self
             .retire_failures
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
@@ -130,14 +131,14 @@ impl lash_core::ProcessEngine for FailOnceLashlangRetirementEngine {
             })
             .is_ok()
         {
-            return Err(lash_core::PluginError::Session(
+            return Err(lash_core_execution::PluginError::Session(
                 "injected module retirement failure".to_string(),
             ));
         }
         self.store
             .retire_module_artifact_owner(owner)
             .await
-            .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+            .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))
     }
 }
 
@@ -149,7 +150,7 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
             .await
             .expect("open durable module store"),
     );
-    let env_inner = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::new());
+    let env_inner = Arc::new(lash_core_execution::InMemoryProcessExecutionEnvStore::new());
     let env_store = Arc::new(FailOnceProcessEnvStore {
         inner: Arc::clone(&env_inner),
         retire_failures: std::sync::atomic::AtomicUsize::new(usize::from(
@@ -162,17 +163,18 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
             failing_store == "module",
         )),
     });
-    let engines = lash_core::ProcessEngineRegistry::new().with_registration(
-        lash_core::ProcessEngineRegistration::accepting(
-            engine as Arc<dyn lash_core::ProcessEngine>,
+    let engines = lash_core_execution::ProcessEngineRegistry::new().with_registration(
+        lash_core_execution::ProcessEngineRegistration::accepting(
+            engine as Arc<dyn lash_core_execution::ProcessEngine>,
         ),
     );
-    let scope =
-        lash_core::ExecutionScope::runtime_operation(format!("scope-retirement-{failing_store}"));
-    let owner = lash_core::ArtifactOwner::execution(scope.clone());
-    let env_spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::empty(),
-        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    let scope = lash_core_execution::ExecutionScope::runtime_operation(format!(
+        "scope-retirement-{failing_store}"
+    ));
+    let owner = lash_core_execution::ArtifactOwner::execution(scope.clone());
+    let env_spec = lash_core_execution::ProcessExecutionEnvSpec::new(
+        lash_core_execution::PluginOptions::empty(),
+        lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     );
     let env_ref = env_spec.stable_ref().expect("stable environment ref");
     let env_bytes = env_spec.to_store_bytes().expect("environment bytes");
@@ -188,57 +190,55 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
         .await
         .expect("publish execution-owned module");
 
-    let host: Arc<dyn lash_core::EffectHost> = Arc::new(
+    let host: Arc<dyn lash_core_execution::EffectHost> = Arc::new(
         SqliteEffectHost::open(&effect_path)
             .await
             .expect("open effect host"),
     );
     host.retire_effect_journal(
-        lash_core::EffectJournalRetirement::for_scope(&scope)
+        lash_core_execution::EffectJournalRetirement::for_scope(&scope)
             .expect("runtime-operation retirement"),
     )
     .await
     .expect("commit authoritative journal retirement");
     let late_commit = host
-        .scoped(lash_core::testing::store_fixtures::durable_admission(
-            &scope,
-        ))
+        .scoped(lash_core_execution::testing::store_fixtures::durable_admission(&scope))
         .expect("retired scope still binds for a typed refusal")
         .controller()
         .execute_effect(
-            lash_core::RuntimeEffectEnvelope::new(
-                lash_core::RuntimeEffectInvocation::new(
-                    lash_core::EffectAddress::new(scope.clone(), "late-effect-replay")
+            lash_core_execution::RuntimeEffectEnvelope::new(
+                lash_core_execution::RuntimeEffectInvocation::new(
+                    lash_core_execution::EffectAddress::new(scope.clone(), "late-effect-replay")
                         .expect("valid late-effect address"),
-                    lash_core::RuntimeAttribution::none(),
+                    lash_core_execution::RuntimeAttribution::none(),
                     "late-effect",
                 ),
-                lash_core::RuntimeEffectCommand::Sleep {
-                    spec: lash_core::SleepSpec::For { duration_ms: 0 },
+                lash_core_execution::RuntimeEffectCommand::Sleep {
+                    spec: lash_core_execution::SleepSpec::For { duration_ms: 0 },
                 },
             ),
-            lash_core::RuntimeEffectLocalExecutor::testing(|_| async {
-                Ok(lash_core::RuntimeEffectOutcome::Sleep)
+            lash_core_execution::RuntimeEffectLocalExecutor::testing(|_| async {
+                Ok(lash_core_execution::RuntimeEffectOutcome::Sleep)
             }),
         )
         .await
         .expect_err("the authoritative lifecycle decision rejects a late runtime commit");
     assert_eq!(
         late_commit.code,
-        lash_core::RuntimeErrorCode::EffectScopeRetired
+        lash_core_execution::RuntimeErrorCode::EffectScopeRetired
     );
     drop(host);
 
-    let reopened: Arc<dyn lash_core::EffectHost> = Arc::new(
+    let reopened: Arc<dyn lash_core_execution::EffectHost> = Arc::new(
         SqliteEffectHost::open(&effect_path)
             .await
             .expect("reopen effect host after authoritative retirement"),
     );
     let first_factory = SqliteSessionStoreFactory::new(dir.path().join("sessions-first"));
-    lash_core::SessionStoreFactory::bind_effect_host(&first_factory, &reopened);
-    lash_core::SessionStoreFactory::bind_artifact_stores(
+    lash_core_execution::SessionStoreFactory::bind_effect_host(&first_factory, &reopened);
+    lash_core_execution::SessionStoreFactory::bind_artifact_stores(
         &first_factory,
-        env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        env_store.clone() as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
         engines.clone(),
     );
     first_factory
@@ -255,16 +255,16 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
     );
     drop(reopened);
 
-    let recovered: Arc<dyn lash_core::EffectHost> = Arc::new(
+    let recovered: Arc<dyn lash_core_execution::EffectHost> = Arc::new(
         SqliteEffectHost::open(&effect_path)
             .await
             .expect("reopen effect host for cleanup retry"),
     );
     let retry_factory = SqliteSessionStoreFactory::new(dir.path().join("sessions-retry"));
-    lash_core::SessionStoreFactory::bind_effect_host(&retry_factory, &recovered);
-    lash_core::SessionStoreFactory::bind_artifact_stores(
+    lash_core_execution::SessionStoreFactory::bind_effect_host(&retry_factory, &recovered);
+    lash_core_execution::SessionStoreFactory::bind_artifact_stores(
         &retry_factory,
-        env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        env_store.clone() as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
         engines,
     );
     retry_factory
@@ -532,9 +532,9 @@ async fn session_listing_statement_count_is_session_count_invariant() {
     for index in 0..8 {
         let session_id = SessionId::from(format!("listing-statement-count-{index}"));
         let relation = if index == 0 {
-            lash_core::SessionRelation::Root
+            lash_core_execution::SessionRelation::Root
         } else {
-            lash_core::SessionRelation::Fork {
+            lash_core_execution::SessionRelation::Fork {
                 source_session_id: SessionId::from("listing-statement-count-0"),
                 source_node_id: format!("source-node-{index}").into(),
             }
@@ -545,14 +545,16 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                     Vec::new()
                 } else {
                     vec![
-                        lash_core::facade_support::SessionObserverIntent::host_requested(format!(
-                            "intent-process-{index}"
-                        )),
+                        lash_core_execution::facade_support::SessionObserverIntent::host_requested(
+                            format!("intent-process-{index}"),
+                        ),
                     ]
                 },
                 session_id: session_id.clone(),
                 relation: relation.clone(),
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                policy: lash_core_execution::SessionPolicy::new(
+                    lash_core_execution::TurnBudget::Unbounded,
+                ),
             })
             .await
             .expect("create session listing fixture");
@@ -602,7 +604,7 @@ fn checkpoint_with_changed_components(depth: usize) -> HydratedSessionCheckpoint
             .map(|index| {
                 (
                     format!("arbitrary/depth-invariance/{index:05}"),
-                    lash_core::HydratedCheckpointComponent::changed(
+                    lash_core_execution::HydratedCheckpointComponent::changed(
                         format!("depth-invariance-body-{index:05}").into_bytes(),
                     ),
                 )
@@ -621,22 +623,25 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
             .map(|(key, descriptor)| {
                 (
                     key.clone(),
-                    lash_core::HydratedCheckpointComponent::unchanged(descriptor),
+                    lash_core_execution::HydratedCheckpointComponent::unchanged(descriptor),
                 )
             })
             .collect(),
     }
 }
 
-async fn durable_state(store: &Store, session_id: &SessionId) -> lash_core::RuntimeSessionState {
-    let state = lash_core::RuntimeSessionState {
+async fn durable_state(
+    store: &Store,
+    session_id: &SessionId,
+) -> lash_core_execution::RuntimeSessionState {
+    let state = lash_core_execution::RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
-        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
         ))
     };
     store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(session_id))
+        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(session_id))
         .await
         .expect("bind SQLite test session");
     state
@@ -735,11 +740,13 @@ fn registration(id: &str) -> ProcessRegistration {
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
-        lash_core::RecoveryContract::ExternallyOwned,
-        lash_core::ProcessProvenance::session(lash_core::SessionScope::new("session")),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
+        lash_core_execution::RecoveryContract::ExternallyOwned,
+        lash_core_execution::ProcessProvenance::session(lash_core_execution::SessionScope::new(
+            "session",
+        )),
+        lash_core_execution::ProcessLifecyclePolicy::new(
+            lash_core_execution::ParentScope::Host,
+            lash_core_execution::OnParentEnd::Abandon,
         ),
     )
 }
@@ -785,27 +792,27 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
 
     let catalog = factory.catalog_path();
     let attachment_id =
-        lash_core::AttachmentId::parse("a".repeat(64)).expect("valid attachment id");
+        lash_core_execution::AttachmentId::parse("a".repeat(64)).expect("valid attachment id");
     {
         let store = Store::open(&catalog).await.expect("open catalog");
-        let intent = lash_core::AttachmentIntent {
+        let intent = lash_core_execution::AttachmentIntent {
             attachment_id: attachment_id.clone(),
             session_id: SessionId::from("sess-1"),
             canonical_uri: format!("lash-attachment://blake3/{attachment_id}"),
             intent_at_epoch_ms: 1_000,
             owner: None,
         };
-        let lash_core::AttachmentWriteFence::Granted(permit) =
-            lash_core::AttachmentManifest::begin_attachment_write(&store, intent.clone())
+        let lash_core_execution::AttachmentWriteFence::Granted(permit) =
+            lash_core_execution::AttachmentManifest::begin_attachment_write(&store, intent.clone())
                 .await
                 .expect("begin write")
         else {
             panic!("a free digest must grant its writer");
         };
-        lash_core::AttachmentManifest::complete_attachment_write(&store, &intent, permit)
+        lash_core_execution::AttachmentManifest::complete_attachment_write(&store, &intent, permit)
             .await
             .expect("stamp upload evidence");
-        lash_core::AttachmentManifest::commit_refs(
+        lash_core_execution::AttachmentManifest::commit_refs(
             &store,
             &SessionId::from("sess-1"),
             std::slice::from_ref(&attachment_id),
@@ -814,7 +821,7 @@ async fn live_attachment_refs_reads_the_factory_catalog() {
         .expect("commit ref");
     }
 
-    let refs = lash_core::AttachmentRootSet::live_attachment_refs(&factory, 0)
+    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&factory, 0)
         .await
         .expect("root discovery");
     assert!(
@@ -833,7 +840,7 @@ async fn live_attachment_refs_aborts_on_unreadable_catalog() {
 
     std::fs::write(factory.catalog_path(), b"corrupt not-a-db").expect("write corrupt");
 
-    let result = lash_core::AttachmentRootSet::live_attachment_refs(&factory, 0).await;
+    let result = lash_core_execution::AttachmentRootSet::live_attachment_refs(&factory, 0).await;
     assert!(
         result.is_err(),
         "an unreadable durable-core catalog must abort discovery, got {result:?}"
@@ -848,15 +855,15 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("live-attachment"),
-        relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let store = live_factory
         .create_store(&request)
         .await
         .expect("create live session store");
-    let backend = lash_core::attachments::InMemoryAttachmentStore::new();
-    let attachment = lash_core::AttachmentStore::put(
+    let backend = lash_core_execution::attachments::InMemoryAttachmentStore::new();
+    let attachment = lash_core_execution::AttachmentStore::put(
         &backend,
         b"sqlite-live-committed-blob".to_vec(),
         lash_sansio::AttachmentCreateMeta::new(
@@ -867,24 +874,31 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
     )
     .await
     .expect("put shared backend blob");
-    let live_intent = lash_core::AttachmentIntent {
+    let live_intent = lash_core_execution::AttachmentIntent {
         attachment_id: attachment.id.clone(),
         session_id: request.session_id.clone(),
         canonical_uri: format!("lash-attachment://blake3/{}", attachment.id),
         intent_at_epoch_ms: 1,
         owner: None,
     };
-    let lash_core::AttachmentWriteFence::Granted(live_permit) =
-        lash_core::AttachmentManifest::begin_attachment_write(&*store, live_intent.clone())
-            .await
-            .expect("begin live attachment write")
+    let lash_core_execution::AttachmentWriteFence::Granted(live_permit) =
+        lash_core_execution::AttachmentManifest::begin_attachment_write(
+            &*store,
+            live_intent.clone(),
+        )
+        .await
+        .expect("begin live attachment write")
     else {
         panic!("a free digest must grant its writer");
     };
-    lash_core::AttachmentManifest::complete_attachment_write(&*store, &live_intent, live_permit)
-        .await
-        .expect("stamp live attachment upload");
-    lash_core::AttachmentManifest::commit_refs(
+    lash_core_execution::AttachmentManifest::complete_attachment_write(
+        &*store,
+        &live_intent,
+        live_permit,
+    )
+    .await
+    .expect("stamp live attachment upload");
+    lash_core_execution::AttachmentManifest::commit_refs(
         &*store,
         &request.session_id,
         std::slice::from_ref(&attachment.id),
@@ -893,12 +907,12 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
     .expect("commit live attachment ref");
 
     let missing_factory = SqliteSessionStoreFactory::new(dir.path().join("wrong-sessions"));
-    let result = lash_core::attachments::reclaim_unreferenced_attachments(
+    let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
         &missing_factory,
         &backend,
-        lash_core::AttachmentReclamationPolicy {
+        lash_core_execution::AttachmentReclamationPolicy {
             grace_period_ms: 0,
-            empty_root_set: lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll,
+            empty_root_set: lash_core_execution::EmptyRootSetPolicy::AuthorizeDeleteAll,
         },
     )
     .await;
@@ -909,14 +923,14 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
             Err(failure)
                 if matches!(
                     &failure.stop,
-                    lash_core::MaintenanceStop::Failed(
-                        lash_core::AttachmentStoreError::RootSetEnumerationFailed { .. }
+                    lash_core_execution::MaintenanceStop::Failed(
+                        lash_core_execution::AttachmentStoreError::RootSetEnumerationFailed { .. }
                     )
                 )
         ),
         "a missing catalog must abort GC even when delete-all is authorized: {result:?}"
     );
-    lash_core::AttachmentStore::get(&backend, &attachment.id)
+    lash_core_execution::AttachmentStore::get(&backend, &attachment.id)
         .await
         .expect("live committed blob survives the refused sweep");
 }
@@ -925,14 +939,14 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
 async fn attachment_gc_allows_a_fresh_deployment_with_an_empty_backend() {
     let dir = tempfile::tempdir().expect("tempdir");
     let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
-    let backend = lash_core::attachments::InMemoryAttachmentStore::new();
+    let backend = lash_core_execution::attachments::InMemoryAttachmentStore::new();
 
-    let result = lash_core::attachments::reclaim_unreferenced_attachments(
+    let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
         &factory,
         &backend,
-        lash_core::AttachmentReclamationPolicy {
+        lash_core_execution::AttachmentReclamationPolicy {
             grace_period_ms: 0,
-            empty_root_set: lash_core::EmptyRootSetPolicy::Refuse,
+            empty_root_set: lash_core_execution::EmptyRootSetPolicy::Refuse,
         },
     )
     .await;
@@ -956,8 +970,8 @@ async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("reset-empty-attachment-gc"),
-        relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let store = factory
         .create_store(&request)
@@ -965,14 +979,14 @@ async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
         .expect("initialize factory catalog");
     drop(store);
     std::fs::remove_file(factory.catalog_path()).expect("remove catalog for operator reset");
-    let backend = lash_core::attachments::InMemoryAttachmentStore::new();
+    let backend = lash_core_execution::attachments::InMemoryAttachmentStore::new();
 
-    let result = lash_core::attachments::reclaim_unreferenced_attachments(
+    let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
         &factory,
         &backend,
-        lash_core::AttachmentReclamationPolicy {
+        lash_core_execution::AttachmentReclamationPolicy {
             grace_period_ms: 0,
-            empty_root_set: lash_core::EmptyRootSetPolicy::Refuse,
+            empty_root_set: lash_core_execution::EmptyRootSetPolicy::Refuse,
         },
     )
     .await;
@@ -994,10 +1008,14 @@ async fn targeted_attachment_ref_probe_aborts_when_the_factory_catalog_is_missin
     let dir = tempfile::tempdir().expect("tempdir");
     let factory = SqliteSessionStoreFactory::new(dir.path().join("missing-sessions"));
     let attachment_id =
-        lash_core::AttachmentId::parse("b".repeat(64)).expect("valid attachment id");
+        lash_core_execution::AttachmentId::parse("b".repeat(64)).expect("valid attachment id");
 
-    let result =
-        lash_core::AttachmentRootSet::has_live_attachment_ref(&factory, &attachment_id, 0).await;
+    let result = lash_core_execution::AttachmentRootSet::has_live_attachment_ref(
+        &factory,
+        &attachment_id,
+        0,
+    )
+    .await;
 
     assert!(
         result.is_err(),
@@ -1013,8 +1031,8 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
     let request = SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("corrupt-session-meta"),
-        relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
 
     let store = factory
@@ -1056,8 +1074,8 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
         .expect("register");
     let handover = |segment_ordinal| PersistedSegmentHandover {
         segment_ordinal,
-        handover: lash_core::SegmentHandover {
-            reason: lash_core::BoundaryReason::JournalBudget,
+        handover: lash_core_execution::SegmentHandover {
+            reason: lash_core_execution::BoundaryReason::JournalBudget,
             program_hash: "program-v1".to_string(),
             engine_state: vec![segment_ordinal as u8],
         },
@@ -1102,8 +1120,8 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
             &ProcessId::from("segment-terminal"),
             PersistedSegmentHandover {
                 segment_ordinal: 1,
-                handover: lash_core::SegmentHandover {
-                    reason: lash_core::BoundaryReason::JournalBudget,
+                handover: lash_core_execution::SegmentHandover {
+                    reason: lash_core_execution::BoundaryReason::JournalBudget,
                     program_hash: "program-v1".to_string(),
                     engine_state: vec![7],
                 },
@@ -1140,7 +1158,7 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
 
     store
         .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("sqlite-store-test"),
+            &lash_core_execution::ArtifactOwner::host("sqlite-store-test"),
             &linked.artifact,
         )
         .await
@@ -1167,7 +1185,7 @@ async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_ha
     // process cache_probe(root: str) -> str { finish root }
     let module = lashlang::ModuleArtifact::from_program(one_process_module("cache_probe", "root"))
         .expect("build module artifact");
-    let owner = lash_core::ArtifactOwner::host("cross-handle-cache-owner");
+    let owner = lash_core_execution::ArtifactOwner::host("cross-handle-cache-owner");
 
     releasing
         .publish_module_artifact(&owner, &module)
@@ -1203,7 +1221,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
         let registry = SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
             .await
             .expect("open registry");
-        let session_scope = lash_core::SessionScope::new("session");
+        let session_scope = lash_core_execution::SessionScope::new("session");
         registry
             .register_process(registration("proc-persist"))
             .await
@@ -1212,17 +1230,17 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
             .add_observer(
                 &session_scope.session_id,
                 &ProcessId::from("proc-persist"),
-                lash_core::ProcessObserverBy::host("sqlite-reopen-test"),
+                lash_core_execution::ProcessObserverBy::host("sqlite-reopen-test"),
             )
             .await
             .expect("observe");
         registry
             .complete_process(
                 &ProcessId::from("proc-persist"),
-                ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
                     serde_json::json!({"ok": true}),
                 )),
-                lash_core::ProcessCompletionAuthority::external_owner(),
+                lash_core_execution::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete");
@@ -1232,8 +1250,8 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
         SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
             .await
             .expect("reopen registry"),
-    ) as Arc<dyn lash_core::ProcessRegistry>;
-    let session_scope = lash_core::SessionScope::new("session");
+    ) as Arc<dyn lash_core_execution::ProcessRegistry>;
+    let session_scope = lash_core_execution::SessionScope::new("session");
     let record = registry
         .get_process(&ProcessId::from("proc-persist"))
         .await
@@ -1243,14 +1261,14 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     assert_eq!(record.originator_id(), session_scope.session_id);
     assert_eq!(
         record.provenance.originator,
-        lash_core::ProcessOriginator::session(session_scope.clone())
+        lash_core_execution::ProcessOriginator::session(session_scope.clone())
     );
     assert_eq!(
-        lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
+        lash_core_execution::NativeProcessWork::for_registry(Arc::clone(&registry))
             .await_terminal(&ProcessId::from("proc-persist"))
             .await
             .expect("await persisted"),
-        ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+        ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
             serde_json::json!({"ok": true}),
         ))
     );
@@ -1258,8 +1276,8 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
         registry
             .list_observed_by(
                 &session_scope.session_id,
-                &lash_core::ProcessListFilter {
-                    status: lash_core::ProcessStatusFilter::Any,
+                &lash_core_execution::ProcessListFilter {
+                    status: lash_core_execution::ProcessStatusFilter::Any,
                     ..Default::default()
                 }
             )
@@ -1283,22 +1301,22 @@ async fn concurrent_admission_loser_leaves_no_metadata() {
 
     let first_id = SessionId::from("admission-race-a");
     let second_id = SessionId::from("admission-race-b");
-    let first_binding = lash_core::SessionBinding::root(first_id.clone());
-    let second_binding = lash_core::SessionBinding::root(second_id.clone());
+    let first_binding = lash_core_execution::SessionBinding::root(first_id.clone());
+    let second_binding = lash_core_execution::SessionBinding::root(second_id.clone());
     let (first, second) = tokio::join!(
         store.admit_and_bind_session(&first_binding),
         store.admit_and_bind_session(&second_binding),
     );
 
     let rejected_id = match (first, second) {
-        (Ok(lash_core::SessionAdmission::Created), Err(error)) => {
+        (Ok(lash_core_execution::SessionAdmission::Created), Err(error)) => {
             assert!(
                 matches!(error, StoreError::SessionBindingMismatch { .. }),
                 "the losing admission must report SessionBindingMismatch, got {error:?}"
             );
             second_id
         }
-        (Err(error), Ok(lash_core::SessionAdmission::Created)) => {
+        (Err(error), Ok(lash_core_execution::SessionAdmission::Created)) => {
             assert!(
                 matches!(error, StoreError::SessionBindingMismatch { .. }),
                 "the losing admission must report SessionBindingMismatch, got {error:?}"

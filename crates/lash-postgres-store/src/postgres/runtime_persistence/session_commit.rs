@@ -3,8 +3,11 @@ use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresSessionStore {
-    async fn committed_turn_exists(&self, turn_id: &lash_core::TurnId) -> Result<bool, StoreError> {
-        let key = lash_core::store_backend_support::turn_commit_receipt_storage_key(
+    async fn committed_turn_exists(
+        &self,
+        turn_id: &lash_core_execution::TurnId,
+    ) -> Result<bool, StoreError> {
+        let key = lash_core_execution::store_backend_support::turn_commit_receipt_storage_key(
             &self.session_id,
             turn_id,
         )?;
@@ -19,7 +22,7 @@ impl SessionCommitStore for PostgresSessionStore {
     }
 
     async fn drain_end_exists(&self, drain_id: &str) -> Result<bool, StoreError> {
-        let key = lash_core::store_backend_support::drain_end_receipt_storage_key(
+        let key = lash_core_execution::store_backend_support::drain_end_receipt_storage_key(
             &self.session_id,
             drain_id,
         )?;
@@ -44,7 +47,7 @@ impl SessionCommitStore for PostgresSessionStore {
     async fn admit_session_state(
         &self,
         lease: &SessionExecutionLeaseAuthority,
-    ) -> Result<lash_core::store::SessionStateAdmission, StoreError> {
+    ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
@@ -53,7 +56,7 @@ impl SessionCommitStore for PostgresSessionStore {
         ensure_session_execution_lease_tx(&mut tx, &lease.session_id, lease).await?;
         let version = read_session_state_version_tx(&mut tx, &lease.session_id, true).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core::store::SessionStateAdmission {
+        Ok(lash_core_execution::store::SessionStateAdmission {
             session_id: lease.session_id.clone(),
             version,
             lease_fencing_token: lease.fencing_token,
@@ -81,14 +84,16 @@ impl SessionCommitStore for PostgresSessionStore {
         let graph = load_graph_tx(
             &mut tx,
             session_id,
-            leaf_node_id.clone().map(lash_core::NodeId::into_inner),
+            leaf_node_id
+                .clone()
+                .map(lash_core_execution::NodeId::into_inner),
         )
         .await?;
         let checkpoint = match meta.checkpoint_ref.as_ref() {
             Some(blob_ref) => get_checkpoint_tx(&mut tx, blob_ref).await?,
             None => None,
         };
-        let token_ledger = lash_core::store::merge_token_ledger_entries_checked(
+        let token_ledger = lash_core_execution::store::merge_token_ledger_entries_checked(
             load_usage_deltas_tx(&mut tx, session_id).await?,
         )?;
         let turn_failure_rows =
@@ -101,13 +106,13 @@ impl SessionCommitStore for PostgresSessionStore {
         for row in turn_failure_rows {
             let turn_id = row.get::<String, _>("turn_id");
             let result_json = row.get::<String, _>("result_json");
-            let receipt = lash_core::store::decode_runtime_commit_receipt(
+            let receipt = lash_core_execution::store::decode_runtime_commit_receipt(
                 session_id,
                 &turn_id,
                 &result_json,
             )?;
             if !receipt.failure_evidence.is_empty() {
-                turn_failure_settlements.push(lash_core::TurnFailureSettlement {
+                turn_failure_settlements.push(lash_core_execution::TurnFailureSettlement {
                     turn_id,
                     evidence: receipt.failure_evidence,
                 });
@@ -258,7 +263,7 @@ impl SessionCommitStore for PostgresSessionStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        let planner = lash_core::store::RuntimeCommitPlanner::prepare(commit)?;
+        let planner = lash_core_execution::store::RuntimeCommitPlanner::prepare(commit)?;
         let commit = planner.commit();
         self.bind_session_id(&commit.session_id)?;
         let now = self.clock.timestamp_ms();
@@ -294,7 +299,7 @@ impl SessionCommitStore for PostgresSessionStore {
         planner.validate_session_binding(existing.as_ref().map(|meta| &meta.session_id))?;
         let direct_meta = SessionMeta {
             session_id: commit.session_id.clone(),
-            relation: lash_core::SessionRelation::Root,
+            relation: lash_core_execution::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
         };
         planner.validate_node_derivation()?;
@@ -317,18 +322,18 @@ impl SessionCommitStore for PostgresSessionStore {
                 // Its semantic value is already bound by the stored request hash.
                 // Fresh-append ancestor fencing continues below, after receipt adjudication.
                 let append_request_identity =
-                    lash_core::store_backend_support::decode_append_request_identity(
+                    lash_core_execution::store_backend_support::decode_append_request_identity(
                         &commit.turn_commit.operation.key,
                         stored_identity,
                         stored_version.map(i64::from),
                         stored_requested_node_count,
                     )?;
-                let result = lash_core::store::decode_runtime_commit_receipt(
+                let result = lash_core_execution::store::decode_runtime_commit_receipt(
                     &commit.session_id,
                     planner.operation_key(),
                     &result_json,
                 )?;
-                let prior = lash_core::store::RuntimeCommitReceiptRecord {
+                let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
                     turn_commit_hash: hash,
                     result,
                     append_request_identity,
@@ -434,9 +439,12 @@ impl SessionCommitStore for PostgresSessionStore {
                     return Err(StoreError::TurnCancelClosureScopeRetired { scope_id });
                 }
             }
-            let final_key =
-                lash_core::OperationId::turn(closure.session_id(), closure.turn_id(), "final")
-                    .storage_key()?;
+            let final_key = lash_core_execution::OperationId::turn(
+                closure.session_id(),
+                closure.turn_id(),
+                "final",
+            )
+            .storage_key()?;
             let committed: bool =
                 sqlx::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
                     .bind(closure.session_id().as_str())
@@ -500,7 +508,7 @@ impl SessionCommitStore for PostgresSessionStore {
             let placeholder = SessionHeadMeta::assemble(
                 &commit.session_id,
                 SessionHeadPayload {
-                    schema_version: lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    schema_version: lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
                     session_id: commit.session_id.clone(),
                     config: commit.config.clone(),
                     current_frame_node_id: None,
@@ -541,7 +549,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .await
             .map_err(store_sqlx_error)?
             .map(|(generation, frame_node_id)| {
-                Ok(lash_core::store::ParentNodeFacts {
+                Ok(lash_core_execution::store::ParentNodeFacts {
                     node_id: leaf_node_id.to_string().into(),
                     generation: u64_from_sql("SessionGraph node", "generation", generation)?,
                     frame_node_id: frame_node_id.into(),
@@ -575,14 +583,14 @@ impl SessionCommitStore for PostgresSessionStore {
         // the session-keyed advisory lock, so they agree; a disagreement means
         // the head moved under commit authority and the caller must reload.
         let authoritative_revision =
-            match lash_core::store_backend_support::head_publication_verdict(
+            match lash_core_execution::store_backend_support::head_publication_verdict(
                 actual_revision,
                 locked_revision,
             ) {
-                lash_core::store_backend_support::HeadPublicationVerdict::Publish => {
+                lash_core_execution::store_backend_support::HeadPublicationVerdict::Publish => {
                     locked_revision
                 }
-                lash_core::store_backend_support::HeadPublicationVerdict::HeadMoved {
+                lash_core_execution::store_backend_support::HeadPublicationVerdict::HeadMoved {
                     observed_head_revision,
                     ..
                 } => {
@@ -605,13 +613,13 @@ impl SessionCommitStore for PostgresSessionStore {
                 .await
                 .map_err(store_sqlx_error)?
                 .into_iter()
-                .map(lash_core::NodeId::from)
+                .map(lash_core_execution::NodeId::from)
                 .collect::<std::collections::HashSet<_>>();
         let published_leaf = match old_leaf_node_id {
-            None => lash_core::store::PublishedLeafFacts::Absent,
+            None => lash_core_execution::store::PublishedLeafFacts::Absent,
             Some(node_id) => match parent_node_facts {
-                Some(parent) => lash_core::store::PublishedLeafFacts::Live(parent),
-                None => lash_core::store::PublishedLeafFacts::Retired { node_id },
+                Some(parent) => lash_core_execution::store::PublishedLeafFacts::Live(parent),
+                None => lash_core_execution::store::PublishedLeafFacts::Retired { node_id },
             },
         };
         if let Some(pending) = load_run_tx(&mut tx, &commit.session_id, None).await? {
@@ -647,7 +655,7 @@ impl SessionCommitStore for PostgresSessionStore {
         } else {
             None
         };
-        let plan = planner.plan(lash_core::store::FreshRuntimeCommitFacts {
+        let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
             actual_head_revision: authoritative_revision,
             published_leaf,
             requested_ancestor_is_active,
@@ -761,8 +769,8 @@ impl SessionCommitStore for PostgresSessionStore {
         // site has always returned, over a freshly read revision so the report
         // is accurate. `tx` then drops (auto-rollback), discarding this
         // attempt's node and usage writes; the caller reloads and retries.
-        if !lash_core::store_backend_support::fenced_write_applied(
-            lash_core::store_backend_support::FencedWrite::SessionHeadPublication,
+        if !lash_core_execution::store_backend_support::fenced_write_applied(
+            lash_core_execution::store_backend_support::FencedWrite::SessionHeadPublication,
             crate::POSTGRES_BACKEND,
             commit.session_id.as_str(),
             head_write.rows_affected(),
@@ -793,17 +801,17 @@ impl SessionCommitStore for PostgresSessionStore {
         }
         complete_queued_work_claims_tx(&mut tx, &queued_work_plans).await?;
         complete_turn_input_claims_tx(&mut tx, &turn_input_plans).await?;
-        let mut turn_cancel_input_outcome = lash_core::TurnCancelInputOutcome::default();
+        let mut turn_cancel_input_outcome = lash_core_execution::TurnCancelInputOutcome::default();
         if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
             let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
-            let disposition = cancellation
-                .map_or(lash_core::TurnCancelDisposition::Defer, |evidence| {
-                    evidence.undelivered
-                });
+            let disposition = cancellation.map_or(
+                lash_core_execution::TurnCancelDisposition::Defer,
+                |evidence| evidence.undelivered,
+            );
             if let Some(evidence) = commit
                 .turn_cancel_closure_settlement
                 .as_ref()
-                .and_then(lash_core::TurnCancelClosureSettlement::base_cancellation)
+                .and_then(lash_core_execution::TurnCancelClosureSettlement::base_cancellation)
             {
                 let observed = commit
                     .interrupted_turn_cancel_intent
@@ -847,30 +855,36 @@ impl SessionCommitStore for PostgresSessionStore {
                 }
             }
             let deferred_ingress =
-                encode_json(&lash_core::TurnInputState::DeferredNextTurn.ingress())?;
+                encode_json(&lash_core_execution::TurnInputState::DeferredNextTurn.ingress())?;
             for (input_id, payload) in inputs {
                 // Two dispositions, two named statements: deferring rewrites
                 // the ingress so the row stops naming a turn that is over,
                 // dropping is the cancel this table already has.
                 match disposition {
-                    lash_core::TurnCancelDisposition::Defer => {
+                    lash_core_execution::TurnCancelDisposition::Defer => {
                         sqlx::query(sql.pending_inputs.defer_to_next_turn.sql())
                             .bind(commit.session_id.as_str())
                             .bind(&*input_id)
-                            .bind(lash_core::TurnInputStateKind::DeferredNextTurn.as_str())
+                            .bind(
+                                lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
+                                    .as_str(),
+                            )
                             .bind(&deferred_ingress)
                     }
-                    lash_core::TurnCancelDisposition::Drop => {
+                    lash_core_execution::TurnCancelDisposition::Drop => {
                         sqlx::query(sql.pending_inputs.cancel.sql())
                             .bind(commit.session_id.as_str())
                             .bind(&*input_id)
-                            .bind(lash_core::TurnInputStateKind::Cancelled.as_str())
+                            .bind(
+                                lash_core_execution::runtime::TurnInputStateKind::Cancelled
+                                    .as_str(),
+                            )
                     }
                 }
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
-                let affected = lash_core::TurnCancelAffectedInput {
+                let affected = lash_core_execution::TurnCancelAffectedInput {
                     input_id,
                     payload,
                     disposition,
@@ -916,7 +930,7 @@ impl SessionCommitStore for PostgresSessionStore {
         if let (Some(admission), Some(progress)) = (&queued_admission, &commit.queued_run) {
             if matches!(
                 progress.progress,
-                lash_core::store::QueuedRunProgress::Settle { .. }
+                lash_core_execution::store::QueuedRunProgress::Settle { .. }
             ) {
                 let fence = commit
                     .session_execution_lease_fence
@@ -958,7 +972,7 @@ impl SessionCommitStore for PostgresSessionStore {
                     .flat_map(|completion| &completion.batch_ids)
                 {
                     let marker =
-                        lash_core::store_backend_support::session_command_batch_completion_key(
+                        lash_core_execution::store_backend_support::session_command_batch_completion_key(
                             &commit.session_id,
                             batch_id,
                         )?;
@@ -1002,8 +1016,8 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn admit_and_bind_session(
         &self,
-        binding: &lash_core::SessionBinding,
-    ) -> Result<lash_core::SessionAdmission, StoreError> {
+        binding: &lash_core_execution::SessionBinding,
+    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
         binding.validate()?;
         let session_id = &binding.session_id;
         let meta = SessionMeta {
@@ -1031,20 +1045,20 @@ impl SessionCommitStore for PostgresSessionStore {
         .await?;
         if inserted {
             tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(lash_core::SessionAdmission::Created);
+            return Ok(lash_core_execution::SessionAdmission::Created);
         }
         let recorded = crate::session_meta::load_recorded_lineage_tx(&mut tx, session_id)
             .await?
             .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
                 session_id: SessionId::from(session_id.to_string()),
             })?;
-        lash_core::store_backend_support::guard_rebind_lineage(
+        lash_core_execution::store_backend_support::guard_rebind_lineage(
             session_id,
             &recorded,
             &binding.relation,
         )?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core::SessionAdmission::Rebound)
+        Ok(lash_core_execution::SessionAdmission::Rebound)
     }
 
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
@@ -1059,7 +1073,7 @@ impl SessionCommitStore for PostgresSessionStore {
         if let Some(recorded) =
             crate::session_meta::load_recorded_lineage_tx(&mut tx, &meta.session_id).await?
         {
-            lash_core::store_backend_support::guard_session_meta_relation_rewrite(
+            lash_core_execution::store_backend_support::guard_session_meta_relation_rewrite(
                 &meta.session_id,
                 &recorded,
                 &meta.relation,

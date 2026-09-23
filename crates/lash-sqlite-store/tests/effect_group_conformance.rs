@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use lash_core::{EffectHost, GroupExecutors};
+use lash_core_execution::{EffectHost, GroupExecutors};
 use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
 
 /// Blocks on `future` from a synchronous context.
@@ -146,8 +146,8 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     impl GroupExecutors for NoChildRuns {
         fn executor_for(
             &self,
-            _envelope: &lash_core::RuntimeEffectEnvelope,
-        ) -> Option<lash_core::RuntimeEffectLocalExecutor<'static>> {
+            _envelope: &lash_core_execution::RuntimeEffectEnvelope,
+        ) -> Option<lash_core_execution::RuntimeEffectLocalExecutor<'static>> {
             None
         }
     }
@@ -158,7 +158,7 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     // Before any registration the host does no groups, and says so through the
     // group surface itself rather than through a capability flag (FIG-2266).
     let unwired_view = host
-        .scoped(lash_core::AdmittedScope::runtime_operation(
+        .scoped(lash_core_execution::AdmittedScope::runtime_operation(
             "registration-race",
         ))
         .expect("a scope binds");
@@ -167,7 +167,7 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
             .await
             .expect_err("an unwired host cannot open a group")
             .code,
-        lash_core::RuntimeErrorCode::EffectGroupUnsupported,
+        lash_core_execution::RuntimeErrorCode::EffectGroupUnsupported,
         "a host with no registered resolver has no runner for any child, so it \
          refuses the whole open rather than journaling a group nothing can run"
     );
@@ -203,7 +203,7 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     for refusal in outcomes.into_iter().filter_map(Result::err) {
         assert_eq!(
             refusal.code,
-            lash_core::RuntimeErrorCode::RuntimeEffectGroupShape,
+            lash_core_execution::RuntimeErrorCode::RuntimeEffectGroupShape,
             "a loser learns its resolver is not the host's"
         );
     }
@@ -213,7 +213,7 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     // The two codes are what separates "this deployment does no groups" from
     // "this deployment does groups but has no runner for this child".
     let wired_view = host
-        .scoped(lash_core::AdmittedScope::runtime_operation(
+        .scoped(lash_core_execution::AdmittedScope::runtime_operation(
             "registration-race",
         ))
         .expect("a scope binds");
@@ -222,7 +222,7 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
             .await
             .expect_err("NoChildRuns routes nothing, so the open is refused")
             .code,
-        lash_core::RuntimeErrorCode::RuntimeEffectGroupShape,
+        lash_core_execution::RuntimeErrorCode::RuntimeEffectGroupShape,
         "the winning registration stands: a wired host refuses an unroutable \
          child by shape, not by reporting itself group-less"
     );
@@ -230,31 +230,32 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
 
 /// Opens a one-child group through `view`, for the two refusal codes above.
 async fn open_race_group(
-    view: &lash_core::ScopedEffectController<'_>,
-) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
+    view: &lash_core_execution::ScopedEffectController<'_>,
+) -> Result<lash_core_execution::EffectGroupHandle, lash_core_execution::RuntimeEffectControllerError>
+{
     let scope = view.execution_scope().clone();
-    let child = lash_core::RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope.clone(), "registration-race:child:0")
+    let child = lash_core_execution::RuntimeEffectEnvelope::new(
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(scope.clone(), "registration-race:child:0")
                 .expect("an admitted scope and replay key"),
-            lash_core::RuntimeAttribution::none(),
+            lash_core_execution::RuntimeAttribution::none(),
             "sleep",
         ),
-        lash_core::RuntimeEffectCommand::Sleep {
-            spec: lash_core::SleepSpec::For { duration_ms: 1 },
+        lash_core_execution::RuntimeEffectCommand::Sleep {
+            spec: lash_core_execution::SleepSpec::For { duration_ms: 1 },
         },
     );
-    let group = lash_core::RuntimeEffectGroup::try_new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope, "registration-race:group")
+    let group = lash_core_execution::RuntimeEffectGroup::try_new(
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(scope, "registration-race:group")
                 .expect("an admitted scope and replay key"),
-            lash_core::RuntimeAttribution::none(),
+            lash_core_execution::RuntimeAttribution::none(),
             "effect-group",
         ),
         "registration-race".to_string(),
         vec![child],
-        lash_core::GroupWakePolicy::All,
-        lash_core::LoserPolicy::RunToCompletion,
+        lash_core_execution::GroupWakePolicy::All,
+        lash_core_execution::LoserPolicy::RunToCompletion,
     )?;
     view.controller().open_effect_group(group).await
 }
@@ -272,7 +273,7 @@ fn host_with_lease(path: &std::path::Path, executors: Arc<dyn GroupExecutors>) -
         SqliteEffectHost::open_with_options(
             &path,
             SqliteEffectReplayOptions {
-                lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
+                lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
                     .expect("the ttl is at least three renew intervals wide"),
                 drain_budget: Default::default(),
             },
@@ -294,17 +295,19 @@ struct ParkingExecutors {
 impl GroupExecutors for ParkingExecutors {
     fn executor_for(
         &self,
-        _envelope: &lash_core::RuntimeEffectEnvelope,
-    ) -> Option<lash_core::RuntimeEffectLocalExecutor<'static>> {
+        _envelope: &lash_core_execution::RuntimeEffectEnvelope,
+    ) -> Option<lash_core_execution::RuntimeEffectLocalExecutor<'static>> {
         let entered = Arc::clone(&self.entered);
-        Some(lash_core::RuntimeEffectLocalExecutor::testing(move |_| {
-            let entered = Arc::clone(&entered);
-            async move {
-                entered.fetch_add(1, Ordering::SeqCst);
-                std::future::pending::<()>().await;
-                unreachable!("a parked child is never polled to completion")
-            }
-        }))
+        Some(lash_core_execution::RuntimeEffectLocalExecutor::testing(
+            move |_| {
+                let entered = Arc::clone(&entered);
+                async move {
+                    entered.fetch_add(1, Ordering::SeqCst);
+                    std::future::pending::<()>().await;
+                    unreachable!("a parked child is never polled to completion")
+                }
+            },
+        ))
     }
 }
 
@@ -320,23 +323,25 @@ struct OneShotExecutors {
 impl GroupExecutors for OneShotExecutors {
     fn executor_for(
         &self,
-        envelope: &lash_core::RuntimeEffectEnvelope,
-    ) -> Option<lash_core::RuntimeEffectLocalExecutor<'static>> {
+        envelope: &lash_core_execution::RuntimeEffectEnvelope,
+    ) -> Option<lash_core_execution::RuntimeEffectLocalExecutor<'static>> {
         let mut asked = self.asked.lock().expect("asked");
         asked.push(envelope.invocation.replay_key().to_string());
         if asked.len() != 1 {
             return None;
         }
         let executed = Arc::clone(&self.executed);
-        Some(lash_core::RuntimeEffectLocalExecutor::testing(
+        Some(lash_core_execution::RuntimeEffectLocalExecutor::testing(
             move |envelope| {
                 let key = envelope.invocation.replay_key().to_string();
                 let executed = Arc::clone(&executed);
                 async move {
                     executed.lock().expect("executed").push(key);
-                    Ok(lash_core::RuntimeEffectOutcome::LanguageRuntimeValue {
-                        value: serde_json::json!("settled"),
-                    })
+                    Ok(
+                        lash_core_execution::RuntimeEffectOutcome::LanguageRuntimeValue {
+                            value: serde_json::json!("settled"),
+                        },
+                    )
                 }
             },
         ))
@@ -344,29 +349,32 @@ impl GroupExecutors for OneShotExecutors {
 }
 
 /// A one-child `RunToCompletion` group over `scope`, keyed `key`.
-fn one_child_group(scope: &lash_core::ExecutionScope, key: &str) -> lash_core::RuntimeEffectGroup {
-    let child = lash_core::RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope.clone(), format!("{key}:child:0"))
+fn one_child_group(
+    scope: &lash_core_execution::ExecutionScope,
+    key: &str,
+) -> lash_core_execution::RuntimeEffectGroup {
+    let child = lash_core_execution::RuntimeEffectEnvelope::new(
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(scope.clone(), format!("{key}:child:0"))
                 .expect("an admitted scope and replay key"),
-            lash_core::RuntimeAttribution::none(),
+            lash_core_execution::RuntimeAttribution::none(),
             "settle",
         ),
-        lash_core::RuntimeEffectCommand::LanguageRuntimeValue {
+        lash_core_execution::RuntimeEffectCommand::LanguageRuntimeValue {
             operation: "settle".to_string(),
         },
     );
-    lash_core::RuntimeEffectGroup::try_new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope.clone(), format!("{key}:group"))
+    lash_core_execution::RuntimeEffectGroup::try_new(
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(scope.clone(), format!("{key}:group"))
                 .expect("an admitted scope and replay key"),
-            lash_core::RuntimeAttribution::none(),
+            lash_core_execution::RuntimeAttribution::none(),
             "effect-group",
         ),
         key.to_string(),
         vec![child],
-        lash_core::GroupWakePolicy::All,
-        lash_core::LoserPolicy::RunToCompletion,
+        lash_core_execution::GroupWakePolicy::All,
+        lash_core_execution::LoserPolicy::RunToCompletion,
     )
     .expect("a one-child group assembles")
 }
@@ -409,7 +417,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
                 }),
             );
             let scoped = host
-                .scoped(lash_core::AdmittedScope::runtime_operation(KEY))
+                .scoped(lash_core_execution::AdmittedScope::runtime_operation(KEY))
                 .expect("a scope binds");
             let group = one_child_group(scoped.execution_scope(), KEY);
             let _handle = scoped
@@ -511,7 +519,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
     let executors = Arc::new(OneShotExecutors::default());
     let host = host_with_lease(&path, Arc::clone(&executors) as Arc<dyn GroupExecutors>);
     let scoped = host
-        .scoped(lash_core::AdmittedScope::runtime_operation(KEY))
+        .scoped(lash_core_execution::AdmittedScope::runtime_operation(KEY))
         .expect("a scope binds");
     let group = one_child_group(scoped.execution_scope(), KEY);
     let mut handle = scoped
@@ -526,7 +534,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
         Duration::from_secs(30),
         scoped
             .controller()
-            .await_next_settlement(&mut handle, lash_core::CancellationToken::new()),
+            .await_next_settlement(&mut handle, lash_core_execution::CancellationToken::new()),
     )
     .await
     .expect("the retained child settles inside the budget")
@@ -549,7 +557,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
     );
     scoped
         .controller()
-        .close_effect_group(handle, lash_core::LoserPolicy::RunToCompletion)
+        .close_effect_group(handle, lash_core_execution::LoserPolicy::RunToCompletion)
         .await
         .expect("the group closes");
 }

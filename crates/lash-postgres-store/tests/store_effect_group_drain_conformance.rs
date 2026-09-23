@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_conformance::{DrainWorld, DrainWorldFactory, DrainWorldSpec};
-use lash_core::EffectHost;
+use lash_core_execution::EffectHost;
 use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
 
 use crate::support::{SharedDatabaseLock, database_url, reset};
@@ -32,11 +32,11 @@ async fn world(database_url: String, spec: DrainWorldSpec) -> DrainWorld {
         .expect("PostgreSQL effect-group drain host");
     let ttl = Duration::from_millis(spec.lease_ttl_ms);
     let options = PostgresEffectReplayOptions {
-        lease_timings: lash_core::facade_support::LeaseTimings::new(ttl, ttl / 3)
+        lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
             .expect("the suite asks for a ttl at least three renew intervals wide"),
         drain_budget: spec
             .drain_budget
-            .map(lash_core::EffectGroupDrainBudget::new)
+            .map(lash_core_execution::EffectGroupDrainBudget::new)
             .unwrap_or_default(),
     };
     let host = PostgresEffectHost::with_options(&storage, options);

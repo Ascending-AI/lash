@@ -16,8 +16,8 @@
 
 use std::sync::LazyLock;
 
-use lash_core::WakeDeliveryState;
-use lash_core::store_backend_support as vocabulary;
+use lash_core_execution::WakeDeliveryState;
+use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
     artifact_cleanup::ArtifactCleanupStatements, definitions::DefinitionStatements,
     events::EventStatements, leases::LeaseStatements, observers::ObserverStatements,
@@ -76,8 +76,8 @@ fn wake_delivery_state_equals(column: &str, state: WakeDeliveryState) -> String 
 
 /// The process family's domain vocabulary, as this backend supplies it.
 ///
-/// Every expansion is generated from `lash_core::ProcessStatus` or
-/// `lash_core::WakeDeliveryState`, so adding a variant is still one edit in
+/// Every expansion is generated from `lash_core_execution::ProcessStatus` or
+/// `lash_core_execution::WakeDeliveryState`, so adding a variant is still one edit in
 /// the enum rather than one per statement. The term names are the domain's and
 /// are identical in the PostgreSQL store.
 const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[
@@ -1044,7 +1044,7 @@ pub(crate) fn attached_process_sql() -> &'static ProcessSql {
 /// than a template with a hole. Choosing the statement and pushing the values
 /// in one place is what keeps a clause and the parameter it reads together.
 pub(crate) fn list_processes_query(
-    filter: &lash_core::ProcessListFilter,
+    filter: &lash_core_execution::ProcessListFilter,
     status: Option<String>,
     definition: Option<String>,
 ) -> (&'static str, Vec<rusqlite::types::Value>) {

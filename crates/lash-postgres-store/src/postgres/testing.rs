@@ -20,7 +20,9 @@ use sqlx::{Connection, PgConnection};
 /// The filter no longer builds the statement; it selects one (FIG-3385). The
 /// text is the named statement its shape is served by, which is what the
 /// listing actually issues.
-pub fn trigger_subscription_list_sql(filter: &lash_core::TriggerSubscriptionFilter) -> String {
+pub fn trigger_subscription_list_sql(
+    filter: &lash_core_execution::TriggerSubscriptionFilter,
+) -> String {
     crate::trigger_store::subscription_list_sql(filter).to_string()
 }
 

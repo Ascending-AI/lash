@@ -72,7 +72,7 @@ impl ScratchSchema {
     pub async fn open_host_provisioned(
         &self,
         check: SchemaCheck,
-    ) -> Result<PostgresStorage, lash_core::StoreError> {
+    ) -> Result<PostgresStorage, lash_core_execution::StoreError> {
         PostgresStorage::from_pool_with(
             self.pool.clone(),
             PostgresStoreConfig {

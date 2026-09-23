@@ -8,7 +8,7 @@
 //! surfaced `ReplayMismatch` deep in the effect driver instead of a typed
 //! refusal at open. Component 96 refuses the whole store at open instead.
 
-use lash_core::{
+use lash_core_execution::{
     ExecutionScope, RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome,
 };
@@ -28,15 +28,15 @@ async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
     Some((database_lock, storage))
 }
 
-fn sleep_effect_envelope() -> lash_core::RuntimeEffectEnvelope {
-    lash_core::RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
+fn sleep_effect_envelope() -> lash_core_execution::RuntimeEffectEnvelope {
+    lash_core_execution::RuntimeEffectEnvelope::new(
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(
                 ExecutionScope::turn("sleep-cutover-session", "sleep-cutover-turn"),
                 REPLAY_KEY,
             )
             .expect("valid sleep effect address"),
-            lash_core::RuntimeAttribution::for_turn(
+            lash_core_execution::RuntimeAttribution::for_turn(
                 "sleep-cutover-session",
                 "sleep-cutover-turn",
                 1,
@@ -45,7 +45,7 @@ fn sleep_effect_envelope() -> lash_core::RuntimeEffectEnvelope {
             "sleep",
         ),
         RuntimeEffectCommand::Sleep {
-            spec: lash_core::SleepSpec::For { duration_ms: 5 },
+            spec: lash_core_execution::SleepSpec::For { duration_ms: 5 },
         },
     )
 }
@@ -181,11 +181,11 @@ async fn postgres_fresh_effect_journal_round_trips_a_sleep_across_reopen() {
     let pool = storage.pool().clone();
     let scope = ExecutionScope::turn("sleep-roundtrip-session", "sleep-roundtrip-turn");
     let replay_key = "sleep-roundtrip-replay";
-    let envelope = lash_core::RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(scope.clone(), replay_key)
+    let envelope = lash_core_execution::RuntimeEffectEnvelope::new(
+        lash_core_execution::RuntimeEffectInvocation::new(
+            lash_core_execution::EffectAddress::new(scope.clone(), replay_key)
                 .expect("valid sleep effect address"),
-            lash_core::RuntimeAttribution::for_turn(
+            lash_core_execution::RuntimeAttribution::for_turn(
                 "sleep-roundtrip-session",
                 "sleep-roundtrip-turn",
                 1,
@@ -194,7 +194,7 @@ async fn postgres_fresh_effect_journal_round_trips_a_sleep_across_reopen() {
             "sleep",
         ),
         RuntimeEffectCommand::Sleep {
-            spec: lash_core::SleepSpec::For { duration_ms: 5 },
+            spec: lash_core_execution::SleepSpec::For { duration_ms: 5 },
         },
     );
     sqlx::query("DELETE FROM lash_runtime_effect_replay WHERE replay_key = $1")

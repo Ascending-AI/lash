@@ -4,18 +4,18 @@ pub(super) fn cancel_pending_turn_input_row_conn(
     conn: &Connection,
     row: PendingTurnInputRow,
     now_epoch_ms: u64,
-) -> Result<lash_core::PendingTurnInputCancelOutcome, StoreError> {
+) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
     let mut input = pending_turn_input_from_row(row.clone())?;
     match input.state.kind() {
-        lash_core::TurnInputStateKind::Cancelled => Ok(
-            lash_core::PendingTurnInputCancelOutcome::AlreadyCancelled(input),
-        ),
-        lash_core::TurnInputStateKind::Completed => Ok(
-            lash_core::PendingTurnInputCancelOutcome::AlreadyCompleted(input),
-        ),
-        lash_core::TurnInputStateKind::PendingActive
-        | lash_core::TurnInputStateKind::DeferredNextTurn
-        | lash_core::TurnInputStateKind::Accepted => {
+        lash_core_execution::runtime::TurnInputStateKind::Cancelled => {
+            Ok(lash_core_execution::PendingTurnInputCancelOutcome::AlreadyCancelled(input))
+        }
+        lash_core_execution::runtime::TurnInputStateKind::Completed => {
+            Ok(lash_core_execution::PendingTurnInputCancelOutcome::AlreadyCompleted(input))
+        }
+        lash_core_execution::runtime::TurnInputStateKind::PendingActive
+        | lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
+        | lash_core_execution::runtime::TurnInputStateKind::Accepted => {
             // A claim is live only while the session-execution-lease generation it
             // pins still holds the session lease (ADR 0029).
             let live_claim = row.claim_token.is_some()
@@ -27,10 +27,15 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                     },
                 );
             if live_claim {
-                return Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed {
-                    claim: pending_turn_input_claim_diagnostics_from_row(&row, input.state.clone()),
-                    input,
-                });
+                return Ok(
+                    lash_core_execution::PendingTurnInputCancelOutcome::AlreadyClaimed {
+                        claim: pending_turn_input_claim_diagnostics_from_row(
+                            &row,
+                            input.state.clone(),
+                        ),
+                        input,
+                    },
+                );
             }
             let run_owns_input: bool = conn
                 .query_row(
@@ -43,10 +48,15 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                 )
                 .map_err(sqlite_error)?;
             if run_owns_input {
-                return Ok(lash_core::PendingTurnInputCancelOutcome::AlreadyClaimed {
-                    claim: pending_turn_input_claim_diagnostics_from_row(&row, input.state.clone()),
-                    input,
-                });
+                return Ok(
+                    lash_core_execution::PendingTurnInputCancelOutcome::AlreadyClaimed {
+                        claim: pending_turn_input_claim_diagnostics_from_row(
+                            &row,
+                            input.state.clone(),
+                        ),
+                        input,
+                    },
+                );
             }
             conn.execute(
                 crate::turn_ingress::turn_ingress_sql()
@@ -56,12 +66,12 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                 params![
                     row.session_id.as_str(),
                     row.input_id.as_str(),
-                    lash_core::TurnInputStateKind::Cancelled.as_str(),
+                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
                 ],
             )
             .map_err(sqlite_error)?;
-            input.state = lash_core::TurnInputState::Cancelled(input.state.ingress());
-            Ok(lash_core::PendingTurnInputCancelOutcome::Cancelled(input))
+            input.state = lash_core_execution::TurnInputState::Cancelled(input.state.ingress());
+            Ok(lash_core_execution::PendingTurnInputCancelOutcome::Cancelled(input))
         }
     }
 }
@@ -73,7 +83,7 @@ pub(super) async fn checkpoint_work_pending_sqlite(
     session_id: &SessionId,
     generation: u64,
     turn_id: &TurnId,
-    checkpoint: lash_core::CheckpointKind,
+    checkpoint: lash_core_execution::CheckpointKind,
     max_inputs: usize,
     max_batches: usize,
 ) -> Result<bool, StoreError> {
@@ -89,10 +99,10 @@ pub(super) async fn checkpoint_work_pending_sqlite(
             // minimum-boundary set is what the checkpoint decides, and an
             // optional predicate over a bound boundary cannot seek an index.
             let sql = match checkpoint {
-                lash_core::CheckpointKind::AfterWork => {
+                lash_core_execution::CheckpointKind::AfterWork => {
                     family.checkpoint_work_pending_after_work.sql()
                 }
-                lash_core::CheckpointKind::BeforeCompletion => {
+                lash_core_execution::CheckpointKind::BeforeCompletion => {
                     family.checkpoint_work_pending_before_completion.sql()
                 }
             };
@@ -176,7 +186,7 @@ pub(super) fn sqlite_refusal_for_empty_scan(
             )
             .map_err(sqlite_error)?
             != 0;
-    lash_core::store::claim_plan::classify_empty_claim_scan(
+    lash_core_execution::store::claim_plan::classify_empty_claim_scan(
         &head_candidates,
         deferred_row_pending,
         boundary,
@@ -224,7 +234,7 @@ pub(super) fn claim_queued_work_rows_sqlite(
         .enumerate()
         .map(|(index, (row, batch))| {
             debug_assert_eq!(row.batch_id.as_str(), &*batch.batch_id);
-            lash_core::store::claim_plan::QueuedWorkClaimRow {
+            lash_core_execution::store::claim_plan::QueuedWorkClaimRow {
                 candidate: candidates[index].clone(),
                 batch,
                 claim_token: row.claim_token.clone(),
@@ -232,8 +242,8 @@ pub(super) fn claim_queued_work_rows_sqlite(
             }
         })
         .collect::<Vec<_>>();
-    let plan = match lash_core::store::claim_plan::plan_queued_work_claim(
-        lash_core::store::queued_work::ClaimIdDialect::QueuedWork,
+    let plan = match lash_core_execution::store::claim_plan::plan_queued_work_claim(
+        lash_core_execution::store::queued_work::ClaimIdDialect::QueuedWork,
         session_id,
         owner,
         generation,
@@ -243,13 +253,13 @@ pub(super) fn claim_queued_work_rows_sqlite(
     )? {
         // Empty commits and Defer rolls back: the claim transaction carries
         // the same meaning the hand-written loop did (FIG-1065).
-        lash_core::store::claim_plan::ClaimPlanDecision::Empty => {
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Empty => {
             return Ok(TxOutcome::Commit(None));
         }
-        lash_core::store::claim_plan::ClaimPlanDecision::Defer => {
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Defer => {
             return Ok(TxOutcome::Rollback(None));
         }
-        lash_core::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
     };
     for write in plan.writes() {
         let claimed = tx
@@ -276,8 +286,8 @@ pub(super) fn claim_queued_work_rows_sqlite(
         // disagreement is recorded as evidence and then fails closed exactly
         // as this site always did — the claim transaction rolls back and no
         // claim is reported.
-        if !lash_core::store_backend_support::fenced_write_applied(
-            lash_core::store_backend_support::FencedWrite::QueuedWorkClaimAcquisition,
+        if !lash_core_execution::store_backend_support::fenced_write_applied(
+            lash_core_execution::store_backend_support::FencedWrite::QueuedWorkClaimAcquisition,
             crate::SQLITE_BACKEND,
             write.batch_id.as_str(),
             u64::try_from(claimed).unwrap_or(u64::MAX),
@@ -319,7 +329,7 @@ pub(super) fn scan_queued_work_candidates_sqlite(
     let candidate_rows = candidate_rows
         .into_iter()
         .filter(|row| {
-            lash_core::store_backend_support::queued_work_batch_claimability(
+            lash_core_execution::store_backend_support::queued_work_batch_claimability(
                 row.claim_facts(),
                 generation,
             )
@@ -384,8 +394,8 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
-    mode: lash_core::TurnInputClaimMode,
-) -> Result<TxOutcome<Option<lash_core::TurnInputClaim>>, StoreError> {
+    mode: lash_core_execution::TurnInputClaimMode,
+) -> Result<TxOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> {
     if max_inputs == 0 {
         return Ok(TxOutcome::Commit(None));
     }
@@ -404,17 +414,19 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
             i64::try_from(max_inputs).unwrap_or(i64::MAX).into(),
         ];
         let statement = match &mode {
-            lash_core::TurnInputClaimMode::NextTurn => statements.claim_candidates_next_turn.sql(),
-            lash_core::TurnInputClaimMode::ActiveTurn {
+            lash_core_execution::TurnInputClaimMode::NextTurn => {
+                statements.claim_candidates_next_turn.sql()
+            }
+            lash_core_execution::TurnInputClaimMode::ActiveTurn {
                 turn_id,
                 checkpoint,
             } => {
                 values.push(turn_id.to_string().into());
                 match checkpoint {
-                    lash_core::CheckpointKind::AfterWork => {
+                    lash_core_execution::CheckpointKind::AfterWork => {
                         statements.claim_candidates_active_turn_after_work.sql()
                     }
-                    lash_core::CheckpointKind::BeforeCompletion => statements
+                    lash_core_execution::CheckpointKind::BeforeCompletion => statements
                         .claim_candidates_active_turn_before_completion
                         .sql(),
                 }
@@ -452,14 +464,14 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
     session_id: &SessionId,
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
-    mode: lash_core::TurnInputClaimMode,
-    selected: Vec<(PendingTurnInputRow, lash_core::PendingTurnInput)>,
-) -> Result<TxOutcome<Option<lash_core::TurnInputClaim>>, StoreError> {
+    mode: lash_core_execution::TurnInputClaimMode,
+    selected: Vec<(PendingTurnInputRow, lash_core_execution::PendingTurnInput)>,
+) -> Result<TxOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> {
     let generation = session_execution_lease.fencing_token;
     let observations = selected
         .into_iter()
         .map(
-            |(row, input)| lash_core::store::claim_plan::TurnInputClaimRow {
+            |(row, input)| lash_core_execution::store::claim_plan::TurnInputClaimRow {
                 input,
                 enqueue_seq: row.enqueue_seq,
                 claim_fencing_token: row.claim_fencing_token,
@@ -468,8 +480,8 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
             },
         )
         .collect();
-    let plan = match lash_core::store::claim_plan::plan_turn_input_claim(
-        lash_core::store::queued_work::ClaimIdDialect::TurnInput,
+    let plan = match lash_core_execution::store::claim_plan::plan_turn_input_claim(
+        lash_core_execution::store::queued_work::ClaimIdDialect::TurnInput,
         session_id,
         owner,
         generation,
@@ -479,13 +491,13 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
     )? {
         // Empty commits and Defer rolls back: the claim transaction carries
         // the same meaning the hand-written loop did (FIG-1065).
-        lash_core::store::claim_plan::ClaimPlanDecision::Empty => {
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Empty => {
             return Ok(TxOutcome::Commit(None));
         }
-        lash_core::store::claim_plan::ClaimPlanDecision::Defer => {
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Defer => {
             return Ok(TxOutcome::Rollback(None));
         }
-        lash_core::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
+        lash_core_execution::store::claim_plan::ClaimPlanDecision::Complete(plan) => plan,
     };
     for write in plan.writes() {
         let claimed = tx
@@ -515,8 +527,8 @@ pub(super) fn claim_turn_input_rows_sqlite_conn(
         // disagreement is recorded as evidence and then fails closed exactly
         // as this site always did — the whole claim transaction rolls back and
         // no claim is reported.
-        if !lash_core::store_backend_support::fenced_write_applied(
-            lash_core::store_backend_support::FencedWrite::TurnInputClaimAcquisition,
+        if !lash_core_execution::store_backend_support::fenced_write_applied(
+            lash_core_execution::store_backend_support::FencedWrite::TurnInputClaimAcquisition,
             crate::SQLITE_BACKEND,
             write.input_id.as_str(),
             u64::try_from(claimed).unwrap_or(u64::MAX),
@@ -534,8 +546,8 @@ pub(super) async fn claim_pending_turn_inputs_sqlite(
     session_execution_lease: &SessionExecutionLeaseAuthority,
     owner: &LeaseOwnerIdentity,
     max_inputs: usize,
-    mode: lash_core::TurnInputClaimMode,
-) -> Result<Option<lash_core::TurnInputClaim>, StoreError> {
+    mode: lash_core_execution::TurnInputClaimMode,
+) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
     if max_inputs == 0 {
         return Ok(None);
     }
@@ -543,31 +555,37 @@ pub(super) async fn claim_pending_turn_inputs_sqlite(
     let session_execution_lease = session_execution_lease.clone();
     let owner = owner.clone();
     conn.write_flow(move |tx| {
-        let outcome: Result<TxOutcome<Option<lash_core::TurnInputClaim>>, StoreError> = (|| {
-            ensure_session_execution_lease_conn(tx, &session_id, &session_execution_lease, now)?;
-            let outcome = claim_pending_turn_inputs_sqlite_conn(
-                tx,
-                now,
-                &session_id,
-                &session_execution_lease,
-                &owner,
-                max_inputs,
-                mode.clone(),
-            )?;
-            if let TxOutcome::Commit(input) = &outcome
-                && let lash_core::TurnInputClaimMode::ActiveTurn { turn_id, .. } = &mode
-            {
-                super::queued_run_assignment::assign_checkpoint_members_conn(
+        let outcome: Result<TxOutcome<Option<lash_core_execution::TurnInputClaim>>, StoreError> =
+            (|| {
+                ensure_session_execution_lease_conn(
                     tx,
                     &session_id,
-                    turn_id,
-                    input.as_ref(),
-                    None,
+                    &session_execution_lease,
+                    now,
                 )?;
-            }
-            Ok(outcome)
-        })(
-        );
+                let outcome = claim_pending_turn_inputs_sqlite_conn(
+                    tx,
+                    now,
+                    &session_id,
+                    &session_execution_lease,
+                    &owner,
+                    max_inputs,
+                    mode.clone(),
+                )?;
+                if let TxOutcome::Commit(input) = &outcome
+                    && let lash_core_execution::TurnInputClaimMode::ActiveTurn { turn_id, .. } =
+                        &mode
+                {
+                    super::queued_run_assignment::assign_checkpoint_members_conn(
+                        tx,
+                        &session_id,
+                        turn_id,
+                        input.as_ref(),
+                        None,
+                    )?;
+                }
+                Ok(outcome)
+            })();
         match outcome {
             Ok(TxOutcome::Commit(value)) => Ok(TxOutcome::Commit(Ok(value))),
             Ok(TxOutcome::Rollback(value)) => Ok(TxOutcome::Rollback(Ok(value))),
@@ -632,12 +650,12 @@ pub(super) fn load_session_execution_lease_row_conn(
 
 pub(super) fn acquire_session_execution_lease_conn(
     conn: &Connection,
-    claim: lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity<'_>,
+    claim: lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity<'_>,
     previous_fencing_token: u64,
     now: u64,
     lease_ttl_ms: u64,
 ) -> Result<SessionExecutionLease, StoreError> {
-    let lash_core::store_backend_support::SessionExecutionLeaseClaimIdentity {
+    let lash_core_execution::store_backend_support::SessionExecutionLeaseClaimIdentity {
         session_id,
         owner,
         executor_id,
@@ -689,10 +707,10 @@ pub(super) fn ensure_session_execution_lease_conn(
     now: u64,
 ) -> Result<(), StoreError> {
     let current = load_session_execution_lease_row_conn(conn, session_id)?;
-    lash_core::store_backend_support::require_current_session_execution_lease(
+    lash_core_execution::store_backend_support::require_current_session_execution_lease(
         session_id,
         current.as_ref().map(|current| {
-            lash_core::store_backend_support::SessionExecutionLeaseFenceFacts {
+            lash_core_execution::store_backend_support::SessionExecutionLeaseFenceFacts {
                 owner: current.owner.as_ref(),
                 executor_id: current.executor_id.as_deref(),
                 lease_token: current.lease_token.as_deref(),
@@ -705,18 +723,20 @@ pub(super) fn ensure_session_execution_lease_conn(
     )
 }
 
-/// An owned [`lash_core::OrphanedTurnInputScope`], because the write flow moves
+/// An owned [`lash_core_execution::OrphanedTurnInputScope`], because the write flow moves
 /// its work into a `'static` closure.
 pub(super) enum OwnedOrphanedScope {
     Turn(TurnId),
     LaneGeneration { resumable_turn_id: Option<TurnId> },
 }
 
-impl From<lash_core::OrphanedTurnInputScope<'_>> for OwnedOrphanedScope {
-    fn from(scope: lash_core::OrphanedTurnInputScope<'_>) -> Self {
+impl From<lash_core_execution::OrphanedTurnInputScope<'_>> for OwnedOrphanedScope {
+    fn from(scope: lash_core_execution::OrphanedTurnInputScope<'_>) -> Self {
         match scope {
-            lash_core::OrphanedTurnInputScope::Turn(turn_id) => Self::Turn(turn_id.clone()),
-            lash_core::OrphanedTurnInputScope::LaneGeneration { resumable_turn_id } => {
+            lash_core_execution::OrphanedTurnInputScope::Turn(turn_id) => {
+                Self::Turn(turn_id.clone())
+            }
+            lash_core_execution::OrphanedTurnInputScope::LaneGeneration { resumable_turn_id } => {
                 Self::LaneGeneration {
                     resumable_turn_id: resumable_turn_id.cloned(),
                 }
@@ -726,11 +746,11 @@ impl From<lash_core::OrphanedTurnInputScope<'_>> for OwnedOrphanedScope {
 }
 
 impl OwnedOrphanedScope {
-    pub(super) fn borrow(&self) -> lash_core::OrphanedTurnInputScope<'_> {
+    pub(super) fn borrow(&self) -> lash_core_execution::OrphanedTurnInputScope<'_> {
         match self {
-            Self::Turn(turn_id) => lash_core::OrphanedTurnInputScope::Turn(turn_id),
+            Self::Turn(turn_id) => lash_core_execution::OrphanedTurnInputScope::Turn(turn_id),
             Self::LaneGeneration { resumable_turn_id } => {
-                lash_core::OrphanedTurnInputScope::LaneGeneration {
+                lash_core_execution::OrphanedTurnInputScope::LaneGeneration {
                     resumable_turn_id: resumable_turn_id.as_ref(),
                 }
             }
@@ -742,7 +762,7 @@ impl OwnedOrphanedScope {
 ///
 /// The write is the commit-time re-defer's write: `deferred_next_turn` with
 /// `NextTurn` ingress and cleared claim columns. Row selection is delegated to
-/// [`lash_core::store_backend_support::orphaned_active_turn_input_is_repairable`]
+/// [`lash_core_execution::store_backend_support::orphaned_active_turn_input_is_repairable`]
 /// rather than expressed as a `json_extract` predicate, so this backend and the
 /// in-memory one cannot drift on which rows a repair may touch. `live_generation`
 /// is the caller's fencing token, already re-validated on this connection.
@@ -758,7 +778,7 @@ pub(super) fn load_turn_cancel_request_conn(
     conn: &Connection,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> Result<Option<lash_core::TurnCancelRequestRecord>, StoreError> {
+) -> Result<Option<lash_core_execution::TurnCancelRequestRecord>, StoreError> {
     let json = conn
         .query_row(
             crate::turn_ingress::turn_ingress_sql()
@@ -778,7 +798,7 @@ pub(super) fn load_turn_cancel_intent_snapshot_conn(
     conn: &Connection,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> Result<lash_core::TurnCancelIntentSnapshot, StoreError> {
+) -> Result<lash_core_execution::TurnCancelIntentSnapshot, StoreError> {
     let row = conn
         .query_row(
             crate::turn_ingress::turn_ingress_sql()
@@ -791,9 +811,9 @@ pub(super) fn load_turn_cancel_intent_snapshot_conn(
         .optional()
         .map_err(sqlite_error)?;
     let Some((json, revision)) = row else {
-        return Ok(lash_core::TurnCancelIntentSnapshot::Absent);
+        return Ok(lash_core_execution::TurnCancelIntentSnapshot::Absent);
     };
-    let record: lash_core::TurnCancelRequestRecord =
+    let record: lash_core_execution::TurnCancelRequestRecord =
         decode_stored_json(&json, "turn cancel request")?;
     let revision = u64::try_from(revision)
         .map_err(|_| StoreError::Backend("turn cancel intent revision is negative".to_string()))?;
@@ -802,7 +822,7 @@ pub(super) fn load_turn_cancel_intent_snapshot_conn(
             "turn cancel intent revision is zero".to_string(),
         ));
     }
-    Ok(lash_core::TurnCancelIntentSnapshot::Present {
+    Ok(lash_core_execution::TurnCancelIntentSnapshot::Present {
         request: record.request,
         revision,
     })
@@ -812,7 +832,7 @@ pub(super) fn append_turn_cancel_outcome_conn(
     conn: &Connection,
     session_id: &SessionId,
     turn_id: &TurnId,
-    affected: lash_core::TurnCancelAffectedInput,
+    affected: lash_core_execution::TurnCancelAffectedInput,
 ) -> Result<(), StoreError> {
     let Some(mut record) = load_turn_cancel_request_conn(conn, session_id, turn_id)? else {
         return Ok(());
@@ -837,17 +857,17 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
     conn: &Connection,
     session_id: &SessionId,
     turn_id: &TurnId,
-    observed: &lash_core::TurnCancelIntentSnapshot,
-    evidence: &lash_core::facade_support::TurnCancellationEvidence,
+    observed: &lash_core_execution::TurnCancelIntentSnapshot,
+    evidence: &lash_core_execution::facade_support::TurnCancellationEvidence,
 ) -> Result<bool, StoreError> {
     let actual = load_turn_cancel_intent_snapshot_conn(conn, session_id, turn_id)?;
     if actual != *observed {
         return Ok(false);
     }
     let mut record = load_turn_cancel_request_conn(conn, session_id, turn_id)?.unwrap_or(
-        lash_core::TurnCancelRequestRecord {
-            request: lash_core::facade_support::TurnCancelRequest {
-                address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
+        lash_core_execution::TurnCancelRequestRecord {
+            request: lash_core_execution::facade_support::TurnCancelRequest {
+                address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
                 request_id: evidence.request_id.clone(),
                 origin: evidence.origin.clone(),
                 reason: evidence.reason.clone(),
@@ -857,8 +877,8 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
             outcome: None,
         },
     );
-    let request = lash_core::facade_support::TurnCancelRequest {
-        address: lash_core::facade_support::TurnAddress::new(session_id, turn_id),
+    let request = lash_core_execution::facade_support::TurnCancelRequest {
+        address: lash_core_execution::facade_support::TurnAddress::new(session_id, turn_id),
         request_id: evidence.request_id.clone(),
         origin: evidence.origin.clone(),
         reason: evidence.reason.clone(),
@@ -866,12 +886,12 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
         mode: evidence.mode,
     };
     let revision = match actual {
-        lash_core::TurnCancelIntentSnapshot::Absent => 1,
-        lash_core::TurnCancelIntentSnapshot::Present {
+        lash_core_execution::TurnCancelIntentSnapshot::Absent => 1,
+        lash_core_execution::TurnCancelIntentSnapshot::Present {
             request: ref prior,
             revision,
         } if prior == &request => revision,
-        lash_core::TurnCancelIntentSnapshot::Present { revision, .. } => {
+        lash_core_execution::TurnCancelIntentSnapshot::Present { revision, .. } => {
             StoreError::checked_monotonic_increment("turn_cancel_intent_revision", revision)?
         }
     };
@@ -899,7 +919,7 @@ pub(super) fn orphaned_active_turn_ids_conn(
     conn: &Connection,
     session_id: &SessionId,
     live_generation: u64,
-    scope: lash_core::OrphanedTurnInputScope<'_>,
+    scope: lash_core_execution::OrphanedTurnInputScope<'_>,
 ) -> Result<Vec<TurnId>, StoreError> {
     let candidates = {
         let mut stmt = conn
@@ -932,7 +952,7 @@ pub(super) fn orphaned_active_turn_ids_conn(
             claim_generation,
         )
         .map_err(sqlite_error)?;
-        if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
+        if lash_core_execution::store_backend_support::orphaned_active_turn_input_is_repairable(
             scope,
             live_generation,
             &state,
@@ -953,17 +973,17 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
     session_id: &SessionId,
     live_generation: u64,
     turn_id: &TurnId,
-    observed: &lash_core::TurnCancelIntentSnapshot,
-    settlement: Option<&lash_core::TurnCancelClosureSettlement>,
-) -> Result<lash_core::TurnCancelRepairResult, StoreError> {
+    observed: &lash_core_execution::TurnCancelIntentSnapshot,
+    settlement: Option<&lash_core_execution::TurnCancelClosureSettlement>,
+) -> Result<lash_core_execution::TurnCancelRepairResult, StoreError> {
     if load_turn_cancel_intent_snapshot_conn(conn, session_id, turn_id)? != *observed {
-        return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
+        return Ok(lash_core_execution::TurnCancelRepairResult::IntentChanged);
     }
     if let Some(evidence) =
-        settlement.and_then(lash_core::TurnCancelClosureSettlement::base_cancellation)
+        settlement.and_then(lash_core_execution::TurnCancelClosureSettlement::base_cancellation)
         && !reconcile_turn_cancel_winner_conn(conn, session_id, turn_id, observed, evidence)?
     {
-        return Ok(lash_core::TurnCancelRepairResult::IntentChanged);
+        return Ok(lash_core_execution::TurnCancelRepairResult::IntentChanged);
     }
     let sql = crate::turn_ingress::turn_ingress_sql();
     let candidates = {
@@ -978,15 +998,17 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
-    let scope = lash_core::OrphanedTurnInputScope::Turn(turn_id);
-    let effective =
-        settlement.and_then(lash_core::TurnCancelClosureSettlement::effective_cancellation);
-    let disposition = effective.map_or(lash_core::TurnCancelDisposition::Defer, |e| e.undelivered);
+    let scope = lash_core_execution::OrphanedTurnInputScope::Turn(turn_id);
+    let effective = settlement
+        .and_then(lash_core_execution::TurnCancelClosureSettlement::effective_cancellation);
+    let disposition = effective.map_or(lash_core_execution::TurnCancelDisposition::Defer, |e| {
+        e.undelivered
+    });
     let mut repairable = Vec::new();
     for row in candidates {
         let ingress = decode_turn_input_ingress(row.ingress_json)?;
         let state = decode_turn_input_state(row.state, ingress)?;
-        if lash_core::store_backend_support::orphaned_active_turn_input_is_repairable(
+        if lash_core_execution::store_backend_support::orphaned_active_turn_input_is_repairable(
             scope,
             live_generation,
             &state,
@@ -1000,20 +1022,20 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
         }
     }
     if repairable.is_empty() {
-        return Ok(lash_core::TurnCancelRepairResult::Applied(
+        return Ok(lash_core_execution::TurnCancelRepairResult::Applied(
             Default::default(),
         ));
     }
-    let deferred = lash_core::TurnInputState::DeferredNextTurn;
+    let deferred = lash_core_execution::TurnInputState::DeferredNextTurn;
     let deferred_ingress = encode_json(&deferred.ingress())?;
-    let mut outcome = lash_core::TurnCancelInputOutcome::default();
+    let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
     for (input_id, payload) in repairable {
         // Two dispositions, two named statements: deferring rewrites the
         // ingress so the row stops naming a turn that is over (FIG-1573),
         // dropping is the cancel this table already has. An optional
         // `COALESCE(?N, ingress_json)` assignment carried both before.
         match disposition {
-            lash_core::TurnCancelDisposition::Defer => conn.execute(
+            lash_core_execution::TurnCancelDisposition::Defer => conn.execute(
                 sql.pending_inputs.defer_to_next_turn.sql(),
                 params![
                     session_id.as_str(),
@@ -1022,17 +1044,17 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
                     deferred_ingress.as_str(),
                 ],
             ),
-            lash_core::TurnCancelDisposition::Drop => conn.execute(
+            lash_core_execution::TurnCancelDisposition::Drop => conn.execute(
                 sql.pending_inputs.cancel.sql(),
                 params![
                     session_id.as_str(),
                     input_id.as_str(),
-                    lash_core::TurnInputStateKind::Cancelled.as_str(),
+                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
                 ],
             ),
         }
         .map_err(sqlite_error)?;
-        let affected = lash_core::TurnCancelAffectedInput {
+        let affected = lash_core_execution::TurnCancelAffectedInput {
             input_id: input_id.into(),
             payload,
             disposition,
@@ -1042,7 +1064,9 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
         }
         outcome.affected_inputs.push(affected);
     }
-    Ok(lash_core::TurnCancelRepairResult::Applied(outcome))
+    Ok(lash_core_execution::TurnCancelRepairResult::Applied(
+        outcome,
+    ))
 }
 
 pub(super) fn release_session_execution_lease_conn(
@@ -1064,23 +1088,25 @@ pub(super) fn release_session_execution_lease_conn(
     Ok(released == 1)
 }
 
-pub(super) fn requested_append_ancestor(stamp: &lash_core::RuntimeTurnCommitStamp) -> Option<&str> {
+pub(super) fn requested_append_ancestor(
+    stamp: &lash_core_execution::RuntimeTurnCommitStamp,
+) -> Option<&str> {
     match &stamp.append_request_identity {
-        lash_core::AppendRequestIdentity::Append {
+        lash_core_execution::AppendRequestIdentity::Append {
             requested_ancestor_node_id,
             ..
         } => requested_ancestor_node_id.as_deref(),
-        lash_core::AppendRequestIdentity::PlainCommit
-        | lash_core::AppendRequestIdentity::SemanticBoundary { .. } => None,
+        lash_core_execution::AppendRequestIdentity::PlainCommit
+        | lash_core_execution::AppendRequestIdentity::SemanticBoundary { .. } => None,
     }
 }
 
 pub(super) fn append_identity_columns(
-    identity: &lash_core::AppendRequestIdentity,
+    identity: &lash_core_execution::AppendRequestIdentity,
 ) -> (Option<&str>, Option<i64>, Option<i64>) {
     match identity {
-        lash_core::AppendRequestIdentity::PlainCommit => (None, None, None),
-        lash_core::AppendRequestIdentity::Append {
+        lash_core_execution::AppendRequestIdentity::PlainCommit => (None, None, None),
+        lash_core_execution::AppendRequestIdentity::Append {
             encoding_version,
             request_hash,
             requested_node_count,
@@ -1092,7 +1118,7 @@ pub(super) fn append_identity_columns(
         ),
         // A semantic-boundary identity persists without a node count; the
         // NULL count is what distinguishes its family on decode (FIG-2480).
-        lash_core::AppendRequestIdentity::SemanticBoundary {
+        lash_core_execution::AppendRequestIdentity::SemanticBoundary {
             operation: _,
             encoding_version,
             request_hash,

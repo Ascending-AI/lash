@@ -25,15 +25,15 @@
 
 use super::*;
 use crate::session_sql::session_sql;
-use lash_core::SelectedQueuedWorkClaimOutcome;
-use lash_core::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
+use lash_core_execution::SelectedQueuedWorkClaimOutcome;
+use lash_core_execution::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
 fn load_turn_failure_settlements_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
-) -> Result<Vec<lash_core::TurnFailureSettlement>, StoreError> {
+) -> Result<Vec<lash_core_execution::TurnFailureSettlement>, StoreError> {
     let mut statement = conn
         .prepare(session_sql().turn_commits.select_failure_settlements.sql())
         .map_err(sqlite_error)?;
@@ -45,10 +45,13 @@ fn load_turn_failure_settlements_conn(
     let mut settlements = Vec::new();
     for row in rows {
         let (turn_id, result_json) = row.map_err(sqlite_error)?;
-        let receipt =
-            lash_core::store::decode_runtime_commit_receipt(session_id, &turn_id, &result_json)?;
+        let receipt = lash_core_execution::store::decode_runtime_commit_receipt(
+            session_id,
+            &turn_id,
+            &result_json,
+        )?;
         if !receipt.failure_evidence.is_empty() {
-            settlements.push(lash_core::TurnFailureSettlement {
+            settlements.push(lash_core_execution::TurnFailureSettlement {
                 turn_id,
                 evidence: receipt.failure_evidence,
             });
@@ -70,7 +73,7 @@ fn read_session_state_version_conn(
         .optional()
         .map_err(sqlite_error)?;
     let Some(marker) = marker else {
-        return Ok(lash_core::store::CURRENT_SESSION_STATE_VERSION);
+        return Ok(lash_core_execution::store::CURRENT_SESSION_STATE_VERSION);
     };
     let marker = marker
         .map(|version| {
@@ -80,7 +83,7 @@ fn read_session_state_version_conn(
             })
         })
         .transpose()?;
-    lash_core::store::resolve_session_state_version(marker)
+    lash_core_execution::store::resolve_session_state_version(marker)
 }
 
 pub(crate) fn ensure_session_not_deleted_conn(

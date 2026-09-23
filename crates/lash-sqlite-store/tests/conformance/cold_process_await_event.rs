@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use lash_core::{
+use lash_core_execution::{
     AwaitEventKey, AwaitEventResolver, EffectHost, Resolution, ResolveOutcome, SessionStoreFactory,
 };
 use lash_sqlite_store::SqliteEffectHost;
@@ -57,26 +57,28 @@ async fn sqlite_effect_host_satisfies_cold_process_await_event_conformance() {
                 .expect("cold-process resolver"),
         );
         let terminal = if identity == "turn_cancel_gate" {
-            let address = lash_core::runtime::TurnAddress::new(
+            let address = lash_core_execution::runtime::TurnAddress::new(
                 format!("cold-process-{nonce}-session"),
                 format!("cold-process-{nonce}-turn"),
             );
             let store_factory: Arc<dyn SessionStoreFactory> =
-                Arc::new(lash_core::runtime::InMemorySessionStoreFactory::new());
+                Arc::new(lash_core_execution::runtime::InMemorySessionStoreFactory::new());
             store_factory
-                .create_store(&lash_core::SessionStoreCreateRequest {
+                .create_store(&lash_core_execution::SessionStoreCreateRequest {
                     pending_observer_intents: Vec::new(),
                     session_id: address.session_id.clone(),
-                    relation: lash_core::SessionRelation::Root,
-                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                    relation: lash_core_execution::SessionRelation::Root,
+                    policy: lash_core_execution::SessionPolicy::new(
+                        lash_core_execution::TurnBudget::Unbounded,
+                    ),
                 })
                 .await
                 .expect("create cold-process cancellation session");
-            let receipt = lash_core::runtime::TurnWorkDriver::for_catalog(
+            let receipt = lash_core_execution::runtime::TurnWorkDriver::for_catalog(
                 Arc::clone(&resolver) as Arc<dyn EffectHost>,
                 store_factory,
             )
-            .request_cancel(lash_core::runtime::TurnCancelRequest::new(
+            .request_cancel(lash_core_execution::runtime::TurnCancelRequest::new(
                 address,
                 format!("cold-process-{nonce}-cancel"),
                 None,
@@ -85,7 +87,7 @@ async fn sqlite_effect_host_satisfies_cold_process_await_event_conformance() {
             .expect("request cancellation through a successor owner");
             assert!(matches!(
                 receipt.outcome,
-                lash_core::runtime::TurnCancelOutcome::Requested(_)
+                lash_core_execution::runtime::TurnCancelOutcome::Requested(_)
             ));
             resolver
                 .peek_await_event(&key)

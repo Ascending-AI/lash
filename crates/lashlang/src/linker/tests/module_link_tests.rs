@@ -418,7 +418,7 @@ async fn module_artifact_store_bytes_reject_corruption() {
 
     store
         .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("corruption-test"),
+            &lash_core_execution::ArtifactOwner::host("corruption-test"),
             &linked.artifact,
         )
         .await

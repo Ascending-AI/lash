@@ -8,7 +8,7 @@
 //! carry the placeholder style and table prefix this backend was rendered for.
 
 use super::turn_ingress_sql;
-use lash_core::store_backend_support as vocabulary;
+use lash_core_execution::store_backend_support as vocabulary;
 
 #[test]
 fn every_statement_renders_for_this_backend() {
@@ -68,21 +68,21 @@ fn a_checkpoint_statement_spells_the_boundary_its_generator_spells() {
         (
             &sql.pending_inputs_postgres
                 .claim_candidates_active_turn_after_work,
-            lash_core::CheckpointKind::AfterWork,
+            lash_core_execution::CheckpointKind::AfterWork,
         ),
         (
             &sql.pending_inputs_postgres
                 .claim_candidates_active_turn_before_completion,
-            lash_core::CheckpointKind::BeforeCompletion,
+            lash_core_execution::CheckpointKind::BeforeCompletion,
         ),
         (
             &sql.family_postgres.checkpoint_work_pending_after_work,
-            lash_core::CheckpointKind::AfterWork,
+            lash_core_execution::CheckpointKind::AfterWork,
         ),
         (
             &sql.family_postgres
                 .checkpoint_work_pending_before_completion,
-            lash_core::CheckpointKind::BeforeCompletion,
+            lash_core_execution::CheckpointKind::BeforeCompletion,
         ),
     ] {
         let admitted = vocabulary::admitted_min_boundary_sql(expression, checkpoint);

@@ -14,16 +14,16 @@ const EFFECT_JOURNAL_SCHEMA: Schema = Schema::EffectJournal;
 /// times the size of the report alone (`clippy::result_large_err`); the
 /// factory's trait method, whose signature the trait fixes, unboxes it.
 pub(crate) type ReclaimResult = Result<
-    lash_core::store::RetentionReport,
-    Box<lash_core::MaintenanceFailure<lash_core::store::RetentionReport>>,
+    lash_core_execution::store::RetentionReport,
+    Box<lash_core_execution::MaintenanceFailure<lash_core_execution::store::RetentionReport>>,
 >;
 
 pub(crate) async fn reclaim(
     factory: &SqliteSessionStoreFactory,
-    bound: lash_core::store::RetentionBound,
+    bound: lash_core_execution::store::RetentionBound,
 ) -> ReclaimResult {
-    let failed_before_any_work = |error: lash_core::StoreError| {
-        Box::new(lash_core::MaintenanceFailure::failed_before_any_work(error))
+    let failed_before_any_work = |error: lash_core_execution::StoreError| {
+        Box::new(lash_core_execution::MaintenanceFailure::failed_before_any_work(error))
     };
     // Attach order is lock order under `BEGIN IMMEDIATE`: the catalog, then
     // the journal, then the registry — the order a journal connection with
@@ -55,7 +55,7 @@ pub(crate) async fn reclaim(
         lifecycle::attach_process_registry(&store.conn, path, factory.options.connection_policy)
             .await
             .map_err(|error| {
-                failed_before_any_work(lash_core::StoreError::Backend(format!(
+                failed_before_any_work(lash_core_execution::StoreError::Backend(format!(
                     "evidence retention aborted: process registry {} could not be attached: {error}",
                     path.display()
                 )))
@@ -130,7 +130,7 @@ pub(crate) async fn reclaim(
                     .sql(),
                 [],
             )?;
-            Ok(lash_core::store::RetentionReport {
+            Ok(lash_core_execution::store::RetentionReport {
                 removed_receipt_count,
                 removed_usage_delta_count,
                 removed_attachment_root_count,
@@ -152,7 +152,7 @@ fn retire_quiescent_operation_scopes(
     tx: &rusqlite::Transaction<'_>,
     now_ms: u64,
 ) -> rusqlite::Result<(usize, Vec<String>)> {
-    let mut scopes: Vec<lash_core::ExecutionScope> = Vec::new();
+    let mut scopes: Vec<lash_core_execution::ExecutionScope> = Vec::new();
     {
         let mut keyed = tx.prepare(
             effect_replay::effect_sql(EFFECT_JOURNAL_SCHEMA)
@@ -161,7 +161,7 @@ fn retire_quiescent_operation_scopes(
                 .sql(),
         )?;
         for key in keyed.query_map([], |row| row.get::<_, String>(0))? {
-            if let Some(scope) = lash_core::ExecutionScope::from_journal_key(&key?) {
+            if let Some(scope) = lash_core_execution::ExecutionScope::from_journal_key(&key?) {
                 scopes.push(scope);
             }
         }
@@ -172,7 +172,9 @@ fn retire_quiescent_operation_scopes(
                 .sql(),
         )?;
         for scope_json in waited.query_map([], |row| row.get::<_, String>(0))? {
-            if let Ok(scope) = serde_json::from_str::<lash_core::ExecutionScope>(&scope_json?) {
+            if let Ok(scope) =
+                serde_json::from_str::<lash_core_execution::ExecutionScope>(&scope_json?)
+            {
                 scopes.push(scope);
             }
         }
@@ -184,11 +186,13 @@ fn retire_quiescent_operation_scopes(
     for scope in scopes.into_iter().filter(|scope| {
         matches!(
             scope,
-            lash_core::ExecutionScope::RuntimeOperation { operation_id }
-                if lash_core::store::is_facade_minted_operation_id(operation_id)
+            lash_core_execution::ExecutionScope::RuntimeOperation { operation_id }
+                if lash_core_execution::store::is_facade_minted_operation_id(operation_id)
         )
     }) {
-        let Ok(receipt_key) = lash_core::store::plugin_operation_receipt_storage_key(&scope) else {
+        let Ok(receipt_key) =
+            lash_core_execution::store::plugin_operation_receipt_storage_key(&scope)
+        else {
             continue;
         };
         let Ok(identity) = scope.journal_identity() else {
@@ -239,7 +243,7 @@ impl SqliteSessionStoreFactory {
     pub(crate) async fn open_catalog_for_maintenance(
         &self,
         operation: &str,
-    ) -> Result<Store, lash_core::StoreError> {
+    ) -> Result<Store, lash_core_execution::StoreError> {
         self.open_catalog_for_maintenance_configured(operation, true)
             .await
     }
@@ -250,7 +254,7 @@ impl SqliteSessionStoreFactory {
     pub(crate) async fn open_catalog_for_maintenance_without_registry(
         &self,
         operation: &str,
-    ) -> Result<Store, lash_core::StoreError> {
+    ) -> Result<Store, lash_core_execution::StoreError> {
         self.open_catalog_for_maintenance_configured(operation, false)
             .await
     }
@@ -259,10 +263,10 @@ impl SqliteSessionStoreFactory {
         &self,
         operation: &str,
         attach_process_registry: bool,
-    ) -> Result<Store, lash_core::StoreError> {
+    ) -> Result<Store, lash_core_execution::StoreError> {
         let path = self.catalog_path();
         if !path.exists() {
-            return Err(lash_core::StoreError::Backend(format!(
+            return Err(lash_core_execution::StoreError::Backend(format!(
                 "maintenance {operation} aborted: durable-core catalog {} does not exist",
                 path.display()
             )));
@@ -280,7 +284,7 @@ impl SqliteSessionStoreFactory {
         )
         .await
         .map_err(|err| {
-            lash_core::StoreError::Backend(format!(
+            lash_core_execution::StoreError::Backend(format!(
                 "maintenance {operation} aborted: durable-core catalog {} could not be opened: {err}",
                 path.display()
             ))

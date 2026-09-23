@@ -5,12 +5,14 @@
 
 use std::sync::Arc;
 
-use lash_core::SessionStoreFactory;
-use lash_core::facade_support::{NativeEffectHost, NativeRuntimeEffectController};
-use lash_core::runtime::{TurnAddress, TurnCancelOutcome, TurnCancelRequest, TurnWorkDriver};
 use lash_core::testing::conformance_support::{ActiveTurnControl, TurnCancelPeekIdentity};
-use lash_core::testing::store_fixtures::durable_admission;
-use lash_core::{
+use lash_core_execution::SessionStoreFactory;
+use lash_core_execution::facade_support::{NativeEffectHost, NativeRuntimeEffectController};
+use lash_core_execution::runtime::{
+    TurnAddress, TurnCancelOutcome, TurnCancelRequest, TurnWorkDriver,
+};
+use lash_core_execution::testing::store_fixtures::durable_admission;
+use lash_core_execution::{
     AwaitEventResolver, AwaitEventWaitIdentity, EffectHost, EffectJournalRetirement,
     ExecutionScope, LeaseOwnerIdentity, ProcessRegistrar, RuntimeErrorCode, ScopedEffectController,
     TurnCancelClosureAuthorization, TurnCancelClosureProposal, TurnCancelIntentSnapshot,
@@ -65,9 +67,13 @@ async fn turn_control_local_gate_is_owned_and_awaited_by_sqlite_host() {
     assert!(matches!(binding, TurnControlBinding::HostOwned { .. }));
 
     // An external request must resolve the gate the Local turn actually watches.
-    let store: Arc<dyn lash_core::RuntimePersistence> =
-        Arc::new(lash_core::runtime::InMemorySessionStore::new());
-    lash_core::testing::store_fixtures::bind_conformance_session(&store, &address.session_id).await;
+    let store: Arc<dyn lash_core_execution::RuntimePersistence> =
+        Arc::new(lash_core_execution::runtime::InMemorySessionStore::new());
+    lash_core_execution::testing::store_fixtures::bind_conformance_session(
+        &store,
+        &address.session_id,
+    )
+    .await;
     let receipt = TurnWorkDriver::for_session(host.clone(), address.session_id.clone(), store)
         .request_cancel(TurnCancelRequest::new(address, "external-cancel", None))
         .await
@@ -124,11 +130,11 @@ async fn native_turn_control_reopens_through_durable_core_authority() {
     let dir = tempfile::tempdir().expect("temporary durable-core directory");
     let factory = SqliteSessionStoreFactory::new(dir.path());
     let address = TurnAddress::new("native-reopen-session", "native-reopen-turn");
-    let create = lash_core::SessionStoreCreateRequest {
+    let create = lash_core_execution::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: address.session_id.clone(),
-        relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
     let first_store = factory.create_store(&create).await.expect("create store");
     let first = TurnWorkDriver::for_session(
@@ -176,17 +182,19 @@ async fn authorize_completion_closure(
     turn: &str,
     physical_scope: &ExecutionScope,
 ) -> (
-    Arc<dyn lash_core::RuntimePersistence>,
-    lash_core::SessionExecutionLease,
+    Arc<dyn lash_core_execution::RuntimePersistence>,
+    lash_core_execution::SessionExecutionLease,
     TurnCancelClosureAuthorization,
 ) {
     let address = TurnAddress::new(session, turn);
     let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create catalog session");
@@ -292,7 +300,7 @@ async fn direct_effect_retirement_waits_for_every_bound_catalog_participant() {
         (&factory_a, store_a, lease_a, authorization_a),
         (&factory_b, store_b, lease_b, authorization_b),
     ] {
-        let authority = lash_core::TurnCancellationAuthority::new(
+        let authority = lash_core_execution::TurnCancellationAuthority::new(
             effect_host.turn_control_binding_id(),
             effect_host.clone(),
         );
@@ -351,11 +359,13 @@ async fn owner_retirement_before_authorization_refuses_the_catalog_without_a_pin
     let scope = ExecutionScope::process("retired-before-authorization");
     let address = TurnAddress::new("late-catalog-session", "turn");
     let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+        .create_store(&lash_core_execution::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+            ),
         })
         .await
         .expect("create late catalog session");
@@ -476,7 +486,7 @@ async fn catalog_participant_identity_survives_precreation_symlink_reopen() {
         "the aliased pre-creation binding registers its owner participant"
     );
 
-    let authority = lash_core::TurnCancellationAuthority::new(
+    let authority = lash_core_execution::TurnCancellationAuthority::new(
         effect_host.turn_control_binding_id(),
         effect_host,
     );
@@ -575,7 +585,7 @@ async fn process_scoped_physical_turn_start_gates_are_distinct_and_replayable() 
             let canonical_json = canonical["json"]
                 .as_str()
                 .expect("canonical envelope contains source JSON");
-            serde_json::from_str::<lash_core::RuntimeEffectEnvelope>(canonical_json)
+            serde_json::from_str::<lash_core_execution::RuntimeEffectEnvelope>(canonical_json)
                 .expect("decode canonical peek envelope")
                 .invocation
                 .attribution
@@ -655,7 +665,7 @@ async fn shared_scope_physical_turn_start_gates_are_distinct_and_replayable() {
                 let canonical_json = canonical["json"]
                     .as_str()
                     .expect("canonical envelope contains source JSON");
-                serde_json::from_str::<lash_core::RuntimeEffectEnvelope>(canonical_json)
+                serde_json::from_str::<lash_core_execution::RuntimeEffectEnvelope>(canonical_json)
                     .expect("decode canonical peek envelope")
                     .invocation
                     .attribution

@@ -336,14 +336,14 @@ fn fig_1219_six_to_two_field_shrink_is_payload_drift() {
         created_at: String,
         model: String,
         cwd: Option<String>,
-        relation: lash_core::SessionRelation,
+        relation: lash_core_execution::SessionRelation,
     }
 
     #[derive(schemars::JsonSchema)]
     #[allow(dead_code)]
     struct After {
         session_id: SessionId,
-        relation: lash_core::SessionRelation,
+        relation: lash_core_execution::SessionRelation,
     }
 
     let mut before = PayloadShape::of::<Before>();
