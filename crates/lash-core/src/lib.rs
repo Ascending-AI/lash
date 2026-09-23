@@ -718,8 +718,9 @@ pub use process_registry::{
     ProcessDefinitionRecord, ProcessDefinitionRegistration, ProcessDefinitionRegistry,
 };
 pub use runtime::{
-    AbandonEvidence, AbandonRequest, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity,
-    AdmittedScope, AdmittedScopeError, ArtifactOwner, AssistantResponseHookEvents, AwaitEventKey,
+    AbandonEvidence, AbandonRequest, AbandonWriter, AcceptedTurnInputDrive,
+    AcceptedTurnInputRefusal, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
+    AdmittedScopeError, ArtifactOwner, AssistantResponseHookEvents, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CausalRef,
     ChargeSafetyRefusalEvidence, CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime,
     CompletionKeyPreparation, DeclaredProcessIdentity, DeliveryPolicy, DrainMode, DrainModePolicy,
@@ -798,7 +799,7 @@ pub use runtime::{
     TurnFailureSettlement, TurnInput, TurnInputApplication, TurnInputCheckpointBoundary,
     TurnInputClaim, TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion,
     TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim, TurnInputState,
-    TurnInputStateKind, UnclaimedTurnInputs, UnreportedLedgerAttempt, UnsettledEffectGroup,
+    TurnInputStateKind, UnreportedLedgerAttempt, UnsettledEffectGroup,
     UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind,

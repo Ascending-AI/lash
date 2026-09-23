@@ -53,6 +53,10 @@ pub enum RuntimeEffectKind {
     ExecCode,
     /// Durable admission of a turn input (ADR 0069 section 6).
     AcceptTurnInput,
+    /// The journaled initial drive set of an accepted turn input: the rows the
+    /// turn claimed right after acceptance, with their settlement authority
+    /// (ADR 0069 section 6). Replay returns it and never re-reads pending rows.
+    ClaimAcceptedTurnInput,
     Checkpoint,
     SyncExecutionEnvironment,
     Sleep,
@@ -77,6 +81,7 @@ impl RuntimeEffectKind {
             Self::Process => "process",
             Self::ExecCode => "exec_code",
             Self::AcceptTurnInput => "accept_turn_input",
+            Self::ClaimAcceptedTurnInput => "claim_accepted_turn_input",
             Self::Checkpoint => "checkpoint",
             Self::SyncExecutionEnvironment => "sync_execution_environment",
             Self::Sleep => "sleep",

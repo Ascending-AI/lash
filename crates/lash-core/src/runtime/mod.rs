@@ -369,13 +369,13 @@ pub use turn_input_ingress::ingress_message_id;
 #[cfg(not(feature = "testing"))]
 pub use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
-    PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics, PendingTurnInputDraft,
-    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
-    QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt, TurnInputApplication,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
-    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
-    TurnInputState, TurnInputStateKind, UnclaimedTurnInputs,
+    AcceptedTurnInputDrive, AcceptedTurnInputRefusal, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,
+    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput,
+    TurnInputAcceptanceReceipt, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
+    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
+    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, TurnInputStateKind,
 };
 pub use turn_loop::ensure_durable_effect_input;
 #[cfg(feature = "testing")]

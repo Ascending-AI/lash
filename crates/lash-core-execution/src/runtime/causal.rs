@@ -69,6 +69,25 @@ pub fn turn_acceptance_effect_invocation(
     )
 }
 
+/// Invocation for the journaled initial drive set of an accepted turn input
+/// (ADR 0069 §6).
+///
+/// The drive is a child of the acceptance it claims: same execution scope and
+/// attribution, a replay key derived from the acceptance's, and a causal edge
+/// back to it. Nothing about the lease that performs the claim enters the
+/// identity, so every lease generation replays the same entry.
+pub fn turn_input_drive_effect_invocation(
+    acceptance: &RuntimeEffectInvocation,
+) -> RuntimeEffectInvocation {
+    let kind = RuntimeEffectKind::ClaimAcceptedTurnInput.as_str();
+    child_effect_invocation_from_effect(
+        acceptance.execution_scope(),
+        acceptance,
+        format!("{}.{kind}", acceptance.effect_id()),
+        kind,
+    )
+}
+
 /// Invocation for a later phase of a staged turn effect (FIG-1276).
 ///
 /// The phase carries its own effect id — `<id>.<kind>` — so its journal entry,
@@ -653,6 +672,19 @@ mod tests {
             acceptance.replay_key(),
             "session:subagent:call:process:subagent:call:accept_turn_input"
         );
+
+        let drive = turn_input_drive_effect_invocation(&acceptance);
+        assert_eq!(drive.execution_scope(), &process_scope);
+        assert_eq!(drive.attribution, acceptance.attribution);
+        assert_eq!(
+            drive.replay_key(),
+            "session:subagent:call:process:subagent:call:accept_turn_input:claim_accepted_turn_input"
+        );
+        assert_eq!(
+            drive.effect_id(),
+            "process:subagent:call.accept.claim_accepted_turn_input"
+        );
+        assert_eq!(drive.caused_by, Some(acceptance.causal_ref()));
     }
 
     #[test]

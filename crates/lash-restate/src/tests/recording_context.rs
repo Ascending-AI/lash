@@ -106,6 +106,23 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
             "journaled_run",
         ),
         (
+            RuntimeEffectCommand::AcceptTurnInput {
+                draft: Box::new(lash_core::PendingTurnInputDraft::new(
+                    "session",
+                    lash_core::TurnInputIngress::next_turn(),
+                    lash_core::TurnInput::text("accepted"),
+                )),
+            },
+            "journaled_run",
+        ),
+        (
+            // FIG-3532: the initial drive set is journaled like acceptance.
+            RuntimeEffectCommand::ClaimAcceptedTurnInput {
+                input_id: lash_core::InputId::from("in_7"),
+            },
+            "journaled_run",
+        ),
+        (
             RuntimeEffectCommand::Trigger {
                 command: Box::new(lash_core::TriggerCommand::List {
                     owner_scope: lash_core::TriggerOwnerScope::session("session"),

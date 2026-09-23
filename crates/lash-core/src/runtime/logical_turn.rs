@@ -1,4 +1,3 @@
-use super::turn_input_ingress::TurnInputDrive;
 use super::turn_loop::{
     LogicalTurnErrorContext, PreparedTurnExecuteContext, SessionExecutionLeaseReleasePolicy,
     TurnLeaseScope, TurnPrepareContext, TurnSinks, TurnStopwatch,
@@ -23,7 +22,7 @@ pub const MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS: usize = 16;
 #[derive(Default)]
 pub(in crate::runtime) struct WithheldTerminalWork {
     pub(in crate::runtime) queued: Vec<crate::QueuedWorkClaim>,
-    pub(in crate::runtime) turn_inputs: Vec<TurnInputDrive>,
+    pub(in crate::runtime) turn_inputs: Vec<crate::TurnInputClaim>,
 }
 
 impl WithheldTerminalWork {
@@ -50,7 +49,7 @@ pub(super) struct LogicalTurnClaims {
     /// The turn-input rows this turn drives, each with the authority it will
     /// settle under: a generation-fenced claim, or none at all when the turn
     /// accepted the row itself and settles it at the head CAS (ADR 0069 §5).
-    pub(super) turn_inputs: Vec<TurnInputDrive>,
+    pub(super) turn_inputs: Vec<crate::TurnInputClaim>,
     /// Work this turn claimed at its terminal checkpoint and withheld from the
     /// delivery. It is never settled as this turn's completed work: it is the
     /// follow-on turn's input, and holding it keeps the session execution
@@ -61,13 +60,13 @@ pub(super) struct LogicalTurnClaims {
     /// Withheld turn input a turn that aborted on a cancel hands straight to
     /// the undelivered disposition, whatever outcome the commit assembles
     /// (FIG-3531).
-    pub(super) undelivered_turn_inputs: Vec<TurnInputDrive>,
+    pub(super) undelivered_turn_inputs: Vec<crate::TurnInputClaim>,
 }
 
 impl LogicalTurnClaims {
     pub(super) fn new(
         queued: Vec<crate::QueuedWorkClaim>,
-        turn_inputs: Vec<TurnInputDrive>,
+        turn_inputs: Vec<crate::TurnInputClaim>,
     ) -> Self {
         Self {
             queued,
@@ -77,7 +76,10 @@ impl LogicalTurnClaims {
         }
     }
 
-    pub(super) fn with_undelivered_turn_inputs(mut self, undelivered: Vec<TurnInputDrive>) -> Self {
+    pub(super) fn with_undelivered_turn_inputs(
+        mut self,
+        undelivered: Vec<crate::TurnInputClaim>,
+    ) -> Self {
         self.undelivered_turn_inputs = undelivered;
         self
     }
@@ -136,13 +138,10 @@ impl LogicalTurnClaims {
             .iter()
             .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
-        // Only a claimed drive has a generation, so only a claimed drive can be
-        // superseded by a later one and have its settlement dropped and
-        // retried. An unclaimed settlement retires at its first lost head CAS.
         let turn_input_claim_generations = self
             .turn_inputs
             .iter()
-            .filter_map(TurnInputDrive::claim_generation)
+            .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
             .collect();
         let enqueued_queue_batches = match outcome {
             TurnOutcome::AgentFrameSwitch {
@@ -165,8 +164,6 @@ impl LogicalTurnClaims {
         };
         // A cancelled turn never delivers the input it withheld from its
         // terminal checkpoint: it starts no follow-on for it (FIG-3531).
-        // Withheld input is always claimed at the checkpoint that withheld it;
-        // an unclaimed drive would have no fence to release.
         let cancelled = matches!(outcome, TurnOutcome::Stopped(TurnStop::Cancelled { .. }));
         let withheld_turn_inputs = self
             .withheld_terminal_work
@@ -177,7 +174,6 @@ impl LogicalTurnClaims {
             .undelivered_turn_inputs
             .iter()
             .chain(withheld_turn_inputs)
-            .filter_map(TurnInputDrive::as_claim)
             .cloned()
             .collect();
         LogicalTurnCommitEffects {
@@ -302,14 +298,9 @@ impl LashRuntime {
                 "failed to abandon queued work withheld from a terminal checkpoint"
             );
         }
-        let turn_input_claims = withheld
-            .turn_inputs
-            .iter()
-            .filter_map(super::turn_input_ingress::TurnInputDrive::as_claim)
-            .cloned()
-            .collect::<Vec<_>>();
+        let turn_input_claims = &withheld.turn_inputs;
         if !turn_input_claims.is_empty()
-            && let Err(err) = store.abandon_turn_input_claims(&turn_input_claims).await
+            && let Err(err) = store.abandon_turn_input_claims(turn_input_claims).await
         {
             tracing::warn!(
                 error = %err,
@@ -623,7 +614,11 @@ impl LashRuntime {
                         &lease.fence(),
                         &pending.scope,
                         &self.runtime_lease_owner,
-                        super::turn_loop::MAX_CLAIMED_TURN_INPUTS,
+                        self.host
+                            .core
+                            .durability
+                            .queued_work_batching
+                            .max_turn_input_claim(),
                         &crate::store::persisted_session_config_from_state(&self.state),
                         self.host
                             .core

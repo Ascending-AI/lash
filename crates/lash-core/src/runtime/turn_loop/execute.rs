@@ -16,7 +16,7 @@ pub(super) struct TurnDriverRemainder {
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
-    pub(super) pending_turn_input_claims: Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
+    pub(super) pending_turn_input_claims: Vec<crate::TurnInputClaim>,
     pub(super) withheld_terminal_work: crate::runtime::logical_turn::WithheldTerminalWork,
 }
 
@@ -30,8 +30,7 @@ pub(in crate::runtime) struct PreparedTurnExecuteContext<'sinks, 'run> {
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) cancel: CancellationToken,
     pub(in crate::runtime) initial_queue_claims: Vec<crate::QueuedWorkClaim>,
-    pub(in crate::runtime) initial_turn_input_claims:
-        Vec<super::turn_input_ingress::TurnInputDrive>,
+    pub(in crate::runtime) initial_turn_input_claims: Vec<crate::TurnInputClaim>,
     pub(in crate::runtime) lease: TurnLeaseScope<'sinks>,
 }
 

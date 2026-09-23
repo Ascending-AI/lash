@@ -15,6 +15,7 @@ mod accept;
 mod commit;
 mod drain_end;
 mod execute;
+mod initial_drive;
 mod lease;
 mod post_commit;
 #[cfg(feature = "testing")]
@@ -63,12 +64,6 @@ pub(in crate::runtime) struct TurnLeaseScope<'lease> {
     pub(in crate::runtime) guard: Option<&'lease SessionExecutionLeaseGuard>,
     pub(in crate::runtime) release_policy: SessionExecutionLeaseReleasePolicy,
 }
-
-/// How many pending next-turn inputs one idle claim absorbs into a single turn.
-///
-/// Direct and drained ingress share the bound because they share the claim
-/// (ADR 0069): a direct turn takes the head of the same queue a drain does.
-pub(super) const MAX_CLAIMED_TURN_INPUTS: usize = 64;
 
 /// Projects a terminal turn outcome onto the closed trace outcome.
 ///

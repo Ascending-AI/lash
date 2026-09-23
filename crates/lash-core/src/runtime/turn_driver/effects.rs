@@ -127,11 +127,11 @@ fn claim_shares_queued_batches(
 
 /// Whether an incoming turn-input claim names a row this turn already drives.
 fn claim_shares_turn_input_rows(
-    pending_drives: &[crate::runtime::turn_input_ingress::TurnInputDrive],
+    pending_drives: &[crate::TurnInputClaim],
     incoming: &crate::TurnInputClaim,
 ) -> bool {
     pending_drives.iter().any(|drive| {
-        drive.inputs().iter().any(|pending_input| {
+        drive.inputs.iter().any(|pending_input| {
             incoming
                 .inputs
                 .iter()
@@ -162,29 +162,14 @@ fn merge_pending_queue_claim_authority(
 /// Reconcile a checkpoint's fresh claim against the claims this turn already
 /// holds.
 ///
-/// Only claimed drives take part, and the reason is the ingress class rather
-/// than the fence: a turn holding the session-execution fence can still be
-/// driving rows unclaimed (a replayed acceptance redrives its settled row
-/// unclaimed, and a re-admitted one is driven unclaimed too), so "holds the
-/// fence" does not imply "took its rows under a claim". What does hold is that
-/// every unclaimed drive here is a `NextTurn` admission, while a checkpoint
-/// claim selects `ActiveTurn` ingress only, so the two sets are disjoint by
-/// construction. An unclaimed drive therefore never overlaps an incoming
-/// checkpoint claim in this process — and if two processes ever did reach that
-/// state, the head CAS refuses one of them, because a claimed row no longer
-/// satisfies the unclaimed settlement predicate (ADR 0069 §5).
+/// Every row a turn drives is held under a claim, including the journaled
+/// initial drive set (ADR 0069 §6), so every pending claim takes part.
 fn merge_pending_turn_input_claim_authority(
-    pending_drives: &mut Vec<crate::runtime::turn_input_ingress::TurnInputDrive>,
+    pending_drives: &mut Vec<crate::TurnInputClaim>,
     incoming: &mut crate::TurnInputClaim,
 ) -> Result<std::collections::HashSet<String>, RuntimeError> {
     let mut already_delivered = std::collections::HashSet::new();
-    let mut pending_claims = pending_drives
-        .iter_mut()
-        .filter_map(|drive| match drive {
-            crate::runtime::turn_input_ingress::TurnInputDrive::Claimed(claim) => Some(claim),
-            crate::runtime::turn_input_ingress::TurnInputDrive::Unclaimed(_) => None,
-        })
-        .collect::<Vec<_>>();
+    let mut pending_claims = pending_drives.iter_mut().collect::<Vec<_>>();
     merge_pending_claim_authority(
         &mut pending_claims,
         incoming,
@@ -207,7 +192,7 @@ fn merge_pending_turn_input_claim_authority(
         },
     )?;
     drop(pending_claims);
-    pending_drives.retain(|drive| !drive.inputs().is_empty());
+    pending_drives.retain(|drive| !drive.inputs.is_empty());
     Ok(already_delivered)
 }
 
@@ -268,13 +253,7 @@ impl RuntimeTurnDriver<'_> {
                 turn_input_claim: self
                     .pending_checkpoint_turn_input_claim
                     .clone()
-                    .or_else(|| {
-                        self.withheld_terminal_work
-                            .turn_inputs
-                            .last()
-                            .and_then(crate::runtime::turn_input_ingress::TurnInputDrive::as_claim)
-                            .cloned()
-                    }),
+                    .or_else(|| self.withheld_terminal_work.turn_inputs.last().cloned()),
                 incorporation: self.opener_state.ledger_snapshot(),
             }),
         }
@@ -350,9 +329,7 @@ impl RuntimeTurnDriver<'_> {
                     &mut claim,
                 )?;
                 if !claim.inputs.is_empty() {
-                    self.withheld_terminal_work.turn_inputs.push(
-                        crate::runtime::turn_input_ingress::TurnInputDrive::Claimed(claim),
-                    );
+                    self.withheld_terminal_work.turn_inputs.push(claim);
                 }
             } else {
                 // A replayed checkpoint outcome can re-deliver a claim this
@@ -551,9 +528,7 @@ impl RuntimeTurnDriver<'_> {
                 // The row was accepted at this boundary; only the turn that
                 // renders it moves. Applications are recorded by that turn.
                 let accepted_turn_inputs = claim.accepted_turn_inputs();
-                self.withheld_terminal_work.turn_inputs.push(
-                    crate::runtime::turn_input_ingress::TurnInputDrive::Claimed(claim),
-                );
+                self.withheld_terminal_work.turn_inputs.push(claim);
                 if !accepted_turn_inputs.is_empty() {
                     send_session_event(
                         event_tx,
@@ -970,22 +945,14 @@ mod claim_authority_tests {
 
     #[test]
     fn equal_turn_input_authority_with_different_claims_is_rejected() {
-        let mut pending = vec![super::super::turn_input_ingress::TurnInputDrive::Claimed(
-            turn_input_claim("first", 2, 3, &["input-a"]),
-        )];
+        let mut pending = vec![turn_input_claim("first", 2, 3, &["input-a"])];
         let mut incoming = turn_input_claim("conflicting", 2, 3, &["input-a"]);
         let error = merge_pending_turn_input_claim_authority(&mut pending, &mut incoming)
             .expect_err("equal authority must not silently choose a turn-input claim");
 
         assert_eq!(error.code, RuntimeErrorCode::StoreCommitFailed);
         assert!(error.message.contains("conflicting claim authorities"));
-        assert_eq!(
-            pending[0]
-                .as_claim()
-                .expect("pending drive stays claimed")
-                .claim_id,
-            "first"
-        );
+        assert_eq!(pending[0].claim_id, "first");
     }
 
     #[test]
@@ -998,9 +965,7 @@ mod claim_authority_tests {
             committed_message_id: "message-a".to_string(),
             checkpoint: Some(crate::CheckpointKind::AfterWork),
         });
-        let mut pending = vec![super::super::turn_input_ingress::TurnInputDrive::Claimed(
-            predecessor,
-        )];
+        let mut pending = vec![predecessor];
         let mut incoming = turn_input_claim("successor", 2, 2, &["input-a"]);
 
         let already_delivered =
@@ -1019,9 +984,7 @@ mod claim_authority_tests {
 
     #[test]
     fn higher_turn_input_authority_discards_the_incoming_rows_and_applications() {
-        let mut pending = vec![super::super::turn_input_ingress::TurnInputDrive::Claimed(
-            turn_input_claim("successor", 2, 2, &["input-a"]),
-        )];
+        let mut pending = vec![turn_input_claim("successor", 2, 2, &["input-a"])];
         let mut incoming = turn_input_claim("predecessor", 1, 1, &["input-a"]);
         incoming.applications.push(crate::TurnInputApplication {
             input_id: "input-a".into(),

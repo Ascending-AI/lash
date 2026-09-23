@@ -253,8 +253,8 @@ That outcome is **retryable by contract**, and the two words together are the
 point. The drive attempt is over; the *admission* is not, because acceptance is
 durable and journaled (section 6). So re-running the identical turn is explicitly
 safe and is how a durable engine obtains the result: replay re-derives the same
-acceptance identity, and from there either drives the row or finds it settled and
-replays the original commit's receipt. A host that treats this outcome as a
+acceptance and the same journaled drive set (section 6), and the commit either
+settles those rows or finds the original commit's receipt and replays it. A host that treats this outcome as a
 terminal failure turns ordinary failover — where the accepted row is momentarily
 held by a driver that has gone away — into a user-visible fault, which is exactly
 what this section exists to prevent. The `Restate + Postgres + MinIO Workers`
@@ -278,35 +278,49 @@ second redemption, and an intent is fulfilled if and only if its result exists.
 
 "An already-settled identity is skipped" is the *effect* the replay delivers, not
 the mechanism, and the difference matters. Lash has no way to hand a caller back
-a turn it never ran, so a replay whose acceptance is already settled **redrives**
-the turn and lets the commit-identity receipt recognise it: the re-derived commit
+a turn it never ran, so a replay whose turn already committed **redrives** the
+turn and lets the commit-identity receipt recognise it: the re-derived commit
 hashes to the same `turn_commit_hash`, and the store replays the original result
 instead of writing a second one. The redrive therefore has to re-derive the same
-turn, which means the same rows — a first execution that held the lane may have
-absorbed every earlier claimed row into one turn, and the replay reconstructs
-that set from the durable applications the first execution wrote rather than
-naming its own row alone. The application record's `checkpoint` is part of that
-reconstruction: the direct acceptance rebuilds only the rows applied with it at
-the initial boundary, while replayed checkpoint effects restore rows originally
-applied at `AfterWork` or `BeforeCompletion`. Folding a checkpoint input into the
-initial set changes the message shape and therefore the commit identity even when
-the words and row ids are unchanged.
+turn, which means the same rows with the same words — a first execution that held
+the lane may have absorbed every earlier claimed row into one turn.
 
-Where durable application history is missing, unreadable, or cannot yield the
-complete boundary-specific row set, Lash refuses the redrive before executing the
-turn with the terminal typed error `turn_input_redrive_set_unavailable`. Its
-diagnostic names the settled acceptance and the operator recovery step: restore
-turn-input application history, then redrive the same turn. It does not fall back
-to the settled row alone and discover the loss later as a bare commit-identity
-mismatch.
+**The initial drive set is journaled with its settlement authority, exactly as
+checkpoint claims are.** Right after `AcceptTurnInput`, the turn issues a second
+journaled effect, `ClaimAcceptedTurnInput`, whose outcome is a self-contained
+snapshot of what the turn drives: the claimed rows with their content and claim
+token; `Queued { ahead }` when the accepted row is open but sits behind more
+earlier admissions than one claim absorbs; or a typed refusal. It is a separate effect rather than part of the acceptance, because the
+acceptance body must stay one write: a crash between two writes in one body
+re-runs both under at-least-once semantics. The envelope names only the accepted
+input; the lease fence and owner that perform the claim are captured by the local
+executor, so the entry replays identically under every lease generation.
 
-A loser that cedes (section 5(d)) reaches the same place from the other side: its
-drive attempt is retired, and the re-run that follows lands in this paragraph.
+Replay returns that journaled drive and never reads pending rows. Rows are
+admission evidence, not replay state
+([ADR 0010](0010-pending-turn-input-is-admission-evidence.md)), so `vacuum()`
+pruning terminal rows cannot affect a replay: a redrive after vacuum drives the
+journaled rows and replays the receipt, an input the host cancelled is never
+re-admitted, and a row admitted after the drive was journaled never joins the
+redriven turn. Only a first execution reads rows, and when it finds its own row
+held by another driver, or already settled, cancelled, or pruned, it cedes with
+the terminal typed error `accepted_turn_input_ceded`. It never re-admits a row.
+Replaying that refusal refuses again, which is why it is terminal.
+
+A queued drive drops nothing and withdraws nothing. The accepted row stays in
+the next-turn queue in arrival order, the call reports `turn_input_queued` with
+the acceptance receipt and the number of inputs ahead of it, and the queued-work
+drain answers it in order, exactly once. The claim bound is host policy
+(`QueuedWorkBatchingConfig::with_max_turn_input_claim`, default 64), shared by
+the direct-turn drive and the drain because they claim from the same queue.
+Retrying the call would admit the words a second time, so the outcome is not
+retryable; replaying the turn reports the same queue position.
 
 This is the second regime's replay story and it introduces no third one.
 Acceptance replay adds **no third authority** beside the claim predicate and the
-head CAS. To be precise about what that does and does not say: a direct turn
-that takes the advisory lane claims its row through the same generation-fenced
+head CAS: the journaled drive replays the claim predicate's own token, and an
+unclaimed drive still settles under the head CAS alone. To be precise about what
+that does and does not say: a direct turn that takes the advisory lane claims its row through the same generation-fenced
 `claim_next_turn_inputs` a drain uses, so it *is* lease-generation fenced —
 that is the claimed regime, unchanged. What section 6 rules out is a *separate*
 generation fence attached to acceptance replay itself, on top of the two

@@ -12,6 +12,12 @@ macro_rules! direct_turn_acceptance_tests {
             (direct_turn_acceptance_mints_no_idempotency_key, "direct-turn-identity"),
             (unclaimed_turn_input_settlement_is_a_conditional_write, "direct-turn-conditional-settlement"),
             (busy_execution_lane_refuses_direct_turn_before_acceptance, "direct-turn-busy-lane"),
+            (vacuum_then_redrive_replays_receipt_single_row, "direct-turn-vacuum-redrive-single"),
+            (vacuum_then_redrive_replays_receipt_absorbed_rows, "direct-turn-vacuum-redrive-absorbed"),
+            (cancelled_vacuumed_acceptance_is_not_resurrected, "direct-turn-cancelled-vacuumed"),
+            (uncommitted_redrive_drives_journaled_set_not_live_claim, "direct-turn-uncommitted-redrive"),
+            (drive_effect_refusal_is_journaled, "direct-turn-refused-drive"),
+            (queued_direct_turn_input_is_answered_in_order_by_the_drain, "direct-turn-queued-input"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

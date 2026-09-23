@@ -403,7 +403,11 @@ impl LashRuntime {
                 &fence,
                 &admission.scope,
                 &self.runtime_lease_owner,
-                MAX_CLAIMED_TURN_INPUTS,
+                self.host
+                    .core
+                    .durability
+                    .queued_work_batching
+                    .max_turn_input_claim(),
                 &crate::store::persisted_session_config_from_state(&self.state),
                 self.host
                     .core
@@ -674,14 +678,7 @@ impl LashRuntime {
         self.queued_run = Some(Box::new(selected.admission));
         Ok((
             input,
-            LogicalTurnClaims::new(
-                selected.queued,
-                selected
-                    .inputs
-                    .into_iter()
-                    .map(super::turn_input_ingress::TurnInputDrive::Claimed)
-                    .collect(),
-            ),
+            LogicalTurnClaims::new(selected.queued, selected.inputs),
         ))
     }
 }

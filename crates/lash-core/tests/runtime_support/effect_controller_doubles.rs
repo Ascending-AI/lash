@@ -877,7 +877,8 @@ impl RuntimeEffectController for RecordingEffectController {
             RuntimeEffectCommand::SyncExecutionEnvironment { .. } => {
                 Ok(RuntimeEffectOutcome::SyncExecutionEnvironment { result: Ok(None) })
             }
-            command @ RuntimeEffectCommand::AcceptTurnInput { .. } => {
+            command @ (RuntimeEffectCommand::AcceptTurnInput { .. }
+            | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }) => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await
