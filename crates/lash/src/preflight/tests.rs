@@ -343,6 +343,13 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             ),
         ),
         (
+            DurableFormat::ProcessEffectSummary,
+            SurfaceRelation::Unwalkable(
+                "no bounded surface: carried on process-event rows, refused when a summary event \
+                 is appended or folded rather than at rest",
+            ),
+        ),
+        (
             DurableFormat::AppendRequestIdentity,
             SurfaceRelation::Unwalkable(REQUEST_IDENTITY),
         ),
@@ -478,6 +485,7 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         DurableFormat::ProtocolTurnOptions,
         DurableFormat::ParentScopeStoragePayload,
         DurableFormat::ProcessLease,
+        DurableFormat::ProcessEffectSummary,
         DurableFormat::AppendRequestIdentity,
         DurableFormat::RecordConfigRequestIdentity,
         DurableFormat::CreateSessionRequestIdentity,

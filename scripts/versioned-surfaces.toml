@@ -1635,6 +1635,7 @@ must_cover = ["SegmentHandover", "PersistedSegmentHandover"]
 constant = "PROCESS_EVENT_VOCABULARY_VERSION"
 constant_path = "crates/lash-core-execution/src/runtime/process/effect_summary.rs"
 description = "runtime-owned durable effect-summary kinds: event types, strict serde payloads, occurrence cap and failure-code mappings"
+manifest = "ProcessEffectSummary"
 
 # The effect-summary module is the wire surface: both event-type constants,
 # the payload types and their only encoder (`append_request`, serde) and

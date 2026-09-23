@@ -1402,10 +1402,11 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
     assert_eq!(second.replay_key, "k1");
 }
 
-/// FIG-3464: the store-backed replay driver hands a trigger command to the
-/// trigger target — before, only the generic runner arm existed and a
-/// process-scoped trigger effect on a durable host was refused — and a replay
-/// answers from the recorded row without touching the trigger store again.
+/// FIG-3464: the store-backed replay driver hands every claimed command to
+/// the local executor's `execute`, which now runs a trigger command on its
+/// trigger target — before, it refused it as a mismatch, so a process-scoped
+/// trigger effect on a durable host failed — and a replay answers from the
+/// recorded row without touching the trigger store again.
 #[tokio::test]
 async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row() {
     let scope = ExecutionScope::process("trigger-driver-process");

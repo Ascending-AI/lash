@@ -935,14 +935,23 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     ),
                 ))
             }
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(_)) => {
-                Err(RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                    format!(
-                        "trigger executor cannot execute {} command directly",
-                        envelope.command.kind().as_str()
-                    ),
-                ))
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
+                // A store-backed replay driver hands every claimed command to
+                // `execute`; a trigger command runs on its own target.
+                let RuntimeEffectCommand::Trigger { command } = envelope.command else {
+                    return Err(RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                        format!(
+                            "trigger executor cannot execute {} command directly",
+                            envelope.command.kind().as_str()
+                        ),
+                    ));
+                };
+                let operation_id = envelope.invocation.effect_id().to_string();
+                let result = execution.execute(&operation_id, *command).await?;
+                Ok(RuntimeEffectOutcome::Trigger {
+                    result: Box::new(result),
+                })
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(execution)) => {
                 execution.execute(envelope).await
