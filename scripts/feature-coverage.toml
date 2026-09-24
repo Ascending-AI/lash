@@ -292,6 +292,16 @@ commands = [
   # with them. This was the `default-off-tests` leg of the retired
   # `Runtime feature boundary` matrix.
   ["cargo", "test", "-p", "lash-runtime", "--no-default-features", "--locked"],
+  # The Restate host at its release resolution (FIG-3610). The `--all-targets`
+  # restate command below unifies the dev-dependency `lash-core/testing` into
+  # lash-restate, so it cannot see a testing-gated path that the release
+  # worker build, which has no dev-dependencies, refuses. `//:restate_release`
+  # names this unit so pull requests prove it without the whole lane graph.
+  # It precedes that command: the generator keys optional-dependency
+  # activations by package and features alone, so a library variant emitted
+  # after a `--all-targets` command of the same features would inherit its
+  # dev-dependency edges.
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "restate", "--locked"],
   # ADR 0079 host-wired extension features. Each gates one `lash::<name>`
   # module in the library and one `#[cfg]` block in
   # `tests/integration/facade_inventory.rs`, so the ON witness has to compile both

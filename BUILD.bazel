@@ -5,6 +5,7 @@ load(
     "FEATURE_LANE_CLIPPY_TARGETS",
     "FEATURE_LANE_COMPILE_TARGETS",
     "FEATURE_LANE_TEST_TARGETS",
+    "RESTATE_RELEASE_TARGET",
     "RUNTIME_OFF_TARGET",
 )
 load(
@@ -285,4 +286,16 @@ filegroup(
 alias(
     name = "runtime_off",
     actual = RUNTIME_OFF_TARGET,
+)
+
+# The Restate release witness, `cargo check -p lash-runtime --lib
+# --no-default-features --features restate`: lash-restate and the facade's
+# `restate` module at the resolution the release worker build compiles them
+# at, where no dev-dependency unifies `lash-core/testing` in (FIG-3610). One
+# unit of the `runtime-features` lane, type-checked without codegen so every
+# pull request can afford it.
+lash_rust_check(
+    name = "restate_release",
+    testonly = True,
+    deps = [RESTATE_RELEASE_TARGET],
 )

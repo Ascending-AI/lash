@@ -327,10 +327,8 @@ where
         &self,
         group_key: &str,
         rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
+    ) -> Result<Option<lash_core::RankedGroupSettlement>, lash_core::RuntimeEffectControllerError>
+    {
         self.inner.read_group_settlement(group_key, rank).await
     }
 

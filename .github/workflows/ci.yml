@@ -1224,11 +1224,16 @@ jobs:
       # feature-variant compiles on a core-touching diff, evidence no pull
       # request needs for its first signal; the merge group proves them on the
       # combined tree before anything lands.
+      #
+      # `//:restate_release` rides every event: lash-restate at the resolution
+      # the dispatch-only release worker build compiles it at, where no
+      # dev-dependency unifies `lash-core/testing` in (FIG-3610). It is a
+      # metadata-only check of one lane unit, so a pull request can afford it.
       - name: Clippy (workspace, all targets, shared cache)
         if: needs.plan.outputs.bazel_trusted == 'true'
         shell: bash
         run: |
-          targets=(//:workspace_clippy //:schema_checks)
+          targets=(//:workspace_clippy //:schema_checks //:restate_release)
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
             targets+=(//:feature_lane_clippy //:runtime_off)
           fi
