@@ -36,12 +36,12 @@ pub(super) async fn process_sleep_wake_verdict_replays_from_the_journal() {
         tokio::spawn(async move {
             let controller = RestateRuntimeEffectController::new_for_test(context);
             workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                        .process_scope_for_test(durable_admission(&ExecutionScope::process(
                             &process_id,
                         )))
                         .expect("verdict replay scope"),
@@ -98,12 +98,12 @@ pub(super) async fn process_sleep_wake_verdict_replays_from_the_journal() {
     context.start_replay();
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let replayed = replay_workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(durable_admission(&ExecutionScope::process(&process_id)))
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(&process_id)))
                 .expect("verdict replay redelivery scope"),
             0,
             None,
@@ -162,12 +162,12 @@ pub(super) async fn process_sleep_wake_verdict_extends_a_pre_verdict_journal() {
         tokio::spawn(async move {
             let controller = RestateRuntimeEffectController::new_for_test(context);
             workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                        .process_scope_for_test(durable_admission(&ExecutionScope::process(
                             &process_id,
                         )))
                         .expect("pre-verdict journal scope"),
@@ -208,12 +208,12 @@ pub(super) async fn process_sleep_wake_verdict_extends_a_pre_verdict_journal() {
     ));
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let redriven = replay_workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(durable_admission(&ExecutionScope::process(&process_id)))
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(&process_id)))
                 .expect("pre-verdict journal redelivery scope"),
             0,
             None,

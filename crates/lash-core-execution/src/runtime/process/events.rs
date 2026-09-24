@@ -63,7 +63,7 @@ pub struct ProcessEventSemantics {
 
 /// Who wrote an [`ProcessStatus::Abandoned`] terminal — the exactly-one
 /// legitimate writer per path (ADR 0019).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AbandonWriter {
     /// The owner abandoned its own OwnerBound work during native graceful drain,
@@ -78,6 +78,29 @@ pub enum AbandonWriter {
     /// The execution engine exhausted the producer-declared attempt budget or
     /// otherwise gave up retrying a managed process.
     EngineGaveUp,
+    /// The resume fence refused to run a started process, before any effect,
+    /// because it cannot be resumed safely (FIG-3588). `reason` says why.
+    ResumeRefused { reason: ProcessResumeRefusal },
+}
+
+/// Why a started process cannot be resumed safely.
+///
+/// One vocabulary for every "cannot resume" terminal, whichever substrate or
+/// engine decides it. Each reason is decided before the run issues any effect
+/// and ends the process [`ProcessStatus::Abandoned`] with
+/// [`AbandonWriter::ResumeRefused`] evidence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessResumeRefusal {
+    /// The process's executable was written by a retired generation, so this
+    /// build cannot run it (FIG-3571). `found` names the stored identity the
+    /// run refused (a Lashlang process names its module ref), so a later
+    /// drain or migration can find what was refused.
+    RetiredGeneration { found: String },
+    /// The process already started under an execution whose journal this run
+    /// cannot read, so resuming would re-run effects that execution recorded
+    /// (FIG-3588). Lash never restarts started work from scratch.
+    SubstrateLost,
 }
 
 /// Evidence attached to an [`ProcessStatus::Abandoned`] terminal: which
@@ -452,6 +475,18 @@ impl ProcessAwaitOutput {
                     }
                     AbandonWriter::EngineGaveUp => {
                         "process abandoned: execution engine exhausted its retry budget".to_string()
+                    }
+                    AbandonWriter::ResumeRefused {
+                        reason: ProcessResumeRefusal::RetiredGeneration { found },
+                    } => format!(
+                        "process abandoned: its executable `{found}` was written by a retired \
+                         generation"
+                    ),
+                    AbandonWriter::ResumeRefused {
+                        reason: ProcessResumeRefusal::SubstrateLost,
+                    } => {
+                        "process abandoned: the substrate lost the journal of its started execution"
+                            .to_string()
                     }
                 };
                 let mut failure = crate::ToolFailure::tool(

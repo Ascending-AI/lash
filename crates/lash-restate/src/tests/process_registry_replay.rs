@@ -758,12 +758,16 @@ pub(super) struct RecordedProcessRun {
 pub(super) struct RecordingRunner {
     pub(super) ran: Mutex<Vec<RecordedProcessRun>>,
     pub(super) cancelled: Mutex<Vec<RestateProcessCancelRequest>>,
+    /// Leave the process live: after recording the run, fail it with a
+    /// retryable fault Restate would retry, so no terminal is written.
+    pub(super) stay_live: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for RecordingRunner {
     async fn run_process_segment(
         &self,
+        _started: &SegmentStarted,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -780,6 +784,12 @@ impl RestateProcessRunner for RecordingRunner {
             execution_scope_id: scoped_effect_controller.scope_id().to_string(),
             effect_journaling,
         });
+        if self.stay_live.load(Ordering::SeqCst) {
+            return Err(PluginError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::RuntimeStore,
+                "recording runner keeps the process live",
+            )));
+        }
         Ok(process_success(serde_json::json!({"ok": true})).into())
     }
 
@@ -811,6 +821,7 @@ pub(super) struct OpaqueFailureThenSuccessRunner {
 impl RestateProcessRunner for ReplacementThenSuccessRunner {
     async fn run_process_segment(
         &self,
+        _started: &SegmentStarted,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -844,6 +855,7 @@ impl RestateProcessRunner for ReplacementThenSuccessRunner {
 impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
     async fn run_process_segment(
         &self,
+        _started: &SegmentStarted,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -870,6 +882,7 @@ impl RestateProcessRunner for OpaqueFailureThenSuccessRunner {
 impl RestateProcessRunner for TerminalFailureRunner {
     async fn run_process_segment(
         &self,
+        _started: &SegmentStarted,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -894,6 +907,7 @@ impl RestateProcessRunner for TerminalFailureRunner {
 impl RestateProcessRunner for AlreadyStartedRunner {
     async fn run_process_segment(
         &self,
+        _started: &SegmentStarted,
         registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -1049,6 +1063,7 @@ impl HttpTransport for BlockingCancelSignalTransport {
 impl RestateProcessRunner for CancellationAwareRunner {
     async fn run_process_segment(
         &self,
+        _started: &SegmentStarted,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -1078,6 +1093,7 @@ impl RestateProcessRunner for CancellationAwareRunner {
 impl RestateProcessRunner for SegmentedRecordingRunner {
     async fn run_process_segment(
         &self,
+        _started: &SegmentStarted,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -1142,7 +1158,7 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
             let cancellation_signal =
                 workflow.cancellation_signal(&ProcessId::from("prompt-cancel"), 0);
             workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default(),
                     native_process_scope(&ProcessId::from("prompt-cancel")),
@@ -1219,7 +1235,7 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
         let workflow = Arc::clone(&workflow);
         tokio::spawn(async move {
             workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default(),
                     native_process_scope(&ProcessId::from("cancel-cleanup-failure")),
@@ -1314,7 +1330,7 @@ pub(super) async fn session_turn_runner_failure_after_completion_stays_recoverab
         .expect("append durable cancellation");
 
     let outcome = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
             native_process_scope(&ProcessId::from("cancel-after-failure")),
@@ -1364,7 +1380,7 @@ pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure(
         let workflow = Arc::clone(&workflow);
         tokio::spawn(async move {
             workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default(),
                     native_process_scope(&ProcessId::from("non-session-cancel-failure")),
@@ -1456,7 +1472,7 @@ pub(super) async fn cancel_watch_reissues_after_attach_ceiling_until_segment_com
 
     let outcome = tokio::time::timeout(
         Duration::from_secs(5),
-        workflow.run_registration(
+        workflow.run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
             native_process_scope(&ProcessId::from("ceiling-reissues")),
@@ -1497,7 +1513,7 @@ pub(super) async fn non_timeout_cancel_watch_error_fails_the_segment() {
     );
 
     let error = workflow
-        .run_registration(
+        .run_registration_for_test(
             rerunnable_registration("broken-cancel-watch"),
             ProcessExecutionContext::default(),
             native_process_scope(&ProcessId::from("broken-cancel-watch")),
@@ -1547,7 +1563,7 @@ pub(super) async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_in
     );
 
     let error = workflow
-        .run_registration(
+        .run_registration_for_test(
             rerunnable_registration("unregistered-cancel-watch"),
             ProcessExecutionContext::default(),
             native_process_scope(&ProcessId::from("unregistered-cancel-watch")),
@@ -1655,7 +1671,7 @@ pub(super) async fn transient_cancel_registry_read_error_cannot_fall_through_to_
         let workflow = Arc::clone(&workflow);
         tokio::spawn(async move {
             workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default(),
                     native_process_scope(&ProcessId::from("transient-cancel-read")),
@@ -1781,11 +1797,11 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
     let first_controller = RestateRuntimeEffectController::new_for_test(first_context.clone());
 
     let first = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration.clone(),
             ProcessExecutionContext::default(),
             first_controller
-                .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(
                     "segmented-durable",
                 )))
                 .expect("durable first-segment scope"),
@@ -1825,11 +1841,11 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
     let successor_context = Arc::new(ReplayableRecordingContext::default());
     let successor_controller = RestateRuntimeEffectController::new_for_test(successor_context);
     let second = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
             successor_controller
-                .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(
                     "segmented-durable",
                 )))
                 .expect("durable successor scope"),
@@ -2018,7 +2034,7 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
             }
 
             let run_once = workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration.clone(),
                     ProcessExecutionContext::default(),
                     native_process_scope(&ProcessId::from(process_id.clone())),

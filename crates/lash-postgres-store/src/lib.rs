@@ -484,7 +484,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // Version 122 (FIG-3598) adds `restate_effect_group_protocol_retired` to the
 // durable `RuntimeErrorCode` vocabulary. No relation changes. Component-121
 // catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 122;
+// Version 123 (FIG-3588) gives `lash_process_segment_handovers` the nullable
+// `started_json` start marker a Restate segment's admission writes
+// set-if-absent before its first effect. Component-122 catalogs are rejected
+// and recreated.
+const SCHEMA_VERSION: i32 = 123;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

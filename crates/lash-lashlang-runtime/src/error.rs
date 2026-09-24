@@ -302,17 +302,10 @@ impl From<LashlangHostError> for lashlang::ExecutionHostError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LashlangProcessFailureCode {
-    /// A Restate segment resumed with a different program hash.
-    RestateSegmentProgramHashMismatch,
     /// A process payload could not be decoded.
     ProcessPayloadInvalid,
     /// The process's module artifact is missing.
     ProcessModuleArtifactMissing,
-    /// The process's stored module artifact was written by a retired artifact
-    /// generation — or is otherwise undecodable — so this build cannot run it
-    /// (FIG-3571). Deterministic: the same bytes fail the same way on every
-    /// attempt, so the run ends here, before any effect, instead of retrying.
-    ProcessArtifactGenerationRetired,
     /// The process and artifact host requirements differ.
     ProcessHostRequirementsMismatch,
     /// The process reference does not match the artifact export.
@@ -343,10 +336,8 @@ pub enum LashlangProcessFailureCode {
 impl LashlangProcessFailureCode {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::RestateSegmentProgramHashMismatch => "restate_segment_program_hash_mismatch",
             Self::ProcessPayloadInvalid => "process_payload_invalid",
             Self::ProcessModuleArtifactMissing => "process_module_artifact_missing",
-            Self::ProcessArtifactGenerationRetired => "process_artifact_generation_retired",
             Self::ProcessHostRequirementsMismatch => "process_host_requirements_mismatch",
             Self::ProcessRefMismatch => "process_ref_mismatch",
             Self::ProcessHostEnvironmentInvalid => "process_host_environment_invalid",
@@ -393,11 +384,6 @@ mod tests {
     }
 
     failure_code_test!(
-        restate_segment_program_hash_mismatch,
-        RestateSegmentProgramHashMismatch,
-        "restate_segment_program_hash_mismatch"
-    );
-    failure_code_test!(
         process_payload_invalid,
         ProcessPayloadInvalid,
         "process_payload_invalid"
@@ -406,11 +392,6 @@ mod tests {
         process_module_artifact_missing,
         ProcessModuleArtifactMissing,
         "process_module_artifact_missing"
-    );
-    failure_code_test!(
-        process_artifact_generation_retired,
-        ProcessArtifactGenerationRetired,
-        "process_artifact_generation_retired"
     );
     failure_code_test!(
         process_host_requirements_mismatch,

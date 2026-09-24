@@ -62,6 +62,55 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
             .transpose()
     }
 
+    async fn segment_start(
+        &self,
+        segment: &lash_core_execution::ProcessSegmentKey,
+    ) -> Result<Option<lash_core_execution::SegmentStartMarker>, PluginError> {
+        let (process_id, segment_ordinal) = (&segment.process_id, segment.segment_ordinal);
+        let started: Option<Option<String>> =
+            sqlx::query_scalar(process_sql().handover.select_started.sql())
+                .bind(process_id.as_str())
+                .bind(segment_ordinal as i64)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(plugin_sqlx_error)?;
+        started
+            .flatten()
+            .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+            .transpose()
+    }
+
+    async fn mark_segment_started(
+        &self,
+        segment: &lash_core_execution::ProcessSegmentKey,
+        marker: lash_core_execution::SegmentStartMarker,
+    ) -> Result<lash_core_execution::SegmentStartMarker, PluginError> {
+        let (process_id, segment_ordinal) = (&segment.process_id, segment.segment_ordinal);
+        let encoded = serde_json::to_string(&marker).map_err(process_decode_error)?;
+        let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        sqlx::query(process_sql().handover.mark_started.sql())
+            .bind(process_id.as_str())
+            .bind(segment_ordinal as i64)
+            .bind(encoded)
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        let started: Option<Option<String>> =
+            sqlx::query_scalar(process_sql().handover.select_started.sql())
+                .bind(process_id.as_str())
+                .bind(segment_ordinal as i64)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(plugin_sqlx_error)?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        let Some(Some(recorded)) = started else {
+            return Err(PluginError::Session(format!(
+                "process `{process_id}` segment {segment_ordinal} has no retained handover to mark started"
+            )));
+        };
+        serde_json::from_str(&recorded).map_err(process_decode_error)
+    }
+
     async fn delete_segment_handovers(&self, process_id: &ProcessId) -> Result<(), PluginError> {
         sqlx::query(process_sql().handover.delete_by_process.sql())
             .bind(process_id.as_str())

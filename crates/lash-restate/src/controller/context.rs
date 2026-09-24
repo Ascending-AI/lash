@@ -863,7 +863,7 @@ macro_rules! impl_restate_controller_context {
                             registration,
                             execution_context,
                             segment_ordinal: 0,
-                            execution_id: None,
+                            journal_version: crate::process::RESTATE_PROCESS_JOURNAL_VERSION,
                         }));
                     let handle = request.send();
                     Box::pin(async move {

@@ -103,6 +103,72 @@ impl SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
+    pub(super) async fn segment_start_impl(
+        &self,
+        segment: &lash_core_execution::ProcessSegmentKey,
+    ) -> Result<Option<lash_core_execution::SegmentStartMarker>, lash_core_execution::PluginError>
+    {
+        let process_id = segment.process_id.clone();
+        let segment_ordinal = segment.segment_ordinal;
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    let started: Option<Option<String>> = conn
+                        .query_row(
+                            process_sql().handover.select_started.sql(),
+                            params![process_id.as_str(), segment_ordinal as i64],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(process_sqlite_error)?;
+                    started
+                        .flatten()
+                        .map(|encoded| serde_json::from_str(&encoded).map_err(process_decode_error))
+                        .transpose()
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    pub(super) async fn mark_segment_started_impl(
+        &self,
+        segment: &lash_core_execution::ProcessSegmentKey,
+        marker: lash_core_execution::SegmentStartMarker,
+    ) -> Result<lash_core_execution::SegmentStartMarker, lash_core_execution::PluginError> {
+        let process_id = segment.process_id.clone();
+        let segment_ordinal = segment.segment_ordinal;
+        let marked = self
+            .conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome((|| {
+                    let encoded = process_encode_json(&marker)?;
+                    tx.execute(
+                        process_sql().handover.mark_started.sql(),
+                        params![process_id.as_str(), segment_ordinal as i64, encoded],
+                    )
+                    .map_err(process_sqlite_error)?;
+                    let started: Option<Option<String>> = tx
+                        .query_row(
+                            process_sql().handover.select_started.sql(),
+                            params![process_id.as_str(), segment_ordinal as i64],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .map_err(process_sqlite_error)?;
+                    let Some(Some(recorded)) = started else {
+                        return Err(lash_core_execution::PluginError::Session(format!(
+                            "process `{process_id}` segment {segment_ordinal} has no retained handover to mark started"
+                        )));
+                    };
+                    serde_json::from_str(&recorded).map_err(process_decode_error)
+                })()))
+            })
+            .await
+            .map_err(process_sqlite_error)??;
+        Ok(marked)
+    }
+
     pub(super) async fn delete_segment_handovers_impl(
         &self,
         process_id: &ProcessId,

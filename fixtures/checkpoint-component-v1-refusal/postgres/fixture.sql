@@ -374,7 +374,8 @@ CREATE TABLE lash_durable_read_fixture.lash_process_observers (
 CREATE TABLE lash_durable_read_fixture.lash_process_segment_handovers (
     process_id text NOT NULL COLLATE pg_catalog."C",
     segment_ordinal bigint NOT NULL,
-    handover_json text NOT NULL
+    handover_json text NOT NULL,
+    started_json text
 );
 
 
@@ -1223,7 +1224,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 122);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 123);
 
 
 --

@@ -280,7 +280,11 @@ pub use usage_activity::*;
 // separate durable and live halves, and gaps gain `sequence_unbridged` and
 // `history_unavailable`. An earlier peer sends a `continuation` and a
 // `lashpc1` cursor this decoder refuses, so peers must adopt 98.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 98;
+// Window 99: FIG-3588 adds `RemoteAbandonWriter::ResumeRefused` with its
+// `RemoteProcessResumeRefusal` reason, the one "cannot resume safely"
+// Abandoned terminal. A window-98 peer refuses the unknown writer tag in a
+// process record or terminal, so peers must adopt 99.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 99;
 
 /// One versioned remote-protocol message.
 ///

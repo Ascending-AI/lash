@@ -354,6 +354,19 @@ pub(super) fn encode_recorded_commands_with_invocations_replay<T: serde::Seriali
             invocation_ids.len()
         )));
     }
+    // A run the handler proposed is completed with the value it proposed: the
+    // runtime acknowledged it. Every process-workflow journal opens with the
+    // two admission runs (FIG-3588).
+    let mut proposals = Vec::new();
+    for output in outputs {
+        for frame in restate_message_frames(output, 0x0005)
+            .ok_or_else(|| TerminalError::new("recorded output omitted a valid frame"))?
+        {
+            if let Some((completion_id, value)) = frame.get(8..).and_then(proposed_run_completion) {
+                proposals.push((completion_id, value.to_vec()));
+            }
+        }
+    }
     let known_entries = u32::try_from(1 + commands.len())
         .map_err(|_| TerminalError::new("too many commands in recorded replay fixture"))?;
     let mut body = BytesMut::new();
@@ -361,6 +374,22 @@ pub(super) fn encode_recorded_commands_with_invocations_replay<T: serde::Seriali
     body.extend_from_slice(&encode_input_command(&input));
     for command in &commands {
         body.extend_from_slice(&command.frame);
+    }
+    for command in commands
+        .iter()
+        .filter(|command| command.message_type == 0x0411)
+    {
+        let Some(completion_id) = command
+            .frame
+            .get(8..)
+            .and_then(|payload| protobuf_varint_field(payload, 11))
+            .and_then(|id| u32::try_from(id).ok())
+        else {
+            continue;
+        };
+        if let Some((_, value)) = proposals.iter().find(|(id, _)| *id == completion_id) {
+            body.extend_from_slice(&encode_run_completion(completion_id, value));
+        }
     }
     let mut invocation_ids = invocation_ids.iter();
     for command in &commands {
@@ -919,12 +948,210 @@ async fn invoke_process_workflow_endpoint_unbounded<T: serde::Serialize>(
     input: &T,
     complete_runs: bool,
 ) -> Result<Bytes, TerminalError> {
+    invoke_process_workflow_body_unbounded(
+        endpoint,
+        handler,
+        encode_invocation_body(workflow_key, input)?,
+        complete_runs,
+    )
+    .await
+}
+
+/// [`invoke_process_workflow_endpoint`] over a pre-encoded invocation body,
+/// such as a retry journal from [`encode_journal_retry`].
+pub(super) async fn invoke_process_workflow_body(
+    endpoint: &Endpoint,
+    handler: &str,
+    body: Bytes,
+    complete_runs: bool,
+) -> Result<Bytes, TerminalError> {
+    tokio::time::timeout(
+        ENDPOINT_TEST_TIMEOUT,
+        invoke_process_workflow_body_unbounded(endpoint, handler, body, complete_runs),
+    )
+    .await
+    .map_err(|_| TerminalError::new("workflow endpoint test timed out"))?
+}
+
+/// Restate's retry of an invocation: the same invocation id with the journal
+/// the runtime acknowledged. That is the first `journaled_commands` commands
+/// `prior` recorded, each run completed with the value `prior` proposed for it
+/// and each durable-wait index call answered; anything after them was never
+/// acknowledged and replays nothing.
+pub(super) fn encode_journal_retry<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    prior: &[u8],
+    journaled_commands: usize,
+) -> Result<Bytes, TerminalError> {
+    let input = serde_json::to_vec(input).map_err(TerminalError::from_error)?;
+    let commands = restate_recorded_commands(prior)
+        .ok_or_else(|| TerminalError::new("prior attempt omitted a valid frame"))?;
+    if commands.len() < journaled_commands {
+        return Err(TerminalError::new(format!(
+            "prior attempt journaled {} commands, fewer than {journaled_commands}",
+            commands.len()
+        )));
+    }
+    let commands = &commands[..journaled_commands];
+    let proposals = restate_message_frames(prior, 0x0005)
+        .ok_or_else(|| TerminalError::new("prior attempt omitted a valid frame"))?
+        .into_iter()
+        .filter_map(|frame| {
+            let (completion_id, value) = proposed_run_completion(frame.get(8..)?)?;
+            Some((completion_id, value.to_vec()))
+        })
+        .collect::<Vec<_>>();
+    let known_entries = u32::try_from(1 + commands.len())
+        .map_err(|_| TerminalError::new("too many commands in retry journal"))?;
+    let mut body = BytesMut::new();
+    body.extend_from_slice(&encode_start_message(workflow_key, known_entries));
+    body.extend_from_slice(&encode_input_command(&input));
+    for command in commands {
+        body.extend_from_slice(&command.frame);
+    }
+    for command in commands {
+        match command.message_type {
+            0x0411 => {
+                let completion_id = u32::try_from(
+                    protobuf_varint_field(command.frame.get(8..).unwrap_or_default(), 11)
+                        .ok_or_else(|| {
+                            TerminalError::new("run command omitted its completion id")
+                        })?,
+                )
+                .map_err(|_| TerminalError::new("run completion id exceeded u32"))?;
+                let Some((_, value)) = proposals.iter().find(|(id, _)| *id == completion_id) else {
+                    return Err(TerminalError::new(format!(
+                        "prior attempt never proposed run {completion_id}'s completion"
+                    )));
+                };
+                body.extend_from_slice(&encode_run_completion(completion_id, value));
+            }
+            0x040D => {
+                if let (Some(completion_id), Some((service, handler))) =
+                    (command.completion_id, command.call.as_ref())
+                    && let Some(response) = durable_wait_index_call_response(service, handler)
+                {
+                    let response =
+                        serde_json::to_vec(&response).map_err(TerminalError::from_error)?;
+                    body.extend_from_slice(&encode_call_completion(completion_id, &response));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(body.freeze())
+}
+
+/// The two admission steps every `LashProcessWorkflow/run` invocation
+/// journals first (FIG-3588), as the runtime recorded them: the verdict's and
+/// the start's `RunCommand` frames and proposed completions, gathered from a
+/// first try (which proposes the verdict) and Restate's retry over it (which
+/// proposes the start). Splice them into a replay with [`with_admission`].
+pub(super) async fn admission_journal<T: serde::Serialize>(
+    endpoint: &Endpoint,
+    workflow_key: &str,
+    input: &T,
+) -> Result<Vec<u8>, TerminalError> {
+    let verdict =
+        invoke_endpoint(endpoint, "LashProcessWorkflow", "run", workflow_key, input).await?;
+    let retry = encode_journal_retry(workflow_key, input, &verdict, 1)?;
+    let start = invoke_endpoint_body(endpoint, "LashProcessWorkflow", "run", retry).await?;
+    let mut journal = verdict.to_vec();
+    journal.extend_from_slice(&start);
+    let runs = restate_recorded_commands(&journal)
+        .ok_or_else(|| TerminalError::new("admission journal omitted a valid frame"))?
+        .into_iter()
+        .filter(|command| command.message_type == 0x0411)
+        .count();
+    if runs != 2 {
+        return Err(TerminalError::new(format!(
+            "admission journals exactly its two steps, found {runs} runs"
+        )));
+    }
+    Ok(journal)
+}
+
+/// Splice the admission steps `admission` recorded in front of the journal
+/// `body` replays: its two `RunCommand`s right after the input command, its
+/// completions after everything else, and the start message's entry count
+/// raised to match. Every command `body` carries was recorded after
+/// admission, so its completion ids already follow the admission's.
+pub(super) fn with_admission(body: &[u8], admission: &[u8]) -> Result<Bytes, TerminalError> {
+    let frames = split_frames(body)
+        .ok_or_else(|| TerminalError::new("replay body omitted a valid frame"))?;
+    let (Some(start), Some(input)) = (frames.first(), frames.get(1)) else {
+        return Err(TerminalError::new("replay body lacks its start and input"));
+    };
+    let start_payload = start
+        .get(8..)
+        .ok_or_else(|| TerminalError::new("start message omitted its payload"))?;
+    let key = protobuf_len_field(start_payload, 6)
+        .ok_or_else(|| TerminalError::new("start message omitted its key"))?;
+    let known = protobuf_varint_field(start_payload, 3)
+        .ok_or_else(|| TerminalError::new("start message omitted its entry count"))?;
+    let key = String::from_utf8(key.to_vec()).map_err(TerminalError::from_error)?;
+    let known = u32::try_from(known + 2)
+        .map_err(|_| TerminalError::new("admitted replay entry count exceeded u32"))?;
+    let admission_runs = restate_message_frames(admission, 0x0411)
+        .ok_or_else(|| TerminalError::new("admission journal omitted a valid frame"))?;
+    let proposals = restate_message_frames(admission, 0x0005)
+        .ok_or_else(|| TerminalError::new("admission journal omitted a valid frame"))?;
+    let mut spliced = BytesMut::new();
+    spliced.extend_from_slice(&encode_start_message(&key, known));
+    spliced.extend_from_slice(input);
+    for run in &admission_runs {
+        spliced.extend_from_slice(run);
+    }
+    for frame in &frames[2..] {
+        spliced.extend_from_slice(frame);
+    }
+    for proposal in proposals {
+        let (completion_id, value) = proposed_run_completion(
+            proposal
+                .get(8..)
+                .ok_or_else(|| TerminalError::new("proposal omitted its payload"))?,
+        )
+        .ok_or_else(|| TerminalError::new("invalid admission proposal"))?;
+        spliced.extend_from_slice(&encode_run_completion(completion_id, value));
+    }
+    Ok(spliced.freeze())
+}
+
+fn split_frames(input: &[u8]) -> Option<Vec<&[u8]>> {
+    let mut cursor = 0;
+    let mut frames = Vec::new();
+    while cursor < input.len() {
+        let header = u64::from_be_bytes(input.get(cursor..cursor + 8)?.try_into().ok()?);
+        let payload_len = usize::try_from(header & 0x0000_FFFF_FFFF_FFFF).ok()?;
+        let frame_end = cursor.checked_add(8 + payload_len)?;
+        frames.push(input.get(cursor..frame_end)?);
+        cursor = frame_end;
+    }
+    Some(frames)
+}
+
+/// A fresh invocation body whose admission `admission` recorded.
+pub(super) fn admitted_invocation_body<T: serde::Serialize>(
+    workflow_key: &str,
+    input: &T,
+    admission: &[u8],
+) -> Result<Bytes, TerminalError> {
+    with_admission(&encode_invocation_body(workflow_key, input)?, admission)
+}
+
+async fn invoke_process_workflow_body_unbounded(
+    endpoint: &Endpoint,
+    handler: &str,
+    body: Bytes,
+    complete_runs: bool,
+) -> Result<Bytes, TerminalError> {
     if !complete_runs {
         let response = endpoint.handle(
             http::Request::builder()
                 .uri(format!("/invoke/LashProcessWorkflow/{handler}"))
                 .header(http::header::CONTENT_TYPE, RESTATE_INVOCATION_CONTENT_TYPE)
-                .body(Full::new(encode_invocation_body(workflow_key, input)?))
+                .body(Full::new(body))
                 .expect("workflow invocation request"),
         );
         let status = response.status();
@@ -942,9 +1169,10 @@ async fn invoke_process_workflow_endpoint_unbounded<T: serde::Serialize>(
             .map_err(|err| TerminalError::new(format!("workflow endpoint body failed: {err}")));
     }
 
+    let invocation_body = body;
     let (mut input_sender, body) = Channel::<Bytes, Infallible>::new(4);
     input_sender
-        .send_data(encode_invocation_body(workflow_key, input)?)
+        .send_data(invocation_body)
         .await
         .map_err(|err| TerminalError::new(format!("workflow endpoint input failed: {err}")))?;
     let mut input_sender = Some(input_sender);
@@ -1019,7 +1247,10 @@ async fn invoke_process_workflow_endpoint_unbounded<T: serde::Serialize>(
                         })?;
                 }
             }
-            if message_type == 0x0003 {
+            // Suspension, error and end each close the attempt: a retryable
+            // error frame is followed by no end frame, and the SDK waits for
+            // the input to close before it finishes the response.
+            if matches!(message_type, 0x0001..=0x0003) {
                 drop(input_sender.take());
             }
             decoded = frame_end;

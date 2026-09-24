@@ -135,6 +135,12 @@ REGISTRATION_BASELINES = {
     "crates/lash-core-execution/src/runtime/effect/tool_child.rs:TOOL_CHILD_REQUEST_VERSION": (
         "sha256:296da08a0c7d581e875b1494223ff65c68e01dc40d73614c0f1aa8992390f0ba"
     ),
+    # FIG-3588: the Restate process handler's leading journaled commands (the
+    # segment admission verdict and start steps) are a new versioned surface,
+    # registered once with the lead's approval (2026-09-24).
+    "crates/lash-restate/src/process/admission.rs:RESTATE_PROCESS_JOURNAL_VERSION": (
+        "sha256:a7269845c206537cd698e9bedff49e47468580d4dee35695fa8a2f9b5b9c2593"
+    ),
     # FIG-1128: the v2 Restate durable-wait request enrolls an explicit
     # absolute-deadline wire after retiring the unversioned relative timeout.
     "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_REQUEST_VERSION": (

@@ -76,10 +76,87 @@ pub async fn process_continuation_store(
         "same ordinal with different bytes must conflict"
     );
 
+    // FIG-3588: a retained handover carries its segment's start marker,
+    // written set-if-absent. The first nonce stays; a second write reads it
+    // back unchanged, which is how a different execution learns it lost.
+    let segment = crate::ProcessSegmentKey::new(process_id, 1);
+    assert_eq!(
+        store
+            .segment_start(&segment)
+            .await
+            .expect("read unstarted marker"),
+        None,
+        "a handed-over segment has not started"
+    );
+    let first = crate::SegmentStartMarker {
+        nonce: "nonce-first".to_string(),
+        started_at_ms: 10,
+    };
+    assert_eq!(
+        store
+            .mark_segment_started(&segment, first.clone())
+            .await
+            .expect("mark the segment started"),
+        first
+    );
+    assert_eq!(
+        store
+            .mark_segment_started(&segment, first.clone())
+            .await
+            .expect("the same execution re-marks idempotently"),
+        first
+    );
+    assert_eq!(
+        store
+            .mark_segment_started(
+                &segment,
+                crate::SegmentStartMarker {
+                    nonce: "nonce-other".to_string(),
+                    started_at_ms: 20,
+                },
+            )
+            .await
+            .expect("a second execution's mark reads the first back"),
+        first,
+        "the recorded marker is never replaced"
+    );
+    assert_eq!(
+        store.segment_start(&segment).await.expect("read marker"),
+        Some(first)
+    );
+    assert!(
+        store
+            .mark_segment_started(
+                &crate::ProcessSegmentKey::new(process_id, 7),
+                crate::SegmentStartMarker {
+                    nonce: "nonce-unretained".to_string(),
+                    started_at_ms: 30,
+                },
+            )
+            .await
+            .is_err(),
+        "a segment with no retained handover cannot be marked started"
+    );
+    assert_eq!(
+        store
+            .segment_start(&crate::ProcessSegmentKey::new(process_id, 7))
+            .await
+            .expect("read an unretained segment"),
+        None
+    );
+
     store
         .delete_segment_handovers(&ProcessId::from(process_id))
         .await
         .expect("delete handovers");
+    assert_eq!(
+        store
+            .segment_start(&segment)
+            .await
+            .expect("read after delete"),
+        None,
+        "the marker goes with its handover"
+    );
     assert!(
         store
             .latest_segment_handover(&ProcessId::from(process_id))

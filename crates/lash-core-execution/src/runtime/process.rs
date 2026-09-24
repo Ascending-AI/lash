@@ -57,8 +57,8 @@ pub use events::{
     ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
     ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemantics,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSemantics, ProcessTerminalSpec,
-    ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec,
+    ProcessEventSemanticsSpec, ProcessEventType, ProcessResumeRefusal, ProcessTerminalSemantics,
+    ProcessTerminalSpec, ProcessValueSelector, ProcessWake, ProcessWakeDelivery, ProcessWakeSpec,
     process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
     runtime_lifecycle_event_type, terminal_append_request, terminal_event_type_name,
     validate_process_signal_name,
@@ -106,11 +106,12 @@ pub use registry::{
     DEFAULT_WAKE_DELIVERY_EXPIRY_MS, ParentEndPlan, ProcessClockRebind, ProcessContinuationStore,
     ProcessEventLog, ProcessLeases, ProcessLifecycle, ProcessObserverRegistry, ProcessPruneReport,
     ProcessQuery, ProcessRegistrar, ProcessRegistrationProbe, ProcessRegistry,
-    ProcessRegistryBinding, ProcessRetention, ProcessScopeFenceHosts, ProcessToolIntents,
-    ProcessWakeOutbox, ProcessWorklistCursor, ProcessWorklistPage, ProjectionWatermark,
-    WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, reconcile_pruned_trigger_deliveries,
+    ProcessRegistryBinding, ProcessRetention, ProcessScopeFenceHosts, ProcessSegmentKey,
+    ProcessToolIntents, ProcessWakeOutbox, ProcessWorklistCursor, ProcessWorklistPage,
+    ProjectionWatermark, SegmentStartMarker, WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery,
+    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    reconcile_pruned_trigger_deliveries,
 };
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 #[cfg(any(test, feature = "testing"))]

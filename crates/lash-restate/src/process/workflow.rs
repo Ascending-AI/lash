@@ -28,13 +28,13 @@ use restate_sdk::serde::Json;
 
 use super::{
     PROCESS_CANCEL_CONFIRM_RETRIES, PROCESS_CANCEL_CONFIRM_RETRY_DELAY, PROCESS_CANCEL_PROMISE_KEY,
-    RestateProcessAwaitRequest, RestateProcessCancelRequest, RestateProcessCancelSignal,
-    RestateProcessCompleteRequest, RestateProcessRunner, RestateProcessWorkflowInput,
-    RestateProcessWorkflowOutput, boundary_must_be_declined, handler_error_from_plugin,
-    is_replay_mismatch, missing_segment_is_superseded, process_segment_workflow_key,
-    resolve_process_cancel_signal, resolve_process_terminal_promise, restate_now_ms,
-    restate_process_terminal_await_key, restate_process_terminal_output,
-    segment_execution_authority, terminal_completion_workflow_key, terminal_process_output,
+    RESTATE_PROCESS_JOURNAL_VERSION, RestateProcessAwaitRequest, RestateProcessCancelRequest,
+    RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessRunner,
+    RestateProcessWorkflowInput, RestateProcessWorkflowOutput, SegmentAdmission, SegmentStarted,
+    admit_segment, boundary_must_be_declined, handler_error_from_plugin, is_replay_mismatch,
+    missing_segment_is_superseded, process_segment_workflow_key, resolve_process_cancel_signal,
+    resolve_process_terminal_promise, restate_now_ms, restate_process_terminal_await_key,
+    restate_process_terminal_output, terminal_completion_workflow_key, terminal_process_output,
     workflow_key_authority,
 };
 use crate::controller::{RestateEffectControllerOptions, RestateRuntimeEffectController};
@@ -229,6 +229,78 @@ impl<R> LashProcessWorkflowImpl<R>
 where
     R: RestateProcessRunner,
 {
+    /// Publish a terminal this segment reached: the root segment resolves the
+    /// process's terminal promise itself, a later segment completes it on the
+    /// root workflow.
+    async fn deliver_segment_terminal(
+        &self,
+        context: &WorkflowContext<'_>,
+        process_id: &ProcessId,
+        segment_ordinal: u64,
+        output: ProcessAwaitOutput,
+    ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
+        if terminal_completion_workflow_key(process_id, segment_ordinal).is_none() {
+            resolve_process_terminal_promise(context, &self.authority_id, process_id, &output)?;
+        } else {
+            let request = context
+                .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
+                .complete_terminal(Json(RestateProcessCompleteRequest {
+                    process_id: process_id.clone(),
+                    output: output.clone(),
+                }));
+            request.call().await?;
+        }
+
+        // FIG-811: the handover remains replay authority until the terminal
+        // process reaches host-owned retention pruning. A redrive after
+        // delivery can therefore reproduce every runner command before
+        // idempotently repeating this terminal suffix.
+        Ok(Json(RestateProcessWorkflowOutput::Terminal {
+            output: Box::new(output),
+        }))
+    }
+
+    /// Refuse an input built for another generation of the handler's command
+    /// prefix, before journaling anything: the process ends Abandoned with
+    /// `ResumeRefused { RetiredGeneration }` naming the generation it
+    /// carried, and the invocation fails terminally without a journal
+    /// command, so a journal recorded under that generation is never replayed
+    /// against this one (FIG-3588, current temporary cutover policy).
+    async fn refuse_retired_journal(
+        &self,
+        process_id: &ProcessId,
+        journal_version: u32,
+    ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
+        let found = format!("restate-process-journal-v{journal_version}");
+        tracing::warn!(
+            process_id = process_id.as_str(),
+            found = found.as_str(),
+            expected = RESTATE_PROCESS_JOURNAL_VERSION,
+            "refusing a process segment built for a retired journal generation"
+        );
+        self.complete_with_stored_outcome(
+            process_id,
+            ProcessAwaitOutput::Abandoned {
+                evidence: Box::new(AbandonEvidence {
+                    writer: AbandonWriter::ResumeRefused {
+                        reason: lash_core::ProcessResumeRefusal::RetiredGeneration {
+                            found: found.clone(),
+                        },
+                    },
+                    owner: None,
+                    epoch_ms: restate_now_ms(),
+                }),
+                control: None,
+            },
+        )
+        .await
+        .map_err(handler_error_from_plugin)?;
+        Err(TerminalError::new(format!(
+            "process `{process_id}` segment input carries {found}; this handler journals generation {RESTATE_PROCESS_JOURNAL_VERSION}"
+        ))
+        .into())
+    }
+
     pub(crate) async fn complete_with_stored_outcome(
         &self,
         process_id: &ProcessId,
@@ -250,7 +322,11 @@ where
         })
     }
 
-    pub(crate) async fn run_registration<F>(
+    /// [`run_registration`](Self::run_registration) for a test that drives a
+    /// segment without the handler's admission: the segment proof is minted
+    /// from the scope and the execution authority the test supplies.
+    #[cfg(test)]
+    pub(crate) async fn run_registration_for_test<F>(
         &self,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
@@ -262,7 +338,38 @@ where
     where
         F: Future<Output = Result<(), HandlerError>>,
     {
+        let started = SegmentStarted::for_test(
+            scoped_effect_controller.admitted_scope().clone(),
+            segment_ordinal,
+            execution_context.execution_write_authority.clone(),
+        );
+        self.run_registration(
+            registration,
+            execution_context,
+            scoped_effect_controller,
+            &started,
+            handover,
+            cancellation_signal,
+        )
+        .await
+    }
+
+    pub(crate) async fn run_registration<F>(
+        &self,
+        registration: ProcessRegistration,
+        execution_context: ProcessExecutionContext,
+        scoped_effect_controller: ScopedEffectController<'_>,
+        started: &SegmentStarted,
+        handover: Option<lash_core::SegmentHandover>,
+        cancellation_signal: F,
+    ) -> Result<lash_core::ProcessRunOutcome, HandlerError>
+    where
+        F: Future<Output = Result<(), HandlerError>>,
+    {
         let process_id = registration.id.clone();
+        let segment_ordinal = started.segment_ordinal();
+        let execution_context =
+            execution_context.with_execution_write_authority(started.write_authority().clone());
         if segment_ordinal > 0 && handover.is_none() {
             return Err(HandlerError::from(TerminalError::new(format!(
                 "process `{process_id}` segment {segment_ordinal} omitted its validated handover"
@@ -274,6 +381,7 @@ where
         );
         let cancellation = tokio_util::sync::CancellationToken::new();
         let runner = self.runner.run_process_segment(
+            started,
             registration,
             execution_context,
             scoped_effect_controller,
@@ -513,25 +621,22 @@ where
         Json(input): Json<RestateProcessWorkflowInput>,
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
         let process_id = input.registration.id.clone();
-        let record = self
-            .registry
-            .get_process(&process_id)
-            .await
-            .map_err(HandlerError::from)?
-            .ok_or_else(|| {
-                HandlerError::from(TerminalError::new(format!(
-                    "unknown process `{process_id}`"
-                )))
-            })?;
+        // The journal-generation gate runs before the handler journals
+        // anything: an input built for another command prefix is refused typed
+        // rather than replayed against commands it never recorded (FIG-3588).
+        if input.journal_version != RESTATE_PROCESS_JOURNAL_VERSION {
+            return self
+                .refuse_retired_journal(&process_id, input.journal_version)
+                .await;
+        }
         // FIG-788: a terminal outcome can land after an attempt has emitted
         // runner commands but before its handler output is committed. Never
-        // branch around the runner from this non-journaled read: redrive must
+        // branch around the runner on a non-journaled read: redrive must
         // reconstruct the deployed command prefix, and idempotent completion
-        // below returns the already-stored terminal outcome. `first_started` is
-        // immutable execution authority. PR #170 observer removal cannot
-        // terminalize a process. Terminal pruning remains a host-owned exposure:
-        // the raw cutoff has no finite workflow-lifetime bound to validate
-        // against, so a host must retain this row while the workflow can replay.
+        // below returns the already-stored terminal outcome. Terminal pruning
+        // remains a host-owned exposure: the raw cutoff has no finite
+        // workflow-lifetime bound to validate against, so a host must retain
+        // this row while the workflow can replay.
         let mut handover = if input.segment_ordinal == 0 {
             None
         } else {
@@ -570,23 +675,64 @@ where
             };
             Some(persisted.handover)
         };
-        if input.segment_ordinal == 0 && input.execution_id.is_some() {
-            tracing::warn!(
-                process_id = process_id.as_str(),
-                presented_execution_id = input.execution_id.as_deref(),
-                invocation_id = %ctx.invocation_id(),
-                verdict = "ignored",
-                "segment-zero execution identity derives exclusively from the Restate invocation"
-            );
-        }
-        let (execution_id, execution_write_authority) = segment_execution_authority(
+        // Admission is the handler's first journaled work: the verdict, then
+        // the start marker, and only the proof the start returns can mint the
+        // segment's effect controller or drive its runner (FIG-3588).
+        let started = match admit_segment(
+            &ctx,
+            &self.registry,
+            &self.continuations,
             &process_id,
             input.segment_ordinal,
-            input.execution_id.as_deref(),
-            ctx.invocation_id(),
-            record.first_started.as_deref(),
         )
-        .map_err(HandlerError::from)?;
+        .await?
+        {
+            SegmentAdmission::Started(started) => started,
+            SegmentAdmission::Superseded {
+                latest_segment_ordinal,
+            } => {
+                // A completed segment is never refused: its successor already
+                // carries the process.
+                tracing::debug!(
+                    process_id = process_id.as_str(),
+                    segment_ordinal = input.segment_ordinal,
+                    latest_segment_ordinal,
+                    "ignoring a completed process segment"
+                );
+                return Ok(Json(RestateProcessWorkflowOutput::SegmentChained {
+                    next_segment_ordinal: latest_segment_ordinal,
+                }));
+            }
+            SegmentAdmission::SubstrateLost { lost } => {
+                tracing::warn!(
+                    process_id = process_id.as_str(),
+                    segment_ordinal = input.segment_ordinal,
+                    lost_owner_id = lost.owner.owner_id.as_str(),
+                    lost_attempt = lost.attempt,
+                    "a process segment started under a journal this invocation cannot read; abandoning instead of re-running"
+                );
+                let output = self
+                    .complete_with_stored_outcome(
+                        &process_id,
+                        ProcessAwaitOutput::Abandoned {
+                            evidence: Box::new(AbandonEvidence {
+                                writer: AbandonWriter::ResumeRefused {
+                                    reason: lash_core::ProcessResumeRefusal::SubstrateLost,
+                                },
+                                owner: Some(lost.owner),
+                                epoch_ms: restate_now_ms(),
+                            }),
+                            control: None,
+                        },
+                    )
+                    .await
+                    .map_err(handler_error_from_plugin)?;
+                resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::SegmentFinished)?;
+                return self
+                    .deliver_segment_terminal(&ctx, &process_id, input.segment_ordinal, output)
+                    .await;
+            }
+        };
         let mut options = RestateEffectControllerOptions::default()
             .segment_effect_budget((self.segment_effect_budget)(&input.registration));
         if let Some(cap) = self.segment_duration_cap {
@@ -601,20 +747,15 @@ where
         };
         let outcome = loop {
             let scoped_effect_controller = controller
-                .scoped_effect_controller(lash_core::AdmittedScope::process(
-                    lash_core::ProcessRef::from_record(&record),
-                ))
+                .process_segment_controller(&started)
                 .map_err(|err| HandlerError::from(TerminalError::from_error(err)))?;
             let cancel_signal = self.cancellation_signal(&process_id, input.segment_ordinal);
             let outcome = self
                 .run_registration(
                     input.registration.clone(),
-                    input
-                        .execution_context
-                        .clone()
-                        .with_execution_write_authority(execution_write_authority.clone()),
+                    input.execution_context.clone(),
                     scoped_effect_controller,
-                    input.segment_ordinal,
+                    &started,
                     handover,
                     cancel_signal,
                 )
@@ -638,35 +779,40 @@ where
         )?;
         match outcome {
             lash_core::ProcessRunOutcome::Terminal { output, .. } => {
-                let output = *output;
-                if terminal_completion_workflow_key(&process_id, input.segment_ordinal).is_none() {
-                    resolve_process_terminal_promise(
-                        controller.context(),
-                        &self.authority_id,
-                        &process_id,
-                        &output,
-                    )?;
-                } else {
-                    let request = controller
-                        .context()
-                        .workflow_client::<LashProcessWorkflowClient>(process_id.clone())
-                        .complete_terminal(Json(RestateProcessCompleteRequest {
-                            process_id: process_id.clone(),
-                            output: output.clone(),
-                        }));
-                    request.call().await?;
-                }
-
-                // FIG-811: the handover remains replay authority until the
-                // terminal process reaches host-owned retention pruning. A
-                // redrive after delivery can therefore reproduce every runner
-                // command before idempotently repeating this terminal suffix.
-                Ok(Json(RestateProcessWorkflowOutput::Terminal {
-                    output: Box::new(output),
-                }))
+                self.deliver_segment_terminal(
+                    controller.context(),
+                    &process_id,
+                    input.segment_ordinal,
+                    *output,
+                )
+                .await
             }
             lash_core::ProcessRunOutcome::SegmentBoundary(handover) => {
                 let next_segment_ordinal = input.segment_ordinal.saturating_add(1);
+                let successor_key = process_segment_workflow_key(&process_id, next_segment_ordinal);
+                // The successor's reference names who owns the process now.
+                // It is observational: the recovery sweep keys on the latest
+                // handover, and admission, not the reference, decides whether
+                // a segment runs. It is still written before the handover and
+                // the send, so a visible handover always has its reference,
+                // and a failed write is a store fault Restate retries — this
+                // invocation replays its journal up to here and writes again,
+                // compare-and-set on the ordinal — rather than a terminal
+                // failure that would strand the chain. The successor's
+                // invocation id is not known until the send, so the reference
+                // carries none; the workflow key identifies the owner.
+                self.registry
+                    .set_external_ref(
+                        &process_id,
+                        lash_core::ProcessExternalRef {
+                            backend: "restate".to_string(),
+                            id: format!("LashProcessWorkflow/{successor_key}"),
+                            metadata: None,
+                            segment_ordinal: Some(next_segment_ordinal),
+                        },
+                    )
+                    .await
+                    .map_err(HandlerError::from)?;
                 self.continuations
                     .put_segment_handover(
                         &process_id,
@@ -677,7 +823,6 @@ where
                     )
                     .await
                     .map_err(HandlerError::from)?;
-                let successor_key = process_segment_workflow_key(&process_id, next_segment_ordinal);
                 // FIG-788: successor emission is unconditional. A cancellation
                 // event can land between attempts, so the append-only registry
                 // read below may shape only commands after this deployed prefix.
@@ -688,46 +833,9 @@ where
                         registration: input.registration,
                         execution_context: input.execution_context,
                         segment_ordinal: next_segment_ordinal,
-                        execution_id: Some(execution_id),
+                        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
                     }));
-                let handle = request.send().await?;
-                // The successor is now the row's durable owner. Writing its
-                // reference here is what makes the recovery sweep's skip
-                // meaningful: without it the row keeps the segment-0 reference
-                // this chain started from, and a sweep comparing the recorded
-                // ordinal against the latest handover would resubmit a segment
-                // Restate is already running. The write is compare-and-set on
-                // the ordinal, so a sweep that raced this handover and wrote the
-                // same successor first is an idempotent no-op rather than a
-                // conflict.
-                // Log and continue: the successor send above is already
-                // journaled, so propagating a failure here would terminally
-                // fail a segment of a chain that is advancing. A missing later
-                // reference costs exactly one coalescing resubmission, which
-                // the ordinal-aware sweep now performs against the successor's
-                // own workflow key.
-                if let Err(error) = self
-                    .registry
-                    .set_external_ref(
-                        &process_id,
-                        lash_core::ProcessExternalRef {
-                            backend: "restate".to_string(),
-                            id: format!("LashProcessWorkflow/{successor_key}"),
-                            metadata: Some(
-                                serde_json::json!({ "invocation_id": handle.invocation_id() }),
-                            ),
-                            segment_ordinal: Some(next_segment_ordinal),
-                        },
-                    )
-                    .await
-                {
-                    tracing::warn!(
-                        process_id = %process_id,
-                        segment_ordinal = next_segment_ordinal,
-                        error = %error,
-                        "segment handover could not record its successor's external reference; the recovery sweep will resubmit the successor's key"
-                    );
-                }
+                request.send().await?;
                 let record = self
                     .registry
                     .get_process(&process_id)

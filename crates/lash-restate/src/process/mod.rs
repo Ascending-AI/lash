@@ -8,7 +8,11 @@
 //! lives in [`workflow`].
 
 use lash_sansio::ProcessId;
+mod admission;
 mod workflow;
+
+pub use admission::{RESTATE_PROCESS_JOURNAL_VERSION, SegmentStarted};
+pub(crate) use admission::{SegmentAdmission, admit_segment};
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -268,8 +272,11 @@ impl RestateProcessCancelRequest {
 
 #[async_trait::async_trait]
 pub trait RestateProcessRunner: Send + Sync + 'static {
+    /// Run one admitted segment. `started` is the proof that the segment's
+    /// start marker committed (FIG-3588); a runner cannot be driven without it.
     async fn run_process_segment(
         &self,
+        started: &SegmentStarted,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
@@ -302,21 +309,14 @@ impl RestateCoreProcessRunner {
 impl RestateProcessRunner for RestateCoreProcessRunner {
     async fn run_process_segment(
         &self,
+        started: &SegmentStarted,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
         handover: Option<lash_core::SegmentHandover>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
-        let execution_write_authority = execution_context
-            .execution_write_authority
-            .clone()
-            .ok_or_else(|| {
-                PluginError::Session(format!(
-                    "Restate process `{}` omitted its invocation execution identity",
-                    registration.id
-                ))
-            })?;
+        let execution_write_authority = started.write_authority().clone();
         Box::pin(
             self.worker
                 .run_process_segment_with_scoped_effect_controller(
@@ -436,6 +436,15 @@ impl RestateProcessIngressRunner {
         // non-terminal: `await_process_terminal` would never return and
         // retention would never reclaim it. The row is submitted, and the
         // workflow's own journaled cancellation step settles it.
+        //
+        // Every non-terminal row is submitted under the workflow key of its
+        // latest handover, whatever its external reference says (FIG-3588).
+        // Restate coalesces a submission onto a live or retained workflow of
+        // that key. A key it no longer holds runs the segment's admission,
+        // which starts a segment that never started, ends a started one whose
+        // journal is gone as `SubstrateLost`, and ignores a segment that has
+        // already handed over. So the sweep reaches every kind of substrate
+        // loss, and the reference is observational only.
         let latest_handover = self
             .continuations
             .latest_segment_handover(&process_id)
@@ -443,22 +452,6 @@ impl RestateProcessIngressRunner {
         let segment_ordinal = latest_handover
             .as_ref()
             .map_or(0, |handover| handover.segment_ordinal);
-        // The skip is by segment, not by "a reference exists". A row that has
-        // handed over carries the reference of whichever segment last reached
-        // Restate; if that is the segment this pass would submit, a submission
-        // is already in flight and resubmitting would be a second POST for it.
-        // If it is an earlier segment — the successor send or its reference
-        // write did not land — then no submission exists for the segment the
-        // process actually advanced to, and the sweep is the thing that has to
-        // make it exist. Comparing `is_some()` instead would make every
-        // handed-over row permanently un-sweepable.
-        if let Some(external) = current
-            .as_ref()
-            .and_then(|current| current.external_ref.as_ref())
-            && external.segment_ordinal() >= segment_ordinal
-        {
-            return Ok(IngressSubmitOutcome::AlreadySubmitted);
-        }
         let workflow_key = process_segment_workflow_key(&process_id, segment_ordinal);
         let registration = ProcessRegistration {
             id: record.id,
@@ -483,11 +476,7 @@ impl RestateProcessIngressRunner {
                     registration,
                     execution_context,
                     segment_ordinal,
-
-                    // An ingress/sweep submission is a fresh invocation. For a
-                    // mid-chain row the handler validates the durable handover,
-                    // then binds this invocation as the next execution attempt.
-                    execution_id: None,
+                    journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
                 },
             )
             .await
@@ -632,16 +621,6 @@ impl RestateProcessIngressRunner {
                             },
                         });
                     }
-                    // Not this pass's row to start, and not a fault. `Busy`
-                    // is the existing dialect's word for a row another owner
-                    // holds; this lane adds a resubmission rule, not a new
-                    // recovery outcome.
-                    Ok(IngressSubmitOutcome::AlreadySubmitted) => {
-                        report.deferred.push(ProcessAdmissionDeferred {
-                            process_id,
-                            disposition: ProcessRecoveryAttemptOutcome::Busy,
-                        });
-                    }
                     Err(error) => {
                         // Per-row submit failure is a per-row deferral. Failing
                         // the whole call here would throw away the ids that
@@ -681,9 +660,6 @@ enum IngressSubmitOutcome {
     ExternallyOwned,
     /// The row was already terminal when re-read just before submitting.
     SettledByPeer(ProcessStatus),
-    /// The row already carries an external reference for its current segment:
-    /// a submission reached Restate and the workflow key coalesces onto it.
-    AlreadySubmitted,
 }
 
 impl RestateProcessIngressRunner {
@@ -922,62 +898,11 @@ pub struct RestateProcessWorkflowInput {
     pub execution_context: ProcessExecutionContext,
     #[serde(default)]
     pub segment_ordinal: u64,
-    /// Root Restate invocation id for this execution attempt. Segment
-    /// successors carry it forward so a process chain remains one attempt.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_id: Option<String>,
-}
-
-pub(crate) fn segment_execution_authority(
-    process_id: &ProcessId,
-    segment_ordinal: u64,
-    carried_execution_id: Option<&str>,
-    invocation_id: &str,
-    retained_start: Option<&lash_core::ProcessStarted>,
-) -> Result<(String, lash_core::ProcessExecutionWriteAuthority), TerminalError> {
-    if segment_ordinal == 0 {
-        let execution_id = invocation_id.to_string();
-        return Ok((
-            execution_id.clone(),
-            lash_core::ProcessExecutionWriteAuthority::invocation(process_id, execution_id),
-        ));
-    }
-
-    let retained_start = retained_start.ok_or_else(|| {
-        TerminalError::new(format!(
-            "process `{process_id}` segment {segment_ordinal} has a handover without a retained execution start"
-        ))
-    })?;
-    if let Some(carried_execution_id) = carried_execution_id {
-        let retained_execution_id = retained_start
-            .owner
-            .restate_process_execution_id(process_id)
-            .ok_or_else(|| {
-                TerminalError::new(format!(
-                    "process `{process_id}` segment {segment_ordinal} retained a non-Restate execution owner"
-                ))
-            })?;
-        if carried_execution_id != retained_execution_id {
-            return Err(TerminalError::new(format!(
-                "process `{process_id}` segment {segment_ordinal} carried execution `{carried_execution_id}` but retained execution is `{retained_execution_id}`"
-            )));
-        }
-        let execution_id = carried_execution_id.to_string();
-        return Ok((
-            execution_id.clone(),
-            lash_core::ProcessExecutionWriteAuthority::invocation(process_id, execution_id),
-        ));
-    }
-
-    let execution_id = invocation_id.to_string();
-    Ok((
-        execution_id.clone(),
-        lash_core::ProcessExecutionWriteAuthority::invocation_resume(
-            process_id,
-            execution_id,
-            retained_start.clone(),
-        ),
-    ))
+    /// The generation of the handler's journaled command prefix the submitter
+    /// was built for ([`RESTATE_PROCESS_JOURNAL_VERSION`]). The handler refuses
+    /// any other generation before it journals anything.
+    #[serde(default = "admission::unstamped_journal_version")]
+    pub journal_version: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]

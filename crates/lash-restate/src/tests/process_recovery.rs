@@ -548,12 +548,12 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
         tokio::spawn(async move {
             let controller = RestateRuntimeEffectController::new_for_test(context);
             workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                        .process_scope_for_test(durable_admission(&ExecutionScope::process(
                             &process_id,
                         )))
                         .expect("sleeping process scope"),
@@ -644,12 +644,12 @@ pub(super) async fn process_sleep_wake_verdict_failure_retries_before_settling_r
         tokio::spawn(async move {
             let controller = RestateRuntimeEffectController::new_for_test(context);
             workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                        .process_scope_for_test(durable_admission(&ExecutionScope::process(
                             process_id,
                         )))
                         .expect("sleeping process scope"),
@@ -702,12 +702,12 @@ pub(super) async fn process_sleep_wake_verdict_failure_retries_before_settling_r
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let retry = tokio::time::timeout(
         Duration::from_secs(5),
-        workflow.run_registration(
+        workflow.run_registration_for_test(
             registration,
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(durable_admission(&ExecutionScope::process(process_id)))
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(process_id)))
                 .expect("sleeping process retry scope"),
             0,
             None,
@@ -770,12 +770,12 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
         tokio::spawn(async move {
             let controller = RestateRuntimeEffectController::new_for_test(context);
             workflow
-                .run_registration(
+                .run_registration_for_test(
                     registration,
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
                     controller
-                        .scoped_effect_controller(durable_admission(&ExecutionScope::process(
+                        .process_scope_for_test(durable_admission(&ExecutionScope::process(
                             process_id,
                         )))
                         .expect("sleeping post-wake-effect scope"),
@@ -839,12 +839,12 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
 
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let redelivery = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .scoped_effect_controller(durable_admission(&ExecutionScope::process(process_id)))
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(process_id)))
                 .expect("sleeping post-wake-effect redelivery scope"),
             0,
             None,
@@ -1424,7 +1424,7 @@ pub(super) async fn process_workflow_impl_runs_and_cancels_through_runner() {
         .expect("workflow cancel while target is nonterminal");
 
     let output = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             execution_context,
             lash_core::ScopedEffectController::shared(
@@ -1589,183 +1589,6 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
 }
 
 #[tokio::test]
-pub(super) async fn segment_zero_ignores_stale_carried_execution_identity() {
-    let registry = process_registry();
-    registry
-        .register_process(rerunnable_registration("root-stale-id").with_max_attempts(Some(2)))
-        .await
-        .expect("register rerunnable");
-    let (first_authority, first_started) =
-        invocation_started(&ProcessId::from("root-stale-id"), "stale-invocation", 1);
-    registry
-        .record_first_started_with_authority(
-            &ProcessId::from("root-stale-id"),
-            first_started.clone(),
-            &first_authority,
-        )
-        .await
-        .expect("record old attempt");
-
-    let (execution_id, authority) = segment_execution_authority(
-        &ProcessId::from("root-stale-id"),
-        0,
-        Some("stale-invocation"),
-        "fresh-invocation",
-        Some(&first_started),
-    )
-    .expect("segment-zero identity");
-    assert_eq!(execution_id, "fresh-invocation");
-    let authority = authority.bind_attempt(2);
-    let mut started = authority
-        .invocation_started()
-        .expect("bound fresh invocation");
-    started.started_at_ms = 2;
-    assert!(matches!(
-        registry
-            .record_first_started_with_authority(
-                &ProcessId::from("root-stale-id"),
-                started,
-                &authority
-            )
-            .await
-            .expect("fresh root attempt"),
-        lash_core::ProcessStartOutcome::Started(_)
-    ));
-}
-
-#[tokio::test]
-pub(super) async fn redriven_mid_chain_segment_consumes_attempt_and_respects_budget() {
-    let registry = process_registry();
-    registry
-        .register_process(
-            owner_bound_registration("owner-bound-redrive").with_max_attempts(Some(2)),
-        )
-        .await
-        .expect("register owner-bound");
-    let (root_authority, root_started) = invocation_started(
-        &ProcessId::from("owner-bound-redrive"),
-        "root-invocation",
-        1,
-    );
-    registry
-        .record_first_started_with_authority(
-            &ProcessId::from("owner-bound-redrive"),
-            root_started.clone(),
-            &root_authority,
-        )
-        .await
-        .expect("record root");
-
-    let (_, redrive_authority) = segment_execution_authority(
-        &ProcessId::from("owner-bound-redrive"),
-        1,
-        None,
-        "redrive-invocation-1",
-        Some(&root_started),
-    )
-    .expect("validated handover redrive identity");
-    let redrive_authority = redrive_authority.bind_attempt(2);
-    let mut redrive_started = redrive_authority
-        .invocation_started()
-        .expect("bound redrive");
-    redrive_started.started_at_ms = 2;
-    let redrive_record = match registry
-        .record_first_started_with_authority(
-            &ProcessId::from("owner-bound-redrive"),
-            redrive_started,
-            &redrive_authority,
-        )
-        .await
-        .expect("owner-bound continuation may rebind at a handover")
-    {
-        lash_core::ProcessStartOutcome::Started(record) => record,
-        other => panic!("expected a new continuation attempt, got {other:?}"),
-    };
-    assert_eq!(
-        redrive_record
-            .first_started
-            .as_deref()
-            .map(|started| started.attempt),
-        Some(2)
-    );
-
-    let retained = redrive_record
-        .first_started
-        .as_deref()
-        .expect("retained redrive start");
-    let (_, exhausted_authority) = segment_execution_authority(
-        &ProcessId::from("owner-bound-redrive"),
-        1,
-        None,
-        "redrive-invocation-2",
-        Some(retained),
-    )
-    .expect("second handover redrive identity");
-    let exhausted_authority = exhausted_authority.bind_attempt(3);
-    let exhausted_started = exhausted_authority
-        .invocation_started()
-        .expect("bound exhausted redrive");
-    assert!(matches!(
-        registry
-            .record_first_started_with_authority(
-                &ProcessId::from("owner-bound-redrive"),
-                exhausted_started,
-                &exhausted_authority,
-            )
-            .await
-            .expect("attempt budget verdict"),
-        lash_core::ProcessStartOutcome::AttemptsExhausted {
-            attempts: 2,
-            max_attempts: 2,
-            ..
-        }
-    ));
-}
-
-#[tokio::test]
-pub(super) async fn rerunnable_mid_chain_redrive_continues_from_validated_handover() {
-    let registry = process_registry();
-    registry
-        .register_process(rerunnable_registration("rerunnable-redrive"))
-        .await
-        .expect("register rerunnable");
-    let (root_authority, root_started) =
-        invocation_started(&ProcessId::from("rerunnable-redrive"), "root-invocation", 1);
-    registry
-        .record_first_started_with_authority(
-            &ProcessId::from("rerunnable-redrive"),
-            root_started.clone(),
-            &root_authority,
-        )
-        .await
-        .expect("record root");
-
-    let (_, redrive_authority) = segment_execution_authority(
-        &ProcessId::from("rerunnable-redrive"),
-        1,
-        None,
-        "redrive-invocation",
-        Some(&root_started),
-    )
-    .expect("validated handover redrive identity");
-    let redrive_authority = redrive_authority.bind_attempt(2);
-    let redrive_started = redrive_authority
-        .invocation_started()
-        .expect("bound redrive");
-    assert!(matches!(
-        registry
-            .record_first_started_with_authority(
-                &ProcessId::from("rerunnable-redrive"),
-                redrive_started,
-                &redrive_authority,
-            )
-            .await
-            .expect("rerunnable continuation"),
-        lash_core::ProcessStartOutcome::Started(_)
-    ));
-}
-
-#[tokio::test]
 pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_identity() {
     let registry = process_registry();
     registry
@@ -1786,16 +1609,14 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
         .await
         .expect("start root segment");
 
-    let (execution_id, successor_authority) = segment_execution_authority(
-        &ProcessId::from("owner-bound-segment"),
-        1,
-        Some("root-invocation"),
-        "successor-handler-invocation",
-        Some(&root_started),
+    // A later segment continues the root segment's execution: it writes its
+    // lifecycle facts under the root's execution id (FIG-3588 admission binds
+    // it from the retained start).
+    let successor_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+        ProcessId::from("owner-bound-segment"),
+        "root-invocation",
     )
-    .expect("validated live successor");
-    assert_eq!(execution_id, "root-invocation");
-    let successor_authority = successor_authority.bind_attempt(1);
+    .bind_attempt(1);
     let mut successor_started = successor_authority
         .invocation_started()
         .expect("bound successor");
@@ -1867,7 +1688,7 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
         .expect("record prior incarnation start");
 
     let output = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
@@ -1924,7 +1745,7 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
         .expect("register fresh owner-bound process");
 
     let output = workflow
-        .run_registration(
+        .run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
@@ -1956,14 +1777,16 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
     );
 }
 
-/// FIG-2964: submission is keyed by segment and coalesces.
+/// FIG-2964, as FIG-3588 leaves it: submission is keyed by segment, and
+/// Restate's workflow key is the only coalescing point.
 ///
-/// The first scan submits the segment-0 workflow key and records the external
-/// reference that says Restate owns the row. A second scan re-reads the row,
-/// sees that reference, and skips: resubmitting would be a second POST for a
-/// run already in flight, and the workflow key is the only coalescing point.
+/// Every scan submits every live row under its latest segment's key. The
+/// repeat scan's submission reaches the same key, and Restate coalesces it onto
+/// the run already in flight (`PreviouslyAccepted`); a key Restate no longer
+/// holds runs the segment's admission instead, which is how the sweep reaches
+/// a lost workflow whose reference still names it.
 #[tokio::test]
-pub(super) async fn ingress_runner_submits_by_segment_key_once_and_coalesces_the_repeat_scan() {
+pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_the_repeat_scan() {
     // A non-terminal, Lash-executed (Rerunnable) process is the durable
     // worklist row the ingress runner must submit. ExternallyOwned rows are
     // never submitted (ADR 0019), so the submittable case uses a Rerunnable row.
@@ -1973,13 +1796,16 @@ pub(super) async fn ingress_runner_submits_by_segment_key_once_and_coalesces_the
         .await
         .expect("register");
 
-    // The capture server accepts exactly one connection, so a second submit
-    // would have nothing to talk to: the single-response server is itself part
-    // of the proof that the repeat scan does not POST.
-    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
-        status: "202 Accepted",
-        body: r#"{"invocationId":"inv_task_1","status":"Accepted"}"#,
-    }])
+    let (base_url, captured, server) = spawn_restate_http_capture(vec![
+        MockHttpResponse {
+            status: "202 Accepted",
+            body: r#"{"invocationId":"inv_task_1","status":"Accepted"}"#,
+        },
+        MockHttpResponse {
+            status: "200 OK",
+            body: r#"{"invocationId":"inv_task_1","status":"PreviouslyAccepted"}"#,
+        },
+    ])
     .await;
 
     let runner = RestateProcessIngressRunner::new(base_url, registry.clone(), continuation_store());
@@ -1996,32 +1822,21 @@ pub(super) async fn ingress_runner_submits_by_segment_key_once_and_coalesces_the
     let requests = captured.lock_recover().clone();
     assert_eq!(
         requests.len(),
-        1,
-        "the row is submitted once; the second scan coalesces onto the recorded reference: {requests:?}"
+        2,
+        "each scan submits the live row: {requests:?}"
     );
-    let request = &requests[0];
-    assert!(
-        request.starts_with("POST /LashProcessWorkflow/task-1/run/send "),
-        "submits the segment-0 workflow key: {request}"
-    );
-    assert!(
-        !request.contains("idempotency-key:"),
-        "workflow sends must not carry an idempotency header; Restate coalesces by workflow key: {request}"
-    );
+    for request in &requests {
+        assert!(
+            request.starts_with("POST /LashProcessWorkflow/task-1/run/send "),
+            "submits the segment-0 workflow key: {request}"
+        );
+        assert!(
+            !request.contains("idempotency-key:"),
+            "workflow sends must not carry an idempotency header; Restate coalesces by workflow key: {request}"
+        );
+    }
     assert_eq!(first.admitted, vec!["task-1".to_string()]);
-    assert!(
-        second.admitted.is_empty(),
-        "a row Restate already owns is not admitted again: {second:?}"
-    );
-    assert_eq!(
-        second
-            .deferred
-            .iter()
-            .map(|entry| (entry.process_id.to_string(), entry.disposition.clone()))
-            .collect::<Vec<_>>(),
-        vec![("task-1".to_string(), ProcessRecoveryAttemptOutcome::Busy)],
-        "the skip is a typed deferral, not a silent drop"
-    );
+    assert_eq!(second.admitted, vec!["task-1".to_string()]);
 
     // The durable backend reference is recorded so the process is observably
     // owned by Restate, and it names the segment it was minted for.
@@ -2044,142 +1859,6 @@ pub(super) async fn ingress_runner_submits_by_segment_key_once_and_coalesces_the
             .as_ref()
             .and_then(|metadata| metadata.get("invocation_id")),
         Some(&serde_json::json!("inv_task_1"))
-    );
-}
-
-/// FIG-2964 acceptance: recovery of a row that has handed over once keys the
-/// submission by segment 1, not by the bare process id.
-///
-/// Segment 1 is the boundary case the keying scheme has to get right: it is the
-/// first ordinal that is not the process id itself, so a scheme that only
-/// special-cased "has a handover" would resubmit segment 0 and run the process
-/// twice from the start.
-///
-/// The row reaches its state through a live boundary — a real start that
-/// recorded its segment-0 reference, then a real handover whose successor send
-/// never landed — because that is the state the sweep actually meets. A
-/// hand-built handover with no reference at all is unreachable from any live
-/// start, and testing against it would let a skip keyed on
-/// `external_ref.is_some()` pass while stranding every real row.
-#[tokio::test]
-pub(super) async fn ingress_sweep_keys_segment_one_recovery_by_its_segment_workflow_key() {
-    let (registry, continuations, _boundary) =
-        super::restate_redrive::drive_to_live_segment_boundary("handed-over-once").await;
-
-    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
-        status: "202 Accepted",
-        body: r#"{"invocationId":"inv_handed_over_1","status":"Accepted"}"#,
-    }])
-    .await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuations.clone());
-    let _ = runner
-        .admit_pending_processes("test")
-        .await
-        .expect("drive pending");
-    server.await.expect("mock ingress server task");
-
-    let requests = captured.lock_recover().clone();
-    assert_eq!(requests.len(), 1);
-    assert!(
-        requests[0].starts_with("POST /LashProcessWorkflow/handed-over-once%231/run/send "),
-        "segment-1 recovery addresses the segment-1 workflow key: {}",
-        requests[0]
-    );
-    assert!(
-        !requests[0].starts_with("POST /LashProcessWorkflow/handed-over-once/run/send "),
-        "keying by the bare id would rerun the process from segment 0: {}",
-        requests[0]
-    );
-    assert!(
-        requests[0].contains("\"segment_ordinal\":1"),
-        "the submitted input must carry the ordinal it was keyed for: {}",
-        requests[0]
-    );
-
-    // The reference written for segment 1 names its ordinal, so a later
-    // compare-and-set can tell it apart from a stale segment-0 reference.
-    let record = registry
-        .get_process(&ProcessId::from("handed-over-once"))
-        .await
-        .expect("read process")
-        .expect("get process");
-    let external = record.external_ref.as_ref().expect("external ref recorded");
-    assert_eq!(external.id, "LashProcessWorkflow/handed-over-once#1");
-    assert_eq!(external.segment_ordinal, Some(1));
-}
-
-/// FIG-2964 regression: the sweep's skip is keyed on the recorded reference's
-/// *ordinal*, not on a reference merely existing.
-///
-/// Both rows below come from the same live boundary. The first has handed over
-/// to segment 1 while its reference still names segment 0 — a crashed successor
-/// Restate owns nothing for, so the sweep must submit it. The second has
-/// completed its handover, so the reference names segment 1 and Restate does own
-/// it: the sweep defers. Skipping on `external_ref.is_some()` would pass the
-/// second and strand the first forever, and after this PR *every* handed-over
-/// row carries a reference, so that skip would strand all of them.
-#[tokio::test]
-pub(super) async fn ingress_sweep_resubmits_a_stale_reference_and_defers_the_current_one() {
-    let (registry, continuations, boundary) =
-        super::restate_redrive::drive_to_live_segment_boundary("ordinal-aware-skip").await;
-
-    // Stale reference (segment 0) against a segment-1 handover: submit it.
-    let (base_url, captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
-        status: "202 Accepted",
-        body: r#"{"invocationId":"inv_ordinal_aware_1","status":"Accepted"}"#,
-    }])
-    .await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuations.clone());
-    let stale = runner
-        .admit_pending_processes("test")
-        .await
-        .expect("drive pending");
-    server.await.expect("mock ingress server task");
-    let requests = captured.lock_recover().clone();
-    assert_eq!(
-        requests.len(),
-        1,
-        "a reference one segment behind the handover must be resubmitted: {requests:?}"
-    );
-    assert!(
-        requests[0].starts_with("POST /LashProcessWorkflow/ordinal-aware-skip%231/run/send "),
-        "the resubmission addresses the latest segment, not the recorded one: {}",
-        requests[0]
-    );
-    assert_eq!(
-        stale.admitted,
-        vec!["ordinal-aware-skip".to_string()],
-        "the stale-reference row is admitted, not deferred"
-    );
-
-    // Now let the live handover complete, so the reference names segment 1.
-    boundary.complete_handover("ordinal-aware-skip").await;
-    let (base_url, captured, server) = spawn_restate_http_capture(vec![]).await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuations.clone());
-    let current = runner
-        .admit_pending_processes("test")
-        .await
-        .expect("drive pending");
-    server.await.expect("mock ingress server task");
-    assert!(
-        captured.lock_recover().is_empty(),
-        "a row whose reference already names the latest segment is not resubmitted"
-    );
-    assert!(current.admitted.is_empty());
-    assert_eq!(
-        current
-            .deferred
-            .iter()
-            .map(|entry| (entry.process_id.to_string(), entry.disposition.clone()))
-            .collect::<Vec<_>>(),
-        vec![(
-            "ordinal-aware-skip".to_string(),
-            ProcessRecoveryAttemptOutcome::Busy
-        )],
-        "the skip is a typed deferral, not a silent drop"
     );
 }
 

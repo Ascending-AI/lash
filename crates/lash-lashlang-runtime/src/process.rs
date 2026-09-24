@@ -267,21 +267,42 @@ pub fn lashlang_program_hash(input: &LashlangProcessInput) -> String {
     )
 }
 
-fn validate_lashlang_program_hash(
+/// The identity fence: a segment parked by another program identity — another
+/// bytecode generation, or another module — is refused with the shared resume
+/// refusal naming the identity it recorded.
+fn refuse_foreign_program(
     persisted: &str,
     current: &str,
-) -> Result<(), Box<lash_core::ProcessAwaitOutput>> {
-    if persisted != current {
-        return Err(Box::new(process_lashlang_failure(
-            LashlangProcessFailureCode::RestateSegmentProgramHashMismatch,
-            format!(
-                "lashlang bytecode v{} segment program identity mismatch: persisted {persisted}, current {current}",
-                lashlang::BYTECODE_FORMAT_VERSION
-            ),
-            None,
-        )));
+    owner: Option<lash_core::LeaseOwnerIdentity>,
+) -> Option<lash_core::ProcessAwaitOutput> {
+    (persisted != current).then(|| {
+        tracing::warn!(
+            persisted,
+            current,
+            bytecode = lashlang::BYTECODE_FORMAT_VERSION,
+            "lashlang segment was parked by another program identity; refusing to resume"
+        );
+        retired_generation(persisted.to_string(), owner)
+    })
+}
+
+/// The shared resume refusal for a run whose stored generation this build
+/// retired: the process ends Abandoned with `ResumeRefused {
+/// RetiredGeneration }` naming the identity it found, before any effect.
+fn retired_generation(
+    found: String,
+    owner: Option<lash_core::LeaseOwnerIdentity>,
+) -> lash_core::ProcessAwaitOutput {
+    lash_core::ProcessAwaitOutput::Abandoned {
+        evidence: Box::new(lash_core::AbandonEvidence {
+            writer: lash_core::AbandonWriter::ResumeRefused {
+                reason: lash_core::ProcessResumeRefusal::RetiredGeneration { found },
+            },
+            owner,
+            epoch_ms: lash_core::facade_support::current_epoch_ms(),
+        }),
+        control: None,
     }
-    Ok(())
 }
 
 pub(crate) fn validate_lashlang_process_for_run(
@@ -309,9 +330,6 @@ pub async fn run_lashlang_process(
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::ProcessInfraError> {
     let handover = context.take_handover();
     let is_initial_segment = handover.is_none();
-    let persisted_program_hash = handover
-        .as_ref()
-        .map(|handover| handover.program_hash.clone());
     let segment_controller = context.scoped_effect_controller();
     let phase_probe = context.turn_phase_probe();
     let input = match LashlangProcessInput::from_payload(payload) {
@@ -324,6 +342,53 @@ pub async fn run_lashlang_process(
             )
             .into());
         }
+    };
+    // The generation fence, before anything else of the run: a parked segment
+    // written by another program identity or another segment-state generation
+    // ends the process with the shared resume refusal, naming what it found,
+    // exactly as a retired module artifact does below (FIG-3571, FIG-3588).
+    let resume_owner = context
+        .execution_context()
+        .execution_write_authority
+        .as_ref()
+        .and_then(|authority| match authority {
+            lash_core::ProcessExecutionWriteAuthority::Lease { lease, .. } => {
+                Some(lease.owner.clone())
+            }
+            lash_core::ProcessExecutionWriteAuthority::Invocation { .. } => {
+                authority.invocation_started().map(|started| started.owner)
+            }
+        });
+    let current_program_hash = lashlang_program_hash(&input);
+    if let Some(refusal) = handover.as_ref().and_then(|handover| {
+        refuse_foreign_program(
+            &handover.program_hash,
+            &current_program_hash,
+            resume_owner.clone(),
+        )
+    }) {
+        return Ok(refusal.into());
+    }
+    let mut segment_state: Option<LashlangSegmentState> = match handover {
+        Some(handover) => match decode_lashlang_segment_state(&handover.engine_state) {
+            Ok(state) => Some(state),
+            Err(LashlangSegmentStateError::VersionMismatch { found, .. }) => {
+                return Ok(retired_generation(
+                    format!("lashlang-segment-state-v{found}"),
+                    resume_owner,
+                )
+                .into());
+            }
+            Err(err @ LashlangSegmentStateError::FormatMismatch { .. }) => {
+                return Ok(process_lashlang_failure(
+                    LashlangProcessFailureCode::ProcessSegmentHandoverInvalid,
+                    format!("invalid lashlang segment handover: {err}"),
+                    None,
+                )
+                .into());
+            }
+        },
+        None => None,
     };
     let artifact = {
         let _phase = context.named_phase("rlm_process.load_artifact");
@@ -343,19 +408,17 @@ pub async fn run_lashlang_process(
             }
             // Stored bytes this build cannot decode — an artifact published by
             // a retired generation (FIG-3571) or a corrupt blob — fail the same
-            // way on every attempt: a typed terminal before any effect, never a
-            // retried infrastructure fault.
+            // way on every attempt: the shared resume-refusal terminal, before
+            // any effect, never a retried infrastructure fault. It names the
+            // module ref it refused so a drain can find it.
             Err(lashlang::ArtifactStoreError::Decode(message)) => {
-                return Ok(process_lashlang_failure(
-                    LashlangProcessFailureCode::ProcessArtifactGenerationRetired,
-                    format!(
-                        "lashlang module artifact `{}` was written by a retired artifact \
-                         generation and cannot run on this build: {message}",
-                        input.module_ref
-                    ),
-                    None,
-                )
-                .into());
+                tracing::warn!(
+                    module_ref = %input.module_ref,
+                    error = %message,
+                    "lashlang module artifact was written by a retired artifact generation; \
+                     refusing to resume"
+                );
+                return Ok(retired_generation(input.module_ref.to_string(), resume_owner).into());
             }
             Err(err) => {
                 return Err(lash_core::ProcessInfraError::new(
@@ -417,27 +480,6 @@ pub async fn run_lashlang_process(
                 .into());
             }
         }
-    };
-    let current_program_hash = lashlang_program_hash(&input);
-    if let Some(persisted_program_hash) = persisted_program_hash
-        && let Err(output) =
-            validate_lashlang_program_hash(&persisted_program_hash, &current_program_hash)
-    {
-        return Ok((*output).into());
-    }
-    let mut segment_state: Option<LashlangSegmentState> = match handover {
-        Some(handover) => match decode_lashlang_segment_state(&handover.engine_state) {
-            Ok(state) => Some(state),
-            Err(err) => {
-                return Ok(process_lashlang_failure(
-                    LashlangProcessFailureCode::ProcessSegmentHandoverInvalid,
-                    format!("invalid lashlang segment handover: {err}"),
-                    None,
-                )
-                .into());
-            }
-        },
-        None => None,
     };
     // The start record names the grammar this incarnation's journal was
     // written under (FIG-3586); one begun under another grammar — or before

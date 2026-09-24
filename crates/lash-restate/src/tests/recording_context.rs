@@ -558,8 +558,8 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                 )));
             }
             if let Some(endpoint) = endpoint {
-                let complete_runs =
-                    matches!(registration.input.as_ref(), ProcessInput::ToolCall { .. });
+                // Every run completes: the handler's admission steps are
+                // runs (FIG-3588), ahead of whatever the process does.
                 invoke_process_workflow_endpoint(
                     &endpoint,
                     "run",
@@ -568,9 +568,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                         registration,
                         execution_context,
                         segment_ordinal: 0,
-                        execution_id: None,
+                        journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
                     },
-                    complete_runs,
+                    true,
                 )
                 .await
                 .map_err(ProcessWorkflowStartFailure::Rejected)?;
@@ -2163,7 +2163,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
             let process_task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
                 let controller = RestateRuntimeEffectController::new_for_test(process_task_context);
                 let scoped_effect_controller = controller
-                    .scoped_effect_controller(
+                    .process_scope_for_test(
                         recorded_process_admission(
                             worker.config().process_registry().as_ref(),
                             &process_task_id,

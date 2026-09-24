@@ -245,7 +245,7 @@ pub(super) async fn lifecycle_process_fact(
         let obj = fact.as_object_mut().expect("lifecycle fact is an object");
         obj.insert(
             "abandon_writer".to_string(),
-            json!(abandon_writer_str(evidence.writer)),
+            json!(abandon_writer_str(&evidence.writer)),
         );
         obj.insert(
             "abandon_evidence_owner".to_string(),
@@ -263,11 +263,17 @@ fn disposition_str(disposition: RecoveryContract) -> &'static str {
     }
 }
 
-fn abandon_writer_str(writer: lash_core::AbandonWriter) -> &'static str {
+fn abandon_writer_str(writer: &lash_core::AbandonWriter) -> &'static str {
     match writer {
         lash_core::AbandonWriter::OwnerDrain => "owner_drain",
         lash_core::AbandonWriter::Sweep => "sweep",
         lash_core::AbandonWriter::ReconciledRequest => "reconciled_request",
         lash_core::AbandonWriter::EngineGaveUp => "engine_gave_up",
+        lash_core::AbandonWriter::ResumeRefused {
+            reason: lash_core::ProcessResumeRefusal::RetiredGeneration { .. },
+        } => "resume_refused_retired_generation",
+        lash_core::AbandonWriter::ResumeRefused {
+            reason: lash_core::ProcessResumeRefusal::SubstrateLost,
+        } => "resume_refused_substrate_lost",
     }
 }
