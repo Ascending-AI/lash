@@ -24,7 +24,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         self.heap
             .assign_path_reference(&root, path, &indexes, value.clone(), &self.chunk.names)?;
         self.stack.truncate(index_start);
-        self.record_assignment(slot);
         self.last_value = Some(value);
         Ok(())
     }

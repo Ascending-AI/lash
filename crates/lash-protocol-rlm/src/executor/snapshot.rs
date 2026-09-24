@@ -7,6 +7,13 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v23 persists the session's runtime roots and heap instead of their host
+// view (FIG-3605, FIG-3606). The root carries Lashlang's durable heap header
+// and each binding's body is a durable fragment — the binding's value and the
+// heap objects it carries — so a `Map`, `Set`, `Date`, `RegExp`, `URL` or
+// `URLSearchParams`, one object named by two bindings, and an object's
+// property order all survive a reload. A v22 body is a one-binding host-view
+// snapshot that this reader does not decode, so the boundary is a version.
 // v22 nests ToolDefinition's manifest and contract under named fields instead
 // of `serde(flatten)`, so the canonical pre-pass can declare field order
 // through the whole envelope (FIG-1210). A pre-cutover flat definition fails
@@ -47,7 +54,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 22;
+pub const RLM_SNAPSHOT_VERSION: u32 = 23;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

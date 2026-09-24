@@ -1033,7 +1033,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap_initialized: false,
             pending_tools: PendingToolMap::new(),
             execution_nonce: mint_execution_nonce(0),
-            assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         }
@@ -1431,7 +1430,6 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             // no earlier marks to carry across the handover blob.
             pending_tools: continuation.pending_tools,
             execution_nonce: continuation.execution_nonce,
-            assigned_globals: std::collections::BTreeSet::new(),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
         };

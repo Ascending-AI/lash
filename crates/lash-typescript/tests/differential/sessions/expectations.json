@@ -786,44 +786,78 @@
     },
     {
       "id": "exotic-globals",
-      "about": "Map and Set bindings stay live across cells",
+      "about": "every exotic built-in bound at the top level stays live, and mutable, in later cells",
       "probe": [
         "seen",
-        "tags"
+        "tags",
+        "when",
+        "pattern",
+        "site",
+        "query",
+        "first"
       ],
       "deviations": [],
       "cells": [
         {
-          "source": "const seen = new Map([[\"a\", 1]]);\nconst tags = new Set([\"x\"]);\n",
+          "source": "const seen = new Map([[\"a\", 1]]);\nconst tags = new Set([\"x\"]);\nconst when = new Date(Date.UTC(2020, 0, 2, 3, 4, 5));\nconst pattern = /a(b+)/g;\nconst site = new URL(\"https://example.com/a?x=1\");\nconst query = new URLSearchParams(\"a=1&b=2\");\n",
           "reject": null,
           "deviation": null,
-          "defect": "exotic-session-globals",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [],
             "probes": {
               "seen": "object {}",
-              "tags": "object {}"
+              "tags": "object {}",
+              "when": "object \"2020-01-02T03:04:05.000Z\"",
+              "pattern": "object {}",
+              "site": "object \"https://example.com/a?x=1\"",
+              "query": "object {}",
+              "first": "unbound"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "normal",
-              "prints": [],
-              "probes": {
-                "seen": "unbound",
-                "tags": "unbound"
-              }
+          }
+        },
+        {
+          "source": "seen.set(\"b\", 2);\ntags.add(\"y\");\nconst first = pattern.exec(\"abbxab\");\nsite.searchParams.append(\"y\", \"2\");\nquery.set(\"a\", \"3\");\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [],
+            "probes": {
+              "seen": "object {}",
+              "tags": "object {}",
+              "when": "object \"2020-01-02T03:04:05.000Z\"",
+              "pattern": "object {}",
+              "site": "object \"https://example.com/a?x=1&y=2\"",
+              "query": "object {}",
+              "first": "object [\"abb\",\"bb\"]"
             },
-            "restart": {
-              "outcome": "normal",
-              "prints": [],
-              "probes": {
-                "seen": "unbound",
-                "tags": "unbound"
-              }
-            }
+            "closures": []
+          }
+        },
+        {
+          "source": "console.log(seen.size, seen.get(\"b\"), tags.has(\"y\"), when.toISOString(), pattern.lastIndex, first[1], first.index, site.href, query.toString());\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "2 2 true 2020-01-02T03:04:05.000Z 3 bb 0 https://example.com/a?x=1&y=2 a=3&b=2"
+            ],
+            "probes": {
+              "seen": "object {}",
+              "tags": "object {}",
+              "when": "object \"2020-01-02T03:04:05.000Z\"",
+              "pattern": "object {}",
+              "site": "object \"https://example.com/a?x=1&y=2\"",
+              "query": "object {}",
+              "first": "object [\"abb\",\"bb\"]"
+            },
+            "closures": []
           }
         }
       ]
@@ -997,7 +1031,7 @@
                 "object"
               ],
               "probes": {
-                "worker": "object {\"$lash_process\":true,\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_name\":\"__process_<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0}}"
+                "worker": "object {\"$lash_process\":true,\"process_name\":\"__process_<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0},\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\"}"
               }
             }
           }
@@ -1354,7 +1388,7 @@
           "source": "const ordered = { zeta: 1, alpha: 2, mid: 3 };\nconst nested = { b: { y: 1, x: 2 }, a: [{ q: 1, p: 2 }] };\n",
           "reject": null,
           "deviation": null,
-          "defect": "durable-key-order",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [],
@@ -1363,16 +1397,23 @@
               "nested": "object {\"b\":{\"y\":1,\"x\":2},\"a\":[{\"q\":1,\"p\":2}]}"
             },
             "closures": []
-          },
-          "lash": {
-            "restart": {
-              "outcome": "normal",
-              "prints": [],
-              "probes": {
-                "nested": "object {\"a\":[{\"p\":2,\"q\":1}],\"b\":{\"x\":2,\"y\":1}}",
-                "ordered": "object {\"alpha\":2,\"mid\":3,\"zeta\":1}"
-              }
-            }
+          }
+        },
+        {
+          "source": "ordered.beta = 4;\nconsole.log(Object.keys(ordered), JSON.stringify(nested));\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[\"zeta\",\"alpha\",\"mid\",\"beta\"] {\"b\":{\"y\":1,\"x\":2},\"a\":[{\"q\":1,\"p\":2}]}"
+            ],
+            "probes": {
+              "ordered": "object {\"zeta\":1,\"alpha\":2,\"mid\":3,\"beta\":4}",
+              "nested": "object {\"b\":{\"y\":1,\"x\":2},\"a\":[{\"q\":1,\"p\":2}]}"
+            },
+            "closures": []
           }
         }
       ]

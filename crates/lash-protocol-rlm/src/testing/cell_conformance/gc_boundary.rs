@@ -69,6 +69,37 @@ fn a_rooted_structure_survives_the_boundary_collection() {
     );
 }
 
+/// How far a constant-data session's persisted state may move once it settles.
+///
+/// The durable form carries the heap's identity — object ids and the
+/// allocation counter (FIG-3605) — and identity is never reused, so those
+/// integers only grow, and their MessagePack encodings widen a byte or two at
+/// each width boundary. That is the only movement a constant-data session may
+/// show. Anything the heap or the encoder kept that it should have dropped
+/// grows with every cell instead, and even one small object per cell exceeds
+/// this over the cells these laws sample.
+const IDENTITY_WIDTH_SLACK: usize = 16;
+
+/// Whether `sizes` holds still, up to the identity integers widening.
+fn settled_up_to_identity_width(sizes: &[usize]) -> bool {
+    sizes.windows(2).all(|pair| pair[0] <= pair[1])
+        && sizes
+            .last()
+            .zip(sizes.first())
+            .is_some_and(|(last, first)| last - first <= IDENTITY_WIDTH_SLACK)
+}
+
+/// The allowance admits the identity integers widening and nothing that grows
+/// with the cell count: even two bytes retained per cell over the sampled
+/// cells is refused, as is any shrinking the widening cannot explain.
+#[test]
+fn the_identity_width_allowance_still_refuses_a_per_cell_leak() {
+    assert!(settled_up_to_identity_width(&[826, 826, 830, 830, 830]));
+    let leaking = (0..27).map(|cell| 826 + 2 * cell).collect::<Vec<_>>();
+    assert!(!settled_up_to_identity_width(&leaking));
+    assert!(!settled_up_to_identity_width(&[830, 826, 826]));
+}
+
 /// A long session of garbage-producing cells does not grow what it persists.
 ///
 /// The cells rebind the same names every time, so the session's live data is
@@ -95,9 +126,8 @@ fn many_garbage_producing_cells_do_not_grow_the_persisted_state(mode: HarnessMod
         sizes.push(session.persisted_bytes());
     }
 
-    let settled = sizes[WARMUP];
     assert!(
-        sizes[WARMUP..].iter().all(|size| *size == settled),
+        settled_up_to_identity_width(&sizes[WARMUP..]),
         "the persisted state of a constant-data session must not move after it settles: {sizes:?}"
     );
 }
@@ -125,9 +155,8 @@ fn alternating_low_and_high_temporary_cells_do_not_grow_the_persisted_state() {
         high_sizes.push(session.persisted_bytes());
     }
 
-    let settled = high_sizes[WARMUP];
     assert!(
-        high_sizes[WARMUP..].iter().all(|size| *size == settled),
+        settled_up_to_identity_width(&high_sizes[WARMUP..]),
         "alternating low/high temporary cells grew persisted state: {high_sizes:?}"
     );
 }

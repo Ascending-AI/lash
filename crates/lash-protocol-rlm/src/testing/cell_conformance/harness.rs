@@ -74,6 +74,9 @@ pub(crate) struct Session {
     backend: lash_sqlite_store::SqliteBackend,
     /// Cells run so far, so a failure names the sequence that produced it.
     history: Vec<String>,
+    /// The leaf bodies a host has been handed, by component key: what a
+    /// rehydrating worker reads an unchanged leaf back from.
+    stored_leaves: BTreeMap<String, Arc<[u8]>>,
 }
 
 impl Session {
@@ -84,6 +87,7 @@ impl Session {
             backend: block_on(lash_sqlite_store::SqliteBackend::memory())
                 .expect("open a memory backend"),
             history: Vec::new(),
+            stored_leaves: BTreeMap::new(),
         }
     }
 
@@ -153,12 +157,6 @@ impl Session {
         outcome.failure().to_string()
     }
 
-    /// Snapshots the session and restores it into a fresh engine, discarding
-    /// everything a live process was holding.
-    ///
-    /// This is the harness's whole model of a restart, and it is the
-    /// production path: the same capture the runtime persists, hydrated back
-    /// through the same restore a rehydrating worker uses.
     /// The next cell's context: the session's backend under an invocation
     /// of its own, numbered by the cells run so far. The number is fixed
     /// width, so the persisted state the size laws measure never moves with
@@ -178,11 +176,40 @@ impl Session {
         )
     }
 
+    /// Snapshots the session and restores it into a fresh engine, discarding
+    /// everything a live process was holding.
+    ///
+    /// This is the harness's whole model of a restart, and it is the
+    /// production path: the same incremental capture the runtime commits after
+    /// a turn — a changed leaf's body, an unchanged leaf by reference to what
+    /// the host already holds — hydrated back through the same restore a
+    /// rehydrating worker uses. A capture that forgot a change would restore
+    /// the stale leaf here exactly as it would in production.
     pub(crate) fn restart(&mut self) {
-        let hydrated = self
+        let snapshot = self
             .state
-            .hydrated_execution_state()
+            .snapshot_execution_state()
             .expect("capture the RLM execution state");
+        self.state.acknowledge_execution_state_capture();
+        let mut components = BTreeMap::new();
+        for (key, component) in snapshot.components {
+            let body = match component {
+                lash_core::plugin::ExecutionStateComponentSnapshot::Changed(body) => {
+                    self.stored_leaves.insert(key.clone(), Arc::clone(&body));
+                    body
+                }
+                lash_core::plugin::ExecutionStateComponentSnapshot::Unchanged => {
+                    self.stored_leaves.get(&key).cloned().unwrap_or_else(|| {
+                        panic!("an unchanged leaf `{key}` the host never stored")
+                    })
+                }
+            };
+            components.insert(key, body);
+        }
+        let hydrated = lash_core::plugin::HydratedExecutionState {
+            root: snapshot.root.expect("a capture carries its root"),
+            components,
+        };
         let mut restored = RlmExecutionState::for_engine(LANGUAGE_ID);
         restored
             .restore_execution_state(&hydrated)
@@ -211,9 +238,9 @@ impl Session {
     /// The names the next cell links against: the session's live globals.
     pub(crate) fn global_names(&self) -> std::collections::BTreeSet<String> {
         self.state
-            .bound_variable_values(&std::collections::BTreeSet::new())
-            .into_iter()
-            .map(|(name, _)| name)
+            .binding_names()
+            .filter(|name| *name != "history")
+            .map(str::to_string)
             .collect()
     }
 

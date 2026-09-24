@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use lash_core::SessionError;
 use lashlang::{
-    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment, ExecutionScratch,
-    SnapshotDecodeError, State as FlowState, Value as FlowValue,
+    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment, DurableBaseline,
+    DurableFragment, ExecutionScratch, SnapshotDecodeError, State as FlowState, Value as FlowValue,
     validate_canonical_messagepack_structure,
 };
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,11 @@ use super::snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
 pub(super) struct RlmSnapshotRoot {
     version: u32,
     engine: String,
+    /// The Lashlang durable header: its format version and heap counters.
+    #[serde(with = "serde_bytes")]
+    state_header: Vec<u8>,
+    /// One Lashlang durable fragment per binding: the binding's value and the
+    /// heap objects it carries (`lashlang::DurableParts`).
     globals: BTreeMap<String, PersistedValue>,
     deferred_resolutions: lash_lashlang_runtime::DeferredResolutionRecord,
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
@@ -381,29 +386,6 @@ fn root_map_required(path: &[CanonicalPathSegment]) -> bool {
     )
 }
 
-fn snapshot_runtime_value(value: &FlowValue) -> Result<Vec<u8>, lashlang::ContinuationError> {
-    let snapshot =
-        lashlang::Snapshot::new([("value".to_string(), value.clone())].into_iter().collect());
-    snapshot.to_canonical_bytes()
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the exactly-one-canonical-`value`-globals guard above fires first, so remove(\"value\") is always Some"
-)]
-fn restore_runtime_value(data: &[u8]) -> Result<FlowValue, RlmSnapshotError> {
-    let snapshot = lashlang::Snapshot::from_canonical_bytes(data)?;
-    if snapshot.globals().len() != 1 || snapshot.globals().get("value").is_none() {
-        return Err(RlmSnapshotError::FormatMismatch {
-            details: "value body must contain exactly the canonical `value` binding".to_string(),
-        });
-    }
-    Ok(snapshot
-        .into_globals()
-        .remove("value")
-        .expect("the canonical value binding was checked"))
-}
-
 fn body_prefers_leaf(encoded_len: usize) -> bool {
     // One source of truth, owned by the crate both sides of the checkpoint
     // contract depend on. Deliberately not a store blob-compression profile:
@@ -517,8 +499,8 @@ fn leaf_keys_for_values(values: &BTreeMap<String, PersistedValue>) -> BTreeSet<S
 /// Which state a capture is relative to.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CaptureMode {
-    /// A checkpoint delta: re-encode assigned bindings and reference every
-    /// other leaf the receiver already holds.
+    /// A checkpoint delta: re-encode the bindings whose fragments changed and
+    /// reference every other leaf the receiver already holds.
     Incremental,
     /// Every binding, with every leaf body present. Relative to nothing, so it
     /// neither reads nor advances capture bookkeeping.
@@ -529,6 +511,7 @@ enum CaptureMode {
 struct PreparedCapture {
     snapshot: lash_core::plugin::ExecutionStateSnapshot,
     persisted_globals: BTreeMap<String, PersistedValue>,
+    persisted_baseline: DurableBaseline,
     leaf_keys: BTreeSet<String>,
     #[cfg(test)]
     encoded_globals: usize,
@@ -537,8 +520,8 @@ struct PreparedCapture {
 #[derive(Clone)]
 struct CaptureRollback {
     persisted_globals: BTreeMap<String, PersistedValue>,
+    persisted_baseline: DurableBaseline,
     persisted_leaf_keys: BTreeSet<String>,
-    dirty_globals: BTreeSet<String>,
 }
 
 /// The live state and capture bookkeeping that one foreground cell may mutate.
@@ -552,9 +535,9 @@ pub(super) struct RlmExecutionCheckpoint {
     deferred_trigger_resolutions: lash_lashlang_runtime::DeferredTriggerResolutionRecord,
     child_max_attempts: Option<std::num::NonZeroU32>,
     persisted_globals: BTreeMap<String, PersistedValue>,
+    persisted_baseline: DurableBaseline,
     persisted_leaf_keys: BTreeSet<String>,
-    dirty_globals: BTreeSet<String>,
-    root_dirty: bool,
+    capture_dirty: bool,
     capture_rollback: Option<CaptureRollback>,
     pending_snapshot: Option<lash_core::plugin::ExecutionStateSnapshot>,
     #[cfg(test)]
@@ -582,10 +565,16 @@ pub struct RlmExecutionState {
     /// already-registered child re-registers with the bound on its registry
     /// row, which is what keeps a redrive's fingerprint stable.
     child_max_attempts: Option<std::num::NonZeroU32>,
+    /// The body each binding's fragment was last captured as, and the
+    /// baseline those bodies stand for. The two move together: a capture
+    /// installs both, and a rollback or checkpoint restore rewinds both.
     persisted_globals: BTreeMap<String, PersistedValue>,
+    persisted_baseline: DurableBaseline,
     persisted_leaf_keys: BTreeSet<String>,
-    dirty_globals: BTreeSet<String>,
-    root_dirty: bool,
+    /// Whether anything may have changed since the last installed capture: a
+    /// cell ran, a patch or prune committed, the root's own records moved.
+    /// Which fragments changed is the durable diff's question, not this flag's.
+    capture_dirty: bool,
     capture_rollback: Option<CaptureRollback>,
     pending_snapshot: Option<lash_core::plugin::ExecutionStateSnapshot>,
     active_execution_checkpoint: Option<RlmExecutionCheckpoint>,
@@ -612,9 +601,9 @@ impl RlmExecutionState {
                 lash_lashlang_runtime::DeferredTriggerResolutionRecord::default(),
             child_max_attempts: None,
             persisted_globals: BTreeMap::new(),
+            persisted_baseline: DurableBaseline::default(),
             persisted_leaf_keys: BTreeSet::new(),
-            dirty_globals: BTreeSet::new(),
-            root_dirty: true,
+            capture_dirty: true,
             capture_rollback: None,
             pending_snapshot: None,
             active_execution_checkpoint: None,
@@ -641,12 +630,12 @@ impl RlmExecutionState {
         }
         if let Some(pinned) = pinned {
             self.child_max_attempts = Some(pinned);
-            self.root_dirty = true;
+            self.capture_dirty = true;
         }
     }
 
     pub fn execution_state_dirty(&self) -> bool {
-        self.pending_snapshot.is_some() || self.root_dirty || !self.dirty_globals.is_empty()
+        self.pending_snapshot.is_some() || self.capture_dirty
     }
 
     pub(super) fn mark_execution_started(&mut self) {
@@ -655,13 +644,7 @@ impl RlmExecutionState {
             "a returned code execution must be settled before another cell starts"
         );
         self.accept_code_execution();
-        self.dirty_globals
-            .append(&mut self.scratch.take_assigned_globals());
-        if self.persisted_globals.is_empty() && self.root_dirty {
-            self.dirty_globals
-                .extend(self.rlm.globals().iter().map(|(name, _)| name.to_string()));
-        }
-        self.root_dirty = true;
+        self.capture_dirty = true;
     }
 
     pub(super) fn execution_checkpoint(&self) -> RlmExecutionCheckpoint {
@@ -671,9 +654,9 @@ impl RlmExecutionState {
             deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
             child_max_attempts: self.child_max_attempts,
             persisted_globals: self.persisted_globals.clone(),
+            persisted_baseline: self.persisted_baseline.clone(),
             persisted_leaf_keys: self.persisted_leaf_keys.clone(),
-            dirty_globals: self.dirty_globals.clone(),
-            root_dirty: self.root_dirty,
+            capture_dirty: self.capture_dirty,
             capture_rollback: self.capture_rollback.clone(),
             pending_snapshot: self.pending_snapshot.clone(),
             #[cfg(test)]
@@ -687,9 +670,9 @@ impl RlmExecutionState {
         self.deferred_trigger_resolutions = checkpoint.deferred_trigger_resolutions;
         self.child_max_attempts = checkpoint.child_max_attempts;
         self.persisted_globals = checkpoint.persisted_globals;
+        self.persisted_baseline = checkpoint.persisted_baseline;
         self.persisted_leaf_keys = checkpoint.persisted_leaf_keys;
-        self.dirty_globals = checkpoint.dirty_globals;
-        self.root_dirty = checkpoint.root_dirty;
+        self.capture_dirty = checkpoint.capture_dirty;
         self.capture_rollback = checkpoint.capture_rollback;
         self.pending_snapshot = checkpoint.pending_snapshot;
         #[cfg(test)]
@@ -740,9 +723,7 @@ impl RlmExecutionState {
     pub fn snapshot_execution_state(
         &mut self,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.absorb_pending_assignments();
-        if !self.root_dirty
-            && self.dirty_globals.is_empty()
+        if !self.capture_dirty
             && let Some(snapshot) = &self.pending_snapshot
         {
             return Ok(snapshot.clone());
@@ -755,15 +736,10 @@ impl RlmExecutionState {
     /// now can succeed, without staging it.
     ///
     /// The whole fallible part of a capture is building it — canonical encoding
-    /// of every assigned binding — so this proves capturability by building the
-    /// same capture and dropping it.
-    /// It advances no capture bookkeeping: the dirty set only absorbs the
-    /// assignments the last execution recorded, which is what keeps them from
-    /// being lost, and everything else stays exactly as the eventual capture
-    /// will find it.
+    /// of every changed fragment — so this proves capturability by building the
+    /// same capture and dropping it. It advances no capture bookkeeping.
     pub fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.absorb_pending_assignments();
-        if !self.root_dirty && self.dirty_globals.is_empty() && self.pending_snapshot.is_some() {
+        if !self.capture_dirty && self.pending_snapshot.is_some() {
             return Ok(());
         }
         self.build_capture(CaptureMode::Incremental).map(|_| ())
@@ -799,37 +775,21 @@ impl RlmExecutionState {
         })
     }
 
-    /// Fold the assignments the last execution recorded into the dirty set. On
-    /// a session's first capture nothing is persisted yet, so every live global
-    /// is dirty.
-    fn absorb_pending_assignments(&mut self) {
-        self.dirty_globals
-            .append(&mut self.scratch.take_assigned_globals());
-        if self.persisted_globals.is_empty() && self.root_dirty {
-            self.dirty_globals
-                .extend(self.rlm.globals().iter().map(|(name, _)| name.to_string()));
-        }
-    }
-
-    #[cfg(feature = "testing")]
-    pub(super) fn absorb_pending_assignments_for_perf(&mut self) {
-        self.absorb_pending_assignments();
-    }
-
     fn build_capture(&self, mode: CaptureMode) -> Result<PreparedCapture, SessionError> {
         let complete = mode == CaptureMode::Complete;
-        let current_globals = self.rlm.globals();
-        let all_global_names = || {
-            current_globals
-                .iter()
-                .map(|(name, _)| name.to_string())
-                .collect::<BTreeSet<_>>()
-        };
-        let dirty_globals = if complete {
-            std::borrow::Cow::Owned(all_global_names())
-        } else {
-            std::borrow::Cow::Borrowed(&self.dirty_globals)
-        };
+        let complete_baseline = DurableBaseline::default();
+        let parts = self
+            .rlm
+            .durable_parts(if complete {
+                &complete_baseline
+            } else {
+                &self.persisted_baseline
+            })
+            .map_err(|error| {
+                SessionError::Protocol(format!(
+                    "failed to snapshot RLM execution state as canonical state: {error}"
+                ))
+            })?;
         // Leaves the receiver of this capture already holds. A staged but
         // uncommitted capture supersedes the durable set, so a leaf it evicted
         // must be resent even though it is still durable.
@@ -840,11 +800,6 @@ impl RlmExecutionState {
                 .as_ref()
                 .map(|snapshot| snapshot.components.keys().cloned().collect())
                 .unwrap_or_else(|| self.persisted_leaf_keys.clone())
-        };
-        let mut next_globals = if complete {
-            BTreeMap::new()
-        } else {
-            self.persisted_globals.clone()
         };
         let mut changed_leaves = if complete {
             BTreeMap::new()
@@ -863,27 +818,31 @@ impl RlmExecutionState {
         };
         #[cfg(test)]
         let mut encoded_globals = 0;
-        for name in dirty_globals.iter() {
-            let Some(value) = current_globals.get(name) else {
-                next_globals.remove(name);
-                continue;
+        let mut next_globals = BTreeMap::new();
+        for (name, fragment) in parts.fragments {
+            let persisted = match fragment {
+                DurableFragment::Changed(body) => {
+                    #[cfg(test)]
+                    {
+                        encoded_globals += 1;
+                    }
+                    persist_value_body(body, &prior_leaf_keys, &mut changed_leaves)
+                }
+                DurableFragment::Unchanged => {
+                    self.persisted_globals.get(&name).cloned().ok_or_else(|| {
+                        SessionError::Protocol(format!(
+                            "RLM global `{name}` is unchanged since a capture that recorded no body for it"
+                        ))
+                    })?
+                }
             };
-            let body = snapshot_runtime_value(value).map_err(|error| {
-                SessionError::Protocol(format!(
-                    "failed to snapshot RLM global `{name}` as canonical state: {error}"
-                ))
-            })?;
-            #[cfg(test)]
-            {
-                encoded_globals += 1;
-            }
-            let persisted = persist_value_body(body, &prior_leaf_keys, &mut changed_leaves);
-            next_globals.insert(name.clone(), persisted);
+            next_globals.insert(name, persisted);
         }
 
         let root = RlmSnapshotRoot {
             version: RLM_SNAPSHOT_VERSION,
             engine: self.engine_id.to_string(),
+            state_header: parts.header,
             globals: next_globals.clone(),
             deferred_resolutions: self.deferred_resolutions.clone(),
             deferred_trigger_resolutions: self.deferred_trigger_resolutions.clone(),
@@ -909,6 +868,7 @@ impl RlmExecutionState {
         Ok(PreparedCapture {
             snapshot,
             persisted_globals: next_globals,
+            persisted_baseline: parts.baseline,
             leaf_keys,
             #[cfg(test)]
             encoded_globals,
@@ -925,25 +885,20 @@ impl RlmExecutionState {
         let PreparedCapture {
             snapshot,
             persisted_globals,
+            persisted_baseline,
             leaf_keys,
             #[cfg(test)]
             encoded_globals,
         } = prepared;
+        let rollback = CaptureRollback {
+            persisted_globals: std::mem::replace(&mut self.persisted_globals, persisted_globals),
+            persisted_baseline: std::mem::replace(&mut self.persisted_baseline, persisted_baseline),
+            persisted_leaf_keys: std::mem::replace(&mut self.persisted_leaf_keys, leaf_keys),
+        };
         if self.capture_rollback.is_none() {
-            self.capture_rollback = Some(CaptureRollback {
-                persisted_globals: std::mem::replace(
-                    &mut self.persisted_globals,
-                    persisted_globals,
-                ),
-                persisted_leaf_keys: std::mem::replace(&mut self.persisted_leaf_keys, leaf_keys),
-                dirty_globals: std::mem::take(&mut self.dirty_globals),
-            });
-        } else {
-            self.persisted_globals = persisted_globals;
-            self.persisted_leaf_keys = leaf_keys;
-            self.dirty_globals.clear();
+            self.capture_rollback = Some(rollback);
         }
-        self.root_dirty = false;
+        self.capture_dirty = false;
         #[cfg(test)]
         {
             self.encoded_globals_in_last_snapshot = encoded_globals;
@@ -961,18 +916,12 @@ impl RlmExecutionState {
         let Some(rollback) = self.capture_rollback.take() else {
             return;
         };
-        let prior_global_names = rollback
-            .persisted_globals
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
+        // The durable set is the rollback's: its bodies and the baseline they
+        // stand for, so the next capture diffs against what the store holds.
         self.persisted_globals = rollback.persisted_globals;
+        self.persisted_baseline = rollback.persisted_baseline;
         self.persisted_leaf_keys = rollback.persisted_leaf_keys;
-        self.dirty_globals = rollback.dirty_globals;
-        self.dirty_globals.extend(prior_global_names);
-        self.dirty_globals
-            .extend(self.rlm.globals().iter().map(|(name, _)| name.to_string()));
-        self.root_dirty = true;
+        self.capture_dirty = true;
         self.pending_snapshot = None;
     }
 
@@ -1027,33 +976,31 @@ impl RlmExecutionState {
             });
         }
 
-        let mut globals = lashlang::Record::new();
+        let mut fragments = Vec::with_capacity(parsed.globals.len());
         for (name, persisted) in &parsed.globals {
             let body = match persisted {
                 PersistedValue::Inline { body } => body.as_slice(),
                 PersistedValue::Leaf { component } => resolve_leaf(state, name, component)?,
             };
-            globals.insert(name.clone(), restore_runtime_value(body)?);
+            fragments.push((name.as_str(), body));
         }
-        let mut next_rlm = FlowState::from_snapshot(lashlang::Snapshot::new(globals));
+        let (mut next_rlm, baseline) =
+            FlowState::from_durable_parts(&parsed.state_header, fragments)?;
         prune_reserved_projected_bindings(&mut next_rlm);
 
         let next_live_names = next_rlm
-            .globals()
-            .iter()
-            .map(|(name, _)| name.to_string())
+            .binding_names()
+            .map(str::to_string)
             .collect::<BTreeSet<_>>();
         let pruned_reserved = parsed.globals.len() != next_live_names.len();
-        let mut next_globals = parsed.globals;
-        next_globals.retain(|name, _| next_live_names.contains(name));
         self.rlm = next_rlm;
         self.deferred_resolutions = parsed.deferred_resolutions;
         self.deferred_trigger_resolutions = parsed.deferred_trigger_resolutions;
         self.child_max_attempts = parsed.child_max_attempts;
-        self.persisted_globals = next_globals;
+        self.persisted_globals = parsed.globals;
+        self.persisted_baseline = baseline;
         self.persisted_leaf_keys = leaf_keys_for_values(&self.persisted_globals);
-        self.root_dirty = pruned_reserved;
-        self.dirty_globals.clear();
+        self.capture_dirty = pruned_reserved;
         self.capture_rollback = None;
         self.pending_snapshot = None;
         self.active_execution_checkpoint = None;
@@ -1062,31 +1009,10 @@ impl RlmExecutionState {
     }
 
     pub fn prune_protected_globals(&mut self, protected_names: &BTreeSet<String>) {
-        let before = self
-            .rlm
-            .globals()
-            .iter()
-            .map(|(name, _)| name.to_string())
-            .collect::<BTreeSet<_>>();
+        let before = self.rlm.binding_names().count();
         prune_protected_bindings(&mut self.rlm, protected_names);
-        for removed in before.difference(
-            &self
-                .rlm
-                .globals()
-                .iter()
-                .map(|(name, _)| name.to_string())
-                .collect(),
-        ) {
-            self.dirty_globals.insert(removed.clone());
-        }
-    }
-
-    pub(super) fn mark_globals_removed<'a>(&mut self, names: impl IntoIterator<Item = &'a str>) {
-        for name in names {
-            if self.rlm.globals().get(name).is_some() {
-                self.dirty_globals.insert(name.to_string());
-                self.root_dirty = true;
-            }
+        if self.rlm.binding_names().count() != before {
+            self.capture_dirty = true;
         }
     }
 
@@ -1103,12 +1029,18 @@ impl RlmExecutionState {
         // reconstructed afterwards. A rejected patch leaves both untouched.
         let inserted = apply_global_defaults(&mut self.rlm, patch, protected_names)
             .map_err(SessionError::Protocol)?;
-        if inserted.is_empty() {
-            return Ok(());
+        if !inserted.is_empty() {
+            self.capture_dirty = true;
         }
-        self.dirty_globals.extend(inserted);
-        self.root_dirty = true;
         Ok(())
+    }
+
+    /// Every binding the session holds, read from the runtime roots that own
+    /// them rather than the host view, which omits a binding with no host
+    /// shape (ADR 0076).
+    #[cfg(test)]
+    pub(crate) fn binding_names(&self) -> impl Iterator<Item = &str> {
+        self.rlm.binding_names()
     }
 
     /// The live top-level variable namespace as JSON for the "Bound Variables"

@@ -118,7 +118,10 @@ pub use state::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
     validate_canonical_messagepack_structure,
 };
-pub use state::{GlobalPatch, GlobalPatchOutcome, Snapshot, SnapshotDecodeError, State};
+pub use state::{
+    DurableBaseline, DurableFragment, DurableParts, GlobalPatch, GlobalPatchOutcome, Snapshot,
+    SnapshotDecodeError, State,
+};
 pub use value::{
     ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY,
     LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
@@ -140,19 +143,11 @@ pub struct ExecutionScratch {
     stack: Vec<Value>,
     iter_stack: Vec<IterState>,
     slot_values: Vec<Option<Value>>,
-    assigned_globals: std::collections::BTreeSet<String>,
 }
 
 impl ExecutionScratch {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// The VM records assignment roots while it executes, including nested
-    /// path assignments. Callers use this to persist only values that may have
-    /// changed without comparing or re-encoding the complete global map.
-    pub fn take_assigned_globals(&mut self) -> std::collections::BTreeSet<String> {
-        std::mem::take(&mut self.assigned_globals)
     }
 }
 

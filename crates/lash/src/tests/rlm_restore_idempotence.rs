@@ -145,9 +145,11 @@ fn typescript_block(code: &str) -> String {
 }
 
 /// The persisted RLM snapshot root, decoded far enough to name its globals and
-/// read one back through its inline body or leaf component.
+/// reload them through their inline bodies or leaf components.
 #[derive(Debug, serde::Deserialize)]
 struct RlmExecutionSnapshotRoot {
+    #[serde(with = "serde_bytes")]
+    state_header: Vec<u8>,
     globals: std::collections::BTreeMap<String, RlmPersistedValueProbe>,
 }
 
@@ -171,7 +173,7 @@ fn snapshot_globals(
 ) -> (Vec<String>, Option<String>) {
     let root: RlmExecutionSnapshotRoot =
         rmp_serde::from_slice(&state.root).expect("decode the RLM snapshot root");
-    let value = root.globals.get(name).map(|persisted| {
+    let fragments = root.globals.iter().map(|(global, persisted)| {
         let body = match persisted {
             RlmPersistedValueProbe::Inline { body } => body.as_slice(),
             RlmPersistedValueProbe::Leaf { component } => state
@@ -180,9 +182,14 @@ fn snapshot_globals(
                 .unwrap_or_else(|| panic!("leaf `{component}` must be hydrated"))
                 .as_ref(),
         };
-        let snapshot = lashlang::Snapshot::from_canonical_bytes(body).expect("decode the global");
-        format!("{:?}", snapshot.globals().get("value"))
+        (global.as_str(), body)
     });
+    let (reloaded, _) = lashlang::State::from_durable_parts(&root.state_header, fragments)
+        .expect("reload the persisted globals");
+    let value = root
+        .globals
+        .contains_key(name)
+        .then(|| format!("{:?}", reloaded.globals().get(name)));
     (root.globals.keys().cloned().collect(), value)
 }
 

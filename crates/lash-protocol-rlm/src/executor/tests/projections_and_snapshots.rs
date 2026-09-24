@@ -727,8 +727,12 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
         // the fixture now carries a production effect address, so the root
         // persists the two deferred-resolution link identities it always
         // persisted in production — once per checkpoint, not per component.
-        assert_eq!(initial_budget.checkpoint_bytes, 82_858);
-        assert_eq!(changed_budget.checkpoint_bytes, 14_376);
+        // Snapshot v23 (FIG-3605) carries each binding as a durable fragment of
+        // the heap — its root value and the objects it carries — instead of a
+        // one-binding snapshot of its host view, and the root gains the heap
+        // header: a large list costs fewer wrapper bytes per binding.
+        assert_eq!(initial_budget.checkpoint_bytes, 82_242);
+        assert_eq!(changed_budget.checkpoint_bytes, 13_672);
     });
 }
 
@@ -953,9 +957,12 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
         assert_eq!(full_state_bytes, 136_711);
         // FIG-3394: the per-commit floor grew by exactly the 278 bytes of the
         // two deferred-resolution link identities the root now persists; the
-        // flat state, which carries no root, is unchanged.
-        assert_eq!(minimum, 21_383);
-        assert_eq!(maximum, 21_385);
+        // flat state, which carries no root, is unchanged. Snapshot v23
+        // (FIG-3605) writes the changed binding as a durable heap fragment
+        // rather than a one-binding host-view snapshot, which sheds wrapper
+        // bytes, and adds the heap header to the root.
+        assert_eq!(minimum, 19_839);
+        assert_eq!(maximum, 19_841);
     });
 }
 
@@ -1024,9 +1031,10 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
         );
         // FIG-3394: same +278 as the single-binding case — the two
         // deferred-resolution link identities ride in the root once, not per
-        // binding.
-        assert_eq!(minimum, 94_630);
-        assert_eq!(maximum, 94_632);
+        // binding. Snapshot v23 (FIG-3605) adds the heap header to the root and
+        // writes each binding as a durable heap fragment.
+        assert_eq!(minimum, 94_774);
+        assert_eq!(maximum, 94_776);
     });
 }
 

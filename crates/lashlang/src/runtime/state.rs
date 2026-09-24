@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::{
@@ -12,17 +13,24 @@ use thiserror::Error;
 mod wire;
 pub(crate) use wire::child_location;
 
+mod durable;
+pub use durable::{DurableBaseline, DurableFragment, DurableParts};
+
 mod canonical_messagepack;
 pub use canonical_messagepack::{
     CanonicalMapOrder, CanonicalPathSegment, validate_canonical_messagepack_structure,
 };
 
+// v8 writes a record's fields in property order instead of sorting them, so
+// a reload answers `Object.keys`, `JSON.stringify` and `for...in` exactly as
+// the live run did (FIG-3606). A v7 wire's sorted fields would decode, but in
+// the wrong order, silently; the bump is what refuses it instead.
 // v7 carries the substrate-minted `EffectError`/`RuntimeError` error brands.
 // `error_kind` serializes by name, so a v6 reader meets an unknown variant
 // while deserializing — before it ever reads `version` — and would report a
 // corrupt snapshot rather than a version boundary. The bump is what makes the
 // refusal honest.
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 7;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 8;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 // The raw-wire guard is secondary to the explicit value-depth guard below. A
 // nested heap value advances through at most four MessagePack containers (the
@@ -66,10 +74,11 @@ pub struct GlobalPatchOutcome {
 
 /// Which record owns a [`State`]/[`Snapshot`]'s bindings.
 ///
-/// A `Plain` state has never executed: the record is the only one there is
-/// and it owns itself. A `HeapBacked` state is one the runtime has touched:
-/// the runtime roots own the bindings and `projected` is their lossy host
-/// view, produced by [`host_view`]. The distinction is deliberately sticky —
+/// A `Plain` state has never executed and never been written by its host: the
+/// record is the only one there is and it owns itself. A `HeapBacked` state is
+/// one the runtime or a host write has touched: the runtime roots own the
+/// bindings and `projected` is their lossy host view, produced by
+/// [`host_view`]. The distinction is deliberately sticky —
 /// a heap that has allocated stays heap-backed even with empty roots, so
 /// ownership never moves back to the view mid-session. Storing the mode as a
 /// value keeps each form's fields out of the other's reach: a plain state
@@ -199,32 +208,36 @@ impl State {
             return Ok(GlobalPatchOutcome::default());
         }
         let mut outcome = GlobalPatchOutcome::default();
+        let removes_only = patch
+            .iter()
+            .all(|operation| matches!(operation, GlobalPatch::Remove { .. }));
         match &mut self.mode {
-            StateMode::Plain(globals) => {
+            StateMode::Plain(globals) if removes_only => {
                 let mut staged = globals.clone();
                 for operation in patch {
-                    match operation {
-                        GlobalPatch::SetDefault { name, .. } if staged.get(&name).is_some() => {
-                            outcome.unchanged.push(name);
-                        }
-                        GlobalPatch::Insert { name, value }
-                        | GlobalPatch::SetDefault { name, value } => {
-                            staged.insert(name.clone(), value);
-                            outcome.inserted.push(name);
-                        }
-                        GlobalPatch::Remove { name } => {
-                            if staged.remove(&name).is_some() {
-                                outcome.removed.push(name);
-                            }
-                        }
+                    if let GlobalPatch::Remove { name } = operation
+                        && staged.remove(&name).is_some()
+                    {
+                        outcome.removed.push(name);
                     }
                 }
                 *globals = staged;
             }
-            StateMode::HeapBacked(backed) => {
-                let mut staged_roots = backed.runtime_globals.clone();
-                let mut staged_view = backed.projected.clone();
-                let mut staged_heap = backed.heap.clone();
+            mode => {
+                // A binding the host writes is owned by the heap from the
+                // moment it exists, exactly like one a cell binds, so a plain
+                // state is promoted here rather than at its first execution:
+                // otherwise the first cell would re-home every seeded value
+                // under new heap ids and rewrite every durable fragment that
+                // carries one.
+                let (mut staged_roots, mut staged_view, mut staged_heap) = match &*mode {
+                    StateMode::Plain(globals) => promote_plain(globals)?,
+                    StateMode::HeapBacked(backed) => (
+                        backed.runtime_globals.clone(),
+                        backed.projected.clone(),
+                        backed.heap.clone(),
+                    ),
+                };
                 for operation in patch {
                     match operation {
                         GlobalPatch::SetDefault { name, .. }
@@ -257,9 +270,11 @@ impl State {
                 }
                 let roots = staged_roots.values().cloned().collect::<Vec<_>>();
                 staged_heap.collect(roots.iter());
-                backed.runtime_globals = staged_roots;
-                backed.projected = staged_view;
-                backed.heap = staged_heap;
+                *mode = StateMode::HeapBacked(Box::new(HeapBackedState {
+                    runtime_globals: staged_roots,
+                    projected: staged_view,
+                    heap: staged_heap,
+                }));
             }
         }
         Ok(outcome)
@@ -373,6 +388,18 @@ impl State {
         };
         Ok(())
     }
+}
+
+/// A plain state's bindings, owned by a fresh heap: the runtime roots, their
+/// host view, and the heap, ready to be staged into.
+fn promote_plain(globals: &Record) -> Result<(Record, Record, Heap), RuntimeError> {
+    let mut heap = Heap::default();
+    let mut roots = record_with_capacity(globals.len());
+    for (name, value) in globals.iter() {
+        roots.insert(name.to_string(), heap.isolate_value(value)?);
+    }
+    let view = host_view(&roots, &mut heap)?;
+    Ok((roots, view, heap))
 }
 
 /// Projects the heap-rooted runtime globals into the host-facing view.
@@ -843,9 +870,53 @@ enum ExpectedValue {
     },
     BindingElements {
         remaining: usize,
-        previous: Option<String>,
+        seen: BindingNames,
         kind: BindingValueKind,
     },
+}
+
+/// The names a binding list has carried so far, checked against the order
+/// its kind requires.
+///
+/// A name table — the session's globals, and a projected JSON object — is
+/// strictly sorted. A record's fields are in property order, which is
+/// observable (`Object.keys`, `JSON.stringify`, `for...in`), so the wire keeps
+/// the order the object had and only requires each key once (FIG-3606).
+#[derive(Default)]
+struct BindingNames {
+    previous: Option<String>,
+    fields: BTreeSet<String>,
+}
+
+impl BindingNames {
+    fn admit(
+        &mut self,
+        name: &str,
+        kind: BindingValueKind,
+        location: &str,
+    ) -> Result<(), SnapshotDecodeError> {
+        match kind {
+            BindingValueKind::Runtime => {
+                if !self.fields.insert(name.to_string()) {
+                    return Err(non_canonical(location, "record field keys must be unique"));
+                }
+            }
+            BindingValueKind::RootRuntime | BindingValueKind::Json => {
+                if self
+                    .previous
+                    .as_deref()
+                    .is_some_and(|previous| previous >= name)
+                {
+                    return Err(non_canonical(
+                        location,
+                        "dynamic map keys must be strictly sorted and unique",
+                    ));
+                }
+                self.previous = Some(name.to_string());
+            }
+        }
+        Ok(())
+    }
 }
 
 struct ValidationFrame {
@@ -1224,7 +1295,7 @@ fn validate_expected(
                 pending,
                 ExpectedValue::BindingElements {
                     remaining: length,
-                    previous: None,
+                    seen: BindingNames::default(),
                     kind,
                 },
                 location,
@@ -1265,7 +1336,7 @@ fn validate_expected(
         }
         ExpectedValue::BindingElements {
             remaining,
-            previous,
+            mut seen,
             kind,
         } => {
             if remaining == 0 {
@@ -1275,19 +1346,14 @@ fn validate_expected(
             expect_struct_map(bytes, cursor, 2, &location, "dynamic map binding")?;
             expect_key(bytes, cursor, "name", &location)?;
             let name = take_canonical_string(bytes, cursor, &format!("{location}.name"))?;
-            if previous.as_deref().is_some_and(|previous| previous >= name) {
-                return Err(non_canonical(
-                    &location,
-                    "dynamic map keys must be strictly sorted and unique",
-                ));
-            }
+            seen.admit(name, kind, &location)?;
             expect_key(bytes, cursor, "value", &location)?;
             let child = child_location(&location, name);
             push(
                 pending,
                 ExpectedValue::BindingElements {
                     remaining: remaining - 1,
-                    previous: Some(name.to_string()),
+                    seen,
                     kind,
                 },
                 location,
