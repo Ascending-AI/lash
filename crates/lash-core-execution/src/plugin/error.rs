@@ -276,14 +276,22 @@ impl PluginError {
     /// redrive repairs it: a carried runtime or controller error keeps its own
     /// code, a lost session lease is `SessionExecutionLeaseLost`, and an opaque
     /// session-seam failure (store I/O behind a plugin service) or a lost
-    /// process lease is `PluginSessionManager`. Every other variant is a
+    /// process lease is `PluginSessionManager`. A carried session retirement
+    /// keeps its own error and cause, so the caller aborts on it (FIG-3630).
+    /// Every other variant is a
     /// deliberate refusal over the turn's inputs or durable state: an outcome
     /// spelled as `refusal`, recorded or settled once instead of retried.
     pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
         match self {
-            Self::Runtime(error) if error.turn_failure_cause().aborts_invocation() => error,
+            Self::Runtime(error)
+                if error.turn_failure_cause().aborts_invocation()
+                    || error.is_session_retirement() =>
+            {
+                error
+            }
             Self::RuntimeEffectController(error)
-                if error.turn_failure_cause().aborts_invocation() =>
+                if error.turn_failure_cause().aborts_invocation()
+                    || error.is_session_retirement() =>
             {
                 error.into_runtime_error()
             }

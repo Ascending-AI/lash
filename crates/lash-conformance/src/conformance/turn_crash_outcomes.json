@@ -229,6 +229,13 @@
   },
   {
     "error_return": {
+      "placement": "tool-attempt-session-retirement",
+      "outcome": "A session-retirement refusal (SessionDeleted, with its cause) from execute_effect(ToolAttempt) aborts the turn instead of recording a failed turn (FIG-3630): the retirement owns the turn, so no cancellation closure is authorized, no final head is committed, no provider request follows, and the typed refusal reaches the caller. Recording it would authorize a closure pin a deleted session can never settle, which then refuses the deletion.",
+      "violations": []
+    }
+  },
+  {
+    "error_return": {
       "placement": "effect-journal-claim",
       "outcome": "An unretried store error from the effect journal's claim aborts the turn as a controller error (FIG-3528): the typed error reaches the caller and no provider request or durable commit follows.",
       "violations": []

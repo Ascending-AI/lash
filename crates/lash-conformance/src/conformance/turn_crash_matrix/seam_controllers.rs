@@ -8,7 +8,7 @@ use std::sync::Arc;
 use lash_sansio::SessionId;
 
 use super::{
-    CrashPlacement, EffectOperation, SeamControl, TurnSeamOperation,
+    CrashPlacement, EffectOperation, ErrorReturnPlacement, SeamControl, TurnSeamOperation,
     turn_control_resolution_operation,
 };
 use crate::{
@@ -40,6 +40,18 @@ impl SeamEffectController {
             });
         RuntimeEffectControllerError::new(code, "injected store error at the tool-attempt seam")
     }
+}
+
+/// The refusal a controller answers once the turn's session is deleted under
+/// it (FIG-3630): the store's `SessionDeleted`, carrying its cause.
+fn session_retirement_refusal(envelope: &RuntimeEffectEnvelope) -> RuntimeEffectControllerError {
+    let session_id = envelope
+        .invocation
+        .execution_scope()
+        .session_id()
+        .cloned()
+        .unwrap_or_else(|| panic!("the scripted tool attempt runs under a session scope"));
+    crate::StoreError::SessionDeleted { session_id }.into()
 }
 
 #[async_trait::async_trait]
@@ -157,7 +169,12 @@ impl RuntimeEffectController for SeamEffectController {
         {
             match placement.journal_point() {
                 None => {
-                    let error = self.injected_store_error();
+                    let error = match placement {
+                        ErrorReturnPlacement::ToolAttemptSessionRetirement => {
+                            session_retirement_refusal(&envelope)
+                        }
+                        _ => self.injected_store_error(),
+                    };
                     return self
                         .control
                         .around(operation, async move { Err(error) })
