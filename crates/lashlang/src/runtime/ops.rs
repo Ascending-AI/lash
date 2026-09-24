@@ -153,6 +153,7 @@ pub(crate) async fn execute_intrinsic(
         | IntrinsicOp::JavaScriptHeapDeleteMember
         | IntrinsicOp::JavaScriptRegExp(_)
         | IntrinsicOp::JavaScriptGlobalDelete
+        | IntrinsicOp::JavaScriptGlobalGet
         | IntrinsicOp::JavaScriptGlobalHas
         | IntrinsicOp::JavaScriptGlobalSet
         | IntrinsicOp::JavaScriptUriCodec(_) => {

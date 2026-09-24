@@ -490,6 +490,7 @@ pub(crate) enum IntrinsicOp {
     JavaScriptHeapDeleteMember,
     JavaScriptRegExp(usize),
     JavaScriptGlobalDelete,
+    JavaScriptGlobalGet,
     JavaScriptGlobalHas,
     JavaScriptGlobalSet,
     JavaScriptUriCodec(JavaScriptUriCodec),
@@ -654,6 +655,7 @@ impl IntrinsicOp {
             | IntrinsicOp::ValidateCompiled(_)
             | IntrinsicOp::PushAssign(_)
             | IntrinsicOp::JavaScriptGlobalDelete
+            | IntrinsicOp::JavaScriptGlobalGet
             | IntrinsicOp::JavaScriptGlobalHas
             | IntrinsicOp::JavaScriptUriCodec(_) => 1,
             IntrinsicOp::Contains
@@ -708,6 +710,7 @@ impl IntrinsicOp {
             | IntrinsicOp::JavaScriptHeapDeleteMember
             | IntrinsicOp::JavaScriptRegExp(_)
             | IntrinsicOp::JavaScriptGlobalDelete
+            | IntrinsicOp::JavaScriptGlobalGet
             | IntrinsicOp::JavaScriptGlobalHas
             | IntrinsicOp::JavaScriptGlobalSet
             | IntrinsicOp::JavaScriptUriCodec(_) => BuiltinProfileTag::TypeScriptStdlib,

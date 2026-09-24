@@ -961,6 +961,9 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
         IntrinsicOp::JavaScriptGlobalDelete => {
             format!("intrinsic typescript_global_delete argc={argc}")
         }
+        IntrinsicOp::JavaScriptGlobalGet => {
+            format!("intrinsic typescript_global_get argc={argc}")
+        }
         IntrinsicOp::JavaScriptGlobalHas => {
             format!("intrinsic typescript_global_has argc={argc}")
         }

@@ -11,8 +11,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::captures::BindingId;
 use super::{
-    CallArg, Expr, FunctionBody, MemberProperty, Pattern, Stmt, is_reserved_name,
-    reserved_identifier,
+    BinaryOp, CallArg, Expr, FunctionBody, MemberProperty, Pattern, Stmt, TsAssignTarget,
+    is_reserved_name, reserved_identifier,
 };
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -63,6 +63,10 @@ pub(super) enum BindingRole {
     ProcessHandle,
     /// A collection whose iteration protocol is its own, not an array's.
     ExoticIterable(IterableKind),
+    /// A session slot only a `globalThis.name` write creates: a global object
+    /// property in ECMA-262, absent until a write runs, so `typeof name`
+    /// reads it live rather than faulting on the empty slot.
+    GlobalProperty,
 }
 
 #[derive(Clone, Debug)]
@@ -106,13 +110,23 @@ impl super::Lowerer {
         if is_reserved_name(name) {
             return Err(reserved_identifier(name));
         }
+        let owner_function = self.current_function();
+        // A binding declared in a block of the cell's top level ends with its
+        // block (ECMA-262 lexical scoping), so it never becomes a session
+        // global. A function frame's locals are never globals to begin with.
+        let block_private = owner_function == 0 && self.scopes.len() > self.root_scope_depth;
         // Mangling exists to stop an inner scope from overwriting an outer slot
         // of the same name. Where nothing of that name is visible there is
         // nothing to protect, and a mangled root-level binding would be a
         // private slot, so the author's binding would not survive the cell as
-        // a session global; keep the author's name in that case.
-        let preserve_name = preserve_name || !self.has_binding(name);
-        let owner_function = self.current_function();
+        // a session global; keep the author's name in that case. A top-level
+        // block binding shares the root frame with the session globals, so
+        // where the cell addresses `globalThis.name` its slot is mangled too:
+        // the root slot spelled `name` is the session global, whatever block
+        // is open. Elsewhere it keeps the authored spelling the workflow-graph
+        // lens prints back.
+        let shares_a_global_slot = block_private && self.global_this_names.contains(name);
+        let preserve_name = !shares_a_global_slot && (preserve_name || !self.has_binding(name));
         if self
             .scopes
             .last()
@@ -129,10 +143,7 @@ impl super::Lowerer {
         } else {
             self.generated_binding(name)
         };
-        // A binding declared in a block of the cell's top level ends with its
-        // block (ECMA-262 lexical scoping), so it never becomes a session
-        // global. A function frame's locals are never globals to begin with.
-        if owner_function == 0 && self.scopes.len() > self.root_scope_depth {
+        if block_private {
             self.private_bindings.insert(internal.clone());
         }
         let id = self.declare_in_ledger(name, kind);
@@ -309,6 +320,59 @@ impl super::Lowerer {
             }
         }
     }
+}
+
+/// Every name the program addresses as `globalThis.name`: read, written,
+/// deleted, or tested with `"name" in globalThis`, at any depth.
+pub(super) fn global_this_names(statements: &[Stmt]) -> BTreeSet<String> {
+    fn global_member<'a>(object: &'a Expr, property: &'a MemberProperty) -> Option<&'a str> {
+        match (object, property) {
+            (Expr::Ident(root, _), MemberProperty::Field(field)) if root == "globalThis" => {
+                Some(field.as_str())
+            }
+            _ => None,
+        }
+    }
+    fn visit(expression: &Expr, names: &mut BTreeSet<String>) {
+        let named = match expression {
+            Expr::Member {
+                object, property, ..
+            }
+            | Expr::Delete { object, property }
+            | Expr::Assign {
+                target: TsAssignTarget::Member { object, property },
+                ..
+            }
+            | Expr::Update {
+                target: TsAssignTarget::Member { object, property },
+                ..
+            } => global_member(object, property),
+            Expr::Binary {
+                left,
+                op: BinaryOp::In,
+                right,
+            } => match (left.as_ref(), right.as_ref()) {
+                (Expr::String(name), Expr::Ident(root, _)) if root == "globalThis" => {
+                    Some(name.as_str())
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(name) = named {
+            names.insert(name.to_string());
+        }
+        for child in expression.children() {
+            visit(child, names);
+        }
+    }
+    let mut names = BTreeSet::new();
+    for statement in statements {
+        for expression in statement.child_expressions() {
+            visit(expression, &mut names);
+        }
+    }
+    names
 }
 
 /// The source-level names this program *calls*.

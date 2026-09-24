@@ -118,6 +118,7 @@ pub(super) fn instruction_heap_plan(
             | IntrinsicOp::JavaScriptHeapDeleteMember
             | IntrinsicOp::JavaScriptRegExp(_)
             | IntrinsicOp::JavaScriptGlobalDelete
+            | IntrinsicOp::JavaScriptGlobalGet
             | IntrinsicOp::JavaScriptGlobalHas
             | IntrinsicOp::JavaScriptGlobalSet
             | IntrinsicOp::JavaScriptUriCodec(_),

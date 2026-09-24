@@ -1660,6 +1660,10 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// moved to `v17` and the lifted-process name domain to `v2`, so the lifted
 /// name, the module and host-requirement hashes and the registration identity
 /// moved. The canonical IR is otherwise byte-identical.
+///
+/// FIG-3620 moved `LASHLANG_SEMANTIC_HASH_VERSION` to `v18` for the new
+/// `__typescript_global_get` builtin: only the module, host-requirement and
+/// component hashes moved; the lifted name and the canonical IR did not.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"

@@ -207,6 +207,11 @@ const PROBES: &[Probe] = &[
         "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
         "const o: any = {}; o.__proto__ = {};",
     ),
+    // A process body has no live view of session state (FIG-3620).
+    readme_probe(
+        "TS_NON_LIFTABLE_CAPTURE",
+        "var budget = 1; const spend = async () => globalThis.budget;",
+    ),
     Probe {
         entry: None,
         refusal: "TS_REGEX_PATTERN_TOO_LONG",

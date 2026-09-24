@@ -475,3 +475,96 @@ for (const n of [1, 2, 3]) {
 }
 console.log([3, 6].map((v) => v / total + count));
 end
+
+session global-this-reads-in-functions
+about a globalThis read at the top level, in a function and in a nested closure reads the global's current value, again after a reload (FIG-3620)
+probe count readCount outer inner readAgain again
+deviation closure-boundary
+cell
+globalThis.count = 1;
+function readCount() { return globalThis.count; }
+const outer = () => {
+  const inner = () => globalThis.count;
+  return inner();
+};
+console.log(globalThis.count, readCount(), outer());
+globalThis.count = 2;
+console.log(globalThis.count, readCount(), outer());
+cell
+function readAgain() { return globalThis.count; }
+const again = () => (() => globalThis.count)();
+console.log(globalThis.count, readAgain(), again(), [1].map(() => globalThis.count));
+end
+
+session global-this-read-of-a-lexical-binding
+about a function reads a top-level let through globalThis, which the dialect aliases to the binding's session slot (FIG-3620)
+probe level readLevel
+cell deviation global-object-aliases-lexical-bindings
+let level = 1;
+function readLevel() { return globalThis.level; }
+console.log(readLevel());
+lash {"outcome":"normal","prints":["1"],"probes":{"level":"number 1","readLevel":"unbound"}}
+end
+
+session global-this-read-past-a-parameter
+about a parameter of the same name does not answer a globalThis read (FIG-3620)
+probe shadowed pick
+deviation closure-boundary
+cell
+globalThis.shadowed = "global";
+function pick(shadowed) { return [shadowed, globalThis.shadowed]; }
+console.log(pick("param"));
+end
+
+session global-this-read-past-a-local
+about a function local of the same name does not answer a globalThis read (FIG-3620)
+probe depth measure
+deviation closure-boundary
+cell
+globalThis.depth = 1;
+function measure() {
+  const depth = 9;
+  return [depth, globalThis.depth];
+}
+console.log(measure());
+end
+
+session global-this-write-then-read-across-functions
+about one function's globalThis write is what another function's globalThis read sees, and nothing exists before the write runs (FIG-3620)
+probe readLater writeLater later
+deviation closure-boundary
+cell
+function readLater() { return globalThis.later; }
+function writeLater() { globalThis.later = 5; }
+console.log(readLater(), "later" in globalThis);
+writeLater();
+console.log(readLater(), "later" in globalThis);
+cell
+console.log(later, typeof later);
+end
+
+session global-this-past-a-block-binding
+about a top-level block binding is not the global of the same name, so a globalThis write in the block creates a separate global (FIG-3620)
+probe blocked
+cell
+{
+  let blocked = 1;
+  globalThis.blocked = 2;
+  console.log(blocked, globalThis.blocked);
+}
+console.log(blocked);
+end
+
+session global-this-in-a-process-body
+about a process body cannot read or write session state through globalThis, which it has no live view of (FIG-3620)
+probe budget spend record
+cell
+var budget = 1;
+cell reject TS_NON_LIFTABLE_CAPTURE
+const spend = async () => globalThis.budget;
+cell reject TS_NON_LIFTABLE_CAPTURE
+const record = async () => {
+  globalThis.budget = 2;
+  return 1;
+};
+end

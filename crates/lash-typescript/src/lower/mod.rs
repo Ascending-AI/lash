@@ -133,7 +133,6 @@ struct Lowerer {
     /// The span of the TypeScript expression currently being lowered, which is
     /// what a declaration emitted mid-lowering is positioned by.
     current_span: Option<SourceSpan>,
-    intrinsic_global_slots: BTreeSet<String>,
     module_authority_roots: BTreeSet<String>,
     allow_uninitialized_declaration_capture: bool,
     /// Where each closure copies its captures and where each binding is
@@ -143,6 +142,10 @@ struct Lowerer {
     /// lowering. A `const`-bound async arrow outside this set is a
     /// process-literal candidate (FIG-2997).
     called_bindings: BTreeSet<String>,
+    /// Every name the program addresses as `globalThis.name`, computed once
+    /// before lowering: a top-level block binding of one of these names takes
+    /// a generated slot, so the bare slot stays the session global's.
+    global_this_names: BTreeSet<String>,
 }
 
 impl Lowerer {
@@ -1012,6 +1015,22 @@ impl Lowerer {
                 UnaryOp::TypeOf if matches!(value.as_ref(), Expr::Ident(name, _) if !self.has_binding(name)) => {
                     LashExpr::String("undefined".into())
                 }
+                UnaryOp::TypeOf
+                    if matches!(value.as_ref(), Expr::Ident(name, _) if self
+                        .binding(name)
+                        .is_ok_and(|binding| binding.role == BindingRole::GlobalProperty)) =>
+                {
+                    let Expr::Ident(name, _) = value.as_ref() else {
+                        unreachable!("the guard matched an identifier")
+                    };
+                    js_unary(
+                        JavaScriptUnaryOp::TypeOf,
+                        LashExpr::BuiltinCall {
+                            name: "__typescript_global_get".into(),
+                            args: vec![LashExpr::String(name.as_str().into())],
+                        },
+                    )
+                }
                 UnaryOp::TypeOf => js_unary(JavaScriptUnaryOp::TypeOf, self.lower_expr(value)?),
             },
             Expr::Binary { left, op, right } => self.lower_binary_expr(left, *op, right)?,
@@ -1267,10 +1286,14 @@ impl Lowerer {
                 MemberProperty::Field(field)
                     if !matches!(field.as_str(), "undefined" | "NaN" | "Infinity") =>
                 {
-                    Ok(if self.has_binding(field) {
-                        LashExpr::Variable(field.as_str().into())
-                    } else {
-                        LashExpr::Undefined
+                    // The session slot, read live wherever the read runs: a
+                    // function or closure reads the root frame's current
+                    // value, as a global object property read does, never a
+                    // copy and never a local of the same name.
+                    self.refuse_global_this_in_process(field)?;
+                    Ok(LashExpr::BuiltinCall {
+                        name: "__typescript_global_get".into(),
+                        args: vec![LashExpr::String(field.as_str().into())],
                     })
                 }
                 MemberProperty::Field(field) => Err(Diagnostic::new(

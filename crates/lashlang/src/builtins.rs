@@ -212,6 +212,10 @@ pub(crate) const TYPESCRIPT_BUILTINS: &[Builtin] = &[
         arity: Arity::Exact(1),
     },
     Builtin {
+        name: "__typescript_global_get",
+        arity: Arity::Exact(1),
+    },
+    Builtin {
         name: "__typescript_global_has",
         arity: Arity::Exact(1),
     },
@@ -294,6 +298,7 @@ mod tests {
             ("__typescript_heap_delete_member", Arity::Exact(2)),
             ("__typescript_regexp", Arity::AtLeast(1)),
             ("__typescript_global_delete", Arity::Exact(1)),
+            ("__typescript_global_get", Arity::Exact(1)),
             ("__typescript_global_has", Arity::Exact(1)),
             ("__typescript_call_dynamic", Arity::Exact(2)),
             ("__typescript_async_map", Arity::Exact(2)),

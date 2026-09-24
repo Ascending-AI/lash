@@ -42,6 +42,7 @@ pub(super) fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<Intrinsic
         "__typescript_heap_delete_member" => IntrinsicOp::JavaScriptHeapDeleteMember,
         "__typescript_regexp" => IntrinsicOp::JavaScriptRegExp(argc),
         "__typescript_global_delete" => IntrinsicOp::JavaScriptGlobalDelete,
+        "__typescript_global_get" => IntrinsicOp::JavaScriptGlobalGet,
         "__typescript_global_has" => IntrinsicOp::JavaScriptGlobalHas,
         "__typescript_global_set" => IntrinsicOp::JavaScriptGlobalSet,
         "__typescript_encode_uri_component" => {

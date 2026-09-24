@@ -233,6 +233,46 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(())
     }
 
+    /// `globalThis.name` read: the root frame's slot for `name`, live, from
+    /// wherever the read runs. A function frame's own locals never answer it,
+    /// and a slot the root frame holds no value in (an absent global, or a
+    /// binding before its declaration runs) reads `undefined`, as a missing
+    /// global object property does.
+    #[expect(
+        clippy::expect_used,
+        reason = "active_function.is_some() means a first frame exists to read, per the guarded split"
+    )]
+    pub(super) fn execute_javascript_global_get(&mut self) -> Result<(), RuntimeError> {
+        let name = self.pop_stack()?;
+        let Value::String(name) = name else {
+            return Err(js_stdlib_error("global read name must be a string"));
+        };
+        reject_reserved_global_name(&name)?;
+        let slot = self
+            .chunk
+            .slot_names
+            .iter()
+            .position(|candidate| candidate.text.as_ref() == name.as_str());
+        let slots = if self.active_function.is_some() {
+            &self
+                .frames
+                .first()
+                .expect("an active function has a root caller frame")
+                .slots
+        } else {
+            &self.slots
+        };
+        let value = slot
+            .map_or_else(
+                || slots.extras.get(name.as_str()),
+                |slot| slots.values[slot].as_ref(),
+            )
+            .cloned()
+            .unwrap_or(Value::Undefined);
+        self.stack.push(value);
+        Ok(())
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "active_function.is_some() means a first frame exists to read, per the guarded split"
