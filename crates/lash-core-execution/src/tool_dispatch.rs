@@ -13,6 +13,7 @@ pub use context::{
 };
 pub use pending_resolver::arm_pending_resolver;
 
+pub(crate) use attempt_coordinator::commit_group_child_boundary;
 pub use attempt_coordinator::{
     GroupChildCoordination, ToolAttemptEffectIdentity, coordinate_tool_invocation,
 };
