@@ -1351,8 +1351,7 @@ where
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(mut code_points) => {
                                 if self.flags.icase {
-                                    code_points =
-                                        unicode::add_icase_code_points(code_points);
+                                    code_points = unicode::add_icase_code_points(code_points);
                                 }
                                 Ok(CharacterClassEscape(code_points))
                             }
@@ -1375,8 +1374,7 @@ where
                                     // Under ignoreCase MaybeSimpleCaseFolding
                                     // applies before CharacterComplement:
                                     // fold the property set, then complement.
-                                    code_points =
-                                        unicode::add_icase_code_points(code_points);
+                                    code_points = unicode::add_icase_code_points(code_points);
                                 }
                                 Ok(CharacterClassEscape(code_points.inverted()))
                             }

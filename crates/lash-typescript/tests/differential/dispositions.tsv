@@ -73,3 +73,4 @@
 "(async () => { var \\u0061wait; })()"	reject	TS_SYNTAX_ERROR
 "(() => { function f() { return 1; } function f() { return 2; } return f(); })()"	reject	TS_FUNCTION_REDECLARATION_UNSUPPORTED
 "(() => delete 1)()"	reject	TS_DELETE_NON_REFERENCE_UNSUPPORTED
+"(() => { const p=/a/g; const f={toString: function() { return 'i'; }}; return new RegExp(p,f).flags; })()"	runtime-reject	TS_OBJECT_STRING_COERCION
