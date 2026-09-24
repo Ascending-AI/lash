@@ -739,7 +739,11 @@ fn a_rewrite_mints_the_same_call_ids() {
             )
             .await
             .assert_clean();
-        let minted = original.call_ids.lock_recover().clone();
+        // Concurrent group children are observed in dispatch-completion
+        // order, which is not part of the identity; compare ids as a sorted
+        // set.
+        let mut minted = original.call_ids.lock_recover().clone();
+        minted.sort();
         assert_eq!(minted.len(), 3);
         for (id, suffix) in
             minted
@@ -751,7 +755,9 @@ fn a_rewrite_mints_the_same_call_ids() {
                 "call ids are issue ordinals under the cell: {minted:?}"
             );
         }
-        assert_eq!(minted, rewritten.call_ids.lock_recover().clone());
+        let mut rewritten_ids = rewritten.call_ids.lock_recover().clone();
+        rewritten_ids.sort();
+        assert_eq!(minted, rewritten_ids);
     });
 }
 
