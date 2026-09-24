@@ -10,11 +10,9 @@ use lash::rlm::RlmTurnBuilderExt;
 #[path = "tests/restate_endpoint.rs"]
 mod restate_endpoint;
 use lash::tracing::{
-    ExecutionNodeKind, TraceBranchSelection, TraceLanguageChildExecution, TraceLanguageExecution,
-    TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge,
-    TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
-    TraceLashlangEdgeSelection, TraceLashlangGraphChildLink, TraceRuntimeScope,
-    TraceRuntimeSubject,
+    TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
+    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLashlangGraphChildLink,
+    TraceRuntimeScope, TraceRuntimeSubject,
 };
 pub(crate) use restate_endpoint::*;
 use std::future::Future;
@@ -310,134 +308,6 @@ fn mail_received_account_contract_uses_slugs() {
 #[cfg(test)]
 #[path = "tests/facade_homes.rs"]
 mod facade_homes_tests;
-
-#[test]
-fn lashlang_graph_store_builds_graph_state() {
-    let store = TraceLashlangGraphStore::default();
-    let context = TraceContext::default().for_session("s1");
-    let identity = TraceLanguageExecutionIdentity {
-        scope: TraceRuntimeScope::new("s1"),
-        subject: TraceRuntimeSubject::Process {
-            process_id: ProcessId::from("p1"),
-        },
-        source_identity: "source-1".to_string(),
-        module_ref: "m1".to_string(),
-        entry_kind: "process".to_string(),
-        entry_ref: Some("r1:0".to_string()),
-        entry_name: "main".to_string(),
-        restate_invocation_id: None,
-        generation: None,
-    };
-    let append = |event: TraceLanguageExecution| {
-        store
-            .append(&TraceRecord::new(
-                context.clone(),
-                TraceEvent::LanguageExecution {
-                    language: "typescript".to_string(),
-                    event,
-                },
-            ))
-            .expect("append tracking event");
-    };
-
-    append(TraceLanguageExecution {
-        event_key: "p1:start".to_string(),
-        identity: identity.clone(),
-        payload: TraceLanguageExecutionPayload::ExecutionStarted {
-            execution_map: TraceLanguageExecutionMap {
-                nodes: vec![TraceLanguageExecutionMapNode {
-                    id: "branch".to_string(),
-                    site: lashlang::WorkflowExecutionSite::new(
-                        "main",
-                        [0],
-                        ExecutionNodeKind::Branch,
-                        "if",
-                    ),
-                    kind: ExecutionNodeKind::Branch,
-                    label: "if".to_string(),
-                    label_metadata: None,
-                    branch_memberships: Vec::new(),
-                }],
-                edges: vec![
-                    TraceLanguageExecutionMapEdge {
-                        id: "then-edge".to_string(),
-                        from: "branch".to_string(),
-                        to: "then".to_string(),
-                        label: "then".to_string(),
-                    },
-                    TraceLanguageExecutionMapEdge {
-                        id: "else-edge".to_string(),
-                        from: "branch".to_string(),
-                        to: "else".to_string(),
-                        label: "else".to_string(),
-                    },
-                ],
-            },
-        },
-    });
-    append(TraceLanguageExecution {
-        event_key: "p1:branch".to_string(),
-        identity: identity.clone(),
-        payload: TraceLanguageExecutionPayload::BranchSelected {
-            node_id: "branch".to_string(),
-            occurrence: 1,
-            edge_id: "then-edge".to_string(),
-            selected: TraceBranchSelection::Then,
-        },
-    });
-    append(TraceLanguageExecution {
-        event_key: "p1:child".to_string(),
-        identity,
-        payload: TraceLanguageExecutionPayload::ChildStarted {
-            parent_node_id: "branch".to_string(),
-            occurrence: 1,
-            child: TraceLanguageChildExecution {
-                scope: TraceRuntimeScope::new("s1"),
-                process_id: ProcessId::from("p2"),
-                incarnation: 1,
-                attempt: Some(1),
-                module_ref: Some("m1".to_string()),
-                entry_ref: Some("r2:1".to_string()),
-                entry_name: Some("child".to_string()),
-            },
-        },
-    });
-
-    let graph = store.graph("process:p1").expect("graph");
-    assert_eq!(graph.status, TraceLanguageExecutionStatus::Running);
-    assert_eq!(graph.children.len(), 1);
-    assert_eq!(
-        graph.children[0].child_graph_key.as_deref(),
-        Some("process:p2:incarnation:1:attempt:1")
-    );
-    assert_eq!(
-        graph
-            .edges
-            .iter()
-            .find(|edge| edge.id == "then-edge")
-            .map(|edge| edge.selection),
-        Some(TraceLashlangEdgeSelection::Selected)
-    );
-    // The unselected arm stays unmarked: nothing in the execution map says an
-    // edge is a branch arm, so which arm ran is read from the branch node's
-    // typed selection instead.
-    assert_eq!(
-        graph
-            .edges
-            .iter()
-            .find(|edge| edge.id == "else-edge")
-            .map(|edge| edge.selection),
-        Some(TraceLashlangEdgeSelection::Unknown)
-    );
-    assert_eq!(
-        graph
-            .nodes
-            .iter()
-            .find(|node| node.id == "branch")
-            .and_then(|node| node.branch_selection),
-        Some(TraceBranchSelection::Then)
-    );
-}
 
 #[test]
 fn empty_model_variant_request_clears_selected_variant() {

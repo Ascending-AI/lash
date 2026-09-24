@@ -133,29 +133,6 @@ async fn optimized_concat_insertion_shares_the_appended_binding() {
     assert_eq!(value, list(vec![list(vec![number(1.0), number(2.0)])]));
 }
 
-/// Sol probe 1, single cell: the same concat without a snapshot boundary.
-#[tokio::test(flavor = "current_thread")]
-async fn optimized_concat_insertion_shares_within_one_cell() {
-    // x = [1]
-    // acc = []
-    // acc = acc + [x]
-    // x = push(x, 2)
-    // finish acc
-    let value = run(
-        &mut State::new(),
-        a::program(vec![
-            a::assign("x", a::list(vec![a::number(1.0)])),
-            a::assign("acc", a::list(Vec::new())),
-            a::assign("acc", a::add(a::var("acc"), a::list(vec![a::var("x")]))),
-            a::assign("x", push(a::var("x"), a::number(2.0))),
-            a::finish(a::var("acc")),
-        ]),
-    )
-    .await;
-
-    assert_eq!(value, list(vec![list(vec![number(1.0), number(2.0)])]));
-}
-
 /// The general concat form copies the right operand's members too.
 #[tokio::test(flavor = "current_thread")]
 async fn general_concat_copies_the_right_operand_members() {

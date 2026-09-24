@@ -241,7 +241,7 @@ class CompileRequestTest(unittest.TestCase):
         self.assertGreater(seen, 0)
 
 
-def test_record(
+def run_record(
     label: str = "//crates/lash-core:runtime_turns__test",
     role: str = "run",
     cores: float = 1.0,
@@ -272,7 +272,7 @@ def test_record(
 TEST_LABELS = {"//crates/lash-core:runtime_turns__test", "//crates/lash-core:test_batch"}
 
 
-def test_run_table(lines: list[str]) -> dict:
+def run_table(lines: list[str]) -> dict:
     return sizes.test_run_table(sizes.collect_test_runs(lines, TEST_LABELS))
 
 
@@ -280,48 +280,48 @@ class TestRunTableTest(unittest.TestCase):
     """Test runs are sized per Bazel label from the `test` field of the log."""
 
     def test_only_successful_runs_of_generated_labels_count(self) -> None:
-        lines = [test_record()] * 3
-        lines += [test_record(role="xml")] * 5
-        lines += [test_record(exit_status="1")] * 5
-        lines += [test_record(label="//crates/hirsel-proto:hirsel-proto__unit_test")] * 5
+        lines = [run_record()] * 3
+        lines += [run_record(role="xml")] * 5
+        lines += [run_record(exit_status="1")] * 5
+        lines += [run_record(label="//crates/hirsel-proto:hirsel-proto__unit_test")] * 5
         # A compile record, and one written before the field existed.
         lines += [record()] * 5
-        lines += [test_record().rsplit("\t", 1)[0]] * 5
-        table_ = test_run_table(lines)
+        lines += [run_record().rsplit("\t", 1)[0]] * 5
+        table_ = run_table(lines)
         self.assertEqual(list(table_), ["//crates/lash-core:runtime_turns__test"])
         self.assertEqual(table_["//crates/lash-core:runtime_turns__test"]["samples"], 3)
 
     def test_a_label_containing_colons_is_read_whole(self) -> None:
         label = "//crates/lash-core:test_batch"
-        self.assertIn(label, test_run_table([test_record(label=label)] * 3))
+        self.assertIn(label, run_table([run_record(label=label)] * 3))
 
     def test_three_samples_make_a_row_and_two_do_not(self) -> None:
         self.assertEqual(sizes.TEST_MIN_SAMPLES, 3)
-        self.assertEqual(test_run_table([test_record()] * 2), {})
-        self.assertEqual(len(test_run_table([test_record()] * 3)), 1)
+        self.assertEqual(run_table([run_record()] * 2), {})
+        self.assertEqual(len(run_table([run_record()] * 3)), 1)
 
     def test_memory_is_the_peak_with_margin_and_a_one_gib_floor(self) -> None:
-        entry = test_run_table([test_record(peak_bytes=100 * 1024 * 1024)] * 3)
+        entry = run_table([run_record(peak_bytes=100 * 1024 * 1024)] * 3)
         self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 1048576)
         # 7.45 GiB x 1.5 = 11.2 GiB, rounded up to 11.5 GiB.
-        entry = test_run_table([test_record(peak_bytes=7_999_586_304)] * 3)
+        entry = run_table([run_record(peak_bytes=7_999_586_304)] * 3)
         self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["memory_kb"], 12058624)
 
     def test_cpu_is_the_compile_p95_rule(self) -> None:
-        entry = test_run_table([test_record(cores=2.15)] * 3)
+        entry = run_table([run_record(cores=2.15)] * 3)
         self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["cpu_count"], 2)
-        entry = test_run_table([test_record(cores=2.25)] * 3)
+        entry = run_table([run_record(cores=2.25)] * 3)
         self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["cpu_count"], 3)
-        entry = test_run_table([test_record(cores=20.0)] * 3)
+        entry = run_table([run_record(cores=20.0)] * 3)
         self.assertEqual(entry["//crates/lash-core:runtime_turns__test"]["cpu_count"], 8)
 
     def test_sub_second_runs_count_as_samples_but_not_as_cpu_evidence(self) -> None:
-        entry = test_run_table([test_record(cores=3.0, wall_ms=400)] * 3)[
+        entry = run_table([run_record(cores=3.0, wall_ms=400)] * 3)[
             "//crates/lash-core:runtime_turns__test"
         ]
         self.assertEqual((entry["samples"], entry["cpu_count"], entry["p95_cores"]), (3, 1, 0.0))
-        lines = [test_record(cores=3.0, wall_ms=400)] * 3 + [test_record(cores=2.5)]
-        entry = test_run_table(lines)["//crates/lash-core:runtime_turns__test"]
+        lines = [run_record(cores=3.0, wall_ms=400)] * 3 + [run_record(cores=2.5)]
+        entry = run_table(lines)["//crates/lash-core:runtime_turns__test"]
         self.assertEqual((entry["samples"], entry["cpu_count"]), (4, 3))
 
     def test_the_checked_in_table_names_generated_tests_only(self) -> None:

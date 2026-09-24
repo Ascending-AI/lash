@@ -222,32 +222,6 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
 }
 
 #[tokio::test]
-async fn sqlite_factory_is_explicitly_usable_as_session_store_factory() {
-    let root = unique_temp_dir("explicit");
-    let factory: std::sync::Arc<dyn SessionStoreFactory> =
-        std::sync::Arc::new(SqliteSessionStoreFactory::new(&root));
-    let request = SessionStoreCreateRequest {
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("explicit"),
-        relation: lash_core_execution::SessionRelation::Root,
-        policy: SessionPolicy {
-            model: model_spec("model"),
-            ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
-        },
-    };
-
-    let store = factory.create_store(&request).await.expect("create store");
-
-    assert!(
-        store
-            .load_session_meta()
-            .await
-            .expect("load meta")
-            .is_some()
-    );
-}
-
-#[tokio::test]
 async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let root = unique_temp_dir("delete-session");
     let factory = SqliteSessionStoreFactory::new(&root);

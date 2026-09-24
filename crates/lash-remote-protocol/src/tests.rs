@@ -1613,17 +1613,6 @@ fn remote_session_observation_schema_includes_typed_kind_enums() {
     );
 }
 
-#[test]
-fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
-    assert!(matches!(
-        decode_empty_envelope(33),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 33,
-            expected: 99,
-        })
-    ));
-}
-
 /// The runtime-effect kinds a protocol-37 peer knew, as a closed decoder.
 ///
 /// Version 38 adds `language_runtime_value`; a 37 peer has no name for it, so

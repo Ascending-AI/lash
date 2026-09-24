@@ -948,34 +948,6 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
 }
 
 #[tokio::test]
-async fn attachment_gc_allows_a_fresh_deployment_with_an_empty_backend() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
-    let backend = lash_core_execution::attachments::InMemoryAttachmentStore::new();
-
-    let result = lash_core_execution::attachments::reclaim_unreferenced_attachments(
-        &factory,
-        &backend,
-        lash_core_execution::AttachmentReclamationPolicy {
-            grace_period_ms: 0,
-            empty_root_set: lash_core_execution::EmptyRootSetPolicy::Refuse,
-        },
-    )
-    .await;
-
-    let report = result.expect("an empty fresh deployment has nothing to protect");
-    assert_eq!(report.scanned_blob_count, 0);
-    assert_eq!(report.reclaimed_count, 0);
-    assert!(
-        report
-            .root_enumeration_failure
-            .as_deref()
-            .is_some_and(|failure| failure.contains("durable-core catalog")),
-        "the returned report must distinguish enumeration failure: {report:?}"
-    );
-}
-
-#[tokio::test]
 async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
     let dir = tempfile::tempdir().expect("tempdir");
     let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));

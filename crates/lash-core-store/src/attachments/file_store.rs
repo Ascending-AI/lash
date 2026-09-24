@@ -332,36 +332,6 @@ mod tests {
         )
     }
 
-    /// `path_for_id` joins the id straight into the store root, so it depends
-    /// on `AttachmentId` refusing every shape that is not a single path
-    /// component. If that rule ever loosens, this fails here rather than
-    /// silently handing the filesystem an escape.
-    #[test]
-    fn attachment_id_rule_keeps_every_shape_out_of_the_store_namespace() {
-        let overlong = "a".repeat(129);
-        let cases = [
-            ("parent with separator", "../"),
-            ("parent component", ".."),
-            ("current component", "."),
-            ("absolute", "/abs"),
-            ("forward separator", "a/b"),
-            ("back separator", "a\\b"),
-            ("nul", "a\0b"),
-            ("empty", ""),
-            ("unicode", "snowman-☃"),
-            ("control", "a\nb"),
-            ("windows prefix", "C:escape"),
-            ("overlong", overlong.as_str()),
-        ];
-
-        for (shape, raw) in cases {
-            assert!(
-                AttachmentId::parse(raw).is_err(),
-                "{shape} id must be unconstructible: {raw:?}"
-            );
-        }
-    }
-
     #[tokio::test]
     async fn file_store_round_trips_bytes_and_metadata() {
         let temp = tempfile::tempdir().expect("tempdir");

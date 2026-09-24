@@ -212,15 +212,6 @@ mod catalogue_tests {
     }
 
     #[test]
-    fn finish_finalization_prompt_defaults_to_natural_guidance() {
-        let prompt = rlm_finalization_prompt(&RlmTermination::default());
-
-        assert!(prompt.contains("prose alone ends this turn as the final answer"));
-        assert!(prompt.contains("write prose only when no work remains"));
-        assert!(prompt.contains("otherwise perform the next step in a block"));
-    }
-
-    #[test]
     fn finish_required_schema_finalization_prompt_requires_value() {
         let prompt = rlm_finalization_prompt(&RlmTermination::FinishRequired {
             schema: Some(serde_json::json!({ "type": "object" })),
@@ -239,6 +230,12 @@ mod catalogue_tests {
 
     #[test]
     fn natural_finalization_prompt_allows_direct_prose() {
+        // `RlmTermination::default()` is the `Natural` variant, so the
+        // default-path prompt is this same guidance.
+        assert_eq!(
+            rlm_finalization_prompt(&RlmTermination::default()),
+            rlm_finalization_prompt(&RlmTermination::Natural)
+        );
         let prompt = rlm_finalization_prompt(&RlmTermination::Natural);
 
         assert!(prompt.contains("Natural termination:"));

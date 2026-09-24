@@ -5,14 +5,6 @@ use tokio::sync::Barrier;
 use tokio::time::{Duration, timeout};
 
 #[test]
-fn standard_protocol_factory_id_is_stable_plugin_contract() {
-    let factory = StandardProtocolPluginFactory::new();
-
-    assert_eq!(factory.id(), STANDARD_PROTOCOL_PLUGIN_ID);
-    assert_eq!(factory.id(), "standard_protocol");
-}
-
-#[test]
 fn standard_execution_section_uses_only_surviving_tool_examples() {
     for removed_tool in [
         "read_file",

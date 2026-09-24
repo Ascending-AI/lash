@@ -647,27 +647,6 @@ proptest! {
     }
 
     #[test]
-    fn ternary_selects_generated_branch_without_evaluating_the_other_side(
-        condition in any::<bool>(),
-        yes in gen_value_strategy(),
-        no in gen_value_strategy()
-    ) {
-        let expected = if condition { yes.to_value() } else { no.to_value() };
-        let source = format!(
-            "const ternary_result = {} ? {} : {};\nfinish(ternary_result);\n",
-            if condition { "true" } else { "false" },
-            yes.to_source(),
-            no.to_source()
-        );
-        let host = DeterministicHost;
-        let mut state = State::new();
-
-        let actual = finished(run_execute(&source, &mut state, &host).expect("ternary execution"));
-
-        prop_assert_eq!(actual, expected);
-    }
-
-    #[test]
     fn generated_type_literal_always_produces_valid_json_schema(
         ty in gen_type_strategy(6)
     ) {

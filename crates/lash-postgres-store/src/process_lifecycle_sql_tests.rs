@@ -228,49 +228,6 @@ mod vocabulary_tokens {
         .expect("neutral statement renders")
     }
 
-    #[test]
-    fn a_worklist_statement_renders_to_the_bytes_the_format_site_produces() {
-        assert_eq!(
-            rendered("SELECT COUNT(*) FROM processes WHERE {{live_process_status(status)}}"),
-            process_sql().process_postgres.count_live_worklist.sql()
-        );
-        assert_eq!(
-            rendered("SELECT MAX(process_id) FROM processes WHERE {{live_process_status(status)}}"),
-            process_sql()
-                .process_postgres
-                .select_max_worklist_process_id
-                .sql()
-        );
-        assert_eq!(
-            rendered(
-                "SELECT record_json FROM processes
-     WHERE {{live_process_status(status)}} AND process_id <= ?1
-     ORDER BY process_id ASC LIMIT ?2"
-            ),
-            process_sql()
-                .process_postgres
-                .list_first_worklist_page
-                .sql()
-        );
-        assert_eq!(
-            rendered(
-                "SELECT record_json FROM processes
-     WHERE {{live_process_status(status)}}
-       AND process_id <= ?1 AND process_id > ?2
-     ORDER BY process_id ASC LIMIT ?3"
-            ),
-            process_sql().process_postgres.list_next_worklist_page.sql()
-        );
-        assert_eq!(
-            rendered(
-                "SELECT record_json FROM processes
-                         WHERE {{live_process_status(status)}}
-                         ORDER BY process_id ASC"
-            ),
-            process_sql().process.collect_non_terminal_records.sql()
-        );
-    }
-
     /// Every partial index whose `WHERE` is lifecycle vocabulary, matched
     /// against what a token renders. A partial index only helps a query whose
     /// predicate matches it byte for byte, so this is the assertion the

@@ -127,15 +127,7 @@ fn the_checkpoint_probe_keeps_the_server_clock_as_its_fallback() {
             statement.name(),
         );
     }
-}
-
-#[test]
-fn a_production_build_injects_no_lease_epoch() {
-    // The injected epoch is a test seam. In a production build it is a
-    // compile-time `None`, so the probe's cutoff is the server clock and
-    // nothing a caller supplies can move it.
-    #[cfg(any(test, feature = "testing"))]
+    // With no lease clock injected the probe binds NULL and reads the server
+    // clock; in a production build the seam has no parameter at all.
     assert_eq!(super::injected_lease_epoch_ms(None), None);
-    #[cfg(not(any(test, feature = "testing")))]
-    assert_eq!(super::injected_lease_epoch_ms(), None);
 }

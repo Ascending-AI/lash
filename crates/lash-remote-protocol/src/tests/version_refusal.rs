@@ -8,23 +8,6 @@ pub(super) fn decode_empty_envelope(protocol_version: u32) -> Result<(), RemoteP
     Envelope::<EmptyEnvelopeBody>::decode_json(wire.as_bytes()).map(drop)
 }
 
-/// Refusal witness (FIG-1123): the generation-61 decoder rejects its immediate
-/// predecessor before attempting to decode the envelope body.
-#[test]
-fn historical_remote_protocol_generation_60_is_refused() {
-    const PREDECESSOR: u32 = 60;
-    assert_eq!(PREDECESSOR + 1, 61, "historical generation adjacency pin");
-    let error = decode_empty_envelope(PREDECESSOR)
-        .expect_err("generation-60 remote envelope must be refused");
-    assert!(matches!(
-        error,
-        RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: PREDECESSOR,
-            expected: REMOTE_PROTOCOL_VERSION,
-        }
-    ));
-}
-
 /// Captured by main's Envelope writer at 11f6b0eb40f6; no hand-edited wire bytes.
 #[test]
 fn historical_remote_protocol_generation_61_is_refused() {
@@ -120,17 +103,6 @@ fn historical_remote_protocol_generation_65_is_refused() {
     ));
 }
 
-#[test]
-fn pre_suppression_rename_remote_protocol_is_rejected_with_literal_versions() {
-    assert!(matches!(
-        decode_empty_envelope(33),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 33,
-            expected: 99,
-        })
-    ));
-}
-
 /// Captured by main's Envelope writer at 24736fac5; no hand-edited wire bytes.
 #[test]
 fn historical_remote_protocol_generation_67_is_refused() {
@@ -151,14 +123,14 @@ fn historical_remote_protocol_generation_67_is_refused() {
     ));
 }
 
-/// Windows 68-70 are claimed by bump members that never landed here, so a peer
-/// speaking any of them is refused by this build too. 72 and 73 are the two
-/// generations this window replaced, and they are refused for the same reason:
-/// exact-match negotiation accepts one number and refuses every other, landed
-/// or not.
+/// Exact-match negotiation accepts one number and refuses every other, landed
+/// or not: 33 is the pre-suppression-rename generation, 60 is generation 61's
+/// landed predecessor (FIG-1123), windows 68-70 are claimed by bump members
+/// that never landed here, and 72-73 are the two generations that window
+/// replaced.
 #[test]
-fn unlanded_intermediate_remote_protocol_generations_are_refused() {
-    for predecessor in [68, 69, 70, 72, 73] {
+fn retired_and_unlanded_remote_protocol_generations_are_refused() {
+    for predecessor in [33, 60, 68, 69, 70, 72, 73] {
         assert!(
             matches!(
                 decode_empty_envelope(predecessor),

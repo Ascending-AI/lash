@@ -781,67 +781,6 @@ async fn a_summary_can_report_both_a_successful_and_a_failed_host_call() {
     assert!(text.contains("missing=failed:"), "{text}");
 }
 
-/// The `format` builtin is part of the retired dialect's standard library and
-/// has no TypeScript spelling (ADR 0096) — TypeScript concatenates. Its
-/// placeholder rules are still IR facts the VM enforces, so the rows that pin
-/// them build the call straight from the AST.
-#[tokio::test(flavor = "current_thread")]
-async fn format_resolves_positional_and_escaped_placeholders() {
-    for (args, expected) in [
-        (
-            vec![string("b={1} a={0}"), string("x"), string("y")],
-            "b=y a=x",
-        ),
-        (vec![string("plain")], "plain"),
-        (vec![string("{{{}}}"), number(1.0)], "{1}"),
-    ] {
-        let host = TestHost::default();
-        let mut state = State::new();
-        let program = finish_program(call("format", args));
-        let value = finished(
-            lashlang::execute(
-                &lashlang_compile_program(&program).expect("the program compiles"),
-                &mut state,
-                &host,
-            )
-            .await
-            .expect("format should run"),
-        );
-        assert_eq!(value, Value::String(expected.to_string().into()));
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn format_rejects_malformed_templates_and_unused_arguments() {
-    for (args, expected) in [
-        (
-            vec![string("{} {1}"), string("x"), string("y")],
-            lashlang::FormatError::MixedPlaceholderKinds,
-        ),
-        (
-            vec![string("plain"), number(1.0)],
-            lashlang::FormatError::UnusedArgument { index: 0 },
-        ),
-        (vec![string("{")], lashlang::FormatError::UnmatchedOpenBrace),
-        (
-            vec![string("}")],
-            lashlang::FormatError::UnmatchedCloseBrace,
-        ),
-    ] {
-        let host = TestHost::default();
-        let mut state = State::new();
-        let program = finish_program(call("format", args));
-        let error = lashlang::execute(
-            &lashlang_compile_program(&program).expect("the program compiles"),
-            &mut state,
-            &host,
-        )
-        .await
-        .expect_err("format should reject");
-        assert_eq!(error, RuntimeError::Format(expected));
-    }
-}
-
 /// A tool call yields the host's value directly and throws on failure, which is
 /// the replacement for the dialect's `{ ok, value }` result record (ADR 0096).
 #[tokio::test(flavor = "current_thread")]

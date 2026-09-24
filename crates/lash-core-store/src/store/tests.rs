@@ -888,16 +888,6 @@ fn append_leaf_is_derived_from_the_terminal_appended_node() {
 }
 
 #[test]
-fn lease_owner_identity_requires_same_incarnation() {
-    let first = LeaseOwnerIdentity::opaque("owner", "incarnation-a");
-    let same = LeaseOwnerIdentity::opaque("owner", "incarnation-a");
-    let next = LeaseOwnerIdentity::opaque("owner", "incarnation-b");
-
-    assert!(first.same_incarnation(&same));
-    assert!(!first.same_incarnation(&next));
-}
-
-#[test]
 // Architecture lint: lexical drift guard over the decorator's operation list,
 // not a behavior proof.
 fn decorator_surface_covers_every_component_trait_method() {

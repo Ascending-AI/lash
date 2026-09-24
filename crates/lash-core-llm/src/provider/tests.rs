@@ -655,8 +655,6 @@ impl crate::Clock for RecordingClock {
 
 #[path = "tests/classifier_tests.rs"]
 mod classifier_tests;
-#[path = "tests/clock.rs"]
-mod clock_contract;
 
 #[derive(Debug)]
 struct MetricsTransport {

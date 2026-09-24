@@ -12,15 +12,29 @@ note: method defined here
    |     pub fn memory_limit(
    |            ^^^^^^^^^^^^
 
-error[E0308]: arguments to this function are incorrect
-  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:22:13
+error[E0308]: mismatched types
+  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:24:28
    |
-22 |     let _ = ExecutionBounds::new(
+24 |         .instruction_limit(MemoryBound::mebibytes(64))
+   |          ----------------- ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `InstructionBound`, found `MemoryBound`
+   |          |
+   |          arguments to this method are incorrect
+   |
+note: method defined here
+  --> $WORKSPACE/crates/lash-protocol-rlm/src/plugin/config.rs
+   |
+   |     pub fn instruction_limit(
+   |            ^^^^^^^^^^^^^^^^^
+
+error[E0308]: arguments to this function are incorrect
+  --> tests/ui/rlm_memory_limit_cannot_take_an_instruction_budget.rs:31:13
+   |
+31 |     let _ = ExecutionBounds::new(
    |             ^^^^^^^^^^^^^^^^^^^^
-23 |         MemoryBound::mebibytes(64),
+32 |         MemoryBound::mebibytes(64),
    |         -------------------------- expected `InstructionBound`, found `MemoryBound`
-24 |         WallClockBound::secs(30),
-25 |         InstructionBound::instructions(1_000_000),
+33 |         WallClockBound::secs(30),
+34 |         InstructionBound::instructions(1_000_000),
    |         ----------------------------------------- expected `MemoryBound`, found `InstructionBound`
    |
 note: associated function defined here
@@ -30,9 +44,9 @@ note: associated function defined here
    |                  ^^^
 help: swap these arguments
    |
-22 ~     let _ = ExecutionBounds::new(
-23 +         InstructionBound::instructions(1_000_000),
-24 +         WallClockBound::secs(30),
-25 +         MemoryBound::mebibytes(64),
-26 ~     );
+31 ~     let _ = ExecutionBounds::new(
+32 +         InstructionBound::instructions(1_000_000),
+33 +         WallClockBound::secs(30),
+34 +         MemoryBound::mebibytes(64),
+35 ~     );
    |

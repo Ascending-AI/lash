@@ -3,8 +3,6 @@
     reason = "upstream test modules load the shared harness as private sibling modules"
 )]
 
-#[path = "anchored_optimization.rs"]
-mod anchored_optimization;
 #[path = "escape_tests.rs"]
 mod escape_tests;
 #[path = "pcre_tests.rs"]

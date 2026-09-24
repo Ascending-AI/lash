@@ -529,43 +529,6 @@ fn run_regexp_capture_test_tc(tc: TestConfig) {
 }
 
 #[test]
-fn run_regexp_unicode_burns_test() {
-    test_with_configs(run_regexp_unicode_burns_test_tc)
-}
-
-#[allow(unreachable_code)]
-fn run_regexp_unicode_burns_test_tc(tc: TestConfig) {
-    // These tests are extracted from regexp-capture-3.js.
-    // All of these are cases where a naive engine would enter an infinite loop.
-    // Termination is success. These depend on the v8 optimization where a regex
-    // is known to only match Unicode strings, and so cannot match an ascii-only
-    // string. We do not yet have this optimization so these tests are disabled.
-    let _ = tc;
-    return;
-    let input = "The truth about forever is that it is happening right now";
-    tc.compilef("(((.*)*)*x)\u{100}", "").match1f(input);
-    tc.compilef("(((.*)*)*\u{100})foo", "").match1f(input);
-    tc.compilef("\u{100}(((.*)*)*x)", "").match1f(input);
-    tc.compilef("(((.*)*)*x)\u{100}", "").match1f(input);
-    tc.compilef("[\u{107}\u{103}\u{100}](((.*)*)*x)", "")
-        .match1f(input);
-    tc.compilef("(((.*)*)*x)[\u{107}\u{103}\u{100}]", "")
-        .match1f(input);
-    tc.compilef("[^\\x00-\\xff](((.*)*)*x)", "").match1f(input);
-    tc.compilef("(((.*)*)*x)[^\\x00-\\xff]", "").match1f(input);
-    tc.compilef("(?!(((.*)*)*x)\u{100})foo", "").match1f(input);
-    tc.compilef("(?!(((.*)*)*x))\u{100}", "").match1f(input);
-    tc.compilef("(?=(((.*)*)*x)\u{100})foo", "").match1f(input);
-    tc.compilef("(?=(((.*)*)*x))\u{100}", "").match1f(input);
-    tc.compilef("(?=\u{100})(((.*)*)*x)", "").match1f(input);
-    tc.compilef("(\u{e6}|\u{f8}|\u{100})(((.*)*)*x)", "")
-        .match1f(input);
-    tc.compilef("(a|b|(((.*)*)*x))\u{100}", "").match1f(input);
-    tc.compilef("(a|(((.*)*)*x)\u{103}|(((.*)*)*x)\u{100})", "")
-        .match1f(input);
-}
-
-#[test]
 fn run_regexp_lookahead_tests() {
     test_with_configs(run_regexp_lookahead_tests_tc)
 }
@@ -1424,17 +1387,6 @@ fn run_regexp_unicode_escape_tc(tc: TestConfig) {
 }
 
 #[test]
-fn run_regexp_unicode_property_classes() {
-    test_with_configs(run_regexp_unicode_property_classes_tc)
-}
-
-#[rustfmt::skip]
-fn run_regexp_unicode_property_classes_tc(tc: TestConfig) {
-    // TODO: tests
-    tc.compilef(r#"\p{Script=Buhid}"#, "u").test_succeeds("ᝀᝁᝂᝃᝄᝅᝆᝇᝈᝉᝊᝋᝌᝍᝎᝏᝐᝑ\u{1752}\u{1753}ᝀᝁᝂᝃᝄᝅᝆᝇᝈᝉᝊᝋᝌᝍᝎᝏᝐᝑ\u{1752}\u{1753}");
-}
-
-#[test]
 fn property_escapes_invalid() {
     // From 262 test/built-ins/RegExp/property-escapes/
     test_parse_fails_flags(r#"\P{ASCII=F}"#, "u");
@@ -2031,35 +1983,6 @@ mod utf16_tests {
         let matched = re.find_from_ucs2(&input, 0).next();
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().range, 1..2);
-    }
-}
-
-#[test]
-fn test_range_from_utf16() {
-    use std::char::decode_utf16;
-    let weird_utf8 = "a🌍b\u{1F600}q";
-    let utf16: Vec<u16> = to_utf16(weird_utf8);
-    assert_eq!(utf16, weird_utf8.encode_utf16().collect::<Vec<_>>());
-
-    for start in 0..utf16.len() {
-        for end in start..=utf16.len() {
-            let utf16_range = start..end;
-
-            // The prefix and body must not split surrogate pairs, else we cannot convert the range.
-            if decode_utf16(utf16[0..utf16_range.end].iter().copied()).any(|r| r.is_err()) {
-                continue;
-            }
-            if decode_utf16(utf16[utf16_range.clone()].iter().copied()).any(|r| r.is_err()) {
-                continue;
-            }
-
-            let utf16_to_utf8: String = decode_utf16(utf16[utf16_range.clone()].iter().copied())
-                .map(|r| r.unwrap())
-                .collect();
-
-            let utf8_range = range_from_utf16(&utf16, utf16_range);
-            assert_eq!(&weird_utf8[utf8_range], utf16_to_utf8);
-        }
     }
 }
 

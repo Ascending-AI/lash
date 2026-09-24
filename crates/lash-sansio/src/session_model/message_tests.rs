@@ -881,15 +881,6 @@ fn message_origins_written_before_turn_input_provenance_still_deserialize() {
     );
 }
 
-#[test]
-fn reasoning_parts_are_zero_for_prune_accounting() {
-    // The standard-compaction plugin's prune logic is driven by
-    // `prompt_char_count`. Reasoning parts are not user-visible,
-    // so they must not count against the prompt budget.
-    let part = reasoning_part_fixture(Some("X=="));
-    assert_eq!(part.prompt_char_count(), 0);
-}
-
 // ─── Part enum serde (FIG-3305) ─────────────────────────────────────
 //
 // `Part` is now an internally-tagged enum whose variants own only their

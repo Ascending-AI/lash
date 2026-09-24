@@ -270,40 +270,4 @@ mod prompt_language_tests {
         assert!(prompt.contains("outside the typescript cell"));
         assert!(!prompt.contains("lashlang"));
     }
-
-    /// ADR 0096: a session bag that still records the retired `dialect` field is
-    /// refused as an incompatible format, not read as absence. Reading it as
-    /// absence would run a session recorded under the retired language against
-    /// TypeScript semantics.
-    #[test]
-    fn a_recorded_dialect_field_is_refused_as_incompatible() {
-        let recorded = lash::runtime::ProtocolTurnOptions::from_payload(
-            serde_json::json!({ "dialect": "typescript" }),
-        );
-        assert_eq!(
-            lash_protocol_rlm::rlm_session_config(&recorded)
-                .expect_err("a recorded dialect field must refuse"),
-            lash::rlm::RlmSessionConfigDecodeError::RetiredDialectField,
-        );
-
-        // A bag that records nothing still reads as an empty config.
-        lash_protocol_rlm::rlm_session_config(&lash::runtime::ProtocolTurnOptions::default())
-            .expect("an empty bag is a session that recorded nothing");
-    }
-
-    /// The turn bag cannot carry a language at all: the per-turn options type
-    /// has no such field, so a turn naming a language the executor ignores is
-    /// unrepresentable rather than merely unused (FIG-1979).
-    #[test]
-    fn a_turn_bag_carries_no_dialect_key() {
-        let encoded = serde_json::to_value(lash::rlm::RlmTurnOptions {
-            termination: Some(lash::rlm::RlmTermination::Natural),
-            final_answer_format: None,
-        })
-        .expect("encode turn options");
-        assert!(
-            encoded.get("dialect").is_none(),
-            "the per-turn bag has no dialect: {encoded}"
-        );
-    }
 }

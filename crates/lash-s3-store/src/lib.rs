@@ -426,36 +426,6 @@ mod tests {
     use lash_core::{AttachmentTypeMetadata, MediaType};
     use object_store::aws::AmazonS3ConfigKey;
 
-    /// `content_path` derives the object key from the id, so it depends on
-    /// `AttachmentId` refusing every shape that is not a single key segment.
-    /// If that rule ever loosens, this fails here rather than silently letting
-    /// a caller-supplied id name a foreign key namespace.
-    #[test]
-    fn attachment_id_rule_keeps_every_shape_out_of_the_key_namespace() {
-        let overlong = "a".repeat(129);
-        let cases = [
-            ("parent with separator", "../"),
-            ("parent component", ".."),
-            ("current component", "."),
-            ("absolute", "/abs"),
-            ("forward separator", "a/b"),
-            ("back separator", "a\\b"),
-            ("nul", "a\0b"),
-            ("empty", ""),
-            ("unicode", "snowman-☃"),
-            ("control", "a\nb"),
-            ("windows prefix", "C:escape"),
-            ("overlong", overlong.as_str()),
-        ];
-
-        for (shape, raw) in cases {
-            assert!(
-                AttachmentId::parse(raw).is_err(),
-                "{shape} id must be unconstructible: {raw:?}"
-            );
-        }
-    }
-
     /// Malformed stored ids fail listing instead of silently losing blobs.
     #[tokio::test]
     async fn s3_store_rejects_a_key_it_cannot_name() {

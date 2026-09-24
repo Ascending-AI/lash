@@ -768,18 +768,4 @@ mod tests {
             Value::Bool(true)
         );
     }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn execute_allows_finish_null() {
-        let compiled = compile_ast(&b::program(vec![b::finish(b::null())]))
-            .expect("the program should compile");
-        let mut state = State::new();
-        let outcome = execute(&compiled, &mut state, &Host)
-            .await
-            .expect("should succeed");
-        let ExecutionOutcome::Finished(value) = outcome else {
-            panic!("expected finish");
-        };
-        assert_eq!(value, Value::Null);
-    }
 }

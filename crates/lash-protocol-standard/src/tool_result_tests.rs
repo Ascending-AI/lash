@@ -78,6 +78,7 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         ToolValue::Attachment(attachment.clone()),
     );
     let notice = lash_sansio::AttachmentMaterializationNotice::no_provider_accepts(&attachment);
+    let notice_placeholder = notice.model_placeholder();
     let mut noticed = ModelToolReturn::from_output(
         "call-notice".to_string(),
         "shot".to_string(),
@@ -85,7 +86,7 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
     );
     noticed
         .parts
-        .push(ModelToolReturnPart::text(notice.model_placeholder()));
+        .push(ModelToolReturnPart::text(notice_placeholder.clone()));
     noticed.attachment_notices.push(notice);
 
     let returns = vec![
@@ -157,15 +158,41 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         })
         .collect();
     assert_eq!(result_blocks.len(), returns.len());
-    for ((call_id, content), model_return) in result_blocks.iter().zip(&returns) {
-        assert_eq!(call_id, &model_return.call_id);
-        let expected: Vec<_> = model_return
-            .parts
-            .iter()
-            .filter(|block| !matches!(block, ModelToolReturnPart::Text { text } if text.is_empty()))
-            .cloned()
-            .collect();
-        assert_eq!(content, &expected, "{call_id} keeps its blocks in order");
+    let expected_blocks: Vec<(&str, Vec<ModelToolReturnPart>)> = vec![
+        (
+            "call-array",
+            vec![
+                ModelToolReturnPart::text("[\"before\","),
+                ModelToolReturnPart::Attachment(attachment.clone()),
+                ModelToolReturnPart::text(",\"after\"]"),
+            ],
+        ),
+        (
+            "call-object",
+            vec![
+                ModelToolReturnPart::text("{\"caption\":\"shot\",\"image\":"),
+                ModelToolReturnPart::Attachment(attachment.clone()),
+                ModelToolReturnPart::text("}"),
+            ],
+        ),
+        ("call-empty", vec![]),
+        ("call-text", vec![ModelToolReturnPart::text("\"ok\"")]),
+        (
+            "call-notice",
+            vec![
+                ModelToolReturnPart::Attachment(attachment.clone()),
+                ModelToolReturnPart::text(notice_placeholder),
+            ],
+        ),
+    ];
+    for ((call_id, content), (expected_call_id, expected_content)) in
+        result_blocks.iter().zip(&expected_blocks)
+    {
+        assert_eq!(call_id, expected_call_id);
+        assert_eq!(
+            content, expected_content,
+            "{call_id} keeps its blocks in order"
+        );
     }
     assert!(
         rendered.messages[1].blocks.iter().all(|block| matches!(

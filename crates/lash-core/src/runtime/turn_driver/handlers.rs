@@ -803,16 +803,27 @@ mod tests {
 
     #[test]
     fn foreground_exec_graph_key_uses_runtime_invocation_identity() {
-        let invocation = RuntimeEffectInvocation::new(
+        let effect = RuntimeInvocation::effect(
             EffectAddress::new(ExecutionScope::turn("session-1", "turn-1"), "replay-key")
                 .expect("valid foreground exec address"),
             RuntimeAttribution::for_turn("session-1", "turn-1", 2, 3),
             "effect-7",
         );
-
         assert_eq!(
-            foreground_effect_graph_key(&invocation),
-            "effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"session-1\",\"execution_id\":\"turn-1\"}:\"replay-key\""
+            foreground_exec_graph_key(&effect).as_deref(),
+            Some(
+                "effect:{\"version\":2,\"kind\":\"turn\",\"session_id\":\"session-1\",\"execution_id\":\"turn-1\"}:\"replay-key\""
+            )
         );
+
+        let process = RuntimeInvocation {
+            attribution: RuntimeAttribution::for_turn("session-1", "turn-1", 2, 3),
+            subject: crate::RuntimeSubject::Process {
+                process_id: crate::ProcessId::from("process-1".to_string()),
+            },
+            caused_by: None,
+            replay: None,
+        };
+        assert_eq!(foreground_exec_graph_key(&process), None);
     }
 }

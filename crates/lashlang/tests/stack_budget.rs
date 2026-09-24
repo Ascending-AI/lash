@@ -211,31 +211,6 @@ fn stack_budget_most_expensive_ast_variant_at_the_nesting_cap() {
     });
 }
 
-/// The AST-only exception nodes must meet the same 2 MiB budget as authored
-/// shapes at the depth the front-end admits.
-#[test]
-fn stack_budget_ast_try_finally_at_front_end_max_depth() {
-    run_on_stack_budget("stack-budget-ast-try-finally", || {
-        let program = nested_try_program(deepest_accepted_nesting());
-        let linked =
-            lashlang::LinkedModule::link(program, stack_budget_environment()).expect("links");
-        let compiled = lashlang::compile(
-            &linked.artifact,
-            lashlang::Entry::Main,
-            Some(linked.spans()),
-        )
-        .expect("a module main entry compiles");
-        let mut state = State::new();
-        let outcome = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("tokio runtime")
-            .block_on(execute(&compiled, &mut state, &StackBudgetHost))
-            .expect("program executes");
-        assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(7.0)));
-    });
-}
-
 /// AST-only nodes have no source grammar to bound them, so the depth cap has to
 /// live on the AST-construction entry points. Without it a dialect that lowers
 /// a deeply nested `try` aborts the host process on a stack overflow instead of

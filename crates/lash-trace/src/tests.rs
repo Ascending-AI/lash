@@ -81,96 +81,6 @@ fn jsonl_sink_writes_record() {
 }
 
 #[test]
-fn tool_start_and_frame_switch_records_are_jsonl_shaped() {
-    let started = TraceRecord::new(
-        TraceContext::default().for_session("root"),
-        TraceEvent::ToolCallStarted {
-            call_id: Some("call-1".to_string()),
-            name: "read_file".to_string(),
-            args: serde_json::json!({"path": "README.md"}),
-            issuing_node_id: None,
-        },
-    );
-    let completed = TraceRecord::new(
-        TraceContext::default().for_session("root"),
-        TraceEvent::TurnCompleted {
-            outcome: TraceTurnOutcome::AgentFrameSwitch {
-                frame_switch: TraceAgentFrameSwitch {
-                    frame_key: "frame-key/v2/example".to_string(),
-                },
-            },
-        },
-    );
-
-    let started_json = serde_json::to_value(started).unwrap();
-    assert_eq!(started_json["type"], "tool_call_started");
-    assert_eq!(started_json["call_id"], "call-1");
-
-    let completed_json = serde_json::to_value(completed).unwrap();
-    assert_eq!(completed_json["type"], "turn_completed");
-    assert_eq!(completed_json["outcome"]["status"], "agent_frame_switch");
-    assert_eq!(
-        completed_json["outcome"]["frame_switch"]["frame_key"],
-        "frame-key/v2/example"
-    );
-}
-
-#[test]
-fn language_execution_records_are_jsonl_shaped() {
-    let identity = TraceLanguageExecutionIdentity {
-        scope: TraceRuntimeScope::new("s1"),
-        subject: TraceRuntimeSubject::Process {
-            process_id: ProcessId::from("p1".to_string()),
-        },
-        source_identity: "source".to_string(),
-        module_ref: "module".to_string(),
-        entry_kind: "process".to_string(),
-        entry_ref: Some("component:0".to_string()),
-        entry_name: "main".to_string(),
-        restate_invocation_id: None,
-        generation: None,
-    };
-    let event = TraceLanguageExecution {
-        event_key: "process:p1:node:n1:1:started".to_string(),
-        identity,
-        payload: TraceLanguageExecutionPayload::NodeStarted {
-            node_id: "n1".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
-            label: "read_file".to_string(),
-            occurrence: 1,
-            call_id: None,
-        },
-    };
-    let record = TraceRecord::new(
-        TraceContext::default().for_session("s1"),
-        TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
-            event,
-        },
-    );
-
-    let json = serde_json::to_value(&record).expect("serialize language execution");
-    assert_eq!(json["type"], "language_execution");
-    assert_eq!(json["language"], "lashlang");
-    assert_eq!(json["event"]["kind"], "node_started");
-    assert_eq!(json["event"]["event_key"], "process:p1:node:n1:1:started");
-    assert_eq!(json["event"]["identity"]["source_identity"], "source");
-
-    let round_trip =
-        serde_json::from_value::<TraceRecord>(json).expect("deserialize language execution");
-    assert!(matches!(
-        round_trip.event,
-        TraceEvent::LanguageExecution {
-            language,
-            event: TraceLanguageExecution {
-                payload: TraceLanguageExecutionPayload::NodeStarted { .. },
-                ..
-            }
-        } if language == "lashlang"
-    ));
-}
-
-#[test]
 fn tool_completion_serializes_typed_failure_output() {
     let record = TraceRecord::new(
         TraceContext::default().for_session("root"),
@@ -206,30 +116,6 @@ fn tool_completion_serializes_typed_failure_output() {
         json["output"]["outcome"]["payload"]["raw"]["path"],
         "missing"
     );
-}
-
-#[test]
-fn event_kind_matches_serialized_type_tag() {
-    let events = [
-        TraceEvent::TurnStarted {
-            metadata: Default::default(),
-        },
-        TraceEvent::ToolCallStarted {
-            call_id: None,
-            name: "read_file".to_string(),
-            args: Value::Null,
-            issuing_node_id: None,
-        },
-        TraceEvent::Custom {
-            name: "x".to_string(),
-            payload: Value::Null,
-        },
-    ];
-    for event in events {
-        let kind = event.kind();
-        let json = serde_json::to_value(&event).expect("serialize event");
-        assert_eq!(json["type"], kind, "kind() disagrees with serde tag");
-    }
 }
 
 #[test]

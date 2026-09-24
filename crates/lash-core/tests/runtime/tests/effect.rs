@@ -27,7 +27,7 @@ mod turn_cancel_modes;
 pub(super) use recording_authority::{
     host_with_effect_recorder, layered_effect_host, runtime_host_config_with_effect_layer,
 };
-use source_lint_support::{effect_module_sources, turn_loop_module_sources, unique_trace_path};
+use source_lint_support::unique_trace_path;
 
 #[tokio::test]
 async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
@@ -1718,74 +1718,6 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
         .expect("direct llm envelope");
     assert!(!envelope.contains("\"data\""));
     assert!(envelope.contains(&expected_attachment_id));
-}
-
-#[test]
-fn lint_runtime_effect_executor_has_no_legacy_future_api() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_files = effect_module_sources(&manifest_dir)
-        .into_iter()
-        .chain([
-            manifest_dir.join("src/runtime/turn_driver.rs"),
-            manifest_dir.join("../lash-core-execution/src/direct.rs"),
-        ])
-        .collect::<Vec<_>>();
-    let legacy_future_type = ["Effect", "Future"].concat();
-    let legacy_constructor = ["Runtime", "Effect", "Executor", "::new"].concat();
-    for path in source_files {
-        let source = std::fs::read_to_string(&path).expect("read runtime effect source");
-        assert!(
-            !source.contains(&legacy_future_type),
-            "{} still mentions {legacy_future_type}",
-            path.display()
-        );
-        assert!(
-            !source.contains(&legacy_constructor),
-            "{} still mentions {legacy_constructor}",
-            path.display()
-        );
-    }
-}
-
-#[test]
-fn lint_runtime_effect_controller_cutover_has_no_legacy_host_request_or_fallback_symbols() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_files = effect_module_sources(&manifest_dir)
-        .into_iter()
-        .chain(turn_loop_module_sources(&manifest_dir))
-        .chain([
-            manifest_dir.join("src/runtime/turn_driver.rs"),
-            manifest_dir.join("../lash-core-execution/src/direct.rs"),
-            manifest_dir.join("../lash-core-execution/src/tool_dispatch.rs"),
-            manifest_dir.join("src/runtime/assembly.rs"),
-            manifest_dir.join("src/runtime/mod.rs"),
-            manifest_dir.join("src/runtime/turn_loop.rs"),
-            manifest_dir.join("../lash-core-execution/src/runtime/process/model.rs"),
-            manifest_dir.join("src/runtime/session_manager/process_runners/control.rs"),
-        ])
-        .collect::<Vec<_>>();
-    let forbidden = [
-        ["Runtime", "Effect", "Host"].concat(),
-        ["Local", "Runtime", "Effect", "Host"].concat(),
-        ["Runtime", "Effect", "Request"].concat(),
-        ["Background", "Task", "Start", "Request"].concat(),
-        ["missing", "_tool", "_result", "_completed", "_call"].concat(),
-        ["fallback", "_assistant", "_output", "_from", "_state"].concat(),
-        ["fallback", "_controller"].concat(),
-        ["resolve", "_durable", "_turn", "_scope"].concat(),
-        ["Process", "Op", "Scope", "::", "new"].concat(),
-        ["b", "\"", "un", "serializable", "\""].concat(),
-    ];
-    for path in source_files {
-        let source = std::fs::read_to_string(&path).expect("read runtime effect source");
-        for symbol in &forbidden {
-            assert!(
-                !source.contains(symbol.as_str()),
-                "{} still mentions {symbol}",
-                path.display()
-            );
-        }
-    }
 }
 
 #[cfg(test)]

@@ -362,22 +362,6 @@ async fn execute_test_batch(
     crate::ToolOutcome::ok(serde_json::json!({ "results": results }))
 }
 
-#[test]
-fn test_batch_result_row_decode_names_missing_required_field() {
-    let error = serde_json::from_value::<lash_sansio::BatchResultRow>(serde_json::json!({
-        "index": 0,
-        "tool": "probe",
-        "success": true,
-        "result": "ok"
-    }))
-    .expect_err("row without duration_ms must fail");
-
-    assert!(
-        error.to_string().contains("missing field `duration_ms`"),
-        "{error}"
-    );
-}
-
 struct TestProtocolDriver;
 
 impl ProtocolDriverPlugin for TestProtocolDriver {

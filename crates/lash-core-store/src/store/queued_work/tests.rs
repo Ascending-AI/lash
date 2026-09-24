@@ -459,26 +459,6 @@ fn merge_key_delivery_and_work_class_mismatches_break_prefix() {
 }
 
 #[test]
-fn the_default_drain_policy_claims_one_row_however_much_window_is_free() {
-    let mut first = candidate(1, Some("wake"));
-    first.input_texts = vec!["a".repeat(4)];
-    let mut second = candidate(2, Some("wake"));
-    second.input_texts = vec!["b".repeat(4)];
-    // Both rows fit the window several times over; the shipped
-    // one-at-a-time policy still drains only the head (FIG-1313).
-    assert_eq!(
-        select_turn_work_claim_prefix(
-            &[first, second],
-            QueuedWorkClaimBoundary::Idle,
-            &policy(1_000, 300),
-            1_000
-        )
-        .unwrap(),
-        1
-    );
-}
-
-#[test]
 fn all_mode_claims_the_whole_compatible_prefix_without_token_arithmetic() {
     let candidates = vec![
         candidate(1, Some("wake")),

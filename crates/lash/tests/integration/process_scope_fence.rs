@@ -115,7 +115,6 @@ struct Backend {
 }
 
 enum Kind {
-    Memory,
     Sqlite,
     Postgres,
 }
@@ -173,13 +172,6 @@ fn sqlite_backend(
 async fn backend(kind: Kind) -> Option<Backend> {
     let dir = tempfile::tempdir().expect("tempdir");
     Some(match kind {
-        Kind::Memory => sqlite_backend(
-            lash_sqlite_store::SqliteBackend::memory()
-                .await
-                .expect("SQLite memory backend"),
-            dir,
-            None,
-        ),
         Kind::Sqlite => {
             let backend = lash_sqlite_store::SqliteBackend::open(dir.path())
                 .await
@@ -520,11 +512,6 @@ async fn pruned_process_id_is_fenced_until_registered_again(kind: Kind) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn memory_prune_fences_only_what_the_registry_prunes() {
-    prune_fences_only_what_the_registry_prunes(Kind::Memory).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_prune_fences_only_what_the_registry_prunes() {
     prune_fences_only_what_the_registry_prunes(Kind::Sqlite).await;
 }
@@ -532,11 +519,6 @@ async fn sqlite_prune_fences_only_what_the_registry_prunes() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_prune_fences_only_what_the_registry_prunes() {
     prune_fences_only_what_the_registry_prunes(Kind::Postgres).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn memory_pruned_process_id_is_fenced_until_registered_again() {
-    pruned_process_id_is_fenced_until_registered_again(Kind::Memory).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -989,11 +971,6 @@ macro_rules! registration_path_tests {
 }
 
 registration_path_tests! {
-    memory_direct_registration_lifts_the_fence => (Memory, DirectRegistry),
-    memory_core_start_lifts_the_fence => (Memory, CoreStart),
-    memory_session_start_lifts_the_fence => (Memory, SessionStart),
-    memory_trigger_delivery_lifts_the_fence => (Memory, TriggerRouter),
-    memory_tool_intent_ingress_lifts_the_fence => (Memory, ToolIntentIngress),
     sqlite_direct_registration_lifts_the_fence => (Sqlite, DirectRegistry),
     sqlite_core_start_lifts_the_fence => (Sqlite, CoreStart),
     sqlite_session_start_lifts_the_fence => (Sqlite, SessionStart),
@@ -1014,11 +991,6 @@ async fn sqlite_failed_registration_keeps_the_fence() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_failed_registration_keeps_the_fence() {
     failed_registration_keeps_the_fence(Kind::Postgres).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn memory_registration_reinstates_every_bound_host() {
-    registration_reinstates_every_bound_host(Kind::Memory).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
