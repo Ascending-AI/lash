@@ -1140,6 +1140,16 @@ fn register_opener_inner(
 /// The intent-admission gate a commit-boundary law installs around the tier's
 /// process service: which call ids' recorded-intent writes may land, what is
 /// parked inside `admit`, and what has landed — in order.
+///
+/// A landing is keyed by the intent's recorded identity (its derived process
+/// id or its replay key), never by the call that carried it. An engine that
+/// replays its drive — Restate re-runs a handler from the top of its journal
+/// whenever it resumes one — calls the process service again for every intent
+/// the drain already landed, under the same identity, and the effect boundary
+/// answers that call with the recorded outcome. The repeat is the same
+/// landing, so it records nothing; a repeat whose outcome differs from the
+/// recorded one is a second landing and is recorded again, so the laws' order
+/// assertions catch it.
 #[derive(Default)]
 struct IntentSink {
     /// When set, every intent write parks until `release_all`.
@@ -1151,6 +1161,9 @@ struct IntentSink {
     blocked: std::sync::Mutex<std::collections::HashSet<String>>,
     /// `(call_id, kind)` in the order the writes landed.
     landed: std::sync::Mutex<Vec<(String, &'static str)>>,
+    /// Each landed intent's recorded identity, and the outcome its first
+    /// landing returned once it has returned.
+    landings: std::sync::Mutex<HashMap<String, Option<String>>>,
     /// Signalled on every hold/release/block change.
     changed: Notify,
 }
@@ -1242,9 +1255,42 @@ impl IntentSink {
         .unwrap_or_else(|_| panic!("fewer than {n} intent writes landed"))
     }
 
-    fn record_landed(&self, call_id: &str, kind: &'static str) {
+    /// Records the landing of the intent `identity` names, the first time
+    /// the drain reaches it. A replayed drain reaching it again records
+    /// nothing: see [`Self::confirm_landed`] for what the repeat must return.
+    fn record_landed(&self, call_id: &str, kind: &'static str, identity: &str) {
+        if self
+            .landings
+            .lock_recover()
+            .insert(identity.to_string(), None)
+            .is_some()
+        {
+            return;
+        }
         self.landed.lock_recover().push((call_id.to_string(), kind));
         self.changed.notify_waiters();
+    }
+
+    /// Checks what the landing of `identity` returned against what its first
+    /// landing returned. A replayed landing answers with the recorded
+    /// outcome; any other answer means the intent landed again, and it is
+    /// recorded as a second landing.
+    fn confirm_landed(&self, call_id: &str, kind: &'static str, identity: &str, outcome: String) {
+        let relanded = {
+            let mut landings = self.landings.lock_recover();
+            match landings.get_mut(identity) {
+                Some(Some(recorded)) => *recorded != outcome,
+                Some(first) => {
+                    *first = Some(outcome);
+                    false
+                }
+                None => false,
+            }
+        };
+        if relanded {
+            self.landed.lock_recover().push((call_id.to_string(), kind));
+            self.changed.notify_waiters();
+        }
     }
 }
 
@@ -1271,11 +1317,20 @@ impl crate::ProcessService for GatedProcessService {
                 .to_string(),
             _ => "<unlabelled>".to_string(),
         };
+        let identity = format!("start:{}", request.id);
         self.sink.admit(&call_id).await;
-        self.sink.record_landed(&call_id, "start");
-        self.inner
+        self.sink.record_landed(&call_id, "start", &identity);
+        let started = self
+            .inner
             .start_from_recorded_intent(session_id, request, scope)
-            .await
+            .await?;
+        self.sink.confirm_landed(
+            &call_id,
+            "start",
+            &identity,
+            format!("{}#{:?}", started.process_id, started.incarnation),
+        );
+        Ok(started)
     }
 
     async fn emit_event_recorded_intent(
@@ -1291,13 +1346,25 @@ impl crate::ProcessService for GatedProcessService {
             .as_str()
             .unwrap_or("<unlabelled>")
             .to_string();
+        let identity = format!("event:{replay_key}");
         self.sink.admit(&call_id).await;
-        self.sink.record_landed(&call_id, "event");
-        self.inner
+        self.sink.record_landed(&call_id, "event", &identity);
+        let event = self
+            .inner
             .emit_event_recorded_intent(
                 session_id, process_id, event_type, replay_key, payload, scope,
             )
-            .await
+            .await?;
+        self.sink.confirm_landed(
+            &call_id,
+            "event",
+            &identity,
+            format!(
+                "{}#{:?}#{}",
+                event.process_id, event.process_incarnation, event.sequence
+            ),
+        );
+        Ok(event)
     }
 
     async fn list_visible_for_attempt(
