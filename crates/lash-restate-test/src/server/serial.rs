@@ -116,6 +116,14 @@ impl Serial {
     pub fn trace(&self) -> &[Turn] {
         &self.trace
     }
+
+    /// Drop every waiting outside request's admission: each goes on, to
+    /// the 503 a shut server answers.
+    pub(super) fn shut_down(&mut self) {
+        self.external.clear();
+        self.ready.clear();
+        self.holder = None;
+    }
 }
 
 impl State {

@@ -166,6 +166,8 @@ pub struct State {
     pub anchor: (u64, std::time::Instant),
     /// Wall-clock microseconds the frame being applied was read at.
     pub frame_received_us: u128,
+    /// The last handle is gone: nothing starts, and ingress answers 503.
+    pub shut: bool,
 }
 
 impl State {
@@ -181,6 +183,7 @@ impl State {
             serial: (scheduling == super::Scheduling::Serial).then(super::serial::Serial::default),
             anchor: (start_ms, std::time::Instant::now()),
             frame_received_us: 0,
+            shut: false,
             now_ms: start_ms,
             ids: SeededIds::new(seed),
             seq: 0,
@@ -192,6 +195,15 @@ impl State {
             timers: BTreeMap::new(),
             crash_plan: CrashPlan::default(),
             stats: Stats::default(),
+        }
+    }
+
+    /// The server's last handle is gone: start nothing more, and let every
+    /// outside request that waits to land go, to a 503.
+    pub(super) fn shut_down(&mut self) {
+        self.shut = true;
+        if let Some(serial) = &mut self.serial {
+            serial.shut_down();
         }
     }
 
@@ -416,6 +428,9 @@ impl State {
     /// Run a new attempt of `key`: replay its whole journal to a fresh
     /// `Endpoint::handle` stream.
     pub fn start_attempt(&mut self, sh: &Arc<Shared>, key: InvKey) {
+        if self.shut {
+            return;
+        }
         let protocol = sh.config.protocol;
         let always_replay = sh.config.always_replay;
         let now_ms = self.now_ms;
@@ -466,7 +481,7 @@ impl State {
             Arc::clone(&probe),
             Arc::new(move || wake.notify_waiters()),
         );
-        let handle = sh.runtime.spawn(super::attempt::run(
+        let handle = sh.spawn(super::attempt::run(
             Arc::clone(sh),
             key,
             number,
