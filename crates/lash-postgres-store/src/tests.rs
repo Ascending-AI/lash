@@ -1598,7 +1598,13 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("SELECT head_revision") => "head-lock",
         q if q.starts_with("SELECT node_id FROM lash_graph_nodes") => "graph-nodes-exist",
         q if q.starts_with("SELECT hash FROM lash_blobs") => "blob-lock",
-        q if q.starts_with("SELECT turn_commit_hash, result_json") => "turn-commit-load",
+        // The receipt read carries the committing turn's park clear as a
+        // data-modifying `WITH` (FIG-3586): one round trip, not two.
+        q if q.starts_with("WITH settled_park AS ( DELETE FROM lash_turn_parks")
+            && q.contains("SELECT turn_commit_hash, result_json") =>
+        {
+            "turn-commit-load"
+        }
         q if q.starts_with("INSERT INTO lash_blobs") => "blob-insert",
         q if q.starts_with("INSERT INTO lash_checkpoint_blob_refs") => {
             "checkpoint-blob-refs-insert"
@@ -1620,9 +1626,24 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
     };
     let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
     let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
-    let storage = PostgresStorage::connect(isolated_database.url())
-        .await
-        .expect("connect statement round-trip pin storage");
+    // One pooled connection, opened before the first measurement and reused by
+    // every statement after it. A pool free to grow may open a fresh connection
+    // inside a measured window, because a released connection returns to the
+    // pool asynchronously. That connection's `after_connect` `set_config` calls
+    // then count against the operation, and its empty statement cache re-parses
+    // each statement, so `pg_stat_statements` records the constant-normalized
+    // text (`SELECT $2 FROM lash_deleted_sessions ...`) that the name catalogue
+    // does not know. Both depend on scheduling rather than on the operation.
+    let storage = PostgresStorage::connect_with(
+        isolated_database.url(),
+        PostgresStoreConfig {
+            max_connections: 1,
+            min_connections: 1,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("connect statement round-trip pin storage");
     sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
         .execute(storage.pool())
         .await

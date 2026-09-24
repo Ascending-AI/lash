@@ -109,7 +109,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
         let scope = scope.clone();
         let session_id = session_id.clone();
         let group_key = group_key.clone();
-        let env_store = Arc::clone(&process_env_store);
+        let make_processes = Arc::clone(&fixture.make_processes);
         let env_ref = env_ref.clone();
         let observation = Arc::clone(&observation);
         let call_id = call_id.clone();
@@ -117,6 +117,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
         let opener = opener.clone();
         move |world| {
             Box::pin(async move {
+                let env_store = phase_env_store(&make_processes, &env_ref).await;
                 let provider: Arc<dyn crate::ToolProvider> = Arc::new(LawLeafProvider {
                     definitions: leaf_definitions(),
                     observation: Arc::clone(&observation),

@@ -36,16 +36,18 @@ async fn in_memory_catalog(session_ids: &[&str]) -> Arc<dyn crate::SessionStoreF
 
 /// Run the durable multi-host AwaitEvent suite.
 ///
-/// Hosts with runtime-owned replay are intentionally ineligible. Store and
-/// engine adapters call this only after they can reopen independent host
-/// objects over one substrate.
+/// Hosts with runtime-owned replay are intentionally ineligible. Store
+/// adapters call this only after they can reopen independent host objects
+/// over one substrate, so the active-wait law is witnessed through the store
+/// journal; an engine supplies its own witness through
+/// [`effect_host_await_events_cold_instance_with_active_wait_witness`].
 pub async fn effect_host_await_events_cold_instance<F>(make: F)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
     effect_host_await_events_cold_instance_with_active_wait_witness(
         make,
-        super::effect_host::effect_host_await_event_when_quiescent_waits_for_live_waits,
+        super::effect_host::effect_host_journaled_wait_registration_witness,
     )
     .await;
 }

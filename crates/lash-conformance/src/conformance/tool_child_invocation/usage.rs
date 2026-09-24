@@ -135,7 +135,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
         let scope = scope_a.clone();
         let session_id = session_a.clone();
         let group_key = group_key.clone();
-        let env_store = Arc::clone(&process_env_store);
+        let make_processes = Arc::clone(&fixture.make_processes);
         let env_ref = env_ref.clone();
         let observation = Arc::clone(&observation);
         let parked_call = parked_call.clone();
@@ -144,6 +144,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
         let provider = provider(&session_a);
         move |world| {
             Box::pin(async move {
+                let env_store = phase_env_store(&make_processes, &env_ref).await;
                 let _guard = register_opener(
                     &world.host,
                     &scope,

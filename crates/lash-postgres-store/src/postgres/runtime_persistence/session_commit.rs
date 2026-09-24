@@ -303,28 +303,27 @@ impl SessionCommitStore for PostgresSessionStore {
             pending_observer_intents: Vec::new(),
         };
         planner.validate_node_derivation()?;
-        // A turn's commit settles its park (FIG-3586), in the commit's
-        // transaction; another turn's commit leaves it.
-        if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
-            sqlx::query(
-                crate::turn_ingress::turn_ingress_sql()
-                    .turn_parks
-                    .delete_for_turn
+        {
+            // A turn's commit settles its park (FIG-3586) in the same round
+            // trip as its receipt read; another turn's commit leaves it.
+            let prior = sqlx::query(
+                session_sql()
+                    .turn_commits_postgres
+                    .select_receipt_settling_turn_park
                     .sql(),
             )
             .bind(commit.session_id.as_str())
-            .bind(turn_id.as_str())
-            .execute(&mut *tx)
+            .bind(planner.operation_key())
+            .bind(
+                commit
+                    .turn_commit
+                    .operation
+                    .turn_id()
+                    .map(|turn_id| turn_id.as_str()),
+            )
+            .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-        }
-        {
-            let prior = sqlx::query(session_sql().turn_commits.select_receipt.sql())
-                .bind(commit.session_id.as_str())
-                .bind(planner.operation_key())
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
             if let Some(row) = prior {
                 let hash: String = row.get(0);
                 let result_json: String = row.get(1);

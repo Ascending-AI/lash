@@ -3047,6 +3047,19 @@ array and needs only
 """
 
 [[dialect_only]]
+statement = "turn_commit.select_receipt_settling_turn_park"
+backends = ["postgres"]
+kind = "data-modifying CTE"
+reason = """
+A turn's commit settles its park in the commit's transaction (FIG-3586).
+PostgreSQL folds the park clear into the receipt read as a data-modifying
+`WITH`, so the clear adds no round trip to the head commit; SQLite has no
+data-modifying CTE and runs `turn_park.delete_for_turn` beside the shared
+`turn_commit.select_receipt` in-process, where a statement costs no network
+round trip.
+"""
+
+[[dialect_only]]
 statement = "turn_commit.delete_retained_except_live"
 backends = ["sqlite", "postgres"]
 kind = "list bind"

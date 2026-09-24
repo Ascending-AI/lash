@@ -1931,6 +1931,28 @@ fn single_leaf_group(
     .expect("the single-leaf group assembles")
 }
 
+/// The process-exec-env store for a phase that runs on a runtime of its own.
+///
+/// The phase's runtime dies with it, and so does every connection opened on
+/// it. A store shared from the law's runtime keeps any connection the phase
+/// made it open in its pool, and a later resolution on the law's runtime can
+/// wait out the pool's acquire timeout on it (FIG-3621). The phase instead
+/// builds its own store over the tier's substrate and publishes the law's
+/// environment there; the reference is content-addressed, so it is the one
+/// the law recorded.
+async fn phase_env_store(
+    make_processes: &ToolChildProcessesFactory,
+    env_ref: &crate::ProcessExecutionEnvRef,
+) -> Arc<dyn crate::ProcessExecutionEnvStore> {
+    let env_store = make_processes().await.process_env_store;
+    assert_eq!(
+        &crate::testing::process_execution_env_fixture(env_store.as_ref()).await,
+        env_ref,
+        "the phase's store publishes the environment the law recorded"
+    );
+    env_store
+}
+
 /// The crash: run `phase` on a world of its own, on a runtime of its own, and
 /// destroy the runtime afterwards.
 ///

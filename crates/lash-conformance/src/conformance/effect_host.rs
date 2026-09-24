@@ -210,18 +210,11 @@ where
 /// This is intentionally separate from [`effect_host`]: deployment-level hosts
 /// may be valid scope factories while requiring an external workflow/object
 /// context before an AwaitEvent can be awaited.
-pub async fn effect_host_await_events<F>(make: F)
-where
-    F: Fn() -> Arc<dyn EffectHost>,
-{
-    effect_host_await_events_with_active_wait_witness(
-        make,
-        effect_host_await_event_when_quiescent_waits_for_live_waits,
-    )
-    .await;
-}
-
-/// Durable engine hosts use this form when starting an ingress task does not
+///
+/// The witness establishes the active-wait law's registration boundary the
+/// way the host can prove it: [`effect_host_journaled_wait_registration_witness`]
+/// for a store journal, the scheduler for the in-process host, and an engine
+/// marker for a durable engine, where starting an ingress task does not
 /// itself prove that the remote wait registration committed. The witness must
 /// establish that registration through the implementation's real await path
 /// before asserting the shared retirement behavior.
@@ -1554,11 +1547,15 @@ async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<d
 /// the in-process host keeps no record of a dropped waiter and retires the
 /// scope. That is the one memory-versus-durable differential in quiescence
 /// (ADR 0049), and a law over the dropped case would assert two answers.
+///
+/// This is the in-process host's witness: its waiter parks in memory on its
+/// first poll, with no I/O to wait for. A host that journals the wait uses
+/// [`effect_host_journaled_wait_registration_witness`].
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(crate) async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
+pub async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
     host: Arc<dyn EffectHost>,
     assert_retirement: ActiveWaitRetirementAssertion,
 ) {
@@ -1585,6 +1582,65 @@ pub(crate) async fn effect_host_await_event_when_quiescent_waits_for_live_waits(
         tokio::task::yield_now().await;
     }
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!waiter.is_finished(), "the wait is still open");
+
+    assert_retirement(host, scope, key, waiter).await;
+}
+
+/// The active-wait witness for a host whose wait registration is a journal
+/// write: the spawned waiter registers its unresolved promise row over a
+/// database round trip, so no amount of scheduler time proves the row exists
+/// when retirement is asked. The witness instead waits for the store's own
+/// quiescence read, the proof the `WhenQuiescent` gate evaluates under its
+/// scope lock, to see the scope as live, and only then asserts the shared
+/// retirement behaviour. Omitting the registration write keeps the scope
+/// quiescent, so the barrier times out instead of passing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn effect_host_journaled_wait_registration_witness(
+    host: Arc<dyn EffectHost>,
+    assert_retirement: ActiveWaitRetirementAssertion,
+) {
+    let suffix = uuid::Uuid::new_v4().simple();
+    let scope = ExecutionScope::runtime_operation(format!("await-event-journaled-wait-{suffix}"));
+    let key = host
+        .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call-live"))
+        .await
+        .expect("the operation mints");
+    let journal = host
+        .effect_group_closing()
+        .expect("a journal-backed host exposes its scope quiescence read");
+    assert!(
+        journal
+            .scope_is_quiescent(&scope)
+            .await
+            .expect("read quiescence before the wait registers"),
+        "minting a key registers no wait"
+    );
+    let waiter_host = Arc::clone(&host);
+    let waiter_key = key.clone();
+    let waiter = crate::task::spawn(async move {
+        waiter_host
+            .await_await_event(
+                &waiter_key,
+                tokio_util::sync::CancellationToken::new(),
+                None,
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while journal
+            .scope_is_quiescent(&scope)
+            .await
+            .expect("read quiescence while the wait registers")
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the waiter journals its unresolved promise");
     assert!(!waiter.is_finished(), "the wait is still open");
 
     assert_retirement(host, scope, key, waiter).await;
