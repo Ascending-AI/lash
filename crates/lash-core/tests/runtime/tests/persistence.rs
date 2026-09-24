@@ -4,6 +4,7 @@ use lash_sansio::sync::MutexExt;
 
 #[tokio::test]
 async fn durable_turn_commit_rejects_token_usage_overflow() {
+    let backend = memory_backend().await;
     let overflowing_call = || MockCall {
         stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
             input_tokens: i64::MAX,
@@ -22,12 +23,12 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         }),
     };
     let transport = mock_provider(vec![overflowing_call(), overflowing_call()]);
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
-        test_host_config(),
+        test_host_config(&backend),
         store.clone() as Arc<dyn lash_core::RuntimePersistence>,
     )
     .await;
@@ -48,7 +49,11 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         .run_turn_assembled(
             TurnInput::text("account this turn"),
             CancellationToken::new(),
-            named_turn_scope(&SessionId::from("root"), &TurnId::from("usage-overflow")),
+            backend_turn_scope(
+                &backend,
+                &SessionId::from("root"),
+                &TurnId::from("usage-overflow"),
+            ),
         )
         .await
         .expect_err("overflow must reject the durable commit");
@@ -64,7 +69,8 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         .run_turn_assembled(
             TurnInput::text("the poisoned ledger must fail closed again"),
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("usage-overflow-next-turn"),
             ),
@@ -81,6 +87,7 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
 
 #[tokio::test]
 async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
@@ -119,12 +126,12 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
             }),
         },
     ]);
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EchoTool),
         transport,
-        test_host_config(),
+        test_host_config(&backend),
         store.clone() as Arc<dyn lash_core::RuntimePersistence>,
     )
     .await;
@@ -150,84 +157,9 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
     assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
 }
 
-// The in-memory `RecordingStore` stands in for the real store across these
-// runtime tests; the conformance suite holds it to the same durability
-// contract as the durable backend so it can't silently drift.
-
-#[tokio::test]
-async fn in_memory_append_receipt_rolls_back_failure_after_first_mutation() {
-    let store = Arc::new(RecordingStore::default());
-    let mut state = RuntimeSessionState::new(lash_core::SessionPolicy::new(
-        lash_core::TurnBudget::Unbounded,
-    ));
-    let nodes = vec![lash_core::SessionAppendNode::plugin(
-        "in-memory-post-mutation-atomicity",
-        serde_json::json!({"value": 1}),
-    )];
-    let operation = lash_core::runtime::state::boundary_operation(
-        &SessionId::from("root"),
-        "in-memory-post-mutation-atomicity",
-        "append-session-nodes",
-    );
-    let stamp =
-        lash_core::RuntimeTurnCommitStamp::append_session_nodes(operation.clone(), None, &nodes)
-            .expect("append stamp");
-    let draft_namespace = operation.storage_key().expect("operation key");
-    lash_core::runtime::state::append_session_nodes_to_state_with_clock(
-        &mut state,
-        &nodes,
-        &draft_namespace,
-        &lash_core::facade_support::SystemClock,
-    );
-    let mut graph = state.pending_graph_commit();
-    graph
-        .derive_node_ids(&SessionId::from("root"), &operation)
-        .expect("derive append ids");
-    let mut commit = lash_core::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-        &state,
-        graph,
-        &[],
-        operation,
-    )
-    .expect("append commit");
-    commit.turn_commit = stamp;
-    store.fail_next_runtime_commit_after_first_mutation(lash_core::StoreError::Backend(
-        "injected failure after first in-memory mutation".to_string(),
-    ));
-
-    let error = store
-        .commit_runtime_state(commit.clone())
-        .await
-        .expect_err("post-mutation failure must reject the append");
-    assert!(matches!(
-        error,
-        lash_core::StoreError::Backend(message)
-            if message == "injected failure after first in-memory mutation"
-    ));
-    assert!(
-        store
-            .load_session()
-            .await
-            .expect("load failed append")
-            .is_none()
-    );
-    assert!(
-        lash_core::SessionCommitStore::load_session_meta(store.as_ref())
-            .await
-            .expect("load rolled-back session meta")
-            .is_none()
-    );
-    assert!(store.raw_runtime_turn_commits_for_testing().is_empty());
-
-    store
-        .commit_runtime_state(commit)
-        .await
-        .expect("retry after honest rollback succeeds");
-    assert_eq!(store.raw_runtime_turn_commits_for_testing().len(), 1);
-}
-
 #[tokio::test]
 async fn standard_runtime_assembles_stream_only_text_response() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -255,7 +187,7 @@ async fn standard_runtime_assembles_stream_only_text_response() {
             ..LlmResponse::default()
         }),
     }]);
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let sink = RecordingSink::default();
 
     let turn = runtime
@@ -271,7 +203,8 @@ async fn standard_runtime_assembles_stream_only_text_response() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("stream-only-text-turn"),
                 ),
@@ -321,6 +254,7 @@ async fn standard_runtime_assembles_stream_only_text_response() {
 
 #[tokio::test]
 async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() {
+    let backend = memory_backend().await;
     let expected =
         "I’m continuing with a type-safety cleanup now: replace the remaining raw JSON paths.";
     let transport = mock_provider(vec![MockCall {
@@ -336,7 +270,7 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
         ],
         response: Ok(LlmResponse::default()),
     }]);
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let sink = RecordingSink::default();
 
     let turn = runtime
@@ -352,7 +286,8 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("recover-streamed-text-turn"),
                 ),
@@ -392,6 +327,7 @@ async fn standard_runtime_recovers_streamed_text_when_final_response_is_empty() 
 
 #[tokio::test]
 async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -405,7 +341,7 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
         ],
         response: Ok(LlmResponse::default()),
     }]);
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let sink = RecordingSink::default();
 
     let turn = runtime
@@ -421,7 +357,8 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("text-part-no-duplicate-turn"),
                 ),
@@ -445,6 +382,7 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate() {
 
 #[tokio::test]
 async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
+    let backend = memory_backend().await;
     // Model emits one tool call that would sleep for 10s; we cancel the turn
     // and expect run_tool_calls to tear down promptly (< 2s), either via
     // JoinSet::abort_all or via the tool observing the cancellation token.
@@ -485,7 +423,7 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(SlowTool {
         observed_cancel: Arc::clone(&observed_cancel),
     });
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
     let cancel = CancellationToken::new();
     let cancel_trigger = cancel.clone();
     lash_core::task::spawn(async move {
@@ -532,6 +470,7 @@ async fn standard_runtime_cancels_in_flight_tool_calls_when_token_fires() {
 
 #[tokio::test]
 async fn standard_runtime_tool_control_finish_emits_terminal_output() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -576,7 +515,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
             },
         ],
     });
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
     let turn_events = RecordingTurnEvents::default();
 
     let turn = runtime
@@ -642,6 +581,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output() {
 
 #[tokio::test]
 async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -677,7 +617,7 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
             ),
         }],
     });
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
     let turn_events = RecordingTurnEvents::default();
 
     let turn = runtime
@@ -726,6 +666,7 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
 
 #[tokio::test]
 async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_empty() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![
@@ -758,7 +699,7 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
         },
     ]);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(EchoTool);
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
 
     let turn = runtime
         .run_turn_assembled(
@@ -794,6 +735,7 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
 
 #[tokio::test]
 async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streamed() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![],
         response: Ok(LlmResponse {
@@ -811,7 +753,7 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
             ..LlmResponse::default()
         }),
     }]);
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let sink = RecordingSink::default();
 
     let turn = runtime
@@ -827,7 +769,8 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("part-boundaries-turn"),
                 ),
@@ -855,6 +798,7 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
 
 #[tokio::test]
 async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -879,7 +823,7 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
             ..LlmResponse::default()
         }),
     }]);
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
 
     let turn = runtime
         .run_turn_assembled(
@@ -893,7 +837,8 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("streamed-usage-turn"),
             ),
@@ -908,6 +853,7 @@ async fn standard_runtime_uses_streamed_usage_when_final_usage_missing() {
 
 #[tokio::test]
 async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -938,7 +884,7 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
             ..LlmResponse::default()
         }),
     }]);
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
 
     let turn = runtime
         .run_turn_assembled(
@@ -952,7 +898,11 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(&SessionId::from("root"), &TurnId::from("final-usage-turn")),
+            backend_turn_scope(
+                &backend,
+                &SessionId::from("root"),
+                &TurnId::from("final-usage-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -968,6 +918,7 @@ async fn standard_runtime_prefers_final_usage_over_streamed_usage() {
 
 #[tokio::test]
 async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
+    let backend = memory_backend().await;
     struct BrokenRead {
         inner: Arc<RecordingStore>,
         read: Mutex<Option<lash_core::testing::runtime_internals::PersistedSessionRead>>,
@@ -1011,7 +962,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         }
     }
     let store = Arc::new(BrokenRead {
-        inner: Arc::new(RecordingStore::default()),
+        inner: unbound_recording_store(&backend).await,
         read: Mutex::new(None),
         loads: std::sync::atomic::AtomicUsize::new(0),
     });
@@ -1019,7 +970,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        test_host_config(),
+        test_host_config(&backend),
         store.clone(),
     )
     .await;
@@ -1100,6 +1051,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
 // and a live ledger that adds both counts the turn twice.
 #[tokio::test]
 async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
+    let backend = memory_backend().await;
     struct LostCommitReplyStore {
         inner: Arc<RecordingStore>,
         armed: AtomicBool,
@@ -1114,7 +1066,9 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
             commit: lash_core::store::RuntimeCommit,
         ) -> Result<lash_core::store::RuntimeCommitReceipt, lash_core::StoreError> {
             let is_turn_final = commit.turn_commit.operation.key == "final";
-            let result = self.inner.commit_runtime_state(commit).await;
+            let result =
+                lash_core::SessionCommitStore::commit_runtime_state(self.inner.as_ref(), commit)
+                    .await;
             if is_turn_final && result.is_ok() && self.armed.swap(false, Ordering::SeqCst) {
                 return Err(lash_core::StoreError::Backend(
                     "injected lost commit reply".to_string(),
@@ -1141,7 +1095,7 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
             ..LlmResponse::default()
         }),
     };
-    let inner_store = Arc::new(RecordingStore::default());
+    let inner_store = unbound_recording_store(&backend).await;
     let store = Arc::new(LostCommitReplyStore {
         inner: Arc::clone(&inner_store),
         armed: AtomicBool::new(true),
@@ -1150,7 +1104,7 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(vec![usage_call(12, 4), usage_call(5, 2)]),
-        test_host_config(),
+        test_host_config(&backend),
         store.clone() as Arc<dyn lash_core::RuntimePersistence>,
     )
     .await;
@@ -1159,7 +1113,8 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
         .run_turn_assembled(
             TurnInput::text("account this turn"),
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("ambiguous-commit-turn"),
             ),
@@ -1169,7 +1124,11 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
     assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
 
     // The commit landed: the durable journal already holds the turn's usage.
-    let durable = inner_store.raw_usage_deltas_for_testing();
+    let durable = lash_core::SessionCommitStore::load_session(inner_store.as_ref())
+        .await
+        .expect("load the durable session")
+        .expect("the session has a committed head")
+        .token_ledger;
     assert_eq!(
         durable
             .iter()
@@ -1203,7 +1162,8 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
             .run_turn_assembled(
                 TurnInput::text("account the next turn"),
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("after-ambiguous-commit-turn"),
                 ),
@@ -1231,7 +1191,11 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
     let observation = handle.observe();
     assert_eq!(observation.usage_report.usage.usage.input_tokens, 17);
     assert_eq!(observation.usage_report.usage.usage.output_tokens, 6);
-    let durable = inner_store.raw_usage_deltas_for_testing();
+    let durable = lash_core::SessionCommitStore::load_session(inner_store.as_ref())
+        .await
+        .expect("load the durable session")
+        .expect("the session has a committed head")
+        .token_ledger;
     assert_eq!(
         durable
             .iter()

@@ -39,16 +39,12 @@ cancel rows, and each control deployment's gate resolutions.
    - The **catalog** (arbitrary-session) driver over a catalog that fails every lookup:
      it performs exactly **one** open and surfaces a typed `RuntimeStore` error. One open,
      not zero — the failure is reported after the open attempt, not instead of it.
-5. Build a core without a catalog. Opening without an explicit store returns
-   `MissingSessionStore`; catalog and administration operations return
-   `SessionCatalogUnavailable` before process, trigger, revocation, storage, or
-   retirement effects.
-6. Delete through an owner-issued native context. Inject a failure after the
+5. Delete through an owner-issued native context. Inject a failure after the
    storage tombstone but before journal retirement, then retry using the same
    administration owner. The retry completes cleanup without reopening the
    session. Repeat through the Restate-installed administration inside a real
    handler; preserve its existing direct `DeleteSession` process command.
-7. Retain a fork point, delete its source session, and fork from the retained
+6. Retain a fork point, delete its source session, and fork from the retained
    point. The owning catalog still creates the destination and applies its own
    admission and fences.
 

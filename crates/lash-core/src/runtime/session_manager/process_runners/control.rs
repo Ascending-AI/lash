@@ -185,7 +185,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 crate::tool_provider::process_events::enqueue_wake_delivery(
                     Arc::clone(&self.registry),
                     self.current.store.clone(),
-                    self.current.host.session_store_factory.as_ref(),
+                    Some(&self.current.host.core.session_store_factory()),
                     wake_delivery.map(|delivery| *delivery),
                     None,
                     Arc::clone(self.current.host.queued_work()),

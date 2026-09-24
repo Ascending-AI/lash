@@ -1,26 +1,25 @@
 use super::*;
-use crate::AttachmentManifest;
 use crate::TurnId;
-use crate::store::{SessionCommitStore, SessionExecutionLeaseStore};
 
 struct AttachmentWritingEngine;
 
+/// A layer over the backend's catalog that hands every session the one store
+/// bound to the parent session: the shape of a parent-bound catalog, which a
+/// process runtime must never alias its own runtime state into.
 struct ParentBoundSessionStoreFactory {
-    store: Arc<InMemorySessionStore>,
+    inner: Arc<dyn SessionStoreFactory>,
+    store: Arc<dyn crate::RuntimePersistence>,
 }
 
-// This test factory owns one attachment-aware store, so its explicit root-set
-// capability projects that store's manifest rather than asserting emptiness.
 #[async_trait::async_trait]
 impl crate::AttachmentRootSet for ParentBoundSessionStoreFactory {
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
-        self.store
-            .forget_aged_uncommitted_intents(intent_grace_cutoff_epoch_ms)
-            .await?;
-        Ok(self.store.list_all_refs().await?.into_iter().collect())
+        self.inner
+            .live_attachment_refs(intent_grace_cutoff_epoch_ms)
+            .await
     }
 
     async fn has_live_attachment_ref(
@@ -28,8 +27,8 @@ impl crate::AttachmentRootSet for ParentBoundSessionStoreFactory {
         id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
     ) -> Result<bool, crate::StoreError> {
-        self.store
-            .has_live_ref_for_id(id, intent_grace_cutoff_epoch_ms)
+        self.inner
+            .has_live_attachment_ref(id, intent_grace_cutoff_epoch_ms)
             .await
     }
 }
@@ -40,29 +39,27 @@ impl SessionStoreFactory for ParentBoundSessionStoreFactory {
         &self,
         _request: &crate::SessionStoreCreateRequest,
     ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
-        Ok(self.store.clone())
+        Ok(Arc::clone(&self.store))
     }
 
-    // The fixture binds exactly one store, so a by-id lookup hands back that
+    // The layer binds exactly one store, so a by-id lookup hands back that
     // store for the id it was bound to.
     async fn open_existing_store_by_id(
         &self,
         _session_id: &SessionId,
     ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
-        Ok(Some(self.store.clone()))
+        Ok(Some(Arc::clone(&self.store)))
     }
 
-    // The single bound store is never deleted by this fixture, so there is no
-    // tombstone to report.
-    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
-        Ok(false)
+    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
+        self.inner.session_was_deleted(session_id).await
     }
 
     async fn delete_session(
         &self,
-        _session_id: &SessionId,
+        session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
-        Ok(crate::store::SessionBlobReclaimReport::default())
+        self.inner.delete_session(session_id).await
     }
 
     // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
@@ -75,9 +72,22 @@ impl SessionStoreFactory for ParentBoundSessionStoreFactory {
     }
 }
 
-async fn parent_bound_session_store(policy: crate::SessionPolicy) -> Arc<InMemorySessionStore> {
+/// The parent session's store on `backend`, bound and committed.
+async fn parent_bound_session_store(
+    backend: &Arc<dyn crate::Backend>,
+    policy: crate::SessionPolicy,
+) -> Arc<dyn crate::RuntimePersistence> {
     const PARENT_SESSION_ID: &str = "parent-bound-process-worker";
-    let store = Arc::new(InMemorySessionStore::default());
+    let store = backend
+        .session_store_factory()
+        .create_store(&crate::SessionStoreCreateRequest {
+            session_id: SessionId::from(PARENT_SESSION_ID),
+            relation: crate::SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
+            policy: policy.clone(),
+        })
+        .await
+        .expect("create the parent session store");
     let owner = crate::LeaseOwnerIdentity::opaque("parent-owner", "parent-incarnation");
     let _lease = store
         .try_claim_session_execution_lease(
@@ -150,10 +160,11 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
                 })
             })
             .build();
-        let mut nested_host = RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+        // The nested embedded runtime stands on a memory backend of its own;
+        // what it shares with the process is the attachment store, whose
+        // owner scope the nested turn must not leave rebound.
+        let backend = memory_backend().await;
+        let mut nested_host = test_host_config(&backend);
         nested_host.durability.attachment_store = Arc::clone(&attachment_store);
         let mut nested_runtime =
             lash_core::testing::runtime_helpers::runtime_with_plugins_and_tools_and_host(
@@ -168,7 +179,8 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
                 crate::TurnInput::text("run nested turn"),
                 crate::TurnOptions::new(
                     CancellationToken::new(),
-                    lash_core::testing::runtime_helpers::named_turn_scope(
+                    lash_core::testing::runtime_helpers::backend_turn_scope(
+                        &backend,
                         &SessionId::from("root"),
                         &TurnId::from("nested-engine-turn"),
                     ),
@@ -209,25 +221,25 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
             .expect("valid model spec"),
         ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
     };
-    let parent_store = parent_bound_session_store(policy.clone()).await;
-    let factory: Arc<dyn SessionStoreFactory> = Arc::new(ParentBoundSessionStoreFactory {
-        store: Arc::clone(&parent_store),
-    });
-    let attachment_backend = Arc::new(crate::InMemoryAttachmentStore::new());
-    let mut runtime_host = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
-    runtime_host.durability.attachment_store =
-        Arc::new(crate::SessionAttachmentStore::ephemeral(attachment_backend));
+    let backend = memory_backend().await;
+    let parent_store = parent_bound_session_store(&backend, policy.clone()).await;
+    let layer_store = Arc::clone(&parent_store);
+    let backend = crate::testing::runtime_helpers::LayeredBackend::over(backend)
+        .map_session_store_factory(|inner| {
+            Arc::new(ParentBoundSessionStoreFactory {
+                inner,
+                store: layer_store,
+            })
+        })
+        .into_backend();
+    let runtime_host = test_host_config(&backend);
     let worker = DurableProcessWorker::new({
-        let watched = crate::watch_process_registry(Arc::new(TestLocalProcessRegistry::default()));
+        let watched = crate::watch_process_registry(backend.process_registry());
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(
                 crate::testing::test_standard_protocol_factories(),
             )),
             runtime_host,
-            factory,
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner("attachment-parent-worker", "host-a", "parent-start-a"),
@@ -284,16 +296,11 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
 #[tokio::test]
 async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
     const PROCESS_ID: &str = "attachment-owner-recovered-engine";
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
-    let attachment_backend = Arc::new(crate::InMemoryAttachmentStore::new());
-    let mut runtime_host = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
-    runtime_host.durability.attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
-        attachment_backend.clone(),
-    ));
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let factory = backend.session_store_factory();
+    let attachment_backend = backend.attachment_store();
+    let mut runtime_host = test_host_config(&backend);
     runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_registration(
         crate::ProcessEngineRegistration::accepting(Arc::new(AttachmentWritingEngine)),
     );
@@ -320,7 +327,6 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
                 crate::testing::test_standard_protocol_factories(),
             )),
             runtime_host,
-            factory.clone() as Arc<dyn SessionStoreFactory>,
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner("attachment-worker", "host-a", "start-a"),
@@ -404,16 +410,10 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
 #[tokio::test]
 async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
     const PROCESS_ID: &str = "attachment-owner-reincarnated-engine";
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
-    let attachment_backend = Arc::new(crate::InMemoryAttachmentStore::new());
-    let mut runtime_host = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
-    runtime_host.durability.attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
-        attachment_backend.clone(),
-    ));
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let factory = backend.session_store_factory();
+    let mut runtime_host = test_host_config(&backend);
     runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_registration(
         crate::ProcessEngineRegistration::accepting(Arc::new(AttachmentWritingEngine)),
     );
@@ -440,7 +440,6 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
                 crate::testing::test_standard_protocol_factories(),
             )),
             runtime_host,
-            factory.clone() as Arc<dyn SessionStoreFactory>,
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner("attachment-reincarnation-worker", "host-a", "start-a"),

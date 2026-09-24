@@ -433,10 +433,11 @@ mod tests {
     /// Real session services over a live runtime: the law asserts on the
     /// production rebind, not a fixture's idea of it.
     async fn session_services() -> (Arc<RuntimeSessionServices>, crate::SessionPolicy) {
-        let env = crate::RuntimeEnvironment::builder(
+        let env = crate::RuntimeEnvironment::builder(crate::RuntimeHostConfig::new(
+            crate::testing::memory_backend().await,
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
-        )
+        ))
         .with_plugin_host(Arc::new(crate::PluginHost::new(
             crate::testing::test_standard_protocol_factories(),
         )))

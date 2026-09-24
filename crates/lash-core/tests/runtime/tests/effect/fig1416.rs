@@ -12,9 +12,7 @@ use super::*;
 /// A controller that overrides nothing beyond the one required method, which is
 /// what an out-of-tree host looks like the day groups land.
 #[derive(Clone, Default)]
-struct GrouplessEffectController {
-    native: NativeRuntimeEffectController,
-}
+struct GrouplessEffectController;
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for GrouplessEffectController {}
@@ -26,7 +24,7 @@ impl RuntimeEffectController for GrouplessEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.native.execute_effect(envelope, local_executor).await
+        local_executor.execute(envelope).await
     }
 
     async fn open_effect_group(
@@ -34,8 +32,7 @@ impl RuntimeEffectController for GrouplessEffectController {
         _group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
         // The refusing side of the typed-refusal-from-wiring law: this double
-        // forwards ordinary effects to a native controller and deliberately
-        // implements no groups, which is now something its source states
+        // runs ordinary effects locally and deliberately implements no groups, which is now something its source states
         // rather than something it inherited.
         Err(lash_core::effect_groups_unsupported(
             "GrouplessEffectController",
@@ -72,7 +69,6 @@ impl RuntimeEffectController for GrouplessEffectController {
 /// which a blanket refusal also satisfies.
 #[derive(Default)]
 struct GroupSupportingEffectController {
-    native: NativeRuntimeEffectController,
     /// The disposition the open declared, so the close can resolve against it
     /// rather than accept whatever it is handed.
     declared: std::sync::Mutex<Option<lash_core::LoserPolicy>>,
@@ -88,7 +84,7 @@ impl RuntimeEffectController for GroupSupportingEffectController {
         envelope: RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.native.execute_effect(envelope, local_executor).await
+        local_executor.execute(envelope).await
     }
 
     async fn open_effect_group(
@@ -179,7 +175,7 @@ fn one_child_group() -> lash_core::RuntimeEffectGroup {
 
 #[tokio::test]
 async fn a_controller_without_group_support_fails_closed_on_every_group_method() {
-    let controller = GrouplessEffectController::default();
+    let controller = GrouplessEffectController;
 
     let group = one_child_group();
     let mut handle = lash_core::EffectGroupHandle::new(&group);
@@ -284,7 +280,7 @@ async fn the_three_group_methods_answer_as_one_surface() {
     }
 
     assert_all(
-        &GrouplessEffectController::default(),
+        &GrouplessEffectController,
         true,
         "a controller that implements no groups",
     )
@@ -296,17 +292,28 @@ async fn the_three_group_methods_answer_as_one_surface() {
     )
     .await;
 
-    // The tier production actually reaches, which since FIG-1578 has two
-    // states: its answer is a per-deployment fact established at wiring time
-    // rather than a constant. Unwired must refuse all three; wired none.
-    let unwired = NativeRuntimeEffectController::default();
-    assert_all(&unwired, true, "the native substrate with no resolver").await;
+    // The store-backed replay driver production actually reaches, which since
+    // FIG-1578 has two states: its answer is a per-deployment fact established
+    // at wiring time rather than a constant. Unwired must refuse all three;
+    // wired none.
+    let unwired = fresh_store_controller().await;
+    assert_all(&unwired, true, "the store-backed driver with no resolver").await;
 
-    let wired = NativeRuntimeEffectController::default();
+    let wired = fresh_store_controller().await;
     wired
         .register_group_executors(std::sync::Arc::new(EveryChildRuns))
         .expect("a fresh controller has no resolver yet");
-    assert_all(&wired, false, "the native substrate with a resolver").await;
+    assert_all(&wired, false, "the store-backed driver with a resolver").await;
+}
+
+/// A store-backed controller for the one-child group's turn scope, on a
+/// replay driver of its own with no group resolver registered yet.
+async fn fresh_store_controller() -> lash_sqlite_store::SqliteRuntimeEffectController {
+    sqlite_memory_backend()
+        .await
+        .open_effect_controller(lash_core::ExecutionScope::turn("session", "turn"))
+        .await
+        .expect("open a store-backed controller")
 }
 
 /// Two threads registering *different* resolvers at once: exactly one wins and
@@ -318,12 +325,12 @@ async fn the_three_group_methods_answer_as_one_surface() {
 /// resolver goes nowhere — a host that then routes children through a resolver
 /// its wiring code believes is registered. `OnceLock::set` is therefore the
 /// arbiter, and this pins that it is.
-#[test]
-fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
+#[tokio::test]
+async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
     const REGISTRARS: usize = 8;
 
     for _ in 0..64 {
-        let controller = NativeRuntimeEffectController::default();
+        let controller = fresh_store_controller().await;
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(REGISTRARS));
         let outcomes = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..REGISTRARS)
@@ -383,7 +390,7 @@ async fn a_child_this_host_cannot_route_is_a_shape_refusal_not_an_unsupported_ho
         }
     }
 
-    let controller = NativeRuntimeEffectController::default();
+    let controller = fresh_store_controller().await;
     controller
         .register_group_executors(std::sync::Arc::new(NoChildRuns))
         .expect("a fresh controller has no resolver yet");

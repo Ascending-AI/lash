@@ -2,6 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn custom_provider_can_establish_a_no_summary_response_before_execution_evidence() {
+    let backend = memory_backend().await;
     let provider = TestProvider::builder()
         .kind("no-summary-response")
         .requires_streaming(true)
@@ -28,13 +29,14 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
             })
         })
         .build();
-    let mut runtime = standard_runtime_with_transport(provider).await;
+    let mut runtime = standard_runtime_with_transport(&backend, provider).await;
 
     let turn = runtime
         .run_turn_assembled(
             TurnInput::text("observe a response without summary metadata"),
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("no-summary-response-establishment"),
             ),
@@ -56,6 +58,7 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
 
 #[tokio::test]
 async fn attempt_reset_clears_response_establishment_before_later_evidence() {
+    let backend = memory_backend().await;
     let provider = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
@@ -86,13 +89,14 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
             ..Default::default()
         }),
     }]);
-    let mut runtime = standard_runtime_with_transport(provider).await;
+    let mut runtime = standard_runtime_with_transport(&backend, provider).await;
 
     let turn = runtime
         .run_turn_assembled(
             TurnInput::text("reset response evidence"),
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("response-establishment-attempt-reset"),
             ),
@@ -108,8 +112,11 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
 
 /// Collects the host-visible `TurnEvent`s for one streamed turn driven by a
 /// scripted provider call.
-async fn drive_streamed_turn(call: MockCall) -> (Vec<TurnActivity>, Vec<SessionStreamEvent>) {
-    let mut runtime = standard_runtime_with_transport(mock_provider(vec![call])).await;
+async fn drive_streamed_turn(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    call: MockCall,
+) -> (Vec<TurnActivity>, Vec<SessionStreamEvent>) {
+    let mut runtime = standard_runtime_with_transport(backend, mock_provider(vec![call])).await;
     let activities = RecordingTurnEvents::default();
     let events = RecordingSink::default();
     runtime
@@ -117,7 +124,8 @@ async fn drive_streamed_turn(call: MockCall) -> (Vec<TurnActivity>, Vec<SessionS
             TurnInput::text("drive the scripted stream"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    backend,
                     &SessionId::from("root"),
                     &TurnId::from("stream-evidence-turn"),
                 ),
@@ -176,22 +184,26 @@ fn block(id: &str) -> lash_core::llm::types::StreamBlockIdentity {
 /// must seal with the provider's text, not the stale accumulated deltas.
 #[tokio::test]
 async fn text_block_completion_seals_authoritative_correction() {
-    let (activities, _) = Box::pin(drive_streamed_turn(text_block_call(
-        vec![
-            LlmStreamEvent::TextBlockStart {
-                block: block("message:m1"),
-            },
-            LlmStreamEvent::Delta {
-                block: block("message:m1"),
-                text: "draft".to_string(),
-            },
-            LlmStreamEvent::TextBlockEnd {
-                block: block("message:m1"),
-                text: "rewritten ending".to_string(),
-            },
-        ],
-        "rewritten ending",
-    )))
+    let backend = memory_backend().await;
+    let (activities, _) = Box::pin(drive_streamed_turn(
+        &backend,
+        text_block_call(
+            vec![
+                LlmStreamEvent::TextBlockStart {
+                    block: block("message:m1"),
+                },
+                LlmStreamEvent::Delta {
+                    block: block("message:m1"),
+                    text: "draft".to_string(),
+                },
+                LlmStreamEvent::TextBlockEnd {
+                    block: block("message:m1"),
+                    text: "rewritten ending".to_string(),
+                },
+            ],
+            "rewritten ending",
+        ),
+    ))
     .await;
 
     assert_eq!(prose_deltas(&activities), ["draft"]);
@@ -203,22 +215,26 @@ async fn text_block_completion_seals_authoritative_correction() {
 /// plugin transform would double-feed the already-seen prefix.
 #[tokio::test]
 async fn text_block_completion_forwards_only_the_unseen_tail() {
-    let (activities, _) = Box::pin(drive_streamed_turn(text_block_call(
-        vec![
-            LlmStreamEvent::TextBlockStart {
-                block: block("message:m1"),
-            },
-            LlmStreamEvent::Delta {
-                block: block("message:m1"),
-                text: "Hello".to_string(),
-            },
-            LlmStreamEvent::TextBlockEnd {
-                block: block("message:m1"),
-                text: "Hello world".to_string(),
-            },
-        ],
-        "Hello world",
-    )))
+    let backend = memory_backend().await;
+    let (activities, _) = Box::pin(drive_streamed_turn(
+        &backend,
+        text_block_call(
+            vec![
+                LlmStreamEvent::TextBlockStart {
+                    block: block("message:m1"),
+                },
+                LlmStreamEvent::Delta {
+                    block: block("message:m1"),
+                    text: "Hello".to_string(),
+                },
+                LlmStreamEvent::TextBlockEnd {
+                    block: block("message:m1"),
+                    text: "Hello world".to_string(),
+                },
+            ],
+            "Hello world",
+        ),
+    ))
     .await;
 
     assert_eq!(prose_deltas(&activities), ["Hello", " world"]);
@@ -230,18 +246,22 @@ async fn text_block_completion_forwards_only_the_unseen_tail() {
 /// authoritative text as one delta before sealing.
 #[tokio::test]
 async fn text_block_completion_without_deltas_publishes_full_text() {
-    let (activities, _) = Box::pin(drive_streamed_turn(text_block_call(
-        vec![
-            LlmStreamEvent::TextBlockStart {
-                block: block("message:m1"),
-            },
-            LlmStreamEvent::TextBlockEnd {
-                block: block("message:m1"),
-                text: "whole answer".to_string(),
-            },
-        ],
-        "whole answer",
-    )))
+    let backend = memory_backend().await;
+    let (activities, _) = Box::pin(drive_streamed_turn(
+        &backend,
+        text_block_call(
+            vec![
+                LlmStreamEvent::TextBlockStart {
+                    block: block("message:m1"),
+                },
+                LlmStreamEvent::TextBlockEnd {
+                    block: block("message:m1"),
+                    text: "whole answer".to_string(),
+                },
+            ],
+            "whole answer",
+        ),
+    ))
     .await;
 
     assert_eq!(prose_deltas(&activities), ["whole answer"]);
@@ -253,23 +273,27 @@ async fn text_block_completion_without_deltas_publishes_full_text() {
 /// provider policy hides thinking.
 #[tokio::test]
 async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() {
-    let (activities, events) = Box::pin(drive_streamed_turn(MockCall {
-        stream_events: vec![],
-        response: Ok(LlmResponse {
-            parts: vec![
-                LlmOutputPart::Reasoning {
-                    text: "private chain".to_string(),
-                    replay: None,
-                },
-                LlmOutputPart::Text {
-                    text: "public answer".to_string(),
-                    response_meta: None,
-                },
-            ],
-            expose_thinking: Some(false),
-            ..Default::default()
-        }),
-    }))
+    let backend = memory_backend().await;
+    let (activities, events) = Box::pin(drive_streamed_turn(
+        &backend,
+        MockCall {
+            stream_events: vec![],
+            response: Ok(LlmResponse {
+                parts: vec![
+                    LlmOutputPart::Reasoning {
+                        text: "private chain".to_string(),
+                        replay: None,
+                    },
+                    LlmOutputPart::Text {
+                        text: "public answer".to_string(),
+                        response_meta: None,
+                    },
+                ],
+                expose_thinking: Some(false),
+                ..Default::default()
+            }),
+        },
+    ))
     .await;
 
     assert!(
@@ -310,23 +334,27 @@ async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() {
 /// not the absence of reasoning parts.
 #[tokio::test]
 async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() {
-    let (activities, _) = Box::pin(drive_streamed_turn(MockCall {
-        stream_events: vec![],
-        response: Ok(LlmResponse {
-            parts: vec![
-                LlmOutputPart::Reasoning {
-                    text: "visible reasoning".to_string(),
-                    replay: None,
-                },
-                LlmOutputPart::Text {
-                    text: "public answer".to_string(),
-                    response_meta: None,
-                },
-            ],
-            expose_thinking: Some(true),
-            ..Default::default()
-        }),
-    }))
+    let backend = memory_backend().await;
+    let (activities, _) = Box::pin(drive_streamed_turn(
+        &backend,
+        MockCall {
+            stream_events: vec![],
+            response: Ok(LlmResponse {
+                parts: vec![
+                    LlmOutputPart::Reasoning {
+                        text: "visible reasoning".to_string(),
+                        replay: None,
+                    },
+                    LlmOutputPart::Text {
+                        text: "public answer".to_string(),
+                        response_meta: None,
+                    },
+                ],
+                expose_thinking: Some(true),
+                ..Default::default()
+            }),
+        },
+    ))
     .await;
 
     let reasoning_deltas = activities
@@ -356,22 +384,26 @@ async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() {
 /// anonymous block.
 #[tokio::test]
 async fn unstreamed_response_publishes_block_lifecycle_per_text_part() {
-    let (_, events) = Box::pin(drive_streamed_turn(MockCall {
-        stream_events: vec![],
-        response: Ok(LlmResponse {
-            parts: vec![
-                LlmOutputPart::Text {
-                    text: "first part".to_string(),
-                    response_meta: None,
-                },
-                LlmOutputPart::Text {
-                    text: "second part".to_string(),
-                    response_meta: None,
-                },
-            ],
-            ..Default::default()
-        }),
-    }))
+    let backend = memory_backend().await;
+    let (_, events) = Box::pin(drive_streamed_turn(
+        &backend,
+        MockCall {
+            stream_events: vec![],
+            response: Ok(LlmResponse {
+                parts: vec![
+                    LlmOutputPart::Text {
+                        text: "first part".to_string(),
+                        response_meta: None,
+                    },
+                    LlmOutputPart::Text {
+                        text: "second part".to_string(),
+                        response_meta: None,
+                    },
+                ],
+                ..Default::default()
+            }),
+        },
+    ))
     .await;
 
     let started_ids = events

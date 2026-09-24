@@ -184,18 +184,27 @@ fn process_worker(
     fault_sink: &RecordingWorkerFaultSink,
 ) -> lash::durability::DurableProcessWorker {
     let watched = lash_core::facade_support::watch_process_registry(registry);
+    // The worker runs no engine and writes no attachment; the backend's
+    // attachment root is a scratch directory it never touches.
+    let attachments = std::env::temp_dir().join(format!(
+        "lash-process-operator-flow-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let backend: Arc<dyn lash::Backend> = Arc::new(lash_postgres_store::PostgresBackend::new(
+        storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(attachments)),
+    ));
     let config = lash::durability::DurableProcessWorkerConfig::new(
         Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
-        lash::durability::RuntimeHostConfig::in_memory(
+        lash::durability::RuntimeHostConfig::new(
+            backend,
             lash::CommitBudget::bounded(1024 * 1024, 512),
             lash::QueuedWorkBatchingConfig::new(1024),
         ),
-        Arc::new(storage.session_store_factory_with_shared_process_registry()),
         lash::durability::WorkerProcessWork::SelfNative(watched),
         Arc::new(lash::runtime::NoQueuedWork::new()),
         lease_owner,
     )
-    .with_trigger_store(Arc::new(storage.trigger_store()))
     .with_process_event_sink(Arc::new(fault_sink.clone()));
     lash::durability::DurableProcessWorker::new(config)
         .expect("runbook worker uses valid native substrate defaults")

@@ -15,7 +15,8 @@ pub(super) async fn process_sleep_wake_verdict_replays_from_the_journal() {
     let worker = recovery_worker(
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    );
+    )
+    .await;
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),
         Arc::clone(&registry),
@@ -88,7 +89,8 @@ pub(super) async fn process_sleep_wake_verdict_replays_from_the_journal() {
     let replay_worker = recovery_worker(
         Arc::clone(&replay_registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    );
+    )
+    .await;
     let replay_workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(replay_worker)),
         Arc::clone(&replay_registry),
@@ -141,7 +143,8 @@ pub(super) async fn process_sleep_wake_verdict_extends_a_pre_verdict_journal() {
     let worker = recovery_worker(
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    );
+    )
+    .await;
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),
         Arc::clone(&registry),
@@ -200,7 +203,8 @@ pub(super) async fn process_sleep_wake_verdict_extends_a_pre_verdict_journal() {
     let replay_worker = recovery_worker(
         Arc::clone(&replay_registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    );
+    )
+    .await;
     let replay_workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(replay_worker)),
         Arc::clone(&replay_registry),

@@ -234,9 +234,9 @@ async fn backend_trigger_store_observes_the_backend_clock_for_inline_and_public_
             .substrate_slot
             .process_worker_config()
             .expect("native worker config must be assembled at build");
-        Arc::clone(&config.trigger_store)
+        config.trigger_store()
     };
-    let public_trigger_store = Arc::clone(&core.durable_process_worker_config()?.trigger_store);
+    let public_trigger_store = core.durable_process_worker_config()?.trigger_store();
 
     assert!(Arc::ptr_eq(&inline_trigger_store, &public_trigger_store));
     let receipt = public_trigger_store
@@ -276,11 +276,11 @@ async fn durable_process_worker_config_uses_the_backend_catalog() -> Result<()> 
         .expect("native process worker config must be assembled at build");
     let public_config = core.durable_process_worker_config()?;
     assert!(Arc::ptr_eq(
-        &inline_config.session_store_factory,
+        &inline_config.session_store_factory(),
         &core.store_factory
     ));
     assert!(Arc::ptr_eq(
-        &public_config.session_store_factory,
+        &public_config.session_store_factory(),
         &core.store_factory
     ));
     Ok(())
@@ -490,7 +490,7 @@ async fn durable_process_worker_config_uses_the_backend_registry_and_trigger_sto
         &core.process_registry()
     ));
     let backend_trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
-    assert!(Arc::ptr_eq(&config.trigger_store, &backend_trigger_store));
+    assert!(Arc::ptr_eq(&config.trigger_store(), &backend_trigger_store));
     assert_eq!(config.lease_owner.owner_id, "durable-worker-facade-owner");
     assert_eq!(
         config.lease_owner.incarnation_id,

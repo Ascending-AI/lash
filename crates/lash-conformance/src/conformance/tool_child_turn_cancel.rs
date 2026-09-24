@@ -53,11 +53,12 @@ async fn build_runtime(
     plugin: Arc<dyn crate::facade_support::PluginFactory>,
     model: crate::testing::TestProvider,
 ) -> crate::LashRuntime {
-    let mut config = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
-    config = config.with_effect_host(Arc::clone(host));
+    let mut config = crate::LawBackend::in_process()
+        .with_effect_host(Arc::clone(host))
+        .host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
     config.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let mut policy = crate::testing::mock_session_policy();
@@ -68,25 +69,20 @@ async fn build_runtime(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     Box::pin(
-        crate::LashRuntime::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-            crate::testing::runtime_lease_owner(),
-        )
-        .with_session_id(session_id)
-        .with_policy(policy)
-        .with_initial_state(state)
-        .with_runtime_host(config)
-        .with_plugin_factories(
-            crate::testing::test_standard_protocol_factories()
-                .into_iter()
-                .chain([plugin])
-                .collect(),
-        )
-        .with_store(store)
-        .with_process_work(crate::testing::process_work_wiring_for_registry(registry))
-        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
-        .build(),
+        crate::LashRuntime::builder(config, crate::testing::runtime_lease_owner())
+            .with_session_id(session_id)
+            .with_policy(policy)
+            .with_initial_state(state)
+            .with_plugin_factories(
+                crate::testing::test_standard_protocol_factories()
+                    .into_iter()
+                    .chain([plugin])
+                    .collect(),
+            )
+            .with_store(store)
+            .with_process_work(crate::testing::process_work_wiring_for_registry(registry))
+            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .build(),
     )
     .await
     .expect("build tool-child turn-cancel conformance runtime")

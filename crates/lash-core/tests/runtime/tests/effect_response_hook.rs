@@ -123,6 +123,7 @@ fn journaled_raw_completion(recorder: &RecordingEffectController) -> LlmResponse
 /// allocate the next index and silently become a fresh logical turn.
 async fn drive_turn(
     runtime: &mut LashRuntime,
+    backend: &Arc<dyn lash_core::Backend>,
     recorder: &RecordingEffectController,
     turn_id: &TurnId,
 ) -> Result<AssembledTurn, RuntimeError> {
@@ -148,7 +149,7 @@ async fn drive_turn(
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            scoped_test_turn(recorder, turn_id),
+            scoped_test_turn(backend, recorder, turn_id),
             CancellationToken::new(),
             None,
             None,
@@ -163,6 +164,7 @@ async fn drive_turn(
 /// second generation.
 #[tokio::test]
 async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_only_the_hook() {
+    let backend = memory_backend().await;
     let fixture = response_hook_fixture(1, 0);
     let recorder = RecordingEffectController::default()
         .with_local_llm_execution()
@@ -171,12 +173,13 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
         vec![Arc::clone(&fixture.plugin)],
         Arc::new(EmptyTools),
         fixture.transport,
-        host_with_effect_recorder(recorder.clone()),
+        host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
 
     let failed = drive_turn(
         &mut runtime,
+        &backend,
         &recorder,
         &TurnId::from("response-hook-failure"),
     )
@@ -215,6 +218,7 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
 
     let redriven = drive_turn(
         &mut runtime,
+        &backend,
         &recorder,
         &TurnId::from("response-hook-failure"),
     )
@@ -240,6 +244,7 @@ async fn failing_hook_leaves_the_paid_completion_journaled_and_redrive_reruns_on
 /// the recorded completion with no provider re-invocation.
 #[tokio::test]
 async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_provider() {
+    let backend = memory_backend().await;
     let fixture = response_hook_fixture(0, 0);
     let recorder = RecordingEffectController::default()
         .with_local_llm_execution()
@@ -249,13 +254,18 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
         vec![Arc::clone(&fixture.plugin)],
         Arc::new(EmptyTools),
         fixture.transport,
-        host_with_effect_recorder(recorder.clone()),
+        host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
 
-    let crashed = drive_turn(&mut runtime, &recorder, &TurnId::from("phase-crash"))
-        .await
-        .expect_err("the crashed phase aborts the turn: a host crash is a live fault");
+    let crashed = drive_turn(
+        &mut runtime,
+        &backend,
+        &recorder,
+        &TurnId::from("phase-crash"),
+    )
+    .await
+    .expect_err("the crashed phase aborts the turn: a host crash is a live fault");
 
     assert_eq!(fixture.provider_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -270,9 +280,14 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
         "phase 1 was durable before the crash window opened"
     );
 
-    let redriven = drive_turn(&mut runtime, &recorder, &TurnId::from("phase-crash"))
-        .await
-        .expect("the redrive completes phase 2 from the recorded completion");
+    let redriven = drive_turn(
+        &mut runtime,
+        &backend,
+        &recorder,
+        &TurnId::from("phase-crash"),
+    )
+    .await
+    .expect("the redrive completes phase 2 from the recorded completion");
 
     assert_eq!(
         fixture.provider_calls.load(Ordering::SeqCst),
@@ -289,6 +304,7 @@ async fn crash_between_the_phases_redrives_phase_two_without_reinvoking_the_prov
 /// phase 2 serves them from its own record instead of re-running the hook.
 #[tokio::test]
 async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
+    let backend = memory_backend().await;
     let fixture = response_hook_fixture(0, 1);
     let recorder = RecordingEffectController::default()
         .with_local_llm_execution()
@@ -297,13 +313,18 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
         vec![Arc::clone(&fixture.plugin)],
         Arc::new(EmptyTools),
         fixture.transport,
-        host_with_effect_recorder(recorder.clone()),
+        host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
 
-    let first = drive_turn(&mut runtime, &recorder, &TurnId::from("hook-events"))
-        .await
-        .expect("turn completes");
+    let first = drive_turn(
+        &mut runtime,
+        &backend,
+        &recorder,
+        &TurnId::from("hook-events"),
+    )
+    .await
+    .expect("turn completes");
     assert_eq!(first.assistant_output.safe_text, "paid completion 1");
 
     let phase_one = journaled(&recorder, |outcome| {
@@ -330,9 +351,14 @@ async fn hook_emitted_events_belong_to_phase_twos_entry_and_replay_from_it() {
         lash_core::PluginRuntimeEvent::Custom { name, .. } if name == "derived-0"
     ));
 
-    let replayed = drive_turn(&mut runtime, &recorder, &TurnId::from("hook-events"))
-        .await
-        .expect("replay of both phases");
+    let replayed = drive_turn(
+        &mut runtime,
+        &backend,
+        &recorder,
+        &TurnId::from("hook-events"),
+    )
+    .await
+    .expect("replay of both phases");
     assert_eq!(
         fixture.provider_calls.load(Ordering::SeqCst),
         1,
@@ -352,6 +378,12 @@ async fn recording_response_hook_terminal_error_replays() {
         RecordingEffectController::default().with_replay_by_key(),
         RecordingEffectController::default().with_strict_replay_by_address(),
     ] {
+        let backend = memory_backend().await;
+        let controller = super::effect::layered_controller(
+            &backend,
+            Arc::new(recorder.clone()),
+            lash_core::AdmittedScope::runtime_operation("recording-terminal"),
+        );
         let scope = ExecutionScope::runtime_operation("recording-terminal");
         let envelope = RuntimeEffectEnvelope::new(
             lash_core::RuntimeEffectInvocation::new(
@@ -363,7 +395,7 @@ async fn recording_response_hook_terminal_error_replays() {
                 response: Box::default(),
             },
         );
-        recorder
+        controller
             .execute_effect(
                 envelope.clone(),
                 lash_core::RuntimeEffectLocalExecutor::testing(|_| async {
@@ -375,7 +407,7 @@ async fn recording_response_hook_terminal_error_replays() {
             )
             .await
             .expect_err("first attempt fails");
-        let error = recorder
+        let error = controller
             .execute_effect(
                 envelope,
                 lash_core::RuntimeEffectLocalExecutor::testing(|_| async {

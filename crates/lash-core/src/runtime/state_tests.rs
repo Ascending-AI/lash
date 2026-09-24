@@ -64,7 +64,7 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     const LEAF_A: &str = "execution_state/leaf-a";
     const LEAF_B: &str = "execution_state/leaf-b";
 
-    let store = crate::InMemorySessionStore::new();
+    let store = crate::testing::unbound_recording_store().await;
     let mut generation_a =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
     let mut snapshot_a = crate::plugin::ExecutionStateSnapshot::from_root(Some(

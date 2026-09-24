@@ -296,12 +296,10 @@ async fn bind_session_store(
     current: &CurrentSessionCapability,
     plan: &SessionInitPlan,
 ) -> Result<Arc<dyn crate::store::RuntimePersistence>, crate::PluginError> {
-    let Some(factory) = &current.host.session_store_factory else {
-        return Err(crate::PluginError::MissingSessionStore {
-            session_id: plan.session_id.clone(),
-        });
-    };
-    let store = factory
+    let store = current
+        .host
+        .core
+        .session_store_factory()
         .create_store(&SessionStoreCreateRequest {
             session_id: plan.session_id.clone(),
             relation: plan.relation.clone(),
@@ -320,12 +318,7 @@ async fn bind_session_store(
 }
 
 fn embedded_host(current: &CurrentSessionCapability) -> EmbeddedRuntimeHost {
-    EmbeddedRuntimeHost {
-        core: current.host.core.clone(),
-        session_store_factory: current.host.session_store_factory.clone(),
-        trigger_store: current.host.trigger_store.clone(),
-        process_definitions: current.host.process_definitions.clone(),
-    }
+    EmbeddedRuntimeHost::new(current.host.core.clone())
 }
 
 fn session_creation_store_guidance() -> &'static str {
@@ -465,10 +458,10 @@ async fn durable_session_store(
     current: &CurrentSessionCapability,
     session_id: &SessionId,
 ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, crate::PluginError> {
-    let Some(factory) = &current.host.session_store_factory else {
-        return Ok(None);
-    };
-    factory
+    current
+        .host
+        .core
+        .session_store_factory()
         .open_existing_store_by_id(session_id)
         .await
         .map_err(|error| match error {
@@ -869,9 +862,7 @@ impl RuntimeSessionServices {
         process_id: &crate::ProcessId,
         turn_id: &TurnId,
     ) -> Result<(), crate::PluginError> {
-        let Some(factory) = self.current.host.session_store_factory.as_ref() else {
-            return Ok(());
-        };
+        let factory = self.current.host.core.session_store_factory();
         let mut candidates: Vec<SessionId> = requested_session_id.cloned().into_iter().collect();
         match factory
             .list_sessions(&crate::SessionListFilter {
@@ -1312,7 +1303,7 @@ mod tests {
             "invocation:subagent:call",
         )
         .bind_attempt(2);
-        let controller = crate::NativeRuntimeEffectController::default();
+        let controller = crate::testing::UnavailableEffectController;
         let scoped_effect_controller = crate::ScopedEffectController::borrowed(
             &controller,
             crate::AdmittedScope::process(crate::ProcessRef::new(

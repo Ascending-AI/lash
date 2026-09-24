@@ -3,6 +3,7 @@ use lash_sansio::sync::MutexExt;
 
 #[tokio::test]
 async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() {
+    let backend = memory_backend().await;
     let recorder = RecordingEffectController::default().with_replay_by_key();
     let trace_path = unique_trace_path("direct-llm-completion");
     let transport = mock_provider(vec![MockCall {
@@ -24,7 +25,8 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
         }),
     }]);
     let host = EmbeddedRuntimeHost::new({
-        let mut config = runtime_host_config_with_native_controller(Arc::new(recorder.clone()));
+        let mut config =
+            runtime_host_config_with_effect_layer(&backend, Arc::new(recorder.clone()));
         config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(
             trace_path.clone(),
         )));
@@ -36,7 +38,10 @@ async fn direct_llm_completion_crosses_controller_and_records_usage_and_trace() 
 
     let manager = runtime.runtime_session_services().expect("session manager");
     let direct = manager.direct_completion_client(
-        RuntimeEffectControllerHandle::shared(Arc::new(recorder.clone())),
+        RuntimeEffectControllerHandle::shared(layered_operation_controller(
+            &backend,
+            Arc::new(recorder.clone()),
+        )),
         None,
     );
     let request = LlmRequest {

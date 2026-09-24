@@ -576,9 +576,9 @@ mod tests {
         await_turn_cancellation_with_retry, publish_terminal_after_commit,
     };
     use crate::{
-        AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope,
-        NativeRuntimeEffectController, Resolution, ResolveOutcome, RuntimeError, TurnAddress,
-        TurnCancellationEvidence, TurnFinish, TurnOutcome, TurnTerminal,
+        AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope, Resolution,
+        ResolveOutcome, RuntimeError, TurnAddress, TurnCancellationEvidence, TurnFinish,
+        TurnOutcome, TurnTerminal,
     };
 
     #[derive(Debug)]
@@ -634,10 +634,11 @@ mod tests {
         assert_eq!(text.timestamp_millis() as u64, milliseconds);
     }
 
-    #[derive(Default)]
+    /// Refuses every terminal publication and forwards the rest of the
+    /// await-event surface to a backend host's controller for the turn.
     struct RejectTerminalPublication {
         attempts: AtomicUsize,
-        native: NativeRuntimeEffectController,
+        inner: Arc<dyn crate::RuntimeEffectController>,
     }
 
     #[async_trait::async_trait]
@@ -647,7 +648,7 @@ mod tests {
             scope: &ExecutionScope,
             wait: AwaitEventWaitIdentity,
         ) -> Result<AwaitEventKey, RuntimeError> {
-            self.native.await_event_key(scope, wait).await
+            self.inner.await_event_key(scope, wait).await
         }
 
         async fn resolve_await_event(
@@ -666,7 +667,7 @@ mod tests {
             &self,
             key: &AwaitEventKey,
         ) -> Result<Option<Resolution>, RuntimeError> {
-            self.native.peek_await_event(key).await
+            self.inner.peek_await_event(key).await
         }
 
         async fn await_await_event(
@@ -675,25 +676,21 @@ mod tests {
             cancel: tokio_util::sync::CancellationToken,
             deadline: Option<std::time::Instant>,
         ) -> Result<Resolution, RuntimeError> {
-            self.native.await_await_event(key, cancel, deadline).await
+            self.inner.await_await_event(key, cancel, deadline).await
         }
 
         async fn revoke_await_events_for_session(
             &self,
             session_id: &SessionId,
         ) -> Result<(), RuntimeError> {
-            self.native
-                .revoke_await_events_for_session(session_id)
-                .await
+            self.inner.revoke_await_events_for_session(session_id).await
         }
 
         async fn cancel_await_events_for_session(
             &self,
             session_id: &SessionId,
         ) -> Result<(), RuntimeError> {
-            self.native
-                .cancel_await_events_for_session(session_id)
-                .await
+            self.inner.cancel_await_events_for_session(session_id).await
         }
     }
 
@@ -814,7 +811,20 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_publication_failure_is_non_fatal_after_commit() {
-        let resolver = RejectTerminalPublication::default();
+        let backend = crate::testing::memory_backend().await;
+        let resolver = RejectTerminalPublication {
+            attempts: AtomicUsize::new(0),
+            inner: backend
+                .effect_host()
+                .scoped_static(crate::AdmittedScope::turn(
+                    SessionId::from("committed-session"),
+                    TurnId::from("committed-turn"),
+                ))
+                .expect("admit the turn scope")
+                .expect("the backend host lends a static controller")
+                .owned_controller()
+                .expect("a static controller is shared"),
+        };
         let control = ActiveTurnControl::new(
             &resolver,
             TurnAddress::new("committed-session", "committed-turn"),

@@ -19,13 +19,13 @@
 // serves its own store-backed tests and is not re-exported here.
 pub use lash_core_execution::testing::{
     EffectLayer, EmptyToolProvider, FIXTURE_ECHO_TOOL, FixtureProcessEngine, FixtureTools,
-    LayeredEffectHost, MockSessionManager, RuntimeCommitBudgetMeasurement, TestClock,
-    TestExecutionContextBuilder, TestExecutionPorts, TestProvider, TestProviderBuilder,
-    UnavailableEffectController, UnavailableProcessExecutionEnvStore, attempt_sentinel,
-    behavior_transcript, cancelled_code_execution_context, code_execution_context,
-    code_execution_context_cancelling_after_yield, code_execution_context_for_process,
-    code_execution_context_with_invocation, code_execution_context_with_process_dependencies,
-    code_execution_context_with_tool_catalog,
+    LayeredEffectHost, MockSessionManager, ProcessRegistryFaults, RuntimeCommitBudgetMeasurement,
+    TestClock, TestExecutionContextBuilder, TestExecutionPorts, TestProvider, TestProviderBuilder,
+    UnavailableEffectController, UnavailableProcessExecutionEnvStore, WorklistPagePause,
+    WorklistPageRead, attempt_sentinel, behavior_transcript, cancelled_code_execution_context,
+    code_execution_context, code_execution_context_cancelling_after_yield,
+    code_execution_context_for_process, code_execution_context_with_invocation,
+    code_execution_context_with_process_dependencies, code_execution_context_with_tool_catalog,
     code_execution_context_with_tool_provider_and_catalog,
     code_execution_context_with_tool_provider_catalog_and_invocation,
     code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
@@ -58,10 +58,60 @@ pub use lash_core_execution::testing::{
 pub mod adversarial_text;
 pub mod checkpoint_observer;
 pub mod conformance_support;
+mod layered_backend;
 mod live_replay;
+mod recording_store;
 pub mod runtime_helpers;
 #[cfg(feature = "testing")]
 pub mod runtime_internals;
+
+#[cfg(test)]
+std::thread_local! {
+    /// The SQLite backends the running unit test opened. A memory backend's
+    /// databases live while any handle does, and its stores reach sibling
+    /// databases by name, so a fixture that hands out only a store would
+    /// otherwise let those vanish under it. Each test runs on its own thread,
+    /// so this holds every backend exactly as long as the test that opened it.
+    static TEST_BACKENDS: std::cell::RefCell<Vec<lash_sqlite_store::SqliteBackend>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A fresh SQLite memory backend for this crate's unit tests (ADR 0102),
+/// held for the rest of the running test. The `testing` feature itself never
+/// links SQLite; only the crate's own test build does, through its
+/// dev-dependency.
+#[cfg(test)]
+pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteBackend {
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend");
+    TEST_BACKENDS.with(|held| held.borrow_mut().push(backend.clone()));
+    backend
+}
+
+/// [`sqlite_memory_backend`] as the handle a host config takes.
+#[cfg(test)]
+pub(crate) async fn memory_backend() -> std::sync::Arc<dyn crate::Backend> {
+    std::sync::Arc::new(sqlite_memory_backend().await)
+}
+
+/// A [`runtime_helpers::RecordingStore`] over a fresh, unbound store of a
+/// fresh memory backend: the first session admitted binds it.
+#[cfg(test)]
+pub(crate) async fn unbound_recording_store() -> runtime_helpers::RecordingStore {
+    unbound_recording_store_on(&sqlite_memory_backend().await).await
+}
+
+/// A [`runtime_helpers::RecordingStore`] over a fresh, unbound store of
+/// `backend`'s catalog.
+#[cfg(test)]
+pub(crate) async fn unbound_recording_store_on(
+    backend: &lash_sqlite_store::SqliteBackend,
+) -> runtime_helpers::RecordingStore {
+    runtime_helpers::RecordingStore::over(std::sync::Arc::new(
+        backend.open_store().await.expect("open an unbound store"),
+    ))
+}
 
 /// Marks resident state stale for downstream reload-race tests.
 #[cfg(any(test, feature = "testing"))]

@@ -98,7 +98,7 @@ impl RuntimeSessionServices {
                 execution_write_authority,
                 process_work,
                 self.current.store.clone(),
-                self.current.host.session_store_factory.clone(),
+                Some(self.current.host.core.session_store_factory()),
                 Arc::clone(self.current.host.queued_work()),
                 self.current.host.core.control.process_wake_delivery_policy,
                 Arc::clone(&self.current.host.core.clock),

@@ -1,81 +1,70 @@
 use crate::runtime_support::effect_controller_doubles::*;
 use crate::runtime_support::*;
-use std::time::Instant;
 
-#[async_trait::async_trait]
-impl lash_core::EffectHost for RecordingEffectController {
-    fn turn_control_binding_id(&self) -> String {
-        self.await_event_authority_binding_id()
-            .expect("recorder authority")
-    }
-
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
-        self
-    }
-
-    fn scoped<'run>(
-        &'run self,
-        scope: lash_core::AdmittedScope,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        ScopedEffectController::borrowed(self, scope)
-    }
-
-    fn scoped_static(
-        &self,
-        scope: lash_core::AdmittedScope,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        ScopedEffectController::shared(Arc::new(self.clone()), scope).map(Some)
-    }
-
-    // Group children minted under this host run through the recorder itself:
-    // the substrate-facing group calls (`commit_group_child_final`,
-    // `await_group_child_drain_admission`, the group driver) forward to the
-    // embedded native controller where the opens landed.
-    fn scoped_for_group_child(
-        &self,
-        scope: lash_core::AdmittedScope,
-        _binding: lash_core::GroupChildBinding,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        ScopedEffectController::shared(Arc::new(self.clone()), scope).map(Some)
-    }
-
-    fn install_tool_child_host(
-        &self,
-        candidate: Arc<lash_core::facade_support::ToolChildHost>,
-    ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
-        let installed = self.tool_children.get_or_init(|| candidate);
-        self.native
-            .register_group_executors(Arc::clone(installed) as Arc<dyn lash_core::GroupExecutors>)
-            .ok()?;
-        Some(Arc::clone(installed))
-    }
+/// `backend`'s effect host under `layer`: the host a test installs to record
+/// or perturb the effect boundary of a runtime over `backend` (FIG-3580).
+pub fn layered_effect_host(
+    backend: &Arc<dyn lash_core::Backend>,
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+) -> Arc<dyn lash_core::EffectHost> {
+    Arc::new(lash_core::testing::LayeredEffectHost::new(
+        backend.effect_host(),
+        layer,
+    ))
 }
 
-/// Re-install the tool-child host after a test swaps `control.effect_host`:
-/// the config's constructor registered the resolver on the host it was built
-/// with, and a swapped-in host must register on its own controller — where
-/// the double forwards group opens — or group children have no runner.
-pub fn reinstall_tool_child_host(config: &mut RuntimeHostConfig) {
-    let host = Arc::clone(&config.control.effect_host);
-    config.control.tool_children =
-        host.install_tool_child_host(lash_core::facade_support::ToolChildHost::new(
-            &host,
-            Arc::clone(&config.durability.process_env_store),
-        ));
-    if let Some(tool_children) = &config.control.tool_children {
-        tool_children.with_clock(Arc::clone(&config.clock));
-    }
+/// `backend` with its effect host under `layer`.
+pub fn backend_with_effect_layer(
+    backend: &Arc<dyn lash_core::Backend>,
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+) -> Arc<dyn lash_core::Backend> {
+    lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::clone(backend))
+        .map_effect_host(|host| Arc::new(lash_core::testing::LayeredEffectHost::new(host, layer)))
+        .into_backend()
 }
 
-pub fn host_with_effect_recorder(recorder: RecordingEffectController) -> EmbeddedRuntimeHost {
-    let mut config = if recorder.controller_owned_replay {
-        let mut config = test_runtime_host_config();
-        config.control.effect_host = Arc::new(recorder);
-        reinstall_tool_child_host(&mut config);
-        config
-    } else {
-        runtime_host_config_with_native_controller(Arc::new(recorder))
-    };
+/// A test host config over `backend` whose effect host is `backend`'s under
+/// `layer`. The config is built over the layered backend rather than swapping
+/// the host in afterwards: the first host config over a backend installs the
+/// backend's one tool-child host, and a tool child must reach its effect
+/// controller through the layer too.
+pub fn runtime_host_config_with_effect_layer(
+    backend: &Arc<dyn lash_core::Backend>,
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+) -> RuntimeHostConfig {
+    test_runtime_host_config(&backend_with_effect_layer(backend, layer))
+}
+
+/// `layer`'s scoped controller for `admitted` over `backend`'s effect host.
+pub fn layered_scope(
+    backend: &Arc<dyn lash_core::Backend>,
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+    admitted: lash_core::AdmittedScope,
+) -> ScopedEffectController<'static> {
+    layered_effect_host(backend, layer)
+        .scoped_static(admitted)
+        .expect("admit the layered scope")
+        .expect("the backend host lends a static controller")
+}
+
+/// The recorder's scoped controller for `turn_id` of the root session.
+pub fn scoped_test_turn(
+    backend: &Arc<dyn lash_core::Backend>,
+    recorder: &RecordingEffectController,
+    turn_id: &TurnId,
+) -> ScopedEffectController<'static> {
+    layered_scope(
+        backend,
+        Arc::new(recorder.clone()),
+        AdmittedScope::turn("root", turn_id),
+    )
+}
+
+pub fn host_with_effect_recorder(
+    backend: &Arc<dyn lash_core::Backend>,
+    recorder: RecordingEffectController,
+) -> EmbeddedRuntimeHost {
+    let mut config = runtime_host_config_with_effect_layer(backend, Arc::new(recorder));
     config.providers.provider_resolver =
         Arc::new(lash_core::facade_support::SingleProviderResolver::new(
             mock_provider(Vec::new()).into_handle(),
@@ -83,158 +72,27 @@ pub fn host_with_effect_recorder(recorder: RecordingEffectController) -> Embedde
     EmbeddedRuntimeHost::new(config)
 }
 
-pub fn runtime_host_config_with_native_controller(
-    controller: Arc<dyn RuntimeEffectController>,
-) -> RuntimeHostConfig {
-    let mut config = test_runtime_host_config();
-    config.control.effect_host = controller_effect_host(controller);
-    reinstall_tool_child_host(&mut config);
-    config
+/// `layer`'s controller for `admitted` over `backend`'s effect host, for a test
+/// that drives the controller directly.
+pub fn layered_controller(
+    backend: &Arc<dyn lash_core::Backend>,
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+    admitted: lash_core::AdmittedScope,
+) -> Arc<dyn RuntimeEffectController> {
+    layered_scope(backend, layer, admitted)
+        .owned_controller()
+        .expect("a static layered controller is shared")
 }
 
-struct ControllerEffectHost {
-    controller: Arc<dyn RuntimeEffectController>,
-    tool_children: std::sync::OnceLock<Arc<lash_core::facade_support::ToolChildHost>>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for ControllerEffectHost {
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.controller.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.controller.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        self.controller.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<Instant>,
-    ) -> Result<Resolution, RuntimeError> {
-        self.controller
-            .await_await_event(key, cancel, deadline)
-            .await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.controller
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.controller
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn retire_await_events_for_scope(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<(), RuntimeError> {
-        self.controller.retire_await_events_for_scope(scope).await
-    }
-
-    async fn retire_await_events_for_scope_if_quiescent(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<bool, RuntimeError> {
-        self.controller
-            .retire_await_events_for_scope_if_quiescent(scope)
-            .await
-    }
-
-    async fn reinstate_await_event_scope(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<(), RuntimeError> {
-        self.controller.reinstate_await_event_scope(scope).await
-    }
-
-    async fn await_event_scope_is_retired(
-        &self,
-        scope: &ExecutionScope,
-    ) -> Result<bool, RuntimeError> {
-        self.controller.await_event_scope_is_retired(scope).await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::EffectHost for ControllerEffectHost {
-    fn turn_control_binding_id(&self) -> String {
-        self.controller
-            .await_event_authority_binding_id()
-            .expect("test controller must identify its authority")
-    }
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
-        self
-    }
-    fn scoped<'run>(
-        &'run self,
-        scope: lash_core::AdmittedScope,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        ScopedEffectController::borrowed(self.controller.as_ref(), scope)
-    }
-
-    fn scoped_static(
-        &self,
-        scope: lash_core::AdmittedScope,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        ScopedEffectController::shared(Arc::clone(&self.controller), scope).map(Some)
-    }
-
-    fn scoped_for_group_child(
-        &self,
-        scope: lash_core::AdmittedScope,
-        _binding: lash_core::GroupChildBinding,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        ScopedEffectController::shared(Arc::clone(&self.controller), scope).map(Some)
-    }
-
-    fn install_tool_child_host(
-        &self,
-        candidate: Arc<lash_core::facade_support::ToolChildHost>,
-    ) -> Option<Arc<lash_core::facade_support::ToolChildHost>> {
-        let installed = self.tool_children.get_or_init(|| candidate);
-        self.controller
-            .register_group_executors(Arc::clone(installed) as Arc<dyn lash_core::GroupExecutors>)
-            .ok()?;
-        Some(Arc::clone(installed))
-    }
-}
-
-pub fn controller_effect_host(
-    controller: Arc<dyn RuntimeEffectController>,
-) -> Arc<dyn lash_core::EffectHost> {
-    assert!(
-        controller.await_event_authority_binding_id().is_some(),
-        "test controller must identify its authority"
-    );
-    Arc::new(ControllerEffectHost {
-        controller,
-        tool_children: std::sync::OnceLock::new(),
-    })
+/// [`layered_controller`] for the runtime-operation scope a shared controller
+/// handle admits.
+pub fn layered_operation_controller(
+    backend: &Arc<dyn lash_core::Backend>,
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+) -> Arc<dyn RuntimeEffectController> {
+    layered_controller(
+        backend,
+        layer,
+        lash_core::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+    )
 }

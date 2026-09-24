@@ -18,12 +18,8 @@ fn field_witness<T>(_: impl FnOnce(&T)) {}
 fn variant_witness<T>(_: impl FnOnce(&T) -> bool) {}
 
 fn drain_area_witnesses() {
-    // W0001: lash::durability::DurableProcessWorkerConfig::trigger_store [field]
-    field_witness(|value: &lash::durability::DurableProcessWorkerConfig| {
-        let _ = &value.trigger_store;
-    });
-    // W0002: lash::durability::DurableProcessWorkerConfig::with_trigger_store [function]
-    let _ = lash::durability::DurableProcessWorkerConfig::with_trigger_store;
+    // W0001: lash::durability::DurableProcessWorkerConfig::trigger_store [function]
+    let _ = lash::durability::DurableProcessWorkerConfig::trigger_store;
     // W0003: lash::plugins::PluginSession::triggers [function]
     let _ = lash::plugins::PluginSession::triggers;
     // W0006: lash_conformance::TriggerOccurrenceRetentionFaultInjector::clear_occurrence_delete_failure [function]

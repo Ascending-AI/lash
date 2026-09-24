@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use lash_core::facade_support::{
-    LashRuntime, LlmTransportError, NativeRuntimeEffectController, Provider, ProviderComponents,
-    ProviderHandle, ProviderOptions, SingleProviderResolver, TurnFinish, TurnOutcome,
+    LashRuntime, LlmTransportError, Provider, ProviderComponents, ProviderHandle, ProviderOptions,
+    SingleProviderResolver, TurnFinish, TurnOutcome,
 };
 use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, PluginSpec,
@@ -38,12 +38,39 @@ fn test_runtime_owner() -> lash_core::LeaseOwnerIdentity {
 use lash_sansio::sync::MutexExt;
 use tokio_util::sync::CancellationToken;
 
+/// A fresh SQLite memory backend (ADR 0102).
+async fn memory_backend() -> Arc<dyn lash_core::Backend> {
+    Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open a SQLite memory backend"),
+    )
+}
+
 static PANIC_MODE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-#[derive(Default)]
+/// Records every effect outcome of a backend host's controller for one turn.
 struct RecordingEffectController {
-    inner: NativeRuntimeEffectController,
+    inner: Arc<dyn RuntimeEffectController>,
     outcomes: std::sync::Mutex<Vec<RuntimeEffectOutcome>>,
+}
+
+/// A recorder over `backend`'s own controller for `turn_id` of `session_id`.
+fn recording_controller(
+    backend: &Arc<dyn lash_core::Backend>,
+    session_id: &str,
+    turn_id: &str,
+) -> Arc<RecordingEffectController> {
+    Arc::new(RecordingEffectController {
+        inner: lash_core::testing::runtime_helpers::backend_turn_scope(
+            backend,
+            &SessionId::from(session_id),
+            &TurnId::from(turn_id),
+        )
+        .owned_controller()
+        .expect("a static controller is shared"),
+        outcomes: std::sync::Mutex::new(Vec::new()),
+    })
 }
 
 impl AwaitEventResolver for RecordingEffectController {}
@@ -550,6 +577,7 @@ async fn manufactured_provider_panic_bypasses_text_classification() {
 
 #[tokio::test]
 async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
+    let backend = memory_backend().await;
     let _mode = PANIC_MODE.lock().await;
     lash_core::panic_containment::set_loud(false);
     let provider = ScriptedProvider::new(vec![
@@ -567,7 +595,8 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         text_response("next turn works"),
     ])
     .into_handle();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let mut host = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
@@ -577,16 +606,11 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
         PluginSpec::new().with_tool_provider(Arc::new(PanicTool)),
     ));
     let mut runtime = Box::pin(
-        LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-            test_runtime_owner(),
-        )
-        .with_session_id("tool-panic-session")
-        .with_policy(policy("scripted-panic-containment"))
-        .with_plugin_factories(vec![protocol_factory(), plugin])
-        .with_runtime_host(host)
-        .build(),
+        LashRuntime::builder(host, test_runtime_owner())
+            .with_session_id("tool-panic-session")
+            .with_policy(policy("scripted-panic-containment"))
+            .with_plugin_factories(vec![protocol_factory(), plugin])
+            .build(),
     )
     .await
     .expect("runtime");
@@ -629,27 +653,24 @@ async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() {
 
 #[tokio::test]
 async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_turn_succeeds() {
+    let backend = memory_backend().await;
     let _mode = PANIC_MODE.lock().await;
     lash_core::panic_containment::set_loud(false);
     let provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicOnceProvider {
         panic_next: Arc::new(AtomicBool::new(true)),
     })));
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let mut host = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
     let mut runtime = Box::pin(
-        LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-            test_runtime_owner(),
-        )
-        .with_session_id("provider-panic-session")
-        .with_policy(policy("panic-once-provider"))
-        .with_plugin_factories(vec![protocol_factory()])
-        .with_runtime_host(host)
-        .build(),
+        LashRuntime::builder(host, test_runtime_owner())
+            .with_session_id("provider-panic-session")
+            .with_policy(policy("panic-once-provider"))
+            .with_plugin_factories(vec![protocol_factory()])
+            .build(),
     )
     .await
     .expect("runtime");
@@ -703,28 +724,29 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
 
 #[tokio::test]
 async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise() {
+    let backend = memory_backend().await;
     use futures_util::FutureExt as _;
 
     let _mode = PANIC_MODE.lock().await;
 
-    let quiet_controller = Arc::new(RecordingEffectController::default());
+    let quiet_controller = recording_controller(
+        &backend,
+        "quiet-provider-record-session",
+        "quiet-provider-record-turn",
+    );
     let quiet_provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
-    let mut quiet_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let mut quiet_host = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
     quiet_host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(quiet_provider));
     let mut quiet_runtime = Box::pin(
-        LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-            test_runtime_owner(),
-        )
-        .with_session_id("quiet-provider-record-session")
-        .with_policy(policy("panic-provider"))
-        .with_plugin_factories(vec![protocol_factory()])
-        .with_runtime_host(quiet_host)
-        .build(),
+        LashRuntime::builder(quiet_host, test_runtime_owner())
+            .with_session_id("quiet-provider-record-session")
+            .with_policy(policy("panic-provider"))
+            .with_plugin_factories(vec![protocol_factory()])
+            .build(),
     )
     .await
     .expect("quiet runtime");
@@ -744,24 +766,24 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         .expect("quiet provider panic is typed");
     let quiet = quiet_controller.provider_panic_projection();
 
-    let loud_controller = Arc::new(RecordingEffectController::default());
+    let loud_controller = recording_controller(
+        &backend,
+        "loud-provider-record-session",
+        "loud-provider-record-turn",
+    );
     let loud_provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
-    let mut loud_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let mut loud_host = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
     loud_host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(loud_provider));
     let mut loud_runtime = Box::pin(
-        LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-            test_runtime_owner(),
-        )
-        .with_session_id("loud-provider-record-session")
-        .with_policy(policy("panic-provider"))
-        .with_plugin_factories(vec![protocol_factory()])
-        .with_runtime_host(loud_host)
-        .build(),
+        LashRuntime::builder(loud_host, test_runtime_owner())
+            .with_session_id("loud-provider-record-session")
+            .with_policy(policy("panic-provider"))
+            .with_plugin_factories(vec![protocol_factory()])
+            .build(),
     )
     .await
     .expect("loud runtime");
@@ -790,27 +812,24 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
 
 #[tokio::test]
 async fn provider_turn_panic_reaches_the_harness_when_loud() {
+    let backend = memory_backend().await;
     use futures_util::FutureExt as _;
 
     let _mode = PANIC_MODE.lock().await;
     lash_core::panic_containment::set_loud(true);
     let provider = ProviderHandle::new(ProviderComponents::new(Box::new(PanicProvider)));
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let mut host = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
     host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(provider));
     let mut runtime = Box::pin(
-        LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-            test_runtime_owner(),
-        )
-        .with_session_id("loud-provider-panic-session")
-        .with_policy(policy("panic-provider"))
-        .with_plugin_factories(vec![protocol_factory()])
-        .with_runtime_host(host)
-        .build(),
+        LashRuntime::builder(host, test_runtime_owner())
+            .with_session_id("loud-provider-panic-session")
+            .with_policy(policy("panic-provider"))
+            .with_plugin_factories(vec![protocol_factory()])
+            .build(),
     )
     .await
     .expect("runtime");

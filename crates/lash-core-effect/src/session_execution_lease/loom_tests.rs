@@ -8,37 +8,90 @@
 //!
 //! The guard is constructed directly rather than through `from_acquisition`
 //! because the renewal task's spawn is a runtime duty outside this seam; the
-//! CAS under test is `release_state`'s.
+//! CAS under test is `release_state`'s. Its lane lives in a test-local lease
+//! port, since the guard reaches the store only through that port.
 
 use super::*;
-use crate::store::{
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
-};
-use lash_core_memory::in_memory_store::InMemorySessionStore;
+use crate::store::{SessionExecutionLeaseObservation, SessionExecutionLeaseStore};
 
-/// Claim a real durable row so `release_if_live`'s backend call succeeds,
-/// then build the guard around it.
+/// A test-local lease port: one lane row held by the guard under test. The
+/// model checks the guard's release CAS, so the port answers exactly the
+/// release a durable backend gives — the holder's first release clears the
+/// row, and any later one is the idempotent refusal — and nothing else.
+struct LoomLeaseStub {
+    held: StdMutex<Option<SessionExecutionLease>>,
+}
+
+impl LoomLeaseStub {
+    fn holding(lease: SessionExecutionLease) -> Self {
+        Self {
+            held: StdMutex::new(Some(lease)),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionExecutionLeaseStore for LoomLeaseStub {
+    async fn try_claim_session_execution_lease_with_token(
+        &self,
+        _session_id: &SessionId,
+        _owner: &crate::LeaseOwnerIdentity,
+        _executor_id: &str,
+        _claim_nonce: &crate::LeaseClaimNonce,
+        _lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
+        unreachable!("the model builds its guard around an already-held lane")
+    }
+
+    async fn renew_session_execution_lease(
+        &self,
+        _fence: &SessionExecutionLeaseAuthority,
+        _lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLease, StoreError> {
+        unreachable!("the model's renewal task never runs")
+    }
+
+    async fn release_session_execution_lease(
+        &self,
+        completion: &SessionExecutionLeaseAuthority,
+    ) -> Result<(), StoreError> {
+        let mut held = self.held.lock_recover();
+        match held.as_ref() {
+            Some(lease) if lease.lease_token == completion.lease_token => {
+                *held = None;
+                Ok(())
+            }
+            _ => Err(StoreError::SessionExecutionLeaseReleaseRefused {
+                session_id: completion.session_id.clone(),
+            }),
+        }
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<SessionExecutionLeaseObservation, StoreError> {
+        unreachable!("the model never reads the lane")
+    }
+}
+
+/// A guard around a lane the stub holds.
 fn claimed_guard(
-    store: &Arc<InMemorySessionStore>,
     renew_task: tokio::task::JoinHandle<()>,
     loss_cause: u8,
 ) -> SessionExecutionLeaseGuard {
-    let owner = crate::LeaseOwnerIdentity::opaque("loom-owner", "loom-incarnation");
-    let outcome = loom::future::block_on(store.try_claim_session_execution_lease_with_token(
-        &SessionId::from("loom-lease"),
-        &owner,
-        "loom-executor",
-        &crate::LeaseClaimNonce::new(),
-        LeaseTimings::default().ttl_ms(),
-    ));
-    let SessionExecutionLeaseClaimOutcome::Acquired(SessionExecutionLeaseAcquisition {
-        lease, ..
-    }) = outcome.expect("a fresh store claim cannot fail")
-    else {
-        unreachable!("a fresh store claim cannot be busy")
+    let lease = SessionExecutionLease {
+        session_id: SessionId::from("loom-lease"),
+        owner: crate::LeaseOwnerIdentity::opaque("loom-owner", "loom-incarnation"),
+        executor_id: "loom-executor".to_string(),
+        lease_token: "loom-lease-token".to_string(),
+        fencing_token: 1,
+        claimed_at_epoch_ms: 0,
+        lease_term_ms: LeaseTimings::default().ttl_ms(),
+        expires_at_epoch_ms: LeaseTimings::default().ttl_ms(),
     };
     SessionExecutionLeaseGuard {
-        store: Arc::clone(store) as Arc<dyn RuntimePersistence>,
+        store: Arc::new(LoomLeaseStub::holding(lease.clone())),
         lease: Arc::new(StdMutex::new(lease)),
         release_state: Arc::new(AtomicU8::new(release_state::LIVE)),
         loss_cause: Arc::new(AtomicU8::new(loss_cause)),
@@ -63,9 +116,7 @@ fn release_if_live_racing_mark_released_converges_to_released() {
             .build()
             .expect("runtime for the renewal-task stand-in");
         let _entered = rt.enter();
-        let store = Arc::new(InMemorySessionStore::new());
         let guard = Arc::new(claimed_guard(
-            &store,
             rt.spawn(std::future::pending()),
             loss_cause::NONE,
         ));
@@ -94,9 +145,7 @@ fn concurrent_release_if_live_attempts_converge_to_released() {
             .build()
             .expect("runtime for the renewal-task stand-in");
         let _entered = rt.enter();
-        let store = Arc::new(InMemorySessionStore::new());
         let guard = Arc::new(claimed_guard(
-            &store,
             rt.spawn(std::future::pending()),
             loss_cause::NONE,
         ));
@@ -130,9 +179,7 @@ fn store_verdict_release_racing_attempt_skips_backend_and_converges() {
             .build()
             .expect("runtime for the renewal-task stand-in");
         let _entered = rt.enter();
-        let store = Arc::new(InMemorySessionStore::new());
         let guard = Arc::new(claimed_guard(
-            &store,
             rt.spawn(std::future::pending()),
             loss_cause::STORE_VERDICT,
         ));

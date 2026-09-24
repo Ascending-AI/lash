@@ -65,10 +65,7 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
         })
         .build()
         .into_handle();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
+    let mut host = memory_host_config().await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );

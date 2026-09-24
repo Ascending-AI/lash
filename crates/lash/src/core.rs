@@ -251,7 +251,7 @@ impl LashCore {
             Arc::clone(&self.store_factory),
             Arc::clone(&resolved_env.core.control.effect_host),
             Some(ports.process),
-            resolved_env.trigger_store.clone(),
+            Some(resolved_env.core.trigger_store()),
             Arc::clone(&resolved_env.core.durability.process_env_store),
             self.host_process_engines.clone(),
         )
@@ -677,7 +677,6 @@ impl LashCore {
         worker_config(
             &plugin_host,
             &self.env,
-            &self.store_factory,
             self.process_lifecycle_available,
             self.policy.clone(),
             self.process_execution_concurrency,
@@ -696,7 +695,6 @@ impl LashCore {
 struct NativeProcessWorkerSetup {
     worker_plugin_host: PluginHost,
     env: RuntimeEnvironment,
-    store_factory: Arc<dyn SessionStoreFactory>,
     process_lifecycle_available: bool,
     policy: SessionPolicy,
     process_execution_concurrency: usize,
@@ -716,7 +714,6 @@ impl NativeProcessWorkerSetup {
         worker_config(
             &self.worker_plugin_host,
             &self.env,
-            &self.store_factory,
             self.process_lifecycle_available,
             self.policy.clone(),
             self.process_execution_concurrency,
@@ -735,7 +732,6 @@ impl NativeProcessWorkerSetup {
 fn worker_config(
     worker_plugin_host: &PluginHost,
     env: &RuntimeEnvironment,
-    store_factory: &Arc<dyn SessionStoreFactory>,
     process_lifecycle_available: bool,
     policy: SessionPolicy,
     process_execution_concurrency: usize,
@@ -752,7 +748,6 @@ fn worker_config(
     let mut config = DurableProcessWorkerConfig::new(
         Arc::new(worker_plugin_host.clone()),
         runtime_host,
-        Arc::clone(store_factory),
         process_work,
         queued_work,
         session_execution_owner,
@@ -763,9 +758,6 @@ fn worker_config(
     config.native_substrate = native_substrate;
     if let Some(worker_slot_supplier) = worker_slot_supplier {
         config = config.with_worker_slot_supplier(worker_slot_supplier);
-    }
-    if let Some(trigger_store) = env.trigger_store.as_ref() {
-        config = config.with_trigger_store(Arc::clone(trigger_store));
     }
     if let Some(sink) = process_event_sink {
         config = config.with_process_event_sink(sink);
@@ -1139,22 +1131,14 @@ impl LashCoreBuilder {
             lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;
         let process_registry = process_work_source.process_registry();
         process_lifecycle_feed.bind_registry(Arc::clone(&process_registry));
-        let mut env_builder = RuntimeEnvironment::builder(
-            core.durability.commit_budget,
-            core.durability.queued_work_batching.clone(),
-        )
-        .with_plugin_host(Arc::clone(&default_plugin_host))
-        .with_runtime_host_config(core);
+        let mut env_builder =
+            RuntimeEnvironment::builder(core).with_plugin_host(Arc::clone(&default_plugin_host));
         env_builder = match &process_work_source {
             ProcessWorkSource::Native(_) => {
                 env_builder.with_process_registry(Arc::clone(&process_registry))
             }
             ProcessWorkSource::External(wiring) => env_builder.with_process_work(wiring.clone()),
         };
-        env_builder = env_builder
-            .with_session_store_factory(Arc::clone(&store_factory))
-            .with_trigger_store(backend.trigger_store())
-            .with_process_definition_registry(backend.process_definition_registry());
         let env = env_builder.build();
         // Registration owns the scope fence (ADR 0049): the registry lifts the
         // effect host's fence for a re-registered process id inside its own
@@ -1171,7 +1155,6 @@ impl LashCoreBuilder {
             &process_work_source,
             default_plugin_host.as_ref(),
             &env,
-            &store_factory,
             process_lifecycle_available,
             &policy,
             process_execution_concurrency,
@@ -1243,7 +1226,6 @@ impl LashCoreBuilder {
         process_work_source: &ProcessWorkSource,
         worker_plugin_host: &PluginHost,
         env: &RuntimeEnvironment,
-        store_factory: &Arc<dyn SessionStoreFactory>,
         process_lifecycle_available: bool,
         policy: &SessionPolicy,
         process_execution_concurrency: usize,
@@ -1263,7 +1245,6 @@ impl LashCoreBuilder {
         let config = Box::new(NativeProcessWorkerSetup {
             worker_plugin_host: worker_plugin_host.clone(),
             env: env.clone(),
-            store_factory: Arc::clone(store_factory),
             process_lifecycle_available,
             policy: policy.clone(),
             process_execution_concurrency,

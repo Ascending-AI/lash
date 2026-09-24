@@ -345,13 +345,12 @@ impl RuntimeSessionServices {
         DirectCompletionClient::runtime(self.clone(), effect_controller, turn_id)
     }
 
-    /// The host's durable home for the named process-definition registry
-    /// (FIG-2995). The environment defaults it to the in-memory registry, so
-    /// this is `Some` for every real runtime open.
+    /// The backend's durable home for the named process-definition registry
+    /// (FIG-2995).
     pub(in crate::runtime) fn process_definition_registry(
         self: &Arc<Self>,
     ) -> Option<std::sync::Arc<dyn crate::ProcessDefinitionRegistry>> {
-        self.current.host.process_definitions.clone()
+        Some(self.current.host.core.process_definitions())
     }
 
     pub(in crate::runtime) fn process_engines(&self) -> &crate::ProcessEngineRegistry {
@@ -359,19 +358,18 @@ impl RuntimeSessionServices {
     }
 
     pub(in crate::runtime) fn trigger_router(self: &Arc<Self>) -> Option<crate::TriggerRouter> {
-        self.current.host.trigger_store.as_ref().and_then(|store| {
-            self.current
-                .host
-                .work
-                .process_wiring()
-                .cloned()
-                .map(|wiring| {
-                    crate::TriggerRouter::new(Arc::clone(store), wiring).with_process_artifacts(
+        self.current
+            .host
+            .work
+            .process_wiring()
+            .cloned()
+            .map(|wiring| {
+                crate::TriggerRouter::new(self.current.host.core.trigger_store(), wiring)
+                    .with_process_artifacts(
                         Arc::clone(&self.current.host.core.durability.process_env_store),
                         self.current.host.core.process_engines.clone(),
                     )
-                })
-        })
+            })
     }
 
     /// Host-scoped services: they own a persistence snapshot and commit usage
@@ -449,6 +447,7 @@ impl RuntimeSessionServices {
     reason = "test-support conformance fixture: a broken setup assumption aborts the test"
 )]
 pub async fn append_receipt_mixed_usage_envelope_conformance(
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
 ) {
     let policy = crate::SessionPolicy {
@@ -462,7 +461,8 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
         .build_session("root")
         .expect("mixed-envelope plugin session");
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        backend,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
@@ -768,6 +768,7 @@ pub async fn append_receipt_mixed_usage_envelope_conformance(
     reason = "test-support conformance fixture: a broken setup assumption aborts the test"
 )]
 pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
+    backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
     arm_and_wait: A,
 ) where
@@ -786,7 +787,8 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     let plugins = crate::PluginHost::new(crate::testing::test_standard_protocol_factories())
         .build_session("root")
         .expect("cancelled usage plugin session");
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        backend,
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     ));
@@ -929,11 +931,10 @@ pub(super) async fn emit_session_events(
 mod process_visibility_tests {
     use super::{ProcessVisibility, RuntimeSessionProcessService};
     use crate::ProcessId;
-    use crate::ProcessRegistrar as _;
     use crate::SessionId;
     use crate::TurnId;
 
-    use crate::runtime::tests::helpers::{named_turn_scope, standard_test_policy};
+    use crate::runtime::tests::helpers::{host_turn_scope, standard_test_policy};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -984,25 +985,23 @@ mod process_visibility_tests {
         let filter = Arc::new(CountingFilter {
             invocations: AtomicUsize::new(0),
         });
-        let registry = Arc::new(crate::TestLocalProcessRegistry::default());
-        let core = crate::RuntimeHostConfig::in_memory(
+        let backend = crate::testing::memory_backend().await;
+        let registry = backend.process_registry();
+        let core = crate::RuntimeHostConfig::new(
+            backend,
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         )
         .with_process_tool_visibility_filter(filter.clone());
-        let env = crate::RuntimeEnvironment::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )
-        .with_plugin_host(Arc::new(crate::PluginHost::new(
-            crate::testing::test_standard_protocol_factories(),
-        )))
-        .with_runtime_host_config(core)
-        .with_process_work(crate::testing::process_work_wiring_for_registry(
-            registry.clone(),
-        ))
-        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
-        .build();
+        let env = crate::RuntimeEnvironment::builder(core)
+            .with_plugin_host(Arc::new(crate::PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )))
+            .with_process_work(crate::testing::process_work_wiring_for_registry(
+                registry.clone(),
+            ))
+            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .build();
         let policy = standard_test_policy();
         let runtime = crate::LashRuntime::from_environment(
             &env,
@@ -1058,8 +1057,9 @@ mod process_visibility_tests {
         )
     }
 
-    fn scope() -> crate::ProcessOpScope<'static> {
-        crate::ProcessOpScope::new(named_turn_scope(
+    fn scope(service: &RuntimeSessionProcessService) -> crate::ProcessOpScope<'static> {
+        crate::ProcessOpScope::new(host_turn_scope(
+            &service.services.current.host.core,
             &SessionId::from(SESSION_ID),
             &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
@@ -1099,7 +1099,7 @@ mod process_visibility_tests {
                             &service,
                             &SessionId::from(SESSION_ID),
                             crate::ProcessListMode::Live,
-                            scope(),
+                            scope(&service),
                         )
                         .await
                         .expect("list visible process records");
@@ -1120,7 +1120,7 @@ mod process_visibility_tests {
                             &service,
                             &SessionId::from(SESSION_ID),
                             &[ProcessId::from(HIDDEN_PROCESS_ID.to_string())],
-                            scope(),
+                            scope(&service),
                         )
                         .await;
                         assert_eq!(result.is_ok(), hidden_is_visible);
@@ -1135,7 +1135,7 @@ mod process_visibility_tests {
                             "ready".to_string(),
                             uuid::Uuid::new_v4().to_string(),
                             serde_json::Value::Null,
-                            scope(),
+                            scope(&service),
                         )
                         .await
                         .expect("signal an already-validated possessed process");
@@ -1160,7 +1160,7 @@ mod process_visibility_tests {
             &service,
             &SessionId::from(SESSION_ID),
             crate::ProcessListMode::Live,
-            scope(),
+            scope(&service),
         )
         .await
         .expect("list process read records");

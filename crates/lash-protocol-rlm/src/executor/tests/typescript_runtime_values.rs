@@ -18,10 +18,10 @@ use lash_core::testing::store_fixtures::durable_admission;
 pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomness() {
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
         Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let effect_host = memory_effect_host().await;
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let process_env_store = backend.process_env_store();
+    let effect_host = backend.effect_host();
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -35,9 +35,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&effect_host),
-        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
-        process_env_store.clone(),
+        Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -49,7 +47,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
             ),
         ),
     );
-    let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+    let registry_dyn = Arc::clone(&registry);
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::new(
@@ -57,7 +55,6 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
                 lash_core::testing::test_code_protocol_factories(),
             )),
             runtime_host,
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
@@ -130,7 +127,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
     let [record] = records.as_slice() else {
         panic!("expected exactly one started TypeScript process, got {records:?}");
     };
-    let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+    let registry_dyn = Arc::clone(&registry);
     let terminal = match tokio::time::timeout(
         std::time::Duration::from_secs(5),
         lash_core::NativeProcessWork::for_registry(registry_dyn).await_terminal(&record.id),

@@ -17,21 +17,23 @@ fn recovery_local_owner(
     lash_core::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-/// A bare recovery worker over `registry` with a known lease owner. It runs no
-/// engine (empty `PluginHost`); it drains and sweeps the registry only, so it
-/// stands in for a host that started OwnerBound work under `owner`.
+/// A bare recovery worker over `backend` with a known lease owner. It runs no
+/// engine (empty `PluginHost`); it drains and sweeps the backend's registry
+/// only, so it stands in for a host that started OwnerBound work under
+/// `owner`.
 fn recovery_process_worker(
-    registry: Arc<dyn lash_core::ProcessRegistry>,
+    backend: &Arc<lash_sqlite_store::SqliteBackend>,
     owner: lash_core::LeaseOwnerIdentity,
 ) -> lash_core_worker::DurableProcessWorker {
-    let watched = lash_core::facade_support::watch_process_registry(registry);
+    let backend: Arc<dyn lash_core::Backend> = backend.clone();
+    let watched = lash_core::facade_support::watch_process_registry(backend.process_registry());
     lash_core_worker::DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
         Arc::new(lash_core::facade_support::PluginHost::new(Vec::new())),
-        lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::facade_support::RuntimeHostConfig::new(
+            backend,
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         ),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
         lash_core_worker::WorkerProcessWork::SelfNative(watched),
         Arc::new(lash_core::NoQueuedWork::new()),
         owner,
@@ -67,7 +69,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     let core = process_test_core(backend.clone(), Arc::clone(&artifact_store))?;
 
     let drain_owner = recovery_local_owner("drain-host", "host-a", "drain-start");
-    let worker = recovery_process_worker(Arc::clone(&registry), drain_owner.clone());
+    let worker = recovery_process_worker(&backend, drain_owner.clone());
 
     // A started OwnerBound row this host owns (first_started under `drain_owner`).
     let process_id = "owner-bound-drain";
@@ -132,7 +134,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     // A foreign worker's sweep never resurrects or re-runs an abandoned row: the
     // row is terminal, so it is off the worklist and untouched.
     let foreign = recovery_process_worker(
-        Arc::clone(&registry),
+        &backend,
         recovery_local_owner("foreign-host", "host-b", "foreign-start"),
     );
     let _ = foreign.drive_pending_processes().await?;
@@ -203,7 +205,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     // The sweep runs on host-a; the started owner is on host-b, so it is never
     // available for a claimant — a silent, foreign, expired holder.
     let sweep_owner = recovery_local_owner("recovery-host", "host-a", "claimant-start");
-    let worker = recovery_process_worker(Arc::clone(&registry), sweep_owner);
+    let worker = recovery_process_worker(&backend, sweep_owner);
     let silent_owner = recovery_local_owner("silent-owner", "host-b", "silent-start");
 
     let process_id = "silent-owner-bound";

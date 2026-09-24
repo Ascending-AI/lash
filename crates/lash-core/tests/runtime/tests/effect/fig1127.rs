@@ -2,10 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_without_session_nodes() {
-    #[derive(Clone, Default)]
+    let backend = memory_backend().await;
+    #[derive(Clone)]
     struct ControllerOwnedTriggerEmitter {
         process_starts: Arc<std::sync::atomic::AtomicUsize>,
-        native: NativeRuntimeEffectController,
+        native: Arc<dyn RuntimeEffectController>,
     }
 
     #[async_trait::async_trait]
@@ -91,13 +92,9 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
         }
     }
 
-    let store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-    let registry: Arc<dyn lash_core::ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("memory backend");
-    let process_env_store = lash_core::Backend::process_env_store(&backend);
+    let store = backend.trigger_store();
+    let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
+    let process_env_store = backend.process_env_store();
     let process_env_ref =
         lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let source_key = lash_core::facade_support::empty_trigger_source_key("ui.button.pressed")
@@ -138,7 +135,15 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
         process_env_store,
         lash_core::testing::process_engine_fixture(),
     );
-    let controller = ControllerOwnedTriggerEmitter::default();
+    let controller = ControllerOwnedTriggerEmitter {
+        process_starts: Arc::default(),
+        native: backend_admitted_scope(
+            &backend,
+            lash_core::AdmittedScope::runtime_operation("fig1127-trigger-emission"),
+        )
+        .owned_controller()
+        .expect("a static controller is shared"),
+    };
     let occurrence = || {
         lash_core::TriggerOccurrenceRequest::new(
             "ui.button.pressed",

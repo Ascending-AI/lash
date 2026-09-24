@@ -804,36 +804,35 @@ impl Processes {
                 .artifact_cleanup_acknowledgements
                 .push(acknowledgement);
         }
-        if let Some(trigger_store) = self.core.env.trigger_store.as_ref() {
-            let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
-                registry.as_ref(),
-                trigger_store.as_ref(),
-                Some(self.core.store_factory.as_ref()),
-            )
-            .await
-            {
-                Ok(retention) => retention,
-                Err(err) => {
-                    tracing::warn!(
-                        failure_stage = "reconcile_trigger_deliveries_after_process_prune",
-                        cutoff_epoch_ms,
-                        pruned_processes = report.pruned_processes,
-                        pruned_events = report.pruned_events,
-                        error = %err,
-                        "process retention partially completed"
-                    );
-                    return Err(err.into());
-                }
-            };
-            report.pruned_trigger_deliveries = retention.reclaimed_delivery_count;
-            tracing::info!(
-                reclaimed_trigger_deliveries = retention.reclaimed_delivery_count,
-                reclaimed_trigger_occurrences = retention.reclaimed_occurrence_count,
-                reclaimed_trigger_subscriptions = retention.reclaimed_subscription_count,
-                reclaimed_trigger_mutation_receipts = retention.reclaimed_mutation_receipt_count,
-                "completed trigger retention after process prune"
-            );
-        }
+        let trigger_store = self.core.env.core.trigger_store();
+        let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
+            registry.as_ref(),
+            trigger_store.as_ref(),
+            Some(self.core.store_factory.as_ref()),
+        )
+        .await
+        {
+            Ok(retention) => retention,
+            Err(err) => {
+                tracing::warn!(
+                    failure_stage = "reconcile_trigger_deliveries_after_process_prune",
+                    cutoff_epoch_ms,
+                    pruned_processes = report.pruned_processes,
+                    pruned_events = report.pruned_events,
+                    error = %err,
+                    "process retention partially completed"
+                );
+                return Err(err.into());
+            }
+        };
+        report.pruned_trigger_deliveries = retention.reclaimed_delivery_count;
+        tracing::info!(
+            reclaimed_trigger_deliveries = retention.reclaimed_delivery_count,
+            reclaimed_trigger_occurrences = retention.reclaimed_occurrence_count,
+            reclaimed_trigger_subscriptions = retention.reclaimed_subscription_count,
+            reclaimed_trigger_mutation_receipts = retention.reclaimed_mutation_receipt_count,
+            "completed trigger retention after process prune"
+        );
         Ok(report)
     }
 
@@ -852,60 +851,52 @@ impl Processes {
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<usize> {
         let registry = self.registry();
-        let surveyed_trigger_store = if let Some(trigger_store) =
-            self.core.env.trigger_store.as_ref()
-        {
-            let retention_candidates =
-                match trigger_store.list_delivery_retention_candidates().await {
-                    Ok(candidates) => candidates,
-                    Err(err) => {
-                        tracing::warn!(
-                            failure_stage = "survey_outstanding_trigger_deliveries",
-                            cutoff_epoch_ms,
-                            error = %err,
-                            "process tombstone compaction blocked"
-                        );
-                        return Err(err.into());
-                    }
-                };
-            let surveyed_trigger_store =
-                SurveyedTriggerStore::new(trigger_store.as_ref(), retention_candidates);
-            let reconciled_trigger_deliveries =
-                match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
-                    registry.as_ref(),
-                    &surveyed_trigger_store,
-                    Some(self.core.store_factory.as_ref()),
-                )
-                .await
-                {
-                    Ok(retention) => retention.reclaimed_delivery_count,
-                    Err(err) => {
-                        tracing::warn!(
-                            failure_stage = "reconcile_trigger_deliveries_before_compaction",
-                            cutoff_epoch_ms,
-                            protected_process_count = surveyed_trigger_store.protected_process_count(),
-                            error = %err,
-                            "process tombstone compaction blocked"
-                        );
-                        return Err(err.into());
-                    }
-                };
-            tracing::debug!(
-                protected_process_count = surveyed_trigger_store.protected_process_count(),
-                reconciled_trigger_deliveries,
-                "prepared delivery-aware process tombstone compaction"
-            );
-            Some(surveyed_trigger_store)
-        } else {
-            None
+        let trigger_store = self.core.env.core.trigger_store();
+        let retention_candidates = match trigger_store.list_delivery_retention_candidates().await {
+            Ok(candidates) => candidates,
+            Err(err) => {
+                tracing::warn!(
+                    failure_stage = "survey_outstanding_trigger_deliveries",
+                    cutoff_epoch_ms,
+                    error = %err,
+                    "process tombstone compaction blocked"
+                );
+                return Err(err.into());
+            }
         };
+        let surveyed_trigger_store =
+            SurveyedTriggerStore::new(trigger_store.as_ref(), retention_candidates);
+        let reconciled_trigger_deliveries =
+            match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
+                registry.as_ref(),
+                &surveyed_trigger_store,
+                Some(self.core.store_factory.as_ref()),
+            )
+            .await
+            {
+                Ok(retention) => retention.reclaimed_delivery_count,
+                Err(err) => {
+                    tracing::warn!(
+                        failure_stage = "reconcile_trigger_deliveries_before_compaction",
+                        cutoff_epoch_ms,
+                        protected_process_count = surveyed_trigger_store.protected_process_count(),
+                        error = %err,
+                        "process tombstone compaction blocked"
+                    );
+                    return Err(err.into());
+                }
+            };
+        tracing::debug!(
+            protected_process_count = surveyed_trigger_store.protected_process_count(),
+            reconciled_trigger_deliveries,
+            "prepared delivery-aware process tombstone compaction"
+        );
+
         match registry
             .compact_process_tombstones(
                 cutoff_epoch_ms,
                 watermark,
-                surveyed_trigger_store
-                    .as_ref()
-                    .map(|store| store as &dyn lash_core::TriggerStore),
+                Some(&surveyed_trigger_store as &dyn lash_core::TriggerStore),
             )
             .await
         {
@@ -914,9 +905,7 @@ impl Processes {
                 tracing::warn!(
                     failure_stage = "compact_process_tombstones",
                     cutoff_epoch_ms,
-                    protected_process_count = surveyed_trigger_store
-                        .as_ref()
-                        .map_or(0, SurveyedTriggerStore::protected_process_count),
+                    protected_process_count = surveyed_trigger_store.protected_process_count(),
                     error = %err,
                     "process tombstone compaction failed"
                 );

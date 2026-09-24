@@ -88,9 +88,9 @@ fn assert_exact_globals(state: &RlmExecutionState, names: &[&str], after: &str) 
 async fn process_context() -> lash_core::RuntimeExecutionContext<'static> {
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
         lashlang::global_in_memory_lashlang_artifact_store();
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let effect_host = memory_effect_host().await;
+    let backend = memory_backend().await;
+    let process_env_store = backend.process_env_store();
+    let effect_host = backend.effect_host();
     let session_policy = lash_core::SessionPolicy {
         model: lash_core::ModelSpec::builder("mock-model")
             .context_window_tokens(200_000)
@@ -99,7 +99,7 @@ async fn process_context() -> lash_core::RuntimeExecutionContext<'static> {
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let processes: Arc<dyn lash_core::ProcessService> = Arc::new(TypeScriptSignalProcessService {
-        registry: Arc::new(lash_core::TestLocalProcessRegistry::default()),
+        registry: backend.process_registry(),
         effect_host: Arc::clone(&effect_host),
         originator_override: None,
         env_store: Arc::clone(&process_env_store),

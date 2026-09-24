@@ -512,7 +512,7 @@ fn attachment_put_transport() -> TestProvider {
 }
 
 fn assert_turn_owned_attachment(store: &RecordingStore, turn_id: &TurnId) {
-    let entries = store.attachment_manifest_entries();
+    let entries = store.attachment_intents();
     assert_eq!(entries.len(), 1);
     assert_eq!(
         entries[0].owner,
@@ -549,6 +549,7 @@ impl lash_core::Clock for CancelWatchTestClock {
 }
 
 mod checkpoint_progress;
+mod config_patches;
 mod drain_and_recovery;
 mod drop_cancel_owner_failure;
 mod effects_and_queue;

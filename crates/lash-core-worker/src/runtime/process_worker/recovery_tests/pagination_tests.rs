@@ -32,14 +32,12 @@ async fn worker_sweep_policy_limits_worklist_fetch_attempts() {
         native_substrate,
     )
     .await;
-    test_registry
-        .set_worklist_page_errors_for_testing(
-            0,
-            (0..default_fetch_attempts())
-                .map(|_| injected_worklist_error("configured retry limit"))
-                .collect(),
-        )
-        .await;
+    test_registry.set_worklist_page_errors(
+        0,
+        (0..default_fetch_attempts())
+            .map(|_| injected_worklist_error("configured retry limit"))
+            .collect(),
+    );
 
     let result = worker
         .fetch_worklist_page_with_retry(
@@ -50,7 +48,7 @@ async fn worker_sweep_policy_limits_worklist_fetch_attempts() {
 
     assert!(result.is_err(), "the one configured attempt fails");
     assert_eq!(
-        test_registry.worklist_page_reads_for_testing().await.len(),
+        test_registry.worklist_page_reads().len(),
         1,
         "fetch_attempts=1 must stop after the first failed read"
     );
@@ -167,23 +165,19 @@ async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_swee
             .await
             .expect("register continuation recovery process");
     }
-    test_registry
-        .set_worklist_page_errors_for_testing(
-            1,
-            (0..default_fetch_attempts())
-                .map(|_| injected_worklist_error("continuation"))
-                .collect(),
-        )
-        .await;
+    test_registry.set_worklist_page_errors(
+        1,
+        (0..default_fetch_attempts())
+            .map(|_| injected_worklist_error("continuation"))
+            .collect(),
+    );
 
     let _ = run_handle
         .enable_and_drive()
         .await
         .expect("initial worklist page succeeds");
     tokio::time::timeout(Duration::from_secs(2), async {
-        while test_registry.worklist_page_reads_for_testing().await.len()
-            < 1 + default_fetch_attempts()
-        {
+        while test_registry.worklist_page_reads().len() < 1 + default_fetch_attempts() {
             tokio::task::yield_now().await;
         }
     })
@@ -233,14 +227,12 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
             .await
             .expect("register retry-exhaustion fixture");
     }
-    test_registry
-        .set_worklist_page_errors_for_testing(
-            1,
-            (0..default_fetch_attempts())
-                .map(|_| injected_worklist_error("in-flight retry"))
-                .collect(),
-        )
-        .await;
+    test_registry.set_worklist_page_errors(
+        1,
+        (0..default_fetch_attempts())
+            .map(|_| injected_worklist_error("in-flight retry"))
+            .collect(),
+    );
 
     let _ = run_handle
         .enable_and_drive()
@@ -248,9 +240,7 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
         .expect("start retry-exhaustion drive");
     retry_started.notified().await;
     tokio::time::timeout(Duration::from_secs(2), async {
-        while test_registry.worklist_page_reads_for_testing().await.len()
-            < 1 + default_fetch_attempts()
-        {
+        while test_registry.worklist_page_reads().len() < 1 + default_fetch_attempts() {
             tokio::task::yield_now().await;
         }
     })
@@ -283,14 +273,21 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
         .expect("the next drive reports its own admission");
     wait_for_terminal_count(&registry, 3, "retry after continuation exhaustion").await;
     assert_eq!(retry_runs.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        worker
+    // A terminal write lands in the durable registry before the execution that
+    // wrote it leaves the scheduler, so the scheduler is read once it settles.
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while worker
             .execution_scheduler
             .state
             .lock_recover()
-            .running_count(),
-        0
-    );
+            .running_count()
+            != 0
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("no execution stays stranded in the scheduler");
 }
 
 #[tokio::test]
@@ -318,10 +315,8 @@ async fn concurrent_drive_rescan_survives_the_initial_fetch_error() {
         ))
         .await
         .expect("register concurrent rescan process");
-    test_registry
-        .set_worklist_page_errors_for_testing(0, vec![injected_worklist_error("initial")])
-        .await;
-    let pause = test_registry.pause_next_worklist_page_for_testing();
+    test_registry.set_worklist_page_errors(0, vec![injected_worklist_error("initial")]);
+    let pause = test_registry.pause_next_worklist_page();
     let first_drive = {
         let run_handle = Arc::clone(&run_handle);
         crate::task::spawn(async move { run_handle.enable_and_drive().await })
@@ -382,10 +377,8 @@ async fn a_failed_scan_consumes_the_pending_rescan_without_a_redundant_pass() {
         ))
         .await
         .expect("register consumed-rescan process");
-    test_registry
-        .set_worklist_page_errors_for_testing(0, vec![injected_worklist_error("initial")])
-        .await;
-    let pause = test_registry.pause_next_worklist_page_for_testing();
+    test_registry.set_worklist_page_errors(0, vec![injected_worklist_error("initial")]);
+    let pause = test_registry.pause_next_worklist_page();
     let first_drive = {
         let run_handle = Arc::clone(&run_handle);
         crate::task::spawn(async move { run_handle.enable_and_drive().await })
@@ -408,12 +401,12 @@ async fn a_failed_scan_consumes_the_pending_rescan_without_a_redundant_pass() {
     // The failed first read plus the rescan it owed: a third read means the
     // pending flag survived the error path and scheduled a redundant pass.
     let redundant = tokio::time::timeout(Duration::from_millis(500), async {
-        while test_registry.worklist_page_reads_for_testing().await.len() < 3 {
+        while test_registry.worklist_page_reads().len() < 3 {
             tokio::task::yield_now().await;
         }
     })
     .await;
-    let reads = test_registry.worklist_page_reads_for_testing().await;
+    let reads = test_registry.worklist_page_reads();
     assert!(
         redundant.is_err(),
         "the consumed rescan must not schedule a redundant pass: {reads:?}"
@@ -520,13 +513,13 @@ async fn worklist_intake_fetches_next_page_only_after_dispatch_capacity_frees() 
     })
     .await
     .expect("first process starts");
-    let reads = test_registry.worklist_page_reads_for_testing().await;
+    let reads = test_registry.worklist_page_reads();
     assert_eq!(reads.len(), 1, "a saturated worker must not fetch page two");
     assert_eq!(reads[0].0, 1, "the first page is bounded by free slots");
 
     release.add_permits(4);
     wait_for_terminal_count(&registry, 4, "bounded intake backlog").await;
-    let reads = test_registry.worklist_page_reads_for_testing().await;
+    let reads = test_registry.worklist_page_reads();
     assert!(
         reads.len() >= 4,
         "one-slot dispatch must intake the four-row backlog incrementally"
@@ -631,7 +624,7 @@ async fn a_drive_that_coalesces_onto_an_in_flight_scan_reports_no_intake() {
         .await
         .expect("register the coalesced intake row");
 
-    let pause = test_registry.pause_next_worklist_page_for_testing();
+    let pause = test_registry.pause_next_worklist_page();
     let scanning_drive = {
         let run_handle = Arc::clone(&run_handle);
         crate::task::spawn(async move { run_handle.enable_and_drive().await })

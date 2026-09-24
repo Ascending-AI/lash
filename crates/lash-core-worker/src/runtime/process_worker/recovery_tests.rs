@@ -4,12 +4,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use super::test_backend::*;
 use super::*;
 use crate::TestProcessRegistryWriteExt;
 use crate::{
-    AbandonRequest, AttachmentStore, LeaseOwnerIdentity, ProcessExecutionEnvRef, ProcessInput,
-    ProcessListFilter, ProcessRegistration, ProcessStarted, ProcessStatus,
-    TestLocalProcessRegistry, TriggerStore,
+    AbandonRequest, LeaseOwnerIdentity, ProcessExecutionEnvRef, ProcessInput, ProcessListFilter,
+    ProcessRegistration, ProcessStarted, ProcessStatus, TriggerStore,
 };
 use lash_core::testing::trace_capture::{CapturedFieldKind, EventCapture, capturing};
 
@@ -79,7 +79,8 @@ fn process_execution_concurrency_validates_semaphore_bounds() {
 
 #[tokio::test]
 async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
-    let raw_registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let raw_registry = backend.process_registry();
     let watched = crate::watch_process_registry(raw_registry);
     let registry = Arc::clone(watched.registry());
     let process_id = "cancelled-before-crash-replay";
@@ -104,11 +105,7 @@ async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
             Arc::new(PluginHost::new(
                 crate::testing::test_standard_protocol_factories(),
             )),
-            RuntimeHostConfig::in_memory(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
-            ),
-            Arc::new(crate::InMemorySessionStoreFactory::new()),
+            test_host_config(&backend),
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner("cancel-replay-worker", "host-a", "fresh-incarnation"),
@@ -135,7 +132,7 @@ async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
     );
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal() {
     let provider_started = Arc::new(tokio::sync::Notify::new());
     let provider_release = Arc::new(tokio::sync::Semaphore::new(0));
@@ -160,15 +157,12 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
         })
         .build()
         .into_handle();
-    let raw_registry = Arc::new(TestLocalProcessRegistry::default());
-    let raw_registry_port: Arc<dyn ProcessRegistry> = raw_registry.clone();
+    let (backend, raw_registry) = faulted_memory_backend().await;
+    let raw_registry_port = backend.process_registry();
     let run_handle = Arc::new(LateBoundProcessWork::default());
     let (registry, _hub, process_work) =
         late_bound_process_work_wiring(raw_registry_port, Arc::clone(&run_handle));
-    let mut runtime_host = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+    let mut runtime_host = test_host_config(&backend);
     runtime_host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider));
     let policy = test_session_policy();
@@ -178,7 +172,6 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
             crate::testing::test_standard_protocol_factories(),
         )),
         runtime_host,
-        Arc::new(TestSessionStoreFactory::default()),
         crate::WorkerProcessWork::External(process_work),
         Arc::new(crate::NoQueuedWork::new()),
         local_owner("terminal-fence-worker", "host-a", "terminal-fence-start"),
@@ -227,8 +220,11 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
         )
         .await
         .expect("append cancellation without notifying the parked watcher");
-    // Freeze the watcher's polling timer so only the explicit provider release
-    // advances this race after the durable cancellation commit.
+    // Release the runner in the same step that follows the durable
+    // cancellation commit. The store runs on its own thread, so a paused clock
+    // would jump across every store wait rather than freeze the watcher's
+    // poll; the runner and the watcher race on real time, and whichever wins,
+    // the committed cancellation is the recorded terminal.
     provider_release.add_permits(1);
 
     // The runner settles its child turn and returns a successful output, but
@@ -362,15 +358,14 @@ fn late_bound_process_work_wiring(
 /// it must appear once as admitted and never as another owner's contention.
 #[tokio::test]
 async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    let trigger_store: Arc<dyn TriggerStore> = Arc::new(crate::InMemoryTriggerStore::default());
+    let backend = memory_backend().await;
+    let trigger_store = backend.trigger_store();
     let delivery = seed_reserved_trigger_delivery(&trigger_store).await;
     let run_handle = Arc::new(LateBoundProcessWork::default());
     run_handle.enabled.store(true, Ordering::SeqCst);
-    let worker = reentrant_worker_with_trigger_store(
-        Arc::clone(&registry),
+    let worker = reentrant_worker(
+        &backend,
         local_owner("reentrant-worker", "host-a", "claimant-start"),
-        Arc::clone(&trigger_store),
         Arc::clone(&run_handle),
     )
     .await;
@@ -1172,13 +1167,11 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         runs: Arc::clone(&nested_runs),
     });
     let run_handle = Arc::new(LateBoundProcessWork::default());
-    let raw_registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let raw_registry = backend.process_registry();
     let (registry, _hub, process_work) =
         late_bound_process_work_wiring(raw_registry, Arc::clone(&run_handle));
-    let mut runtime_host = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+    let mut runtime_host = test_host_config(&backend);
     runtime_host.process_engines = crate::ProcessEngineRegistry::new()
         .with_registration(crate::ProcessEngineRegistration::accepting(nested_engine));
     runtime_host.providers.provider_resolver =
@@ -1193,7 +1186,6 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         DurableProcessWorkerConfig::new(
             Arc::new(PluginHost::new(plugin_factories)),
             runtime_host,
-            Arc::new(TestSessionStoreFactory::default()),
             crate::WorkerProcessWork::External(process_work),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner("session-turn-worker", "host-a", "session-turn-start"),
@@ -1260,12 +1252,10 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
 
 #[tokio::test]
 async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
     let runs = Arc::new(AtomicUsize::new(0));
-    let mut runtime_host = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+    let mut runtime_host = test_host_config(&backend);
     runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_registration(
         crate::ProcessEngineRegistration::accepting(Arc::new(BoundaryThenTerminalEngine {
             runs: Arc::clone(&runs),
@@ -1289,7 +1279,6 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
                 crate::testing::test_standard_protocol_factories(),
             )),
             runtime_host,
-            Arc::new(SegmentBoundarySessionStoreFactory::default()),
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner("segment-worker", "host-a", "start-a"),
@@ -1333,8 +1322,9 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
 
 #[tokio::test]
 async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    let trigger_store: Arc<dyn TriggerStore> = Arc::new(crate::InMemoryTriggerStore::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let trigger_store = backend.trigger_store();
     let delivery = seed_reserved_trigger_delivery(&trigger_store).await;
     assert!(
         registry
@@ -1345,10 +1335,9 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
         "test starts in the reserve/start crash window"
     );
 
-    let worker = native_worker_with_trigger_store(
-        Arc::clone(&registry),
+    let worker = native_worker(
+        &backend,
         local_owner("trigger-worker", "host-a", "claimant-start"),
-        Arc::clone(&trigger_store),
     )
     .await;
     let _ = worker
@@ -1396,13 +1385,11 @@ async fn snapshot_recovery_fixture(
     Arc<Mutex<Vec<serde_json::Value>>>,
     DurableProcessWorker,
 ) {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    let trigger_store: Arc<dyn TriggerStore> = Arc::new(crate::InMemoryTriggerStore::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let trigger_store = backend.trigger_store();
     let payloads = Arc::new(Mutex::new(Vec::new()));
-    let mut runtime_host = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+    let mut runtime_host = test_host_config(&backend);
     runtime_host.process_engines = crate::ProcessEngineRegistry::new().with_registration(
         crate::ProcessEngineRegistration::accepting(Arc::new(SnapshotRecordingEngine {
             payloads: Arc::clone(&payloads),
@@ -1492,7 +1479,6 @@ async fn snapshot_recovery_fixture(
                 crate::testing::test_standard_protocol_factories(),
             )),
             runtime_host,
-            Arc::new(TestSessionStoreFactory::default()),
             crate::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             local_owner(
@@ -1502,7 +1488,6 @@ async fn snapshot_recovery_fixture(
             ),
         )
         .with_session_policy(policy)
-        .with_trigger_store(Arc::clone(&trigger_store))
     })
     .expect("valid test native substrate config");
     (registry, trigger_store, delivery, payloads, worker)
@@ -1576,8 +1561,9 @@ async fn sweep_recovers_reserved_v1_snapshot_after_tombstone_exactly_once() {
 
 #[tokio::test]
 async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process() {
-    let trigger_store = Arc::new(crate::InMemoryTriggerStore::default());
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let trigger_store = backend.trigger_store();
+    let registry = backend.process_registry();
     let trigger_store_dyn: Arc<dyn TriggerStore> = trigger_store.clone();
     let delivery = seed_reserved_trigger_delivery(&trigger_store_dyn).await;
     assert!(
@@ -1589,10 +1575,9 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         "test starts in the reserve/start crash window"
     );
 
-    let worker = native_worker_with_trigger_store(
-        Arc::clone(&registry),
+    let worker = native_worker(
+        &backend,
         local_owner("trigger-worker", "host-a", "claimant-start"),
-        Arc::clone(&trigger_store_dyn),
     )
     .await;
     let _ = worker
@@ -1673,8 +1658,9 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
 
 #[tokio::test]
 async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
-    let trigger_store: Arc<dyn TriggerStore> = Arc::new(crate::InMemoryTriggerStore::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let trigger_store = backend.trigger_store();
     let delivery = seed_reserved_trigger_delivery(&trigger_store).await;
     registry
         .register_process(ProcessRegistration::new(
@@ -1692,10 +1678,9 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
         .await
         .expect("pre-register delivery process");
 
-    let worker = native_worker_with_trigger_store(
-        Arc::clone(&registry),
+    let worker = native_worker(
+        &backend,
         local_owner("trigger-worker", "host-a", "claimant-start"),
-        trigger_store,
     )
     .await;
     let _ = worker
@@ -1720,7 +1705,8 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
 /// their execution (ADR 0019).
 #[tokio::test]
 async fn sweep_never_claims_externally_owned_rows() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
     registry
         .register_process(registration_with_disposition(
             "proc-ext",
@@ -1730,7 +1716,7 @@ async fn sweep_never_claims_externally_owned_rows() {
         .expect("register");
 
     let worker = native_worker(
-        Arc::clone(&registry),
+        &backend,
         local_owner("live-worker", "host-a", "claimant-start"),
     )
     .await;
@@ -1787,7 +1773,8 @@ async fn sweep_never_claims_externally_owned_rows() {
 /// terminalized by recovery without invoking the engine again.
 #[tokio::test]
 async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
     registry
         .register_process(
             registration_with_disposition("proc-attempts-exhausted", RecoveryContract::Rerunnable)
@@ -1811,7 +1798,7 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
         .expect("record exhausted attempt");
 
     let worker = native_worker(
-        Arc::clone(&registry),
+        &backend,
         local_owner("recovery-worker", "host-b", "recovery-start"),
     )
     .await;
@@ -1834,7 +1821,8 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
 /// `Abandoned{reconciled_request}` — there is no owner lease to wait out.
 #[tokio::test]
 async fn sweep_reconciles_externally_owned_abandon_request() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
     registry
         .register_process(registration_with_disposition(
             "proc-ext-abandon",
@@ -1855,7 +1843,7 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
         .expect("request abandon");
 
     let worker = native_worker(
-        Arc::clone(&registry),
+        &backend,
         local_owner("live-worker", "host-a", "claimant-start"),
     )
     .await;
@@ -1877,7 +1865,8 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
 /// elapsed time alone never terminalizes.
 #[tokio::test]
 async fn sweep_skips_started_owner_bound_with_silent_holder() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
     registry
         .register_process(registration_with_disposition(
             "proc-ob-silent",
@@ -1911,7 +1900,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
         .expect("live holder lease acquired");
 
     let worker = native_worker(
-        Arc::clone(&registry),
+        &backend,
         local_owner("live-worker", "host-a", "claimant-start"),
     )
     .await;
@@ -1937,7 +1926,8 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
 /// owner as the lapsed owner.
 #[tokio::test]
 async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
     registry
         .register_process(registration_with_disposition(
             "proc-ob-lapse",
@@ -1972,7 +1962,7 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
     // No live lease held: the row's owner lease has lapsed.
 
     let worker = native_worker(
-        Arc::clone(&registry),
+        &backend,
         local_owner("live-worker", "host-a", "claimant-start"),
     )
     .await;
@@ -1997,7 +1987,8 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
 /// non-terminal and becomes claimable again rather than recording a failure.
 #[tokio::test]
 async fn owner_bound_unstarted_infra_failure_stays_claimable() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
     registry
         .register_process(registration_with_disposition(
             "proc-ob-unstarted",
@@ -2007,7 +1998,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
         .expect("register");
 
     let worker = native_worker(
-        Arc::clone(&registry),
+        &backend,
         local_owner("live-worker", "host-a", "claimant-start"),
     )
     .await;
@@ -2205,9 +2196,10 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
 /// while leaving rerunnable, not-yet-started, and other-owner rows untouched.
 #[tokio::test]
 async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
-    let registry: Arc<dyn ProcessRegistry> = Arc::new(TestLocalProcessRegistry::default());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
     let owner = local_owner("drain-host", "host-a", "start-a");
-    let worker = native_worker(Arc::clone(&registry), owner.clone()).await;
+    let worker = native_worker(&backend, owner.clone()).await;
 
     // (a) OwnerBound row this worker started -> drained.
     registry
@@ -2374,7 +2366,7 @@ async fn native_start_records_stable_owner_that_owner_drain_can_match() {
 
 #[tokio::test]
 async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-write-failure", "host-a", "start-a");
     let process_id = "owner-bound-terminal-write-failure";
     registry
@@ -2397,13 +2389,11 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
         )
         .await
         .expect("record first start");
-    registry
-        .set_process_terminal_write_error(Some(PluginError::Session(
-            "injected terminal-write failure".to_string(),
-        )))
-        .await;
+    registry.set_process_terminal_write_error(Some(PluginError::Session(
+        "injected terminal-write failure".to_string(),
+    )));
 
-    let worker = native_worker(registry.clone(), owner).await;
+    let worker = native_worker(&backend, owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 
@@ -2437,7 +2427,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
         "the injected store failure is fail-closed"
     );
 
-    registry.set_process_terminal_write_error(None).await;
+    registry.set_process_terminal_write_error(None);
     let retry = worker
         .drain_owner_bound_work()
         .await

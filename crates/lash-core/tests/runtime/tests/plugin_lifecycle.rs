@@ -3,6 +3,7 @@ use super::*;
 
 #[tokio::test]
 async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
+    let backend = memory_backend().await;
     let gate = Arc::new((
         tokio::sync::Notify::new(),
         tokio::sync::Notify::new(),
@@ -67,7 +68,7 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
                 ..LlmResponse::default()
             }),
         }]),
-        host_with_effect_recorder(recorder.clone()),
+        host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
 
@@ -83,7 +84,7 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            scoped_test_turn(&recorder, &TurnId::from("hook-error-surfacing")),
+            scoped_test_turn(&backend, &recorder, &TurnId::from("hook-error-surfacing")),
         )
         .await
         .expect("turn remains committed despite an observer-hook failure");

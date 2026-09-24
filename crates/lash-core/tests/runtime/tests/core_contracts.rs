@@ -35,8 +35,9 @@ impl RuntimeTurnPhaseProbe for RecordingPhaseProbe {
     }
 }
 
-#[test]
-fn default_lease_timings_are_contractual_windows() {
+#[tokio::test]
+async fn default_lease_timings_are_contractual_windows() {
+    let backend = memory_backend().await;
     let timings = lash_core::facade_support::LeaseTimings::default();
     assert_eq!(timings.ttl_ms(), 30_000);
     assert_eq!(timings.renew_interval_ms(), 10_000);
@@ -49,7 +50,8 @@ fn default_lease_timings_are_contractual_windows() {
         .is_err(),
         "a ttl below three renew intervals must be rejected"
     );
-    let host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let host = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );

@@ -274,20 +274,12 @@ impl DurableProcessWorker {
         policy.session_id = Some(session_id.clone());
         policy.provider_id = String::new();
         let builder = EmbeddedRuntimeBuilder::new(
-            self.config.runtime_host.durability.commit_budget,
-            self.config
-                .runtime_host
-                .durability
-                .queued_work_batching
-                .clone(),
+            self.config.runtime_host.clone(),
             self.config.lease_owner.clone(),
         )
         .with_session_id(session_id.to_string())
         .with_policy(policy)
         .with_plugin_host(self.config.plugin_host.as_ref().clone())
-        .with_runtime_host(self.config.runtime_host.clone())
-        .with_session_store_factory(Arc::clone(&self.config.session_store_factory))
-        .with_trigger_store(Arc::clone(&self.config.trigger_store))
         .with_process_work(self.process_wiring())
         .with_store(store)
         .with_queued_work(Arc::clone(&self.config.queued_work));
@@ -309,7 +301,7 @@ impl DurableProcessWorker {
         };
         match self
             .config
-            .session_store_factory
+            .session_store_factory()
             .open_existing_store(&request)
             .await
         {

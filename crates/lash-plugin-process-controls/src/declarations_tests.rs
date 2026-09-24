@@ -48,7 +48,7 @@ fn attempt_context(enclosing_process: Option<&str>) -> lash_core::ToolContext<'s
     // A recorded attempt always runs under a real owner scope; the mock
     // default is `RuntimeOperation`, which names no opener.
     let scoped = lash_core::ScopedEffectController::shared(
-        std::sync::Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+        std::sync::Arc::new(lash_core::testing::UnavailableEffectController),
         lash_core::AdmittedScope::turn("test-session", "declaration-turn"),
     )
     .expect("the test scope validates");

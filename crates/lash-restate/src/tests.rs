@@ -80,6 +80,21 @@ fn test_restate_await_event_key(
     restate_await_event_key_for_authority(&test_restate_authority_id(), scope, wait)
 }
 
+/// A runtime host config over a fresh SQLite memory backend (ADR 0102): the
+/// store set a Restate test's runtime stands on. A test that journals under
+/// Restate installs its Restate host over this config's backend host.
+pub(super) async fn memory_host_config() -> lash_core::facade_support::RuntimeHostConfig {
+    lash_core::facade_support::RuntimeHostConfig::new(
+        Arc::new(
+            lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .expect("open a SQLite memory backend"),
+        ),
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    )
+}
+
 mod bindings;
 mod effect_group_conformance;
 mod effect_group_sdk_preconditions;

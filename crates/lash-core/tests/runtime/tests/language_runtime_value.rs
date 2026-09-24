@@ -5,11 +5,17 @@ use lash_core::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor,
 };
 
-use super::effect::RecordingEffectController;
+use super::effect::{RecordingEffectController, layered_controller};
 
 #[tokio::test]
 async fn values_are_sampled_once_and_replayed_by_effect_id() {
+    let backend = super::memory_backend().await;
     let recorder = RecordingEffectController::default().with_replay_by_key();
+    let controller = layered_controller(
+        &backend,
+        Arc::new(recorder.clone()),
+        lash_core::AdmittedScope::runtime_operation("typescript-runtime-test"),
+    );
     let clock = Arc::new(lash_core::testing::TestClock::new(1_234));
     let invocation = RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
@@ -24,7 +30,7 @@ async fn values_are_sampled_once_and_replayed_by_effect_id() {
         operation: "now".to_string(),
     };
 
-    let first = recorder
+    let first = controller
         .execute_effect(
             RuntimeEffectEnvelope::new(invocation.clone(), command.clone()),
             RuntimeEffectLocalExecutor::language_runtime_value(clock.clone()),
@@ -34,7 +40,7 @@ async fn values_are_sampled_once_and_replayed_by_effect_id() {
         .into_language_runtime_value()
         .expect("language runtime outcome");
     clock.set(9_999);
-    let replay = recorder
+    let replay = controller
         .execute_effect(
             RuntimeEffectEnvelope::new(invocation, command),
             RuntimeEffectLocalExecutor::language_runtime_value(clock),

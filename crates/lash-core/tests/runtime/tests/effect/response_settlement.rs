@@ -109,16 +109,17 @@ fn protocol_factory(
     })
 }
 
-fn turn_scope<'a>(
-    controller: &'a dyn lash_core::RuntimeEffectController,
+fn turn_scope(
+    backend: &Arc<dyn lash_core::Backend>,
+    controller: &RecordingEffectController,
     session_id: &SessionId,
     turn_id: &TurnId,
-) -> lash_core::ScopedEffectController<'a> {
-    lash_core::ScopedEffectController::borrowed(
-        controller,
+) -> lash_core::ScopedEffectController<'static> {
+    layered_scope(
+        backend,
+        Arc::new(controller.clone()),
         lash_core::AdmittedScope::turn(session_id, turn_id),
     )
-    .expect("turn scope")
 }
 
 #[derive(Debug)]
@@ -174,18 +175,19 @@ fn manual_clock_wall_clock_faces_agree() {
 
 #[tokio::test]
 async fn bare_cancelled_token_after_mid_cell_lease_loss_is_not_a_cancelled_terminal() {
+    let backend = memory_backend().await;
     let lease_ttl = std::time::Duration::from_millis(120);
     let clock = Arc::new(ManualClock::new(1_000));
-    let store = Arc::new(RecordingStore::with_clock(clock.clone()));
+    let store = unbound_recording_store_with_clock(&backend, clock.clone()).await;
     let executor = Arc::new(SettlementExecutor::new(false));
     let controller = RecordingEffectController::default().with_local_code_execution();
-    let config = runtime_host_config_with_native_controller(Arc::new(controller.clone()))
+    let config = runtime_host_config_with_effect_layer(&backend, Arc::new(controller.clone()))
         .with_clock(clock.clone())
         .with_lease_timings(
             lash_core::facade_support::LeaseTimings::from_ttl(lease_ttl)
                 .expect("valid lease timings"),
         );
-    let mut runtime = TestRuntime::new(mock_provider(Vec::new()))
+    let mut runtime = TestRuntime::new(&backend, mock_provider(Vec::new()))
         .plugins(vec![protocol_factory(Arc::clone(&executor))])
         .host(EmbeddedRuntimeHost::new(config))
         .store(store.clone())
@@ -199,12 +201,14 @@ async fn bare_cancelled_token_after_mid_cell_lease_loss_is_not_a_cancelled_termi
     let mut input = TurnInput::text("run until the session lease is lost");
     input.turn_context.set_local_cancel_origin_hint(hint);
     let controller_for_turn = controller.clone();
+    let backend_for_turn = Arc::clone(&backend);
     let turn = lash_core::task::spawn(async move {
         runtime
             .run_turn_assembled(
                 input,
                 cancel_for_turn,
                 turn_scope(
+                    &backend_for_turn,
                     &controller_for_turn,
                     &SessionId::from("root"),
                     &TurnId::from("lease-loss-mid-cell"),
@@ -252,10 +256,12 @@ async fn bare_cancelled_token_after_mid_cell_lease_loss_is_not_a_cancelled_termi
 
 #[tokio::test]
 async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
+    let backend = memory_backend().await;
     let executor = Arc::new(SettlementExecutor::new(false));
     let controller = RecordingEffectController::default().with_local_code_execution();
-    let host = host_with_effect_recorder(controller.clone());
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RecordingStore::default());
+    let host = host_with_effect_recorder(&backend, controller.clone());
+    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
+        unbound_recording_store(&backend).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -280,6 +286,7 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
                 TurnInput::text("run the first cell"),
                 CancellationToken::new(),
                 turn_scope(
+                    &backend,
                     &controller,
                     &SessionId::from("root"),
                     &TurnId::from(turn_id),
@@ -317,12 +324,14 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
 
 #[tokio::test]
 async fn response_handoff_abort_settles_before_the_next_cell() {
+    let backend = memory_backend().await;
     let executor = Arc::new(SettlementExecutor::new(false));
     let controller = RecordingEffectController::default()
         .with_local_code_execution()
         .with_failing_exec_handoff_once();
-    let host = host_with_effect_recorder(controller.clone());
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RecordingStore::default());
+    let host = host_with_effect_recorder(&backend, controller.clone());
+    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
+        unbound_recording_store(&backend).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -342,12 +351,14 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
     .await;
     let turn_id = "response-handoff-abort";
     let controller_for_first = controller.clone();
+    let backend_for_turn = Arc::clone(&backend);
     let first = lash_core::task::spawn(async move {
         let result = runtime
             .run_turn_assembled(
                 TurnInput::text("abort the first cell handoff"),
                 CancellationToken::new(),
                 turn_scope(
+                    &backend_for_turn,
                     &controller_for_first,
                     &SessionId::from("root"),
                     &TurnId::from(turn_id),
@@ -378,6 +389,7 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
             TurnInput::text("run the next cell"),
             CancellationToken::new(),
             turn_scope(
+                &backend,
                 &controller,
                 &SessionId::from("root"),
                 &TurnId::from("response-handoff-next-cell"),

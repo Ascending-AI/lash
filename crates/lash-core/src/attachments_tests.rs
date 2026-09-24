@@ -1,7 +1,7 @@
 //! Attachment-layer tests.
 //!
 //! The attachment layer moved to `lash-core-store`; these cases drive it
-//! through `lash-core`'s in-memory session-store factory, so they live here.
+//! through a SQLite memory backend's session catalog and attachment store.
 
 use crate::SessionId;
 use lash_core_store::attachments::*;
@@ -228,21 +228,22 @@ fn meta() -> AttachmentCreateMeta {
 }
 
 async fn committed_factory_attachment() -> (
-    crate::InMemorySessionStoreFactory,
-    Arc<InMemoryAttachmentStore>,
+    Arc<dyn crate::SessionStoreFactory>,
+    Arc<dyn AttachmentStore>,
     AttachmentId,
 ) {
-    let factory = crate::InMemorySessionStoreFactory::new();
+    let substrate = crate::testing::memory_backend().await;
+    let factory = substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("explicit-root-factory"),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
-    let store = crate::SessionStoreFactory::create_store(&factory, &request)
+    let store = crate::SessionStoreFactory::create_store(factory.as_ref(), &request)
         .await
         .expect("create attachment-aware store");
-    let backend = Arc::new(InMemoryAttachmentStore::new());
+    let backend = substrate.attachment_store();
     let session = SessionAttachmentStore::new(
         backend.clone(),
         Arc::new(PersistenceManifestAdapter(Arc::clone(&store))),
@@ -264,7 +265,7 @@ async fn explicit_factory_root_set_keeps_committed_blob() {
     let (factory, backend, id) = committed_factory_attachment().await;
 
     let report = reclaim_unreferenced_attachments(
-        &factory,
+        factory.as_ref(),
         &*backend,
         AttachmentReclamationPolicy {
             grace_period_ms: 0,
@@ -286,7 +287,7 @@ async fn explicit_factory_root_set_keeps_committed_blob() {
 /// is therefore blind; only the factory's condemn CAS — the authority the
 /// writer's intent lives in — can still see the root.
 struct EmptySnapshotFactoryRoots<'a> {
-    factory: &'a crate::InMemorySessionStoreFactory,
+    factory: &'a dyn crate::SessionStoreFactory,
 }
 
 #[async_trait::async_trait]
@@ -353,7 +354,9 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
 #[tokio::test]
 async fn condemn_cas_spares_a_live_blob_every_read_shaped_guard_missed() {
     let (factory, backend, id) = committed_factory_attachment().await;
-    let roots = EmptySnapshotFactoryRoots { factory: &factory };
+    let roots = EmptySnapshotFactoryRoots {
+        factory: factory.as_ref(),
+    };
 
     let report = reclaim_unreferenced_attachments(
         &roots,
@@ -378,50 +381,14 @@ async fn condemn_cas_spares_a_live_blob_every_read_shaped_guard_missed() {
         .expect("the committed blob survives a blind snapshot and a blind probe");
 }
 
-#[tokio::test]
-async fn memory_store_dedupes_by_bytes() {
-    let store = InMemoryAttachmentStore::new();
-    let a = store.put(vec![1, 2, 3], meta()).await.expect("put a");
-    let b = store.put(vec![1, 2, 3], meta()).await.expect("put b");
-    assert_eq!(a.id, b.id);
-    assert_eq!(a.byte_len, 3);
-    assert_eq!(store.get(&a.id).await.expect("get").bytes, vec![1, 2, 3]);
-}
-
-#[tokio::test]
-async fn memory_store_assigns_identity_and_byte_len_from_bytes() {
-    let store = InMemoryAttachmentStore::new();
-    let reference = store.put(vec![4, 5, 6, 7], meta()).await.expect("put");
-
-    assert_eq!(reference.id, content_id(&[4, 5, 6, 7]));
-    assert_eq!(reference.byte_len, 4);
-}
-
-#[tokio::test]
-async fn memory_store_lists_stored_blobs() {
-    let store = InMemoryAttachmentStore::new();
-    let a = store.put(vec![1], meta()).await.expect("put a");
-    let b = store.put(vec![2], meta()).await.expect("put b");
-    let listed: BTreeSet<AttachmentId> = store
-        .list()
-        .await
-        .expect("list")
-        .into_iter()
-        .map(|blob| blob.id)
-        .collect();
-    assert!(listed.contains(&a.id));
-    assert!(listed.contains(&b.id));
-    assert_eq!(listed.len(), 2);
-}
-
 struct DeleteFailingAttachmentStore {
-    inner: InMemoryAttachmentStore,
+    inner: Arc<dyn AttachmentStore>,
 }
 
 impl DeleteFailingAttachmentStore {
-    fn new() -> Self {
+    async fn new() -> Self {
         Self {
-            inner: InMemoryAttachmentStore::new(),
+            inner: crate::testing::memory_backend().await.attachment_store(),
         }
     }
 }
@@ -459,7 +426,7 @@ impl AttachmentStore for DeleteFailingAttachmentStore {
 
 #[tokio::test]
 async fn gc_all_deletes_failed_is_incomplete() {
-    let backend = DeleteFailingAttachmentStore::new();
+    let backend = DeleteFailingAttachmentStore::new().await;
     let first = backend
         .put(vec![1, 3, 3, 7], meta())
         .await
@@ -496,11 +463,11 @@ async fn gc_all_deletes_failed_is_incomplete() {
 
 #[tokio::test]
 async fn gc_empty_backend_reports_incomplete_with_degraded_proof_and_root_diagnostic() {
-    let backend = InMemoryAttachmentStore::new();
+    let backend = crate::testing::memory_backend().await.attachment_store();
 
     let report = reclaim_unreferenced_attachments(
         &UnavailableRootSet,
-        &backend,
+        backend.as_ref(),
         AttachmentReclamationPolicy {
             grace_period_ms: 0,
             empty_root_set: EmptyRootSetPolicy::Refuse,
@@ -527,7 +494,7 @@ async fn gc_empty_backend_reports_incomplete_with_degraded_proof_and_root_diagno
 
 #[tokio::test]
 async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
-    let backend = InMemoryAttachmentStore::new();
+    let backend = crate::testing::memory_backend().await.attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 6], meta())
         .await
@@ -536,7 +503,7 @@ async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
 
     let result = reclaim_unreferenced_attachments(
         &roots,
-        &backend,
+        backend.as_ref(),
         AttachmentReclamationPolicy {
             grace_period_ms: 0,
             empty_root_set: EmptyRootSetPolicy::Refuse,
@@ -561,7 +528,7 @@ async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
 
 #[tokio::test]
 async fn gc_explicit_authorization_permits_an_empty_root_set_sweep() {
-    let backend = InMemoryAttachmentStore::new();
+    let backend = crate::testing::memory_backend().await.attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 7], meta())
         .await
@@ -570,7 +537,7 @@ async fn gc_explicit_authorization_permits_an_empty_root_set_sweep() {
 
     let report = reclaim_unreferenced_attachments(
         &roots,
-        &backend,
+        backend.as_ref(),
         AttachmentReclamationPolicy {
             grace_period_ms: 0,
             empty_root_set: EmptyRootSetPolicy::AuthorizeDeleteAll,
@@ -588,7 +555,7 @@ async fn gc_explicit_authorization_permits_an_empty_root_set_sweep() {
 
 #[tokio::test]
 async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
-    let backend = InMemoryAttachmentStore::new();
+    let backend = crate::testing::memory_backend().await.attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 8], meta())
         .await
@@ -597,7 +564,7 @@ async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
 
     let report = reclaim_unreferenced_attachments(
         &roots,
-        &backend,
+        backend.as_ref(),
         AttachmentReclamationPolicy {
             grace_period_ms: 60 * 60 * 1000,
             empty_root_set: EmptyRootSetPolicy::Refuse,
@@ -615,7 +582,7 @@ async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
 
 #[tokio::test]
 async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protected() {
-    let backend = InMemoryAttachmentStore::new();
+    let backend = crate::testing::memory_backend().await.attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 9], meta())
         .await
@@ -623,7 +590,7 @@ async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protect
 
     let report = reclaim_unreferenced_attachments(
         &UnavailableRootSet,
-        &backend,
+        backend.as_ref(),
         AttachmentReclamationPolicy {
             grace_period_ms: 60 * 60 * 1000,
             empty_root_set: EmptyRootSetPolicy::Refuse,
@@ -655,7 +622,8 @@ async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protect
 
 #[tokio::test]
 async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
-    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let backend: Arc<dyn AttachmentStore> =
+        crate::testing::memory_backend().await.attachment_store();
     let manifest = Arc::new(RecordingManifest::default());
     let session = SessionAttachmentStore::new(
         Arc::clone(&backend),
@@ -702,7 +670,8 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
 
 #[tokio::test]
 async fn facade_get_resolves_content_addresses_across_sessions() {
-    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let backend: Arc<dyn AttachmentStore> =
+        crate::testing::memory_backend().await.attachment_store();
     let manifest: Arc<dyn AttachmentManifest> = Arc::new(RecordingManifest::default());
     let session_a = SessionAttachmentStore::new(backend.clone(), manifest.clone(), "session-a");
     let session_b = SessionAttachmentStore::new(backend.clone(), manifest.clone(), "session-b");
@@ -731,7 +700,8 @@ async fn facade_get_resolves_content_addresses_across_sessions() {
 
 #[tokio::test]
 async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
-    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let backend: Arc<dyn AttachmentStore> =
+        crate::testing::memory_backend().await.attachment_store();
     let manifest: Arc<dyn AttachmentManifest> = Arc::new(RecordingManifest::default());
     let session = SessionAttachmentStore::new(backend.clone(), manifest, "session-1");
 
@@ -759,7 +729,8 @@ async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
 
 #[tokio::test]
 async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
-    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let backend: Arc<dyn AttachmentStore> =
+        crate::testing::memory_backend().await.attachment_store();
     let manifest_a = Arc::new(RecordingManifest::default());
     let manifest_b = Arc::new(RecordingManifest::default());
     let session_a = SessionAttachmentStore::new(
@@ -838,7 +809,8 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
 
 #[tokio::test]
 async fn gc_spares_fresh_in_flight_intents_as_refs() {
-    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let backend: Arc<dyn AttachmentStore> =
+        crate::testing::memory_backend().await.attachment_store();
     let manifest = Arc::new(RecordingManifest::default());
     let session = SessionAttachmentStore::new(
         backend.clone(),
@@ -874,7 +846,8 @@ async fn gc_spares_fresh_in_flight_intents_as_refs() {
 // age-only: an old intent is reconciled and a fresh one survives.
 #[tokio::test]
 async fn gc_collects_aged_uncommitted_intent_orphan() {
-    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let backend: Arc<dyn AttachmentStore> =
+        crate::testing::memory_backend().await.attachment_store();
     let manifest = Arc::new(RecordingManifest::default());
     let session = SessionAttachmentStore::new(
         backend.clone(),
@@ -1164,14 +1137,14 @@ type WindowWriterSlot = Arc<Mutex<Option<WindowWriterHandle>>>;
 /// digest is condemned but no delete is issued) or `delete` (the delete is in
 /// flight) — the two instants a concurrent same-content write can land in.
 struct WindowHookedStore {
-    inner: Arc<InMemoryAttachmentStore>,
+    inner: Arc<dyn AttachmentStore>,
     on_head: Mutex<Option<WindowHook>>,
     on_delete: Mutex<Option<WindowHook>>,
     delete_calls: Mutex<usize>,
 }
 
 impl WindowHookedStore {
-    fn new(inner: Arc<InMemoryAttachmentStore>) -> Self {
+    fn new(inner: Arc<dyn AttachmentStore>) -> Self {
         Self {
             inner,
             on_head: Mutex::new(None),
@@ -1215,9 +1188,9 @@ impl AttachmentStore for WindowHookedStore {
 }
 
 struct FencedFixture {
-    factory: crate::InMemorySessionStoreFactory,
+    factory: Arc<dyn crate::SessionStoreFactory>,
     store: Arc<dyn crate::RuntimePersistence>,
-    backend: Arc<InMemoryAttachmentStore>,
+    backend: Arc<dyn AttachmentStore>,
     session: Arc<SessionAttachmentStore>,
     /// Every fence outcome the facade observed, in order.
     fence_attempts:
@@ -1225,17 +1198,18 @@ struct FencedFixture {
 }
 
 async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
-    let factory = crate::InMemorySessionStoreFactory::new();
+    let substrate = crate::testing::memory_backend().await;
+    let factory = substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: crate::SessionRelation::Root,
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
-    let store = crate::SessionStoreFactory::create_store(&factory, &request)
+    let store = crate::SessionStoreFactory::create_store(factory.as_ref(), &request)
         .await
         .expect("create attachment-aware store");
-    let backend = Arc::new(InMemoryAttachmentStore::new());
+    let backend = substrate.attachment_store();
     let (attempts, fence_attempts) = tokio::sync::mpsc::unbounded_channel();
     let session = Arc::new(SessionAttachmentStore::new(
         Arc::clone(&backend) as Arc<dyn AttachmentStore>,
@@ -1392,9 +1366,10 @@ async fn same_content_put_inside_the_delete_window_survives() {
         Arc::clone(&handle_slot),
     ));
 
-    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
-        .await
-        .expect("sweep");
+    let report =
+        reclaim_unreferenced_attachments(fixture.factory.as_ref(), &backend, collecting_policy())
+            .await
+            .expect("sweep");
 
     let writer = handle_slot
         .lock_recover()
@@ -1452,9 +1427,10 @@ async fn writer_after_delete_arming_restores_the_deleted_digest() {
         Arc::clone(&handle_slot),
     ));
 
-    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
-        .await
-        .expect("sweep");
+    let report =
+        reclaim_unreferenced_attachments(fixture.factory.as_ref(), &backend, collecting_policy())
+            .await
+            .expect("sweep");
 
     let writer = handle_slot
         .lock_recover()
@@ -1500,13 +1476,13 @@ async fn a_peer_sweepers_condemnation_defers_the_digest() {
 
     // A peer sweeper's condemnation.
     assert_eq!(
-        AttachmentRootSet::condemn_attachment(&fixture.factory, &id, 0)
+        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, 0)
             .await
             .expect("first condemn"),
         crate::AttachmentCondemnation::Condemned
     );
     assert_eq!(
-        AttachmentRootSet::condemn_attachment(&fixture.factory, &id, 0)
+        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, 0)
             .await
             .expect("second condemn"),
         crate::AttachmentCondemnation::AlreadyCondemned,
@@ -1514,9 +1490,10 @@ async fn a_peer_sweepers_condemnation_defers_the_digest() {
     );
 
     let backend = WindowHookedStore::new(Arc::clone(&fixture.backend));
-    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
-        .await
-        .expect("sweep");
+    let report =
+        reclaim_unreferenced_attachments(fixture.factory.as_ref(), &backend, collecting_policy())
+            .await
+            .expect("sweep");
     assert_eq!(report.condemn_deferred_ids, vec![id.clone()]);
     assert!(
         report.deleted_while_referenced.is_empty(),
@@ -1533,12 +1510,13 @@ async fn a_peer_sweepers_condemnation_defers_the_digest() {
 
     // The host-owned lever clears a condemnation a dead sweeper left behind; the
     // next sweep then collects the digest normally.
-    AttachmentRootSet::release_attachment_condemnation(&fixture.factory, &id)
+    AttachmentRootSet::release_attachment_condemnation(fixture.factory.as_ref(), &id)
         .await
         .expect("release");
-    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
-        .await
-        .expect("second sweep");
+    let report =
+        reclaim_unreferenced_attachments(fixture.factory.as_ref(), &backend, collecting_policy())
+            .await
+            .expect("second sweep");
     assert_eq!(report.reclaimed_count, 1);
     assert!(report.condemn_deferred_ids.is_empty());
 }
@@ -1557,7 +1535,7 @@ async fn a_stuck_intent_retains_the_blob() {
     drop(binding);
 
     assert_eq!(
-        AttachmentRootSet::condemn_attachment(&fixture.factory, &reference.id, u64::MAX)
+        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &reference.id, u64::MAX)
             .await
             .expect("condemn"),
         crate::AttachmentCondemnation::RootPresent,
@@ -1565,9 +1543,10 @@ async fn a_stuck_intent_retains_the_blob() {
     );
 
     let backend = WindowHookedStore::new(Arc::clone(&fixture.backend));
-    let report = reclaim_unreferenced_attachments(&fixture.factory, &backend, collecting_policy())
-        .await
-        .expect("sweep");
+    let report =
+        reclaim_unreferenced_attachments(fixture.factory.as_ref(), &backend, collecting_policy())
+            .await
+            .expect("sweep");
     assert_eq!(report.reclaimed_count, 0);
     assert_eq!(*backend.delete_calls.lock_recover(), 0);
     assert!(
@@ -1587,7 +1566,7 @@ async fn a_stuck_intent_retains_the_blob() {
 async fn session_facade_records_bound_owner_on_put() {
     let manifest = Arc::new(RecordingManifest::default());
     let store = Arc::new(SessionAttachmentStore::new(
-        Arc::new(InMemoryAttachmentStore::new()),
+        crate::testing::memory_backend().await.attachment_store(),
         manifest.clone(),
         "session-1",
     ));
@@ -1620,7 +1599,7 @@ async fn session_facade_records_bound_owner_on_put() {
 async fn nested_owner_binding_restores_the_previous_owner() {
     let manifest = Arc::new(RecordingManifest::default());
     let store = Arc::new(SessionAttachmentStore::new(
-        Arc::new(InMemoryAttachmentStore::new()),
+        crate::testing::memory_backend().await.attachment_store(),
         manifest.clone(),
         "session-1",
     ));
@@ -1677,7 +1656,8 @@ async fn ephemeral_facade_passes_reads_through_without_a_guard() {
 
 #[tokio::test]
 async fn persistence_manifest_adapter_forwards_root_tracking() {
-    let runtime: Arc<dyn crate::RuntimePersistence> = Arc::new(crate::InMemorySessionStore::new());
+    let runtime: Arc<dyn crate::RuntimePersistence> =
+        Arc::new(crate::testing::unbound_recording_store().await);
     let adapter = PersistenceManifestAdapter(runtime);
     let attachment_id = AttachmentId::parse("adapter-forwarding").expect("valid attachment id");
     let intent = AttachmentIntent {
@@ -2105,7 +2085,7 @@ fn a_manifest_write_leaves_the_caller_runtime_running() {
         // would leave the worker free and prove nothing.
         let worker = crate::task::spawn(async move {
             let session = SessionAttachmentStore::new(
-                Arc::new(InMemoryAttachmentStore::new()),
+                crate::testing::memory_backend().await.attachment_store(),
                 Arc::new(SlowManifest {
                     inner: NoopAttachmentManifest,
                     delay: std::time::Duration::from_millis(300),

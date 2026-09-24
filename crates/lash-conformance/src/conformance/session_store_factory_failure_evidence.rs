@@ -75,11 +75,12 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         .build()
         .into_handle();
     let effect_host: Arc<dyn crate::EffectHost> = Arc::new(crate::NativeEffectHost::default());
-    let mut host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
-    host = host.with_effect_host(Arc::clone(&effect_host));
+    let mut host = crate::LawBackend::in_process()
+        .with_effect_host(Arc::clone(&effect_host))
+        .host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = request.policy.clone();
     policy.session_id = Some(SessionId::from(SESSION_ID.to_string()));
@@ -89,18 +90,13 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     let mut runtime = Box::pin(
-        crate::LashRuntime::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-            crate::testing::runtime_lease_owner(),
-        )
-        .with_session_id(SESSION_ID)
-        .with_policy(policy)
-        .with_initial_state(state)
-        .with_runtime_host(host)
-        .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-        .with_store(store)
-        .build(),
+        crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner())
+            .with_session_id(SESSION_ID)
+            .with_policy(policy)
+            .with_initial_state(state)
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
+            .with_store(store)
+            .build(),
     )
     .await
     .expect("build failure-evidence conformance runtime");

@@ -41,7 +41,6 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash-core-ids = { workspace = true, features = ["testing"] }
-lash-core-memory = { package = "lash-internal-core-memory", path = "../lash-core-memory", features = ["testing"] }
 # FIG-1161: loom seam tests run via `cargo rustc --profile test -- --cfg loom`
 # (a global RUSTFLAGS cannot work: `cfg(loom)` compiles `tokio::net` out and
 # the transitive dep closure then fails). loom must therefore resolve for the

@@ -1,8 +1,116 @@
 use super::*;
+use crate::store::{SessionExecutionLeaseAcquisition, SessionExecutionLeaseObservation};
+use lash_core_ids::clock::ClockWallTime as _;
 use lash_core_ids::trace_capture::{CapturedFieldKind, capturing};
-use lash_core_memory::in_memory_store::InMemorySessionStore;
 
 const TEST_SESSION_ID: &str = "renewal-install-validation";
+
+/// A test-local lease port that grants one lane and answers each renewal by
+/// extending it, unless the test scripted the next answer. The guard reaches
+/// the store only through this port, so its install validation is exercised
+/// against exactly the response a backend returns.
+#[derive(Default)]
+struct ScriptedLeasePort {
+    held: StdMutex<Option<SessionExecutionLease>>,
+    next_renewal: StdMutex<Option<SessionExecutionLease>>,
+}
+
+impl ScriptedLeasePort {
+    fn respond_to_next_renewal_with(&self, lease: SessionExecutionLease) {
+        *self.next_renewal.lock_recover() = Some(lease);
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionExecutionLeaseStore for ScriptedLeasePort {
+    async fn try_claim_session_execution_lease_with_token(
+        &self,
+        session_id: &SessionId,
+        owner: &crate::LeaseOwnerIdentity,
+        executor_id: &str,
+        _claim_nonce: &crate::LeaseClaimNonce,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLeaseClaimOutcome, StoreError> {
+        let now = lash_core_ids::clock::SystemClock.timestamp_ms();
+        let lease = SessionExecutionLease {
+            session_id: session_id.clone(),
+            owner: owner.clone(),
+            executor_id: executor_id.to_string(),
+            lease_token: "scripted-lease-token".to_string(),
+            fencing_token: 1,
+            claimed_at_epoch_ms: now,
+            lease_term_ms: lease_ttl_ms,
+            expires_at_epoch_ms: now + lease_ttl_ms,
+        };
+        *self.held.lock_recover() = Some(lease.clone());
+        Ok(SessionExecutionLeaseClaimOutcome::Acquired(
+            SessionExecutionLeaseAcquisition {
+                lease,
+                displaced: None,
+            },
+        ))
+    }
+
+    async fn renew_session_execution_lease(
+        &self,
+        _fence: &SessionExecutionLeaseAuthority,
+        lease_ttl_ms: u64,
+    ) -> Result<SessionExecutionLease, StoreError> {
+        let mut held = self.held.lock_recover();
+        let lease = held.as_mut().expect("the port holds the granted lane");
+        lease.expires_at_epoch_ms = lash_core_ids::clock::SystemClock.timestamp_ms() + lease_ttl_ms;
+        Ok(self
+            .next_renewal
+            .lock_recover()
+            .take()
+            .unwrap_or_else(|| lease.clone()))
+    }
+
+    async fn release_session_execution_lease(
+        &self,
+        _completion: &SessionExecutionLeaseAuthority,
+    ) -> Result<(), StoreError> {
+        *self.held.lock_recover() = None;
+        Ok(())
+    }
+
+    async fn get_session_execution_lease(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<SessionExecutionLeaseObservation, StoreError> {
+        let _ = session_id;
+        Ok(SessionExecutionLeaseObservation {
+            observed_at_epoch_ms: lash_core_ids::clock::SystemClock.timestamp_ms(),
+            lease: self.held.lock_recover().clone(),
+        })
+    }
+}
+
+/// A guard over the port's lane, built the way acquisition builds one.
+async fn acquire(
+    port: &Arc<ScriptedLeasePort>,
+    executor_id: &str,
+    timings: LeaseTimings,
+) -> SessionExecutionLeaseGuard {
+    let SessionExecutionLeaseClaimOutcome::Acquired(acquisition) = port
+        .try_claim_session_execution_lease(
+            &SessionId::from(TEST_SESSION_ID),
+            &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+            executor_id,
+            timings.ttl_ms(),
+        )
+        .await
+        .expect("claim lease")
+    else {
+        unreachable!("the scripted port always grants its lane")
+    };
+    SessionExecutionLeaseGuard::from_acquisition(
+        Arc::clone(port) as Arc<dyn SessionExecutionLeaseStore>,
+        acquisition,
+        timings,
+        Arc::new(lash_core_ids::clock::SystemClock),
+    )
+}
 
 fn resident_lease(guard: &SessionExecutionLeaseGuard) -> SessionExecutionLease {
     guard.lease.lock_recover().clone()
@@ -23,7 +131,7 @@ async fn assert_renewal_response_refused(
     expected: crate::SessionExecutionLeaseRenewalInstallMismatch,
     refusal_cause: &str,
 ) {
-    let store = Arc::new(InMemorySessionStore::new());
+    let store = Arc::new(ScriptedLeasePort::default());
     let timings = LeaseTimings::new(
         std::time::Duration::from_secs(30),
         std::time::Duration::from_millis(10),
@@ -31,17 +139,7 @@ async fn assert_renewal_response_refused(
     .expect("test lease timings");
 
     let ((guard, presented), capture) = capturing(|| async {
-        let guard = SessionExecutionLeaseGuard::try_acquire(
-            Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-            &SessionId::from(TEST_SESSION_ID),
-            &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
-            "assert-renewal-response-refused-executor",
-            timings,
-            Arc::new(lash_core_ids::clock::SystemClock),
-        )
-        .await
-        .expect("claim lease")
-        .expect("lease acquired");
+        let guard = acquire(&store, "assert-renewal-response-refused-executor", timings).await;
         // The renewal task starts with the guard and can advance the resident
         // lease on another runtime thread. Snapshot it only when the override
         // is ready to be armed so the refusal assertion pins the actual
@@ -50,7 +148,7 @@ async fn assert_renewal_response_refused(
         let mut response = presented.clone();
         response.expires_at_epoch_ms = response.expires_at_epoch_ms.saturating_add(1_000);
         mutate(&presented, &mut response);
-        store.respond_to_next_session_execution_lease_renewal_with(response.clone());
+        store.respond_to_next_renewal_with(response.clone());
         assert_eq!(
             validate_renewed_session_execution_lease(&presented, &response),
             Err(expected),
@@ -248,23 +346,18 @@ async fn renewal_with_regressed_expiry_marks_lost_and_never_installs() {
 
 #[tokio::test]
 async fn renewal_with_advanced_expiry_installs() {
-    let store = Arc::new(InMemorySessionStore::new());
+    let store = Arc::new(ScriptedLeasePort::default());
     let timings = LeaseTimings::new(
         std::time::Duration::from_secs(30),
         std::time::Duration::from_millis(10),
     )
     .expect("test lease timings");
-    let guard = SessionExecutionLeaseGuard::try_acquire(
-        Arc::clone(&store) as Arc<dyn RuntimePersistence>,
-        &SessionId::from(TEST_SESSION_ID),
-        &crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+    let guard = acquire(
+        &store,
         "renewal-with-advanced-expiry-installs-executor",
         timings,
-        Arc::new(lash_core_ids::clock::SystemClock),
     )
-    .await
-    .expect("claim lease")
-    .expect("lease acquired");
+    .await;
     let presented = resident_lease(&guard);
     let mut renewed = presented.clone();
     renewed.expires_at_epoch_ms = renewed.expires_at_epoch_ms.saturating_add(1_000);
@@ -272,7 +365,7 @@ async fn renewal_with_advanced_expiry_installs() {
         validate_renewed_session_execution_lease(&presented, &renewed),
         Ok(())
     );
-    store.respond_to_next_session_execution_lease_renewal_with(renewed.clone());
+    store.respond_to_next_renewal_with(renewed.clone());
 
     wait_until(|| resident_lease(&guard) == renewed).await;
     guard.renew_task.abort();

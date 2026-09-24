@@ -1,10 +1,11 @@
 use super::*;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 
-// Exercise the trait default with a host registry distinct from the borrowed
-// Local controller, as durable deployment hosts do for foreground native runs.
-#[derive(Default)]
-struct DefaultBindingHost(lash_core::facade_support::NativeEffectHost);
+// Exercise the trait-default turn-control binding over a real journaling host:
+// this host forwards its ports to `0` but keeps the trait's own
+// `turn_control_binding`, so the binding comes from the default's journaled
+// arm rather than from the backend host's override.
+struct DefaultBindingHost(Arc<dyn lash_core::EffectHost>);
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for DefaultBindingHost {
@@ -13,20 +14,26 @@ impl lash_core::AwaitEventResolver for DefaultBindingHost {
         scope: &lash_core::ExecutionScope,
         wait: lash_core::AwaitEventWaitIdentity,
     ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.0.await_event_key(scope, wait).await
+        self.0
+            .await_event_resolver()
+            .await_event_key(scope, wait)
+            .await
     }
     async fn resolve_await_event(
         &self,
         key: &lash_core::AwaitEventKey,
         resolution: lash_core::Resolution,
     ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.0.resolve_await_event(key, resolution).await
+        self.0
+            .await_event_resolver()
+            .resolve_await_event(key, resolution)
+            .await
     }
     async fn peek_await_event(
         &self,
         key: &lash_core::AwaitEventKey,
     ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.0.peek_await_event(key).await
+        self.0.await_event_resolver().peek_await_event(key).await
     }
     async fn await_await_event(
         &self,
@@ -34,14 +41,17 @@ impl lash_core::AwaitEventResolver for DefaultBindingHost {
         cancel: CancellationToken,
         deadline: Option<std::time::Instant>,
     ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.0.await_await_event(key, cancel, deadline).await
+        self.0
+            .await_event_resolver()
+            .await_await_event(key, cancel, deadline)
+            .await
     }
 }
 
 #[async_trait::async_trait]
 impl lash_core::EffectHost for DefaultBindingHost {
     fn turn_control_binding_id(&self) -> String {
-        "fig2471-default-binding-host".to_string()
+        self.0.turn_control_binding_id()
     }
 
     fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
@@ -54,10 +64,18 @@ impl lash_core::EffectHost for DefaultBindingHost {
     ) -> Result<lash_core::ScopedEffectController<'run>, lash_core::RuntimeError> {
         self.0.scoped(scope)
     }
+
+    fn scoped_static(
+        &self,
+        scope: lash_core::AdmittedScope,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.0.scoped_static(scope)
+    }
 }
 
 #[tokio::test]
 async fn turn_control_default_binding_external_cancel_stops_local_turn() {
+    let backend = memory_backend().await;
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let started_tx = Arc::new(Mutex::new(Some(started_tx)));
     let transport = TestProvider::builder()
@@ -73,12 +91,14 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
             }
         })
         .build();
-    let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let mut config = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    config = config.with_effect_host(Arc::new(DefaultBindingHost::default()));
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RecordingStore::default());
+    config = config.with_effect_host(Arc::new(DefaultBindingHost(backend.effect_host())));
+    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
+        unbound_recording_store(&backend).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -89,6 +109,7 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
         "root",
         driver_store,
     );
+    let host_config = config.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -97,7 +118,8 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
     )
     .await;
     let address = lash_core::facade_support::TurnAddress::new("root", "external-local-cancel");
-    let scope = native_scope(
+    let scope = host_admitted_scope(
+        &host_config,
         lash_core::AdmittedScope::unpinned(
             runtime
                 .export_persistence_state()
@@ -137,17 +159,16 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
 
 #[tokio::test]
 async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
+    let backend = memory_backend().await;
     use lash_core::EffectHost as _;
     use lash_core::runtime::turn_control::ActiveTurnControl;
 
-    let host = Arc::new(DefaultBindingHost::default());
-    let controller = NativeRuntimeEffectController::default();
+    let host = Arc::new(DefaultBindingHost(backend.effect_host()));
     let address = lash_core::facade_support::TurnAddress::new("active-session", "active-turn");
-    let scoped = lash_core::ScopedEffectController::borrowed(
-        &controller,
+    let scoped = backend_admitted_scope(
+        &backend,
         lash_core::AdmittedScope::unpinned(address.execution_scope()).unwrap(),
-    )
-    .unwrap();
+    );
     let binding = host.turn_control_binding(&scoped).await.unwrap();
     let resolver = match binding {
         lash_core::TurnControlBinding::HostOwned { resolver, .. }
@@ -163,7 +184,8 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
         !matches!(result, Err(ref error) if error.code == lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked),
         "host rejected active gate: {result:?}"
     );
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RecordingStore::default());
+    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
+        unbound_recording_store(&backend).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("active-session"),

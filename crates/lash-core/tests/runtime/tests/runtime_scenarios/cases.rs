@@ -551,6 +551,7 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
 
 #[tokio::test]
 async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
+    let backend = memory_backend().await;
     let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let tool_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(RuntimeScenarioIntentProvider {
         calls: Arc::clone(&provider_calls),
@@ -590,7 +591,8 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
             }
         })
         .build();
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tool_provider, transport).await;
+    let mut runtime =
+        runtime_with_plugins_and_tools(&backend, Vec::new(), tool_provider, transport).await;
     let registry = runtime
         .host
         .process_registry()

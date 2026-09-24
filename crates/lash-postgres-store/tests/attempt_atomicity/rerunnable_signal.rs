@@ -70,8 +70,7 @@ async fn public_provider_signal_intent_retains_rerunnable_target_geometry_on_pos
     let model_calls = Arc::new(AtomicUsize::new(0));
     let effect_host = Arc::new(storage.effect_host());
     let mut runtime = public_signal_runtime(
-        effect_host.clone(),
-        Arc::clone(&registry),
+        pg_law_backend(&storage, effect_host.clone(), Arc::clone(&registry)),
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
         PublicIntentKind::Signal,

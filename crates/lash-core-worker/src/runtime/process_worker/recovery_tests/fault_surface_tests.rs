@@ -31,7 +31,7 @@ impl crate::ProcessEngine for ImmediateSuccessEngine {
 
 async fn drive_one_faulted_row(
     process_id: &ProcessId,
-    inject: impl AsyncFnOnce(&Arc<TestLocalProcessRegistry>),
+    inject: impl AsyncFnOnce(&Arc<crate::testing::ProcessRegistryFaults>),
 ) -> (ProcessAdmissionReport, ProcessWorkerFault, usize) {
     let run_handle = Arc::new(LateBoundProcessWork::default());
     let (_worker, registry, run_handle, env_ref, test_registry, sink) =
@@ -83,11 +83,9 @@ fn assert_backend_fault(
 async fn a_failed_claim_on_an_admitted_row_reaches_the_fault_surface() {
     let (report, fault, terminal) =
         drive_one_faulted_row(&ProcessId::from("fault-claim"), async |registry| {
-            registry
-                .set_process_lease_claim_error(Some(PluginError::Session(
-                    "injected claim failure".to_string(),
-                )))
-                .await;
+            registry.set_process_lease_claim_error(Some(PluginError::Session(
+                "injected claim failure".to_string(),
+            )));
         })
         .await;
 
@@ -105,11 +103,9 @@ async fn a_failed_claim_on_an_admitted_row_reaches_the_fault_surface() {
 async fn a_failed_read_on_an_admitted_row_reaches_the_fault_surface() {
     let (report, fault, terminal) =
         drive_one_faulted_row(&ProcessId::from("fault-read"), async |registry| {
-            registry
-                .set_process_read_error(Some(PluginError::Session(
-                    "injected read failure".to_string(),
-                )))
-                .await;
+            registry.set_process_read_error(Some(PluginError::Session(
+                "injected read failure".to_string(),
+            )));
         })
         .await;
 
@@ -137,11 +133,9 @@ async fn non_session_cancel_watcher_read_failure_preserves_prior_terminalization
         ))
         .await
         .expect("register non-session fixture");
-    test_registry
-        .set_process_events_read_error_for_testing(PluginError::Session(
-            "injected non-session cancel watcher read failure".to_string(),
-        ))
-        .await;
+    test_registry.set_process_events_read_error(PluginError::Session(
+        "injected non-session cancel watcher read failure".to_string(),
+    ));
 
     let report = run_handle
         .enable_and_drive()
@@ -165,11 +159,9 @@ async fn non_session_cancel_watcher_read_failure_preserves_prior_terminalization
 async fn a_failed_terminal_write_on_an_admitted_row_reaches_the_fault_surface() {
     let (report, fault, terminal) =
         drive_one_faulted_row(&ProcessId::from("fault-write"), async |registry| {
-            registry
-                .set_process_terminal_write_error(Some(PluginError::Session(
-                    "injected terminal write failure".to_string(),
-                )))
-                .await;
+            registry.set_process_terminal_write_error(Some(PluginError::Session(
+                "injected terminal write failure".to_string(),
+            )));
         })
         .await;
 
@@ -191,12 +183,10 @@ async fn a_failed_lease_release_on_an_admitted_row_reaches_the_fault_surface() {
     // releasing its claim — and that release fails.
     let (report, fault, _terminal) =
         drive_one_faulted_row(&ProcessId::from("fault-release"), async |registry| {
-            registry.set_process_read_absent(true).await;
-            registry
-                .set_process_lease_release_error(Some(PluginError::Session(
-                    "injected release failure".to_string(),
-                )))
-                .await;
+            registry.set_process_read_absent(true);
+            registry.set_process_lease_release_error(Some(PluginError::Session(
+                "injected release failure".to_string(),
+            )));
         })
         .await;
 

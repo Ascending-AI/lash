@@ -14,8 +14,6 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
         .await
         .expect("register session turn");
 
-    let session_store_factory =
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
     // A worker like `recovery_worker`, with a scripted provider so the child
     // turn completes instead of failing on provider resolution.
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&registry));
@@ -23,10 +21,7 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
         lash_protocol_standard::StandardProtocolPluginFactory::new(),
     )
         as Arc<dyn lash_core::facade_support::PluginFactory>]);
-    let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
+    let mut runtime_host = memory_host_config().await;
     // The run executes under the journaled Restate controller, so the
     // worker's effect host must present the same turn-control authority.
     runtime_host.control.effect_host = Arc::new(RestateEffectHost::new(
@@ -49,11 +44,11 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
             ])
             .into_handle(),
         ));
+    let session_store_factory = runtime_host.session_store_factory();
     let worker = DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
             runtime_host,
-            session_store_factory.clone(),
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),

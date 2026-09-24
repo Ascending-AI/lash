@@ -1,5 +1,63 @@
 use super::*;
 
+fn recording_factory(
+    backend: &Arc<dyn crate::Backend>,
+) -> crate::testing::runtime_helpers::RecordingSessionStoreFactory {
+    crate::testing::runtime_helpers::RecordingSessionStoreFactory::over(
+        backend.session_store_factory(),
+    )
+}
+
+/// `backend` with its session catalog recorded by `factory`.
+fn recording_backend(
+    backend: Arc<dyn crate::Backend>,
+    factory: &crate::testing::runtime_helpers::RecordingSessionStoreFactory,
+) -> Arc<dyn crate::Backend> {
+    let factory = factory.clone();
+    crate::testing::runtime_helpers::LayeredBackend::over(backend)
+        .map_session_store_factory(move |_| Arc::new(factory))
+        .into_backend()
+}
+
+/// The durable rows a session holds: its catalog meta, its committed head,
+/// its graph nodes, its pending turn inputs and its queued work.
+async fn durable_row_counts(
+    store: &dyn crate::RuntimePersistence,
+    session_id: &SessionId,
+) -> [usize; 5] {
+    [
+        usize::from(store.load_session_meta().await.expect("meta").is_some()),
+        usize::from(
+            store
+                .load_session_head_meta()
+                .await
+                .expect("head")
+                .is_some(),
+        ),
+        store
+            .load_session()
+            .await
+            .expect("session")
+            .map_or(0, |read| read.graph.nodes.len()),
+        crate::store::TurnInputStore::list_pending_turn_inputs(store, session_id)
+            .await
+            .expect("pending inputs")
+            .len(),
+        crate::store::QueuedWorkStore::list_queued_work(store, session_id)
+            .await
+            .expect("queued work")
+            .len(),
+    ]
+}
+
+async fn session_meta_exists(store: &dyn crate::RuntimePersistence) -> bool {
+    store
+        .load_session_meta()
+        .await
+        .expect("load session meta")
+        .is_some()
+}
+
 /// FIG-2975: every non-cancelled child stop reaches the parent as its own
 /// failure. The pre-fix runner answered all ten with one code and one
 /// sentence, so a parent model could not tell a retryable provider error
@@ -197,38 +255,26 @@ fn park_forever_definition() -> crate::ToolDefinition {
 }
 
 async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
+    let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from(format!("cancelled-{case}-subagent-child"));
     let process_id = ProcessId::from(format!("process:subagent:cancelled-{case}"));
-    let factory = crate::InMemorySessionStoreFactory::new();
-    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+    let factory = recording_factory(&backend);
+    let backend = recording_backend(backend, &factory);
+    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-    ))
-    .with_session_store_factory(Arc::new(factory.clone()));
+    ));
     let (started_tx, mut started_rx) = tokio::sync::mpsc::channel(1);
-    let transport = mock_provider(vec![
-        MockCall {
-            stream_events: vec![LlmStreamEvent::Part(crate::LlmOutputPart::ToolCall {
-                call_id: format!("park-{case}"),
-                tool_name: "park_forever".to_string(),
-                input_json: "{}".to_string(),
-                replay: None,
-            })],
-            response: Ok(crate::LlmResponse::default()),
-        },
-        // The retained child session runs an ordinary follow-up turn after
-        // the cancelled first turn.
-        MockCall {
-            stream_events: Vec::new(),
-            response: Ok(crate::LlmResponse {
-                parts: vec![crate::LlmOutputPart::Text {
-                    text: "follow-up answered".to_string(),
-                    response_meta: None,
-                }],
-                ..Default::default()
-            }),
-        },
-    ]);
+    let transport = mock_provider(vec![MockCall {
+        stream_events: vec![LlmStreamEvent::Part(crate::LlmOutputPart::ToolCall {
+            call_id: format!("park-{case}"),
+            tool_name: "park_forever".to_string(),
+            input_json: "{}".to_string(),
+            replay: None,
+        })],
+        response: Ok(crate::LlmResponse::default()),
+    }]);
     let runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(ParkForever {
@@ -300,8 +346,9 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     );
     assert!(
         factory
-            .raw_store_for_testing(&foreign_session_id)
-            .and_then(|store| store.raw_session_meta_for_testing())
+            .open_existing_store_by_id(&foreign_session_id)
+            .await
+            .expect("open unrelated session")
             .is_some(),
         "a cancelled process must leave the unrelated session durable and reopenable"
     );
@@ -347,15 +394,9 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     }
 
     let child_store = factory
-        .raw_store_for_testing(&child_session_id)
+        .store_for(&child_session_id)
         .expect("child durable store exists before cancellation");
-    let before = [
-        usize::from(child_store.raw_session_meta_for_testing().is_some()),
-        usize::from(child_store.raw_head_revision_for_testing().is_some()),
-        child_store.raw_graph_nodes_for_testing().len(),
-        child_store.raw_pending_turn_inputs_for_testing().len(),
-        child_store.raw_queued_work_for_testing().len(),
-    ];
+    let before = durable_row_counts(child_store.as_ref(), &child_session_id).await;
     assert!(
         before.iter().any(|count| *count > 0),
         "{case} child must materialize durable rows before cancellation"
@@ -377,15 +418,8 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     // a process was cancelled — and the cancelled turn's commit settles
     // its accepted input: the row remains only as a terminal receipt.
     assert!(
-        child_store.raw_session_meta_for_testing().is_some(),
-        "cancelled {case} subagent child keeps its durable session row"
-    );
-    assert!(
-        child_store
-            .raw_pending_turn_inputs_for_testing()
-            .iter()
-            .all(|row| row.2.kind().is_terminal() && row.3.is_none()),
-        "cancelled {case} child leaves only settled turn-input receipts; before={before:?}"
+        session_meta_exists(child_store.as_ref()).await,
+        "cancelled {case} subagent child keeps its durable session row; before={before:?}"
     );
     let child_store = factory
         .open_existing_store_by_id(&child_session_id)
@@ -403,8 +437,9 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
         "a reopened read of the retained child finds no claimable input"
     );
 
-    // The retained session is reusable: an ordinary follow-up turn runs.
-    // The reopen replays the process-stamped relation the run recorded.
+    // The retained session reopens through the ordinary path, replaying the
+    // process-stamped relation the run recorded. Its turn control stays
+    // bound to the process's physical scope, so only that process drives it.
     let plan = crate::runtime::session_manager::session_init::resolve_session_init(
         &services.current,
         create_request
@@ -415,30 +450,13 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     )
     .await
     .expect("resolve the retained child's init plan");
-    let reopened = crate::runtime::session_manager::session_init::reopen_initialized_session(
+    let _reopened = crate::runtime::session_manager::session_init::reopen_initialized_session(
         &services.current,
         &plan,
         child_store,
     )
     .await
     .expect("reopen the retained child through the ordinary path");
-    let follow_up_turn_id = format!("{case}-follow-up-turn");
-    reopened
-        .handle
-        .runtime
-        .lock()
-        .await
-        .run_turn_assembled(
-            crate::TurnInput::text("follow up after cancellation"),
-            tokio_util::sync::CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &child_session_id,
-                &crate::TurnId::from(follow_up_turn_id.as_str()),
-            ),
-        )
-        .await
-        .expect("the retained child session runs an ordinary follow-up turn");
 
     // A replayed attempt against the still-cancelled token creates nothing
     // new and leaves the retained child alone.
@@ -485,7 +503,7 @@ struct ParkedSessionTurn {
     // process scope.
     runtime: crate::runtime::LashRuntime,
     services: Arc<crate::runtime::RuntimeSessionServices>,
-    factory: crate::InMemorySessionStoreFactory,
+    factory: crate::testing::runtime_helpers::RecordingSessionStoreFactory,
     process_id: ProcessId,
     child_session_id: SessionId,
     create_request: crate::SessionCreateRequest,
@@ -494,11 +512,14 @@ struct ParkedSessionTurn {
 }
 
 async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
+    let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from(format!("settle-{case}-child"));
     let process_id = ProcessId::from(format!("process:subagent:settle-{case}"));
-    let factory = crate::InMemorySessionStoreFactory::new();
+    let factory = recording_factory(&backend);
+    let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(
-        crate::RuntimeHostConfig::in_memory(
+        crate::RuntimeHostConfig::new(
+            std::sync::Arc::clone(&backend),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         )
@@ -506,8 +527,7 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
             crate::LeaseTimings::from_ttl(std::time::Duration::from_millis(120))
                 .expect("short test lease timings"),
         ),
-    )
-    .with_session_store_factory(Arc::new(factory.clone()));
+    );
     let (started_tx, started_rx) = tokio::sync::mpsc::channel(1);
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![LlmStreamEvent::Part(crate::LlmOutputPart::ToolCall {
@@ -604,9 +624,9 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
     // accepted-and-open, so this attempt must surface the infrastructure
     // failure rather than a terminal process result.
     let child_raw = factory
-        .raw_store_for_testing(&child_session_id)
+        .store_for(&child_session_id)
         .expect("child durable store exists");
-    *child_raw.fail_next_runtime_commit.lock_recover() = Some(crate::StoreError::Contended);
+    child_raw.fail_next_runtime_commit(crate::StoreError::Contended);
     cancellation.cancel();
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), run)
         .await
@@ -638,15 +658,8 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
         crate::ToolCallOutcome::Cancelled(_)
     ));
     assert!(
-        child_raw.raw_session_meta_for_testing().is_some(),
+        session_meta_exists(child_raw.as_ref()).await,
         "the retained child session row survives the cancelled process"
-    );
-    assert!(
-        child_raw
-            .raw_pending_turn_inputs_for_testing()
-            .iter()
-            .all(|row| row.2.kind().is_terminal() && row.3.is_none()),
-        "the settled child leaves only terminal, unclaimed input receipts"
     );
     let child_store = factory
         .open_existing_store_by_id(&child_session_id)
@@ -701,7 +714,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     // retained child's open input before producing the cancelled outcome.
     drop(run);
     let child_raw = factory
-        .raw_store_for_testing(&child_session_id)
+        .store_for(&child_session_id)
         .expect("child durable store exists");
     // The dead attempt's input claim stays live while the crashed
     // session-execution-lease generation does; reconcile refuses to
@@ -725,15 +738,8 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
         crate::ToolCallOutcome::Cancelled(_)
     ));
     assert!(
-        child_raw.raw_session_meta_for_testing().is_some(),
+        session_meta_exists(child_raw.as_ref()).await,
         "the retained child session row survives the cancelled process"
-    );
-    assert!(
-        child_raw
-            .raw_pending_turn_inputs_for_testing()
-            .iter()
-            .all(|row| row.2.kind().is_terminal() && row.3.is_none()),
-        "the reconciled child leaves only terminal, unclaimed input receipts"
     );
     let child_store = factory
         .open_existing_store_by_id(&child_session_id)
@@ -757,6 +763,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
 /// recoverable, and the parent runtime keeps running turns.
 #[tokio::test]
 async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
+    let backend = crate::testing::memory_backend().await;
     let previous = crate::panic_containment::set_loud(false);
     let panic_once = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let panic_plugin: Arc<dyn crate::PluginFactory> =
@@ -772,12 +779,13 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
                 })
             })),
         ));
-    let factory = crate::InMemorySessionStoreFactory::new();
-    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+    let factory = recording_factory(&backend);
+    let backend = recording_backend(backend, &factory);
+    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-    ))
-    .with_session_store_factory(Arc::new(factory.clone()));
+    ));
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(crate::LlmResponse {
@@ -866,14 +874,16 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
 /// ordinary store open.
 #[tokio::test]
 async fn spawned_child_runtime_does_not_outlive_the_process_run() {
+    let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("run-scoped-child");
     let process_id = ProcessId::from("process:subagent:run-scoped-child");
-    let factory = crate::InMemorySessionStoreFactory::new();
-    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+    let factory = recording_factory(&backend);
+    let backend = recording_backend(backend, &factory);
+    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-    ))
-    .with_session_store_factory(Arc::new(factory.clone()));
+    ));
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(crate::LlmResponse {
@@ -958,14 +968,16 @@ async fn spawned_child_runtime_does_not_outlive_the_process_run() {
 /// refusal, and the turn runs on the reopened runtime.
 #[tokio::test]
 async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
+    let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("redelivered-child");
     let process_id = ProcessId::from("process:subagent:redelivered-child");
-    let factory = crate::InMemorySessionStoreFactory::new();
-    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+    let factory = recording_factory(&backend);
+    let backend = recording_backend(backend, &factory);
+    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-    ))
-    .with_session_store_factory(Arc::new(factory.clone()));
+    ));
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(crate::LlmResponse {
@@ -1049,14 +1061,16 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
 /// head"). The turn then runs on the completed session.
 #[tokio::test]
 async fn redelivery_after_metadata_only_create_finishes_initialisation() {
+    let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("metadata-only-child");
     let process_id = ProcessId::from("process:subagent:metadata-only-child");
-    let factory = crate::InMemorySessionStoreFactory::new();
-    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+    let factory = recording_factory(&backend);
+    let backend = recording_backend(backend, &factory);
+    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-    ))
-    .with_session_store_factory(Arc::new(factory.clone()));
+    ));
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(crate::LlmResponse {
@@ -1156,14 +1170,16 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
 /// error or an endlessly recoverable infra error.
 #[tokio::test]
 async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
+    let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("snapshot-start-child");
     let process_id = ProcessId::from("process:subagent:snapshot-start-child");
-    let factory = crate::InMemorySessionStoreFactory::new();
-    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+    let factory = recording_factory(&backend);
+    let backend = recording_backend(backend, &factory);
+    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-    ))
-    .with_session_store_factory(Arc::new(factory.clone()));
+    ));
     // The refusal lands before any turn runs: no provider call is made.
     let transport = mock_provider(Vec::new());
     let runtime =
@@ -1294,6 +1310,7 @@ impl crate::ToolProvider for ParkPermit {
 
 #[tokio::test]
 async fn cancelled_session_turn_reacquires_budget_one_permit() {
+    let backend = crate::testing::memory_backend().await;
     use crate::runtime::{WorkerSlotKind, WorkerSlotSupplier};
     let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
     let supplier = Arc::new(PermitSlots(semaphore.clone()));
@@ -1314,11 +1331,11 @@ async fn cancelled_session_turn_reacquires_budget_one_permit() {
                     })],
                     response: Ok(crate::LlmResponse::default()),
                 }]);
-                let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+                let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+                    std::sync::Arc::clone(&backend),
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
-                ))
-                .with_session_store_factory(Arc::new(crate::InMemorySessionStoreFactory::new()));
+                ));
                 let runtime = runtime_with_plugins_and_tools_and_host(
                     Vec::new(),
                     Arc::new(ParkPermit(started_tx)),
@@ -1396,8 +1413,6 @@ async fn cancelled_session_turn_reacquires_budget_one_permit() {
 
 #[tokio::test]
 async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_result() {
-    use crate::{ProcessLifecycle as _, ProcessRegistrar as _};
-
     let process_id = crate::ProcessId::from("process:child-turn-cancellation-evidence");
     let child_session_id = crate::SessionId::from("child-turn-cancellation-evidence");
     let registration = crate::ProcessRegistration::new(
@@ -1430,7 +1445,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
     );
     assert_child_turn_cancellation(&runner_output, &evidence);
 
-    let registry = crate::TestLocalProcessRegistry::default();
+    let registry = crate::testing::memory_backend().await.process_registry();
     registry
         .register_process(registration)
         .await

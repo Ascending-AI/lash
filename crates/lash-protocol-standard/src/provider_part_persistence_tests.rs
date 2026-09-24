@@ -117,22 +117,11 @@ async fn persisted_provider_response(
     let provider_handle = lash_core::facade_support::ProviderHandle::new(
         lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
     );
-    // The turn's scoped controller and the runtime's effect host must share
-    // one native controller: group opens issued by the turn forward to it,
-    // and the tool-child resolver `RuntimeHostConfig::new` installs lands on
-    // the same controller's group map.
-    let native = Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default());
-    let mut host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::new(
-            lash_core::facade_support::NativeEffectHost::with_native_controller(Arc::clone(
-                &native,
-            )),
-        ),
-        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new()),
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
+    // The turn's scope comes from the runtime's own effect host: group opens
+    // issued by the turn and the tool-child resolver `RuntimeHostConfig::new`
+    // installs meet on that host.
+    let (backend, mut host) =
+        super::tests::layered_test_host(Arc::new(CountingEffectController::default())).await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider_handle),
     );
@@ -148,14 +137,7 @@ async fn persisted_provider_response(
         // failing. The budget is well above the iterations the scenario needs.
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
     };
-    let scoped_controller = lash_core::ScopedEffectController::shared(
-        Arc::new(CountingEffectController {
-            native,
-            ..Default::default()
-        }),
-        lash_core::AdmittedScope::turn(session_id, "turn-1"),
-    )
-    .expect("scoped controller");
+    let scoped_controller = super::tests::test_turn_scope(&backend, session_id);
     let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
         Arc::new(StandardProtocolPluginFactory::new()),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
@@ -166,8 +148,7 @@ async fn persisted_provider_response(
     ];
     let mut runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
+            host,
             lash_core::LeaseOwnerIdentity::opaque(
                 "protocol-standard-test-worker",
                 "protocol-standard-test-boot",
@@ -175,7 +156,6 @@ async fn persisted_provider_response(
         )
         .with_session_id(session_id)
         .with_policy(policy)
-        .with_runtime_host(host)
         .with_plugin_factories(factories)
         .build(),
     )

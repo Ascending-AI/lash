@@ -109,6 +109,7 @@ fn attachment_writing_tool_definition() -> lash_core::ToolDefinition {
 
 #[tokio::test]
 async fn inherited_child_session_carries_parent_tool_state() {
+    let backend = memory_backend().await;
     let plugin_host =
         lash_core::testing::test_plugin_host(vec![Arc::new(StaticPluginFactory::new(
             "memory_probe",
@@ -116,7 +117,7 @@ async fn inherited_child_session_carries_parent_tool_state() {
                 .with_tool_provider(Arc::new(MemoryProbeTool)),
         ))]);
     let plugin_session = plugin_host.build_session("root").expect("plugins");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugin_session,
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
@@ -187,7 +188,10 @@ async fn inherited_child_session_carries_parent_tool_state() {
 
 #[tokio::test]
 async fn parent_fork_without_plugin_init_is_refused() {
-    let runtime = TestRuntime::new(mock_provider(Vec::new())).build().await;
+    let backend = memory_backend().await;
+    let runtime = TestRuntime::new(&backend, mock_provider(Vec::new()))
+        .build()
+        .await;
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");
@@ -213,6 +217,7 @@ async fn parent_fork_without_plugin_init_is_refused() {
 
 #[tokio::test]
 async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
+    let backend = memory_backend().await;
     let plugin_host =
         lash_core::testing::test_plugin_host(vec![Arc::new(StaticPluginFactory::new(
             "memory_probe",
@@ -220,7 +225,7 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
                 .with_tool_provider(Arc::new(MemoryProbeTool)),
         ))]);
     let plugin_session = plugin_host.build_session("root").expect("plugins");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugin_session,
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
@@ -294,6 +299,7 @@ async fn captured_plugin_init_is_immune_to_post_spawn_parent_mutation() {
 
 #[tokio::test]
 async fn durable_child_writes_to_its_own_attachment_namespace() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![LlmStreamEvent::Part(LlmOutputPart::ToolCall {
@@ -316,22 +322,18 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
             }),
         },
     ]);
-    let child_factory = RecordingSessionStoreFactory::default().deferring_metadata_to_admission();
-    let root_store = Arc::new(RecordingStore::default());
-    *root_store.session_meta.lock_recover() = Some(lash_core::SessionMeta {
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("root"),
-        relation: lash_core::SessionRelation::Root,
-    });
-    let bytes = Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new());
-    let mut host_config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let child_factory = RecordingSessionStoreFactory::over(backend.session_store_factory());
+    let root_store = unbound_recording_store(&backend).await;
+    let bytes = backend.attachment_store();
+    let backend = LayeredBackend::over(backend)
+        .map_session_store_factory(|_| Arc::new(child_factory.clone()))
+        .into_backend();
+    let host_config = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    host_config.durability.attachment_store =
-        Arc::new(lash_core::facade_support::SessionAttachmentStore::ephemeral(bytes.clone()));
-    let host = lash_core::facade_support::EmbeddedRuntimeHost::new(host_config)
-        .with_session_store_factory(Arc::new(child_factory.clone()));
+    let host = lash_core::facade_support::EmbeddedRuntimeHost::new(host_config);
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -402,15 +404,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
     // Manifest ownership attributes liveness to the child (FIG-653), while
     // reads resolve content addresses across sessions.
     let child_store = child_factory
-        .stores()
-        .into_iter()
-        .find(|store| {
-            store
-                .session_meta
-                .lock_recover()
-                .as_ref()
-                .is_some_and(|meta| meta.session_id == "attachment-child")
-        })
+        .store_for(&SessionId::from("attachment-child"))
         .expect("child store");
     assert!(
         lash_core::AttachmentManifest::list_all_refs(&*child_store)
@@ -419,17 +413,25 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
             .expect("child manifest lookup"),
         "child session must hold the ref it wrote"
     );
+    // The ref is the child's alone: once the child session is deleted, no
+    // session roots the blob.
+    backend
+        .session_store_factory()
+        .delete_session(&SessionId::from("attachment-child"))
+        .await
+        .expect("delete the child session");
     assert!(
-        !root_store
-            .attachment_manifest_entries()
-            .iter()
-            .any(|entry| entry.session_id == "root" && entry.attachment_id == id),
+        !lash_core::AttachmentManifest::list_all_refs(&*root_store)
+            .await
+            .map(|refs| refs.contains(&id))
+            .expect("root manifest lookup"),
         "root session must not hold a ref for the child's attachment"
     );
 }
 
 #[tokio::test]
 async fn process_registered_during_first_durable_child_turn_remains_listable_after_commit() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![LlmStreamEvent::Part(LlmOutputPart::ToolCall {
@@ -452,16 +454,19 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
             }),
         },
     ]);
-    let child_factory = RecordingSessionStoreFactory::default().deferring_metadata_to_admission();
-    let root_store = Arc::new(RecordingStore::default());
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let child_factory = RecordingSessionStoreFactory::over(backend.session_store_factory());
+    let root_store = unbound_recording_store(&backend).await;
+    let registry = backend.process_registry();
+    let backend = LayeredBackend::over(backend)
+        .map_session_store_factory(|_| Arc::new(child_factory.clone()))
+        .into_backend();
     let embedded = lash_core::facade_support::EmbeddedRuntimeHost::new(
-        lash_core::facade_support::RuntimeHostConfig::in_memory(
+        lash_core::facade_support::RuntimeHostConfig::new(
+            std::sync::Arc::clone(&backend),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         ),
-    )
-    .with_session_store_factory(Arc::new(child_factory.clone()));
+    );
     let registry: Arc<dyn lash_core::ProcessRegistry> = registry;
     let host = lash_core::facade_support::ProcessRuntimeHost::with_ports(
         embedded,
@@ -515,13 +520,13 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         )
         .await
         .expect("durable child session");
-    let child_is_bound = child_factory.stores().into_iter().any(|store| {
-        store
-            .session_meta
-            .lock_recover()
-            .as_ref()
-            .is_some_and(|meta| meta.session_id == child.session_id)
-    });
+    let child_is_bound = match child_factory.store_for(&child.session_id) {
+        Some(store) => lash_core::SessionCommitStore::load_session_meta(store.as_ref())
+            .await
+            .expect("load child session meta")
+            .is_some_and(|meta| meta.session_id == child.session_id),
+        None => false,
+    };
     assert!(child_is_bound, "initialized child must bind its store");
     let mut child_runtime = reopen_session_runtime(&runtime, &child.session_id).await;
     set_runtime_provider(&mut child_runtime, transport.into_handle());
@@ -582,9 +587,10 @@ impl lash_core::plugin::SessionPlugin for MemoryProbePlugin {
 
 #[tokio::test]
 async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebuild() {
+    let backend = memory_backend().await;
     let plugin_host = lash_core::testing::test_plugin_host(vec![Arc::new(MemoryProbeFactory)]);
     let plugin_session = plugin_host.build_session("root").expect("plugins");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugin_session,
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
@@ -684,6 +690,7 @@ async fn forked_child_session_keeps_hidden_live_tool_out_of_catalog_across_rebui
 
 #[tokio::test]
 async fn child_usage_stays_on_the_child_sessions_own_ledger() {
+    let backend = memory_backend().await;
     let transport = mock_openai_compatible_provider(vec![
         // The parent's own turn reports the parent's usage.
         MockCall {
@@ -749,14 +756,18 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         },
     ]);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(EmptyTools);
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
 
     let first_parent = runtime
         .stream_turn(
             TurnInput::text("run child"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(&SessionId::from("root"), &TurnId::from("usage-parent-1")),
+                backend_turn_scope(
+                    &backend,
+                    &SessionId::from("root"),
+                    &TurnId::from("usage-parent-1"),
+                ),
             ),
         )
         .await
@@ -795,7 +806,7 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
         .run_turn_assembled(
             TurnInput::text("run the child turn"),
             CancellationToken::new(),
-            named_turn_scope(&child_session_id, &child_turn_id),
+            backend_turn_scope(&backend, &child_session_id, &child_turn_id),
         )
         .await
         .expect("child turn");
@@ -810,7 +821,11 @@ async fn child_usage_stays_on_the_child_sessions_own_ledger() {
             TurnInput::text("finish up"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(&SessionId::from("root"), &TurnId::from("usage-parent-2")),
+                backend_turn_scope(
+                    &backend,
+                    &SessionId::from("root"),
+                    &TurnId::from("usage-parent-2"),
+                ),
             ),
         )
         .await
@@ -879,9 +894,8 @@ async fn durable_token_ledger(
 ) -> Vec<lash_core::TokenLedgerEntry> {
     let store = runtime
         .host
-        .session_store_factory
-        .as_ref()
-        .expect("session store factory")
+        .core
+        .session_store_factory()
         .open_existing_store_by_id(&SessionId::from(session_id))
         .await
         .expect("open child store")
@@ -896,6 +910,7 @@ async fn durable_token_ledger(
 
 #[tokio::test]
 async fn cached_only_child_usage_stays_on_the_child_ledger() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: vec![LlmStreamEvent::Usage(LlmUsage {
@@ -933,14 +948,15 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         },
     ]);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(EmptyTools);
-    let mut runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let mut runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
 
     runtime
         .stream_turn(
             TurnInput::text("run parent"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("child-session-event-parent"),
                 ),
@@ -978,7 +994,7 @@ async fn cached_only_child_usage_stays_on_the_child_ledger() {
         .run_turn_assembled(
             TurnInput::text("run the child turn"),
             CancellationToken::new(),
-            named_turn_scope(&child_session_id, &child_turn_id),
+            backend_turn_scope(&backend, &child_session_id, &child_turn_id),
         )
         .await
         .expect("child turn");
@@ -1065,6 +1081,7 @@ fn session_input_tokens(runtime: &LashRuntime) -> i64 {
 /// same child runs to completion and reports its own usage.
 #[tokio::test]
 async fn dropped_child_turn_leaves_the_session_reusable() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         // Gated child turn: one provider round-trip reports usage, then the
         // tool call parks the turn.
@@ -1109,7 +1126,7 @@ async fn dropped_child_turn_leaves_the_session_reusable() {
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(ParkedTool {
         started: started_tx,
     });
-    let runtime = runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+    let runtime = runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
     let lifecycle = runtime
         .session_lifecycle_service()
         .expect("session lifecycle");

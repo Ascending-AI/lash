@@ -797,22 +797,22 @@ pub(super) fn snapshot_recovery_tool_factory() -> Arc<dyn lash_core::facade_supp
     ))
 }
 
-pub(super) fn recovery_worker(
+pub(super) async fn recovery_worker(
     registry: Arc<dyn ProcessRegistry>,
     store_factory: Arc<dyn lash_core::SessionStoreFactory>,
 ) -> DurableProcessWorker {
-    recovery_worker_with_plugins(registry, store_factory, Vec::new())
+    recovery_worker_with_plugins(registry, store_factory, Vec::new()).await
 }
 
-pub(super) fn recovery_worker_with_plugins(
+pub(super) async fn recovery_worker_with_plugins(
     registry: Arc<dyn ProcessRegistry>,
     store_factory: Arc<dyn lash_core::SessionStoreFactory>,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
-    recovery_worker_with_plugins_and_trace(registry, store_factory, extra_plugins, None)
+    recovery_worker_with_plugins_and_trace(registry, store_factory, extra_plugins, None).await
 }
 
-pub(super) fn recovery_worker_with_plugins_and_trace(
+pub(super) async fn recovery_worker_with_plugins_and_trace(
     registry: Arc<dyn ProcessRegistry>,
     store_factory: Arc<dyn lash_core::SessionStoreFactory>,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
@@ -832,7 +832,17 @@ pub(super) fn recovery_worker_with_plugins_and_trace(
     let plugin_host = lash_core::facade_support::PluginHost::new(plugins);
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         RECOVERY_PROCESS_ENV_STORE.clone();
-    let runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    // The worker reaches sessions through the catalog the test hands it, layered
+    // onto a memory backend for every other port.
+    let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open a SQLite memory backend"),
+    ))
+    .map_session_store_factory(|_| store_factory)
+    .into_backend();
+    let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+        backend,
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -849,7 +859,6 @@ pub(super) fn recovery_worker_with_plugins_and_trace(
         lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(plugin_host),
             runtime_host,
-            store_factory,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
@@ -968,7 +977,8 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
         )],
         Some(graphs.clone()),
-    );
+    )
+    .await;
     let workflow = Arc::new(
         LashProcessWorkflowImpl::new_for_test(
             Arc::new(RestateCoreProcessRunner::new(worker.clone())),
@@ -1270,7 +1280,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         .await
         .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
-    let worker_a = recovery_worker(Arc::clone(&registry_a), Arc::clone(&store_factory));
+    let worker_a = recovery_worker(Arc::clone(&registry_a), Arc::clone(&store_factory)).await;
     let _root_store = store_factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
@@ -1414,7 +1424,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     assert_eq!(wake.input, "wake-after-rebuild");
     assert_eq!(wake.target_session_id, "root");
 
-    let worker_b = recovery_worker(Arc::clone(&registry_b), store_factory);
+    let worker_b = recovery_worker(Arc::clone(&registry_b), store_factory).await;
     let endpoint_b = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(

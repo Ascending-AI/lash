@@ -247,20 +247,20 @@ async fn fig1293_seed_control_target(registry: &Arc<dyn lash_core_execution::Pro
 }
 
 async fn fig1293_runtime(
-    effect_host: Arc<dyn EffectHost>,
-    registry: Arc<dyn lash_core_execution::ProcessRegistry>,
+    backend: Arc<dyn lash_core_execution::Backend>,
     provider: lash_core_execution::facade_support::ProviderHandle,
     store: Arc<dyn lash_core_execution::RuntimePersistence>,
     policy: lash_core_execution::SessionPolicy,
     initial_state: lash_core_execution::RuntimeSessionState,
 ) -> lash_core::facade_support::LashRuntime {
-    let watched = lash_core_execution::facade_support::watch_process_registry(registry);
+    let watched =
+        lash_core_execution::facade_support::watch_process_registry(backend.process_registry());
     let factories = fig1293_factories();
-    let mut host = lash_core_execution::facade_support::RuntimeHostConfig::in_memory(
+    let mut host = lash_core_execution::facade_support::RuntimeHostConfig::new(
+        backend,
         lash_core_execution::CommitBudget::bounded(1024 * 1024, 512),
         lash_core_execution::QueuedWorkBatchingConfig::new(1),
     );
-    host = host.with_effect_host(effect_host);
     host.providers.provider_resolver =
         Arc::new(lash_core_execution::facade_support::SingleProviderResolver::new(provider));
     let worker = lash_core_worker::DurableProcessWorker::new(
@@ -269,7 +269,6 @@ async fn fig1293_runtime(
                 factories.clone(),
             )),
             host.clone(),
-            Arc::new(lash_core_execution::facade_support::InMemorySessionStoreFactory::new()),
             lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
             Arc::new(lash_core_execution::NoQueuedWork::new()),
             lash_core_execution::testing::runtime_lease_owner(),
@@ -284,14 +283,12 @@ async fn fig1293_runtime(
     );
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
-            lash_core_execution::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core_execution::QueuedWorkBatchingConfig::new(1),
+            host,
             lash_core_execution::testing::runtime_lease_owner(),
         )
         .with_session_id("fig1293-restate-migrated-tools")
         .with_policy(policy)
         .with_initial_state(initial_state)
-        .with_runtime_host(host)
         .with_plugin_factories(factories)
         .with_store(store)
         .with_process_work(process_work)
@@ -400,18 +397,21 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
         .expect("connect FIG-1293 PostgreSQL host");
     reset_fig1293_rows(&storage).await;
 
-    let inline_registry: Arc<dyn lash_core_execution::ProcessRegistry> =
-        Arc::new(lash_core_execution::TestLocalProcessRegistry::default());
+    // The inline tier: the same law over a SQLite memory backend.
+    let inline_backend: Arc<dyn lash_core_execution::Backend> = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open a SQLite memory backend"),
+    );
+    let inline_registry = inline_backend.process_registry();
     fig1293_seed_control_target(&inline_registry).await;
     let (inline_model, inline_model_calls) = fig1293_model();
-    let native_effect_host: Arc<dyn EffectHost> =
-        Arc::new(lash_core_execution::facade_support::NativeEffectHost::default());
+    let native_effect_host = inline_backend.effect_host();
     let inline_policy = fig1293_policy();
     let mut native = fig1293_runtime(
-        Arc::clone(&native_effect_host),
-        Arc::clone(&inline_registry),
+        Arc::clone(&inline_backend),
         inline_model,
-        Arc::new(lash_core_execution::facade_support::InMemorySessionStore::new()),
+        detached_session_store().await,
         inline_policy.clone(),
         fig1293_state(&inline_policy),
     )
@@ -432,11 +432,13 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
     let first_effect_host: Arc<dyn EffectHost> = Arc::new(storage.effect_host());
     let postgres_policy = fig1293_policy();
     let postgres_state = fig1293_state(&postgres_policy);
-    let postgres_store: Arc<dyn lash_core_execution::RuntimePersistence> =
-        Arc::new(lash_core_execution::facade_support::InMemorySessionStore::new());
+    let postgres_store = detached_session_store().await;
     let mut first = fig1293_runtime(
-        Arc::clone(&first_effect_host),
-        Arc::clone(&postgres_registry),
+        pg_law_backend(
+            &storage,
+            Arc::clone(&first_effect_host),
+            Arc::clone(&postgres_registry),
+        ),
         postgres_model.clone(),
         Arc::clone(&postgres_store),
         postgres_policy.clone(),
@@ -452,8 +454,11 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
 
     let replay_effect_host: Arc<dyn EffectHost> = Arc::new(storage.effect_host());
     let mut replay = fig1293_runtime(
-        Arc::clone(&replay_effect_host),
-        Arc::clone(&postgres_registry),
+        pg_law_backend(
+            &storage,
+            Arc::clone(&replay_effect_host),
+            Arc::clone(&postgres_registry),
+        ),
         postgres_model,
         postgres_store,
         postgres_policy,
@@ -682,11 +687,9 @@ async fn fig1293_crash_and_redrive(
     });
     let policy = fig1293_policy();
     let state = fig1293_state(&policy);
-    let store: Arc<dyn lash_core_execution::RuntimePersistence> =
-        Arc::new(lash_core_execution::facade_support::InMemorySessionStore::new());
+    let store = detached_session_store().await;
     let mut first = fig1293_runtime(
-        Arc::clone(&effect_host),
-        Arc::clone(&registry),
+        pg_law_backend(&storage, Arc::clone(&effect_host), Arc::clone(&registry)),
         model.clone(),
         Arc::clone(&store),
         policy.clone(),
@@ -715,8 +718,11 @@ async fn fig1293_crash_and_redrive(
 
     let replay_effect_host: Arc<dyn EffectHost> = Arc::new(PostgresEffectHost::new(&storage));
     let mut replay = fig1293_runtime(
-        Arc::clone(&replay_effect_host),
-        Arc::clone(&registry),
+        pg_law_backend(
+            &storage,
+            Arc::clone(&replay_effect_host),
+            Arc::clone(&registry),
+        ),
         model,
         store,
         policy,

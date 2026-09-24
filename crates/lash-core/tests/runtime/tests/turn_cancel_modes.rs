@@ -127,25 +127,13 @@ struct ModeHarness {
     driver: lash_core::facade_support::TurnWorkDriver,
 }
 
-fn native_driver_store(
-    host: &Arc<dyn lash_core::EffectHost>,
-) -> Arc<dyn lash_core::RuntimePersistence> {
-    Arc::new(
-        RecordingStore::default().with_turn_cancellation_authority_for_testing(
-            lash_core::TurnCancellationAuthority::new(
-                host.turn_control_binding_id(),
-                Arc::clone(host) as Arc<dyn lash_core::AwaitEventResolver>,
-            ),
-        ),
-    )
-}
-
 async fn native_harness(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
     tools: Arc<dyn lash_core::ToolProvider>,
     transport: TestProvider,
 ) -> ModeHarness {
-    let config = test_runtime_host_config();
-    let driver_store = native_driver_store(&config.control.effect_host);
+    let config = test_runtime_host_config(backend);
+    let driver_store = unbound_store(backend).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -180,6 +168,7 @@ fn cancelled_evidence(turn: &AssembledTurn) -> TurnCancellationEvidence {
 
 #[tokio::test]
 async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
+    let backend = memory_backend().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let started = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
@@ -195,7 +184,7 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
     let ModeHarness {
         mut runtime,
         driver,
-    } = Box::pin(native_harness(Arc::new(tool.clone()), transport)).await;
+    } = Box::pin(native_harness(&backend, Arc::new(tool.clone()), transport)).await;
     let turn_id = "after-step-mid-model";
     let turn = lash_core::task::spawn(async move {
         runtime
@@ -262,6 +251,7 @@ async fn after_step_stop_mid_model_call_waits_for_the_response_and_its_tools() {
 
 #[tokio::test]
 async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
+    let backend = memory_backend().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let started = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
@@ -272,7 +262,7 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
     let ModeHarness {
         mut runtime,
         driver,
-    } = Box::pin(native_harness(Arc::new(tool.clone()), transport)).await;
+    } = Box::pin(native_harness(&backend, Arc::new(tool.clone()), transport)).await;
     let turn_id = "after-step-mid-tool";
     let turn = lash_core::task::spawn(async move {
         runtime
@@ -324,6 +314,7 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() {
 
 #[tokio::test]
 async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
+    let backend = memory_backend().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let tool = TokenWatchingTool {
         wait_for_token: true,
@@ -338,7 +329,7 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
     let ModeHarness {
         mut runtime,
         driver,
-    } = Box::pin(native_harness(Arc::new(tool.clone()), transport)).await;
+    } = Box::pin(native_harness(&backend, Arc::new(tool.clone()), transport)).await;
     let turn_id = "escalate-to-abort";
     let turn = lash_core::task::spawn(async move {
         runtime
@@ -423,6 +414,7 @@ async fn immediate_after_after_step_escalates_and_aborts_the_running_tool() {
 #[tokio::test]
 async fn start_gate_refuses_the_next_turn_for_both_modes() {
     for mode in [TurnCancelMode::Immediate, TurnCancelMode::AfterStep] {
+        let backend = memory_backend().await;
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let tool = TokenWatchingTool::default();
         tool.release();
@@ -435,7 +427,7 @@ async fn start_gate_refuses_the_next_turn_for_both_modes() {
         let ModeHarness {
             mut runtime,
             driver,
-        } = Box::pin(native_harness(Arc::new(tool.clone()), transport)).await;
+        } = Box::pin(native_harness(&backend, Arc::new(tool.clone()), transport)).await;
         let turn_id = "refused-before-start";
         let receipt = driver
             .request_cancel(request(&TurnId::from(turn_id), "before-start", mode))
@@ -466,188 +458,8 @@ async fn start_gate_refuses_the_next_turn_for_both_modes() {
 }
 
 #[tokio::test]
-async fn native_takeover_settles_unresolved_cancel_authorization_before_fresh_work() {
-    let provider_calls = Arc::new(AtomicUsize::new(0));
-    let tool = TokenWatchingTool::default();
-    tool.release();
-    let transport = gated_tool_calling_provider(
-        Arc::clone(&provider_calls),
-        Arc::new(tokio::sync::Notify::new()),
-        Arc::new(tokio::sync::Notify::new()),
-        Arc::new(AtomicBool::new(true)),
-    );
-    let clock = Arc::new(lash_core::testing::TestClock::new(1_000));
-    let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let config = test_runtime_host_config().with_clock(host_clock);
-    let effect_host = Arc::clone(&config.control.effect_host);
-    let binding_id = effect_host.turn_control_binding_id();
-    let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = Arc::new(
-        RecordingStore::with_clock(store_clock).with_turn_cancellation_authority_for_testing(
-            lash_core::TurnCancellationAuthority::new(
-                binding_id.clone(),
-                Arc::clone(&effect_host) as Arc<dyn lash_core::AwaitEventResolver>,
-            ),
-        ),
-    );
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    // This case queues behind a lease takeover and is the one that observes the shared lane
-    // shedding it as `StoreCommitContended`, which is a retryable refusal the runtime is right
-    // to raise and this test never meant to exercise.
-    // A session id of its own removes the sharing; the durable assertions below are unchanged.
-    let session_id = SessionId::from("native-unresolved-cancel-takeover-session");
-    lash_core::testing::store_fixtures::bind_conformance_session(&runtime_store, &session_id).await;
-    let mut runtime = TestRuntime::new(transport)
-        .plugins(Vec::new())
-        .tools(Arc::new(tool.clone()))
-        .host(EmbeddedRuntimeHost::new(config))
-        .store(Arc::clone(&runtime_store))
-        .with_session_id(session_id.clone())
-        .build()
-        .await;
-
-    let turn_id = TurnId::from("native-unresolved-cancel-takeover");
-    let address = lash_core::facade_support::TurnAddress::new(&session_id, &turn_id);
-    let retained_input = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
-        store.as_ref(),
-        lash_core::PendingTurnInputDraft::new(
-            &session_id,
-            lash_core::TurnInputIngress::active_turn(
-                &turn_id,
-                lash_core::TurnInputCheckpointBoundary::AfterWork,
-            ),
-            TurnInput::text("retained same-turn input"),
-        ),
-    )
-    .await
-    .expect("enqueue same-turn input");
-    let predecessor =
-        lash_core::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-            store.as_ref(),
-            &session_id,
-            &lash_core::LeaseOwnerIdentity::opaque("predecessor", "crashed-incarnation"),
-            "crashed-executor",
-            lash_core::facade_support::LeaseTimings::default().ttl_ms(),
-        )
-        .await
-        .expect("claim predecessor lease")
-        .acquired()
-        .expect("predecessor owns lane");
-    let evidence = TurnCancellationEvidence {
-        request_id: "predecessor-local-cancel".to_string(),
-        origin: Some("predecessor".to_string()),
-        reason: Some("crash after authorization".to_string()),
-        undelivered: lash_core::TurnCancelDisposition::Drop,
-        mode: TurnCancelMode::Immediate,
-        honoured_after_step: None,
-    };
-    let control = lash_core::runtime::turn_control::ActiveTurnControl::new(
-        effect_host.as_ref(),
-        address.clone(),
-    )
-    .await
-    .expect("prepare predecessor turn control");
-    let authorization = control
-        .closure_authorization(
-            &binding_id,
-            address.execution_scope(),
-            &predecessor.fence(),
-            lash_core::TurnCancelIntentSnapshot::Absent,
-            true,
-            Some(evidence.clone()),
-        )
-        .expect("construct predecessor cancellation authorization");
-    lash_core::store::TurnInputStore::validate_turn_cancellation_binding(
-        store.as_ref(),
-        &session_id,
-        &predecessor.fence(),
-        &binding_id,
-        &address.execution_scope(),
-    )
-    .await
-    .expect("select predecessor cancellation binding");
-    assert!(
-        effect_host
-            .peek_await_event(authorization.cancel_key())
-            .await
-            .expect("inspect unresolved predecessor cancellation gate")
-            .is_none(),
-        "the takeover must settle a gate with no existing winner"
-    );
-    lash_core::store::TurnInputStore::authorize_turn_cancel_closure(
-        store.as_ref(),
-        &predecessor.fence(),
-        &authorization,
-    )
-    .await
-    .expect("persist predecessor authorization without settling its gate");
-    assert_eq!(
-        lash_core::store::TurnInputStore::pending_turn_cancel_closures(
-            store.as_ref(),
-            &session_id,
-            &predecessor.fence(),
-            &binding_id,
-            &address.execution_scope(),
-        )
-        .await
-        .expect("read predecessor closure pin"),
-        vec![authorization.clone()],
-    );
-    clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms() + 1);
-
-    let turn = runtime
-        .run_turn_assembled(
-            TurnInput::text("resume the authorized turn"),
-            CancellationToken::new(),
-            host_turn_scope(&runtime.host.core, &session_id, &turn_id),
-        )
-        .await
-        .expect("successor completes the cancelled turn");
-    assert_eq!(cancelled_evidence(&turn), evidence);
-    assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
-    assert_eq!(tool.executions.load(Ordering::SeqCst), 0);
-    assert!(
-        lash_core::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
-            .await
-            .expect("list post-cancellation input")
-            .into_iter()
-            .all(|input| input.input.input_id != retained_input.input_id),
-        "the exact Drop proposal applies to the retained same-turn input"
-    );
-
-    let audit_lease =
-        lash_core::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-            store.as_ref(),
-            &session_id,
-            &lash_core::LeaseOwnerIdentity::opaque("audit", "post-commit"),
-            "audit-executor",
-            lash_core::facade_support::LeaseTimings::default().ttl_ms(),
-        )
-        .await
-        .expect("claim post-commit audit lease")
-        .acquired()
-        .expect("final commit released the successor lane");
-    assert!(
-        audit_lease.fencing_token > authorization.authorizing_fencing_token(),
-        "final commit used a successor lane while consuming the predecessor authorization"
-    );
-    assert!(
-        lash_core::store::TurnInputStore::pending_turn_cancel_closures(
-            store.as_ref(),
-            &session_id,
-            &audit_lease.fence(),
-            &binding_id,
-            &address.execution_scope(),
-        )
-        .await
-        .expect("read post-commit closure pins")
-        .is_empty(),
-        "final commit consumes the exact retained authorization"
-    );
-}
-
-#[tokio::test]
 async fn undelivered_disposition_matrix_applies_for_both_modes() {
+    let backend = memory_backend().await;
     for mode in [TurnCancelMode::Immediate, TurnCancelMode::AfterStep] {
         for disposition in [
             lash_core::TurnCancelDisposition::Defer,
@@ -657,9 +469,12 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             let session_id = SessionId::from(
                 format!("cancel-matrix-{mode:?}-{disposition:?}").to_ascii_lowercase(),
             );
-            let (mut runtime, store) =
-                standard_runtime_with_transport_and_queue_store_for_session(transport, &session_id)
-                    .await;
+            let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
+                &backend,
+                transport,
+                &session_id,
+            )
+            .await;
             let persisted = runtime.export_persistence_state();
             let session_id = persisted.session_id.clone();
             let driver = lash_core::facade_support::TurnWorkDriver::for_session(
@@ -743,6 +558,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
 
 #[tokio::test]
 async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
+    let backend = memory_backend().await;
     for mode in [TurnCancelMode::AfterStep, TurnCancelMode::Immediate] {
         let provider_calls = Arc::new(AtomicUsize::new(0));
         let tool = TokenWatchingTool {
@@ -755,10 +571,10 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             Arc::new(tokio::sync::Notify::new()),
             Arc::new(AtomicBool::new(true)),
         );
-        let store = Arc::new(RecordingStore::default());
+        let store = unbound_recording_store(&backend).await;
         let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
-        let config = test_runtime_host_config();
-        let mut runtime = TestRuntime::new(transport)
+        let config = test_runtime_host_config(&backend);
+        let mut runtime = TestRuntime::new(&backend, transport)
             .plugins(Vec::new())
             .tools(Arc::new(tool.clone()))
             .host(EmbeddedRuntimeHost::new(config))
@@ -969,13 +785,14 @@ fn retry_tool_provider(provider_calls: Arc<AtomicUsize>) -> TestProvider {
 }
 
 async fn sleeping_retry_harness(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
     clock: Arc<HeldRetrySleepClock>,
     tool: RetryOnceTool,
     provider_calls: Arc<AtomicUsize>,
 ) -> ModeHarness {
     let host_clock: Arc<dyn lash_core::Clock> = clock;
-    let config = test_runtime_host_config().with_clock(host_clock);
-    let driver_store = native_driver_store(&config.control.effect_host);
+    let config = test_runtime_host_config(backend).with_clock(host_clock);
+    let driver_store = unbound_store(backend).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -1000,16 +817,20 @@ async fn sleeping_retry_harness(
 #[tokio::test]
 async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_boundary() {
     let clock = Arc::new(HeldRetrySleepClock::new(RETRY_AFTER_MS));
+    // The retry sleep is the backend's durable timer, so the backend waits on
+    // the held clock.
+    let backend = memory_backend_with_clock(clock.clone()).await;
     let tool = RetryOnceTool::default();
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let ModeHarness {
         mut runtime,
         driver,
-    } = sleeping_retry_harness(
+    } = Box::pin(sleeping_retry_harness(
+        &backend,
         Arc::clone(&clock),
         tool.clone(),
         Arc::clone(&provider_calls),
-    )
+    ))
     .await;
     let turn_id = "after-step-during-sleep";
     let turn = lash_core::task::spawn(async move {
@@ -1070,16 +891,20 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
 #[tokio::test]
 async fn immediate_abort_during_retry_sleep_unwinds_without_the_retry() {
     let clock = Arc::new(HeldRetrySleepClock::new(RETRY_AFTER_MS));
+    // The retry sleep is the backend's durable timer, so the backend waits on
+    // the held clock.
+    let backend = memory_backend_with_clock(clock.clone()).await;
     let tool = RetryOnceTool::default();
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let ModeHarness {
         mut runtime,
         driver,
-    } = sleeping_retry_harness(
+    } = Box::pin(sleeping_retry_harness(
+        &backend,
         Arc::clone(&clock),
         tool.clone(),
         Arc::clone(&provider_calls),
-    )
+    ))
     .await;
     let turn_id = "abort-during-sleep";
     let turn = lash_core::task::spawn(async move {

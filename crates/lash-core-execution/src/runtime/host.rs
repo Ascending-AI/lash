@@ -2,13 +2,10 @@ use crate::SessionId;
 use lash_trace::{TraceContext, TraceLevel, TraceSink};
 use std::sync::Arc;
 
-use super::process::{
-    InMemoryProcessExecutionEnvStore, ProcessEngineRegistry, ProcessExecutionEnvStore,
-    ProcessRegistry,
-};
+use super::process::{ProcessEngineRegistry, ProcessExecutionEnvStore, ProcessRegistry};
 use super::{
-    EffectHost, NativeEffectHost, NoQueuedWork, ProcessWorkSubstrate, ProcessWorkWiring,
-    QueuedWorkSubstrate, SessionStoreFactory, TerminationPolicy,
+    EffectHost, NoQueuedWork, ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkSubstrate,
+    SessionStoreFactory, TerminationPolicy,
 };
 
 /// Default attempt bound stamped onto children started by the engine that runs
@@ -29,8 +26,15 @@ pub const DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS: std::num::NonZeroU32 =
     };
 
 /// Required host configuration for all runtimes.
+///
+/// A config is built over exactly one [`Backend`](crate::Backend) (ADR 0102,
+/// D2): its effect host, attachment port, process-exec-env store and clock
+/// start as the backend's, and every other port a runtime reaches — the
+/// session-store factory, the trigger store and the process-definition
+/// registry — is read from the same backend. There is no in-memory default.
 #[derive(Clone)]
 pub struct RuntimeHostConfig {
+    backend: Arc<dyn crate::Backend>,
     pub durability: RuntimeDurabilityConfig,
     pub process_engines: ProcessEngineRegistry,
     pub providers: RuntimeProviderConfig,
@@ -152,22 +156,23 @@ pub struct RuntimeTracingConfig {
 }
 
 impl RuntimeHostConfig {
-    /// Construct a config with the host-owned durability dependencies and
-    /// commit budget named explicitly.
+    /// A config over `backend`: its effect host, attachment port,
+    /// process-exec-env store and clock, with the commit budget and queued-work
+    /// batching named explicitly.
     ///
-    /// There is intentionally no `Default`. The effect host, stores, and commit
-    /// limits decide a runtime's durability envelope, so hosts must choose them
-    /// rather than silently inheriting policy. Use
-    /// [`RuntimeHostConfig::in_memory`] to opt into the in-process / in-memory
-    /// implementations while still supplying the budget.
+    /// There is intentionally no `Default` and no in-memory constructor. The
+    /// backend and the commit limits decide a runtime's durability envelope,
+    /// so hosts must choose them rather than silently inheriting policy; the
+    /// zero-infra choice is a SQLite memory backend (ADR 0102, D3).
     pub fn new(
-        effect_host: Arc<dyn EffectHost>,
-        attachment_store: Arc<dyn crate::AttachmentStore>,
-        process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+        backend: Arc<dyn crate::Backend>,
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
     ) -> Self {
-        let clock: Arc<dyn super::Clock> = Arc::new(super::SystemClock);
+        let effect_host = backend.effect_host();
+        let attachment_store = backend.attachment_store();
+        let process_env_store = backend.process_env_store();
+        let clock = backend.clock();
         let tool_children =
             effect_host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(
                 &effect_host,
@@ -183,6 +188,7 @@ impl RuntimeHostConfig {
             tool_children.with_process_env_store(Arc::clone(&process_env_store));
         }
         Self {
+            backend,
             durability: RuntimeDurabilityConfig {
                 commit_budget,
                 queued_work_batching,
@@ -222,6 +228,44 @@ impl RuntimeHostConfig {
         }
     }
 
+    /// The backend this config's ports come from.
+    pub fn backend(&self) -> &Arc<dyn crate::Backend> {
+        &self.backend
+    }
+
+    /// This config moved onto `backend`: its effect host, attachment port,
+    /// process-exec-env store and clock become `backend`'s, with every other
+    /// setting kept. Every backend-bound port moves together, so the config
+    /// still names exactly one backend (ADR 0102, D2).
+    pub fn with_backend(mut self, backend: Arc<dyn crate::Backend>) -> Self {
+        let max_attachment_bytes = self.durability.attachment_store.max_attachment_bytes();
+        self.durability.attachment_store = Arc::new(
+            crate::SessionAttachmentStore::ephemeral(backend.attachment_store())
+                .with_max_attachment_bytes(max_attachment_bytes),
+        );
+        let config = self
+            .with_process_env_store(backend.process_env_store())
+            .with_effect_host(backend.effect_host())
+            .with_clock(backend.clock());
+        Self { backend, ..config }
+    }
+
+    /// The backend's session-store factory: the catalog every session this
+    /// runtime creates, reopens or deletes goes through.
+    pub fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
+        self.backend.session_store_factory()
+    }
+
+    /// The backend's trigger subscriptions and occurrences.
+    pub fn trigger_store(&self) -> Arc<dyn crate::TriggerStore> {
+        self.backend.trigger_store()
+    }
+
+    /// The backend's named process-definition registry (FIG-2995).
+    pub fn process_definitions(&self) -> Arc<dyn crate::ProcessDefinitionRegistry> {
+        self.backend.process_definition_registry()
+    }
+
     /// Replace the runtime time source. Hosts that need deterministic replay or
     /// test-driven time inject their own [`Clock`](super::Clock); the default is
     /// [`SystemClock`](super::SystemClock).
@@ -256,25 +300,6 @@ impl RuntimeHostConfig {
     ) -> Self {
         self.attachment_source_policy = policy;
         self
-    }
-
-    /// Explicit in-process / in-memory configuration: an
-    /// [`NativeEffectHost`] and in-memory stores.
-    ///
-    /// Convenient for tests and local experiments; not durable. The commit
-    /// budget remains required because backend latency policy is independent
-    /// of whether persistence is in-memory.
-    pub fn in_memory(
-        commit_budget: crate::CommitBudget,
-        queued_work_batching: crate::QueuedWorkBatchingConfig,
-    ) -> Self {
-        Self::new(
-            Arc::new(NativeEffectHost::default()),
-            Arc::new(crate::InMemoryAttachmentStore::new()),
-            Arc::new(InMemoryProcessExecutionEnvStore::new()),
-            commit_budget,
-            queued_work_batching,
-        )
     }
 
     /// Replace the effect host, keeping the tool-child wiring coherent: when
@@ -392,48 +417,16 @@ impl RuntimeHostConfig {
 
 /// Base host shape for embedded runtimes.
 ///
-/// "Embedded" means a runtime with no process registry.
+/// "Embedded" means a runtime with no process registry. Every store port it
+/// reaches comes from its config's one backend (ADR 0102, D2).
 #[derive(Clone)]
 pub struct EmbeddedRuntimeHost {
     pub core: RuntimeHostConfig,
-    pub session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
-    pub trigger_store: Option<Arc<dyn crate::TriggerStore>>,
-    /// Durable home for the named process-definition registry (FIG-2995).
-    pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
 }
 
 impl EmbeddedRuntimeHost {
     pub fn new(core: RuntimeHostConfig) -> Self {
-        let clock = Arc::clone(&core.clock);
-        Self {
-            core,
-            session_store_factory: None,
-            trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::with_clock(clock))),
-            process_definitions: Some(
-                Arc::new(crate::InMemoryProcessDefinitionRegistry::default()),
-            ),
-        }
-    }
-
-    pub fn with_session_store_factory(
-        mut self,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
-    ) -> Self {
-        self.session_store_factory = Some(session_store_factory);
-        self
-    }
-
-    pub fn with_trigger_store(mut self, store: Arc<dyn crate::TriggerStore>) -> Self {
-        self.trigger_store = Some(store);
-        self
-    }
-
-    pub fn with_process_definition_registry(
-        mut self,
-        registry: Arc<dyn crate::ProcessDefinitionRegistry>,
-    ) -> Self {
-        self.process_definitions = Some(registry);
-        self
+        Self { core }
     }
 }
 
@@ -583,9 +576,6 @@ impl RuntimeWork {
 #[derive(Clone)]
 pub struct RuntimeHost {
     pub core: RuntimeHostConfig,
-    pub session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
-    pub trigger_store: Option<Arc<dyn crate::TriggerStore>>,
-    pub process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
     pub work: RuntimeWork,
 }
 
@@ -593,9 +583,6 @@ impl RuntimeHost {
     pub fn from_embedded_with_work(embedded: EmbeddedRuntimeHost, work: RuntimeWork) -> Self {
         Self {
             core: embedded.core,
-            session_store_factory: embedded.session_store_factory,
-            trigger_store: embedded.trigger_store,
-            process_definitions: embedded.process_definitions,
             work,
         }
     }
@@ -661,9 +648,6 @@ impl From<ProcessRuntimeHost> for RuntimeHost {
     fn from(value: ProcessRuntimeHost) -> Self {
         Self {
             core: value.embedded.core,
-            session_store_factory: value.embedded.session_store_factory,
-            trigger_store: value.embedded.trigger_store,
-            process_definitions: value.embedded.process_definitions,
             work: RuntimeWork::processes(value.wiring, value.queued_work),
         }
     }

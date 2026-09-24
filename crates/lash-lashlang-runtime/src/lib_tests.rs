@@ -257,16 +257,19 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         .await
         .expect("record signal process start");
     let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
-    let effect_host = lash_core::facade_support::NativeEffectHost::default();
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend");
+    let effect_host = lash_core::Backend::effect_host(&backend);
     let scoped = lash_core::EffectHost::scoped_static(
-        &effect_host,
+        effect_host.as_ref(),
         lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
             process_id.clone(),
             incarnation,
         )),
     )
     .expect("valid process scope")
-    .expect("native controller");
+    .expect("the backend host lends a static controller");
     let parent = lash_core::RuntimeInvocation::effect(
         lash_core::EffectAddress::new(
             lash_core::ExecutionScope::process(process_id.clone()),
@@ -332,7 +335,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
             return false;
         }
         let key = lash_core::AwaitEventResolver::await_event_key(
-            &effect_host,
+            effect_host.await_event_resolver(),
             &lash_core::ExecutionScope::process(process_id.clone()),
             lash_core::AwaitEventWaitIdentity::process_signal(&process_id, "ready", 1),
         )
@@ -340,7 +343,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         .expect("durable signal key");
         assert!(matches!(
             lash_core::AwaitEventResolver::resolve_await_event(
-                &effect_host,
+                effect_host.await_event_resolver(),
                 &key,
                 lash_core::Resolution::Ok(serde_json::json!({ "received": true })),
             )
@@ -440,16 +443,19 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
         input.process_identity(),
     ));
     let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
-    let effect_host = lash_core::facade_support::NativeEffectHost::default();
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend");
+    let effect_host = lash_core::Backend::effect_host(&backend);
     let scoped = lash_core::EffectHost::scoped_static(
-        &effect_host,
+        effect_host.as_ref(),
         lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
             process_id.clone(),
             incarnation,
         )),
     )
     .expect("valid process scope")
-    .expect("native controller");
+    .expect("the backend host lends a static controller");
     let parent = lash_core::RuntimeInvocation::effect(
         lash_core::EffectAddress::new(
             lash_core::ExecutionScope::process(process_id.clone()),
@@ -781,7 +787,7 @@ impl lash_core::RuntimeEffectController for EveryNEffectsController {
 }
 
 #[test]
-fn every_n_controller_requests_boundaries_and_native_default_does_not() {
+fn every_n_controller_requests_boundaries_and_the_trait_default_does_not() {
     let progress = lash_core::SegmentProgress {
         effects_executed: 2,
         journaled_bytes_estimate: None,
@@ -793,9 +799,11 @@ fn every_n_controller_requests_boundaries_and_native_default_does_not() {
         ),
         Some(lash_core::BoundaryReason::JournalBudget)
     );
-    let native = lash_core::facade_support::NativeRuntimeEffectController::default();
     assert_eq!(
-        lash_core::RuntimeEffectController::wants_segment_boundary(&native, &progress,),
+        lash_core::RuntimeEffectController::wants_segment_boundary(
+            &lash_core::testing::UnavailableEffectController,
+            &progress,
+        ),
         None
     );
 }

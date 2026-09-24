@@ -47,6 +47,10 @@ mod runtime {
             pub(crate) use crate::runtime_support::effect_recording_authority::*;
         }
 
+        pub(crate) use crate::runtime_support::{
+            memory_backend, memory_backend_with_clock, reopened_backend, sqlite_memory_backend,
+            unbound_recording_store, unbound_recording_store_with_clock, unbound_store,
+        };
         pub(crate) use lash_core::llm::transport::LlmTransportError;
         pub(crate) use lash_core::llm::types::{LlmProviderTraceEvent, LlmUsage};
         pub(crate) use lash_core::plugin::StaticPluginFactory;
@@ -67,6 +71,7 @@ mod runtime {
         mod replay_mismatch;
         mod replay_origin;
         mod session_freshness;
+        mod session_lease_guard;
         mod session_lease_observability;
         mod stream_accumulator;
         mod stream_evidence;

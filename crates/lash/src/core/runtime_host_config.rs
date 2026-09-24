@@ -1,9 +1,9 @@
 use super::*;
 
 impl LashCoreBuilder {
-    /// Assemble the runtime host config from the backend's effect host,
-    /// attachment store, process-env store and clock, then apply every
-    /// runtime setting this builder carries over it.
+    /// Assemble the runtime host config over the backend, which supplies its
+    /// effect host, attachment store, process-env store and clock, then apply
+    /// every runtime setting this builder carries over it.
     pub(super) fn resolve_runtime_host_config(&mut self) -> Result<RuntimeHostConfig> {
         let commit_budget = self
             .commit_budget
@@ -14,13 +14,10 @@ impl LashCoreBuilder {
             .take()
             .ok_or(EmbedError::MissingQueuedWorkBatching)?;
         let core = RuntimeHostConfig::new(
-            self.backend.effect_host(),
-            self.backend.attachment_store(),
-            self.backend.process_env_store(),
+            Arc::clone(&self.backend),
             commit_budget,
             queued_work_batching,
-        )
-        .with_clock(self.backend.clock());
+        );
         Ok(self.apply_core_overrides(core))
     }
 

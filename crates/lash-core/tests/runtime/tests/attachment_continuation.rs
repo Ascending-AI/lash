@@ -130,6 +130,7 @@ fn request_text(request: &lash_core::llm::types::LlmRequest) -> String {
 
 #[tokio::test]
 async fn unsupported_committed_tool_attachment_degrades_and_session_remains_continuable() {
+    let backend = memory_backend().await;
     let trace_path = std::env::temp_dir().join(format!(
         "lash-attachment-degradation-{}-{}.jsonl",
         std::process::id(),
@@ -140,7 +141,7 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
     ));
     let requests = Arc::new(Mutex::new(Vec::new()));
     let provider = attachment_provider(Arc::clone(&requests));
-    let mut runtime = TestRuntime::new(provider)
+    let mut runtime = TestRuntime::new(&backend, provider)
         .plugins(Vec::new())
         .attachment_acceptance(
             lash_core::attachments::attachment_test_capability().attachment_acceptance,
@@ -150,7 +151,10 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
             bytes: UNSUPPORTED_BYTES,
             label: "workspace_badge.bin",
         }))
-        .host(test_host_config_with_trace_path(trace_path.clone()))
+        .host(test_host_config_with_trace_path(
+            &backend,
+            trace_path.clone(),
+        ))
         .build()
         .await;
 
@@ -231,10 +235,11 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
 
 #[tokio::test]
 async fn accepted_tool_attachment_round_trips_without_degradation() {
+    let backend = memory_backend().await;
     const IMAGE_BYTES: &[u8] = b"accepted-image-bytes";
     let requests = Arc::new(Mutex::new(Vec::new()));
     let provider = attachment_provider(Arc::clone(&requests));
-    let mut runtime = TestRuntime::new(provider)
+    let mut runtime = TestRuntime::new(&backend, provider)
         .plugins(Vec::new())
         .attachment_acceptance(
             lash_core::attachments::attachment_test_capability().attachment_acceptance,
@@ -338,6 +343,7 @@ impl lash_core::ToolProvider for ArrayAttachmentTool {
 /// pins the gates themselves.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
+    let backend = memory_backend().await;
     const SESSION_ID: &str = "array-attachment-immediate-cancel";
     let (answering_tx, answering_rx) = tokio::sync::oneshot::channel::<()>();
     let answering_tx = Arc::new(Mutex::new(Some(answering_tx)));
@@ -380,16 +386,16 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
             }
         })
         .build();
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    let mut runtime = TestRuntime::new(provider)
+    let mut runtime = TestRuntime::new(&backend, provider)
         .plugins(Vec::new())
         .attachment_acceptance(
             lash_core::attachments::attachment_test_capability().attachment_acceptance,
         )
         .tools(Arc::new(ArrayAttachmentTool))
         .host(lash_core::facade_support::EmbeddedRuntimeHost::new(
-            test_runtime_host_config(),
+            test_runtime_host_config(&backend),
         ))
         .store(runtime_store)
         .with_session_id(SESSION_ID)

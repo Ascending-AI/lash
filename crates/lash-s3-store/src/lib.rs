@@ -670,8 +670,11 @@ mod tests {
             config.prefix.as_deref().unwrap_or("tests"),
             unique_case_suffix()
         ));
+        let backend = lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open a SQLite memory backend");
         lash_conformance::attachment_reference_lifecycle_with_store(
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+            lash_core::Backend::session_store_factory(&backend),
             Arc::new(S3AttachmentStore::from_config(config).expect("store"))
                 as Arc<dyn AttachmentStore>,
         )

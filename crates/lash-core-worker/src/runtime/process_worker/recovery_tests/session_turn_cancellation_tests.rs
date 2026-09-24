@@ -2,15 +2,15 @@ use super::*;
 
 #[tokio::test]
 async fn cancelled_session_turn_never_creates_and_leaves_foreign_sessions_alone() {
-    let raw_registry = Arc::new(TestLocalProcessRegistry::default());
-    let raw_registry_port: Arc<dyn ProcessRegistry> = raw_registry.clone();
+    let backend = memory_backend().await;
+    let raw_registry_port = backend.process_registry();
     let sink = Arc::new(RecordingProcessEventSink::default());
     let watched = crate::watch_process_registry_with_sink(
         raw_registry_port,
         Some(Arc::clone(&sink) as Arc<dyn crate::ProcessEventSink>),
     );
     let registry = Arc::clone(watched.registry());
-    let factory = Arc::new(crate::InMemorySessionStoreFactory::new());
+    let factory = backend.session_store_factory();
     let policy = test_session_policy();
     let foreign_session_id = "cancel-never-creates-foreign-root";
     factory
@@ -28,11 +28,7 @@ async fn cancelled_session_turn_never_creates_and_leaves_foreign_sessions_alone(
         Arc::new(PluginHost::new(
             crate::testing::test_standard_protocol_factories(),
         )),
-        RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        ),
-        factory.clone(),
+        test_host_config(&backend),
         crate::WorkerProcessWork::SelfNative(watched),
         Arc::new(crate::NoQueuedWork::new()),
         local_owner(

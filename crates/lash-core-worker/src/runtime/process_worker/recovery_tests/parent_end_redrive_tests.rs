@@ -10,8 +10,6 @@
 
 use super::*;
 
-use crate::store::SessionCommitStore as _;
-
 const SESSION: &str = "parent-end-redrive-session";
 
 /// Never actually runs here: these laws drive only the parent-end passes, and
@@ -38,93 +36,6 @@ impl crate::ProcessEngine for NeverDrivenEngine {
     }
 }
 
-/// A factory whose sessions survive: the redrive must reach the very store the
-/// turn committed to, so a fresh store per open would answer every question
-/// "not committed".
-#[derive(Default)]
-struct SharedInMemorySessionStoreFactory {
-    stores: Mutex<std::collections::HashMap<SessionId, Arc<crate::InMemorySessionStore>>>,
-}
-
-impl SharedInMemorySessionStoreFactory {
-    fn store(&self, session_id: &SessionId) -> Arc<crate::InMemorySessionStore> {
-        Arc::clone(
-            self.stores
-                .lock_recover()
-                .entry(session_id.clone())
-                .or_default(),
-        )
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::AttachmentRootSet for SharedInMemorySessionStoreFactory {
-    async fn live_attachment_refs(
-        &self,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "live_attachment_refs",
-        })
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        _id: &crate::AttachmentId,
-        _intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "has_live_attachment_ref",
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl SessionStoreFactory for SharedInMemorySessionStoreFactory {
-    async fn create_store(
-        &self,
-        request: &crate::SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
-        Ok(self.store(&request.session_id))
-    }
-
-    async fn open_existing_store(
-        &self,
-        request: &crate::SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, String> {
-        Ok(Some(self.store(&request.session_id)))
-    }
-
-    // The shared map is the catalog: a by-id lookup is the same resolution the
-    // request-shaped seam performs.
-    async fn open_existing_store_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
-        Ok(Some(self.store(session_id)))
-    }
-
-    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
-        Ok(false)
-    }
-
-    async fn delete_session(
-        &self,
-        _session_id: &SessionId,
-    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
-        Ok(crate::store::SessionBlobReclaimReport::default())
-    }
-
-    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
-    async fn count_unsettled_turns(
-        &self,
-    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::count_unsettled_turns",
-        })
-    }
-}
-
 fn turn_parent(turn_id: &str) -> crate::ParentScope {
     crate::ParentScope::turn(SessionId::from(SESSION), crate::TurnId::from(turn_id))
 }
@@ -147,18 +58,31 @@ fn cancel_child(
     registration
 }
 
-/// Commit one turn to the session store the worker's factory hands out,
+/// Commit one turn to the session store the worker's backend hands out,
 /// leaving the parent-end ledger row unwritten: exactly the durable state a
 /// crash between the two writes produces.
 ///
 /// `head_revision` is the store's revision this commit expects: every turn here
 /// commits into the one shared session, so a second commit follows the first.
-async fn commit_turn(
-    factory: &Arc<SharedInMemorySessionStoreFactory>,
-    turn_id: &str,
-    head_revision: u64,
-) {
-    let store = factory.store(&SessionId::from(SESSION));
+async fn commit_turn(backend: &Arc<dyn crate::Backend>, turn_id: &str, head_revision: u64) {
+    let factory = backend.session_store_factory();
+    let session_id = SessionId::from(SESSION);
+    let store = match factory
+        .open_existing_store_by_id(&session_id)
+        .await
+        .expect("look the session up in the backend catalog")
+    {
+        Some(store) => store,
+        None => factory
+            .create_store(&crate::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: crate::SessionRelation::Root,
+                pending_observer_intents: Vec::new(),
+                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("create the session in the backend catalog"),
+    };
     let state = crate::runtime::RuntimeSessionState {
         session_id: SessionId::from(SESSION),
         head_revision,
@@ -190,9 +114,9 @@ async fn cancel_origins(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_once() {
-    let factory = Arc::new(SharedInMemorySessionStoreFactory::default());
-    let (worker, registry, env_ref, _test_registry) =
-        worker_with_session_store_factory(Arc::new(NeverDrivenEngine), factory.clone()).await;
+    let backend = memory_backend().await;
+    let (worker, registry, env_ref) =
+        worker_on_backend(Arc::new(NeverDrivenEngine), &backend).await;
 
     let committed = ProcessId::from("redrive-committed-child");
     let interrupted = ProcessId::from("redrive-interrupted-child");
@@ -212,7 +136,7 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
         ))
         .await
         .expect("register the interrupted turn's child");
-    commit_turn(&factory, "committed-turn", 0).await;
+    commit_turn(&backend, "committed-turn", 0).await;
 
     worker
         .redrive_missing_opener_parent_end_rows()
@@ -284,9 +208,9 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() {
     const STUCK: usize = 300;
-    let factory = Arc::new(SharedInMemorySessionStoreFactory::default());
-    let (worker, registry, env_ref, _test_registry) =
-        worker_with_session_store_factory(Arc::new(NeverDrivenEngine), factory.clone()).await;
+    let backend = memory_backend().await;
+    let (worker, registry, env_ref) =
+        worker_on_backend(Arc::new(NeverDrivenEngine), &backend).await;
 
     for index in 0..STUCK {
         registry
@@ -308,7 +232,7 @@ async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() 
         ))
         .await
         .expect("register the committed turn's child");
-    commit_turn(&factory, "zz-committed-turn", 0).await;
+    commit_turn(&backend, "zz-committed-turn", 0).await;
 
     worker
         .redrive_missing_opener_parent_end_rows()
@@ -350,7 +274,7 @@ async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() 
     // the candidate order. A scope that only becomes recordable afterwards
     // sits lexically first, behind the cursor's high-water mark: it is reached
     // on the next pass only because the wrap happened.
-    commit_turn(&factory, "stuck-turn-000", 1).await;
+    commit_turn(&backend, "stuck-turn-000", 1).await;
     worker
         .redrive_missing_opener_parent_end_rows()
         .await

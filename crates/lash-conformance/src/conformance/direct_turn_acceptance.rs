@@ -96,11 +96,12 @@ async fn acceptance_runtime_with_batching(
     lease_owner: crate::LeaseOwnerIdentity,
     batching: crate::QueuedWorkBatchingConfig,
 ) -> crate::LashRuntime {
-    let mut host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        batching.clone(),
-    );
-    host = host.with_effect_host(Arc::clone(effect_host));
+    let mut host = crate::LawBackend::in_process()
+        .with_effect_host(Arc::clone(effect_host))
+        .host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            batching.clone(),
+        );
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(SessionId::from(session_id.to_string()));
@@ -110,23 +111,18 @@ async fn acceptance_runtime_with_batching(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     Box::pin(
-        crate::LashRuntime::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            batching,
-            lease_owner,
-        )
-        .with_session_id(session_id)
-        .with_policy(policy)
-        .with_initial_state(state)
-        .with_runtime_host(host)
-        .with_plugin_factories(
-            crate::testing::test_standard_protocol_factories()
-                .into_iter()
-                .chain(plugin_factories)
-                .collect(),
-        )
-        .with_store(Arc::clone(store))
-        .build(),
+        crate::LashRuntime::builder(host, lease_owner)
+            .with_session_id(session_id)
+            .with_policy(policy)
+            .with_initial_state(state)
+            .with_plugin_factories(
+                crate::testing::test_standard_protocol_factories()
+                    .into_iter()
+                    .chain(plugin_factories)
+                    .collect(),
+            )
+            .with_store(Arc::clone(store))
+            .build(),
     )
     .await
     .expect("build the direct-turn acceptance conformance runtime")

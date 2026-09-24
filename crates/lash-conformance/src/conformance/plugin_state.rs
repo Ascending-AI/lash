@@ -313,10 +313,11 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
     };
     let plugins = fixture.host().build_session(id).unwrap();
     let hook_session = plugins.clone();
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    ));
+    let runtime_host =
+        crate::EmbeddedRuntimeHost::new(crate::LawBackend::in_process().host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
         store.clone(),
@@ -379,10 +380,11 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
         )
         .unwrap();
     assert_eq!(rebuilt.state(id).generation(), generation + 1);
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    ));
+    let runtime_host =
+        crate::EmbeddedRuntimeHost::new(crate::LawBackend::in_process().host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
         store.clone(),

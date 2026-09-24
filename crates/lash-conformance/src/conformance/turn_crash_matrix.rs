@@ -1582,14 +1582,13 @@ async fn try_build_runtime_with_lease_timings(
             })
         }
     };
-    let mut host = crate::RuntimeHostConfig::new(
-        effect_host,
-        Arc::new(crate::InMemoryAttachmentStore::new()),
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_lease_timings(lease_timings);
+    let mut host = crate::LawBackend::in_process()
+        .with_effect_host(effect_host)
+        .host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        )
+        .with_lease_timings(lease_timings);
     trace_tool.control = control.clone();
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider_handle(control)));
@@ -1599,17 +1598,12 @@ async fn try_build_runtime_with_lease_timings(
         PluginSpec::new().with_tool_provider(Arc::new(trace_tool)),
     )));
     Box::pin(
-        crate::LashRuntime::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-            crate::testing::runtime_lease_owner(),
-        )
-        .with_session_id(&identity.session_id)
-        .with_policy(runtime_policy())
-        .with_runtime_host(host)
-        .with_store(store)
-        .with_plugin_factories(plugin_factories)
-        .build(),
+        crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner())
+            .with_session_id(&identity.session_id)
+            .with_policy(runtime_policy())
+            .with_store(store)
+            .with_plugin_factories(plugin_factories)
+            .build(),
     )
     .await
 }

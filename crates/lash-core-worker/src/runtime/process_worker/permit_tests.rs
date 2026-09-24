@@ -174,8 +174,9 @@ async fn cancelled_tool_batch_reacquires_the_process_execution_permit() {
                 let tools: Arc<dyn crate::ToolProvider> = Arc::new(PermitParkingTool {
                     started: started_tx,
                 });
+                let backend = super::test_backend::memory_backend().await;
                 let mut runtime =
-                    runtime_with_plugins_and_tools(Vec::new(), tools, transport).await;
+                    runtime_with_plugins_and_tools(&backend, Vec::new(), tools, transport).await;
 
                 let cancel = tokio_util::sync::CancellationToken::new();
                 let cancel_trigger = cancel.clone();
