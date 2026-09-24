@@ -4,8 +4,8 @@
 
 Accepted 2026-09-24 (FIG-3669). It records Sam's ruling on FIG-3664, including
 the hard constraint that the effect interface stays engine-neutral. **Not yet
-implemented**: FIG-3665 through FIG-3668, FIG-3585 and FIG-3600 build it in the
-order under *Order*. Nothing below describes current behaviour unless it says
+implemented**: FIG-3665 through FIG-3668, FIG-3670, FIG-3585, FIG-3600 and the
+B2 backend-construction cutover build it, in the order under *Order*. Nothing below describes current behaviour unless it says
 so.
 
 Supersedes [ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md); see
@@ -88,39 +88,85 @@ wake scheduling and no process scheduling.
 
 ### 2. The effect interface is engine-neutral
 
-Restate is the one implementor today, not the interface. Temporal, or another
-engine, must plug in later without redesigning lash. The interface is:
+Restate is today's one implementor, not the interface. Temporal, or another
+engine, must plug in later without redesigning lash. The contract review of
+2026-09-24 (`/workspace/notes/lash/fig3664-engine-contract/astra-report.md`)
+found that engine-neutral signatures alone do not make Temporal fit. The
+obligations in §3 are therefore written as outcomes, and the execution seam
+below is a requirement of its own.
 
-- **`EffectHost`** and **`RuntimeEffectController`**, with their scoped
-  controllers and effect-group handles;
-- **the work driver**: `QueuedWorkSubstrate`, `ProcessWorkSubstrate`,
-  `TurnWorkDriver` and `TurnAttach`;
-- **the backend**: an effect engine plus a storage-only `StoreSet`. Ports that
-  live above the kernel extend both halves rather than bypass them, as the
-  Lashlang artifact port does (FIG-3633).
+**The interface.** One engine is one `EffectEngine` value. It carries the
+effect host (`EffectHost`, `RuntimeEffectController`, with their scoped
+controllers and effect-group handles), the work driver (`QueuedWorkSubstrate`,
+`ProcessWorkSubstrate`, `TurnWorkDriver`, `TurnAttach`) and the store set it was
+built over. A backend wraps exactly one engine. The end-state construction
+(ruling B2 on FIG-3664's contract review) is:
+
+```rust
+RestateEngine::new(stores: Arc<dyn StoreSet>, cfg: RestateConfig)
+    -> Result<RestateEngine, EngineConfigError>;
+Backend::new(engine: Arc<dyn EffectEngine>) -> Backend;
+EffectEngine::stores(&self) -> Arc<dyn StoreSet>;
+EffectEngine::process_work(&self) -> ProcessWorkWiring;
+StoreSet::binding_identity(&self) -> &StoreBindingId;
+StoreSet::lashlang_artifacts(&self) -> Arc<dyn LashlangArtifactStore>;
+```
+
+- **`Backend` has one private field, the engine.** Every port it hands out
+  derives from that one binding. No engine operation takes a stores argument,
+  `process_work` included: the engine already holds its store set.
+- **`RestateConfig` selects `SubmitOnly` or `Serve`.** A submit-only engine
+  keeps its scheduling and control clients and starts no handlers.
+- **Storage identity and effect authority are distinct.** The store set's
+  `StoreBindingId` names the storage; the engine's authority names the effect
+  state. Both are derived coherently when the engine is constructed and never
+  compared at runtime. No API accepts a second, independently assembled binding.
+- **Ports above the kernel belong to the store set.** The Lashlang artifact
+  port is `StoreSet::lashlang_artifacts`, and its trait lives in a layer both
+  the store sets and lashlang can depend on (FIG-3633 supplies artifacts from
+  the backend today).
+- **Fixtures move through one constructor.** Tests build an engine through a
+  single `lash-restate-test` constructor (FIG-3665, FIG-3668), never by
+  assembling ports.
+
+Today's code has the `Backend` trait of ADR 0102, which SQLite, PostgreSQL and
+Restate each implement. The B2 cutover replaces it with the shape above;
+`SqliteBackend` and `PostgresBackend` become store-set constructors, and
+`RestateBackend` becomes `RestateEngine`.
+
+**The execution seam.** The driver exposes replayable decisions and
+registered, serializable effect commands; adapters own scheduling and I/O
+execution. Engines like Temporal need it: their workflow code must schedule
+deterministically, and every I/O runs as an activity. Today lash hands the
+controller a borrowed local runner and runs effects on Tokio, and running a
+whole drive as one activity would record no per-effect history. The seam is
+proven on paper against Temporal before FIG-3600's S5 freezes the drive API.
+Deterministic logical operation ids are neutral; engine invocation ids stay
+opaque to lash.
 
 The rules:
 
 - **No engine concept crosses into the kernel.** No engine type, id, context,
-  virtual object, workflow, invocation or journal format appears in
-  `lash-core-execution`, `lash-core` or the facade. Engine specifics live only
-  in the engine's crate. The facade may re-export that crate behind its cargo
-  feature (`lash::restate` behind `restate`), because choosing an engine is the
-  host's choice; no other facade item names an engine.
-- **Engine identity is opaque.** It crosses the interface only as values the
-  engine mints and lash stores without parsing, such as the backend's binding
-  identity.
+  virtual object, workflow, invocation, error code or journal format appears in
+  `lash-core-store`, `lash-core-execution`, `lash-core` or the facade. Engine
+  specifics live only in the engine's crate. The facade may re-export that
+  crate behind its cargo feature (`lash::restate` behind `restate`), because
+  choosing an engine is the host's choice; no other facade item names an
+  engine.
 - **Adding an engine changes no kernel crate.** A second engine lives in its own
   crate, implements the interface and passes the conformance suite (§3). If it
-  needs a change to `lash-core-execution`, `lash-core` or the facade, the
-  interface was wrong, and that is lash's defect
+  needs a change to a kernel crate or the facade, the interface was wrong, and
+  that is lash's defect
   ([ADR 0045](0045-services-are-stateless-substrates-own-continuation.md),
   *Conformance is the contract*).
 - **The storage side is engine-neutral too.** `StoreSet` is storage-only, so an
   engine takes any SQL store set, and a store set assumes no engine.
 
 **Known violations at origin/main `b4e1318cc`.** Each is a defect against this
-section, to be removed by giving it an engine-neutral name. None may be added.
+section. FIG-3670 removes them: it renames the `restate_*` identifiers to
+engine-neutral opaque ids, moves the Restate error and format vocabulary below
+`lash-restate` (with the B5 error-code rename), and makes the substrate boundary
+gate refuse new ones. None may be added.
 
 - `RuntimeExecutionContext::restate_invocation_id` and
   `ProcessExecutionWriteAuthority::restate_invocation_id` in
@@ -133,26 +179,33 @@ section, to be removed by giving it an engine-neutral name. None may be added.
 - The `restate_invocation_id` field of `lash-trace`'s language-execution identity
   and its OpenTelemetry attribute
   `lash.language_execution.restate_invocation_id`.
+- The Restate error vocabulary of `RuntimeErrorCode` in `lash-core-store`
+  (`RestateAwaitEvent*`, `RestateEffectController`,
+  `RestateEffectHostRequiresHandlerScope`, `RestateJournaledEffectPoisoned`;
+  `runtime_error/classification.rs`).
+- The Restate durable formats in the facade's format registry
+  (`DurableFormat::Restate*`, `crates/lash/src/formats.rs`).
 
 ### 3. Engine obligations are contracts
 
-Lash relies on these guarantees from its engine. Each is written against the
-interface. The last column names Restate's mechanism as one implementation of
-the contract, not as the contract. Every row comes from an ADR or from code that
-lash runs today.
+Lash relies on these guarantees from its engine. Each is an outcome stated
+against the interface, never a mechanism: the last column names Restate's
+mechanism as one implementation, not as the contract. Every row comes from an
+ADR, from code lash runs today, or from the contract review (O1–O6).
 
 | Obligation | Contract | Restate, today's one implementation |
 |---|---|---|
-| **Per-session serialized execution** | At most one execution drives a session at a time. That covers claiming its ingress items, applying its command lane, running its turns and delivering its wakes ([ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) A1). A successor after a crash sees its predecessor's effects journaled or committed. The session-head CAS stays the commit authority ([ADR 0029](0029-claims-are-generation-fenced-under-the-session-lease.md), ADR 0045). | A virtual object keyed by session, which owns ingress, claims and wakes (FIG-3600). **Not yet implemented**: today the Restate path takes the SQL session-execution lease and claim CAS, which FIG-3600 deletes. |
-| **Durable step result** | An effect's outcome is recorded before the execution depends on it. A re-drive returns the recorded outcome under the same replay key and does not dispatch again. | `ctx.run(..).name("lash:<replay_key>")` (`controller/journaled_effect.rs`). |
-| **Durable timer** | A sleep survives a crash, fires once at or after its deadline, and holds no worker while it waits. | `ContextTimers::sleep` (`controller/context.rs`; wait deadlines in `durable_wait.rs`). |
-| **Durable keyed promise** | A one-shot promise, addressed by a key and scope-agnostic, that an execution parks on and anything holding the key resolves. The first resolution wins, and every richer wait compiles onto it ([ADR 0003](0003-keyed-promise-is-scope-agnostic.md), [ADR 0012](0012-durable-waits-via-effect-host-engines.md)). | `LashDurableWaitWorkflow` promises, indexed per session by the `LashDurableWaitIndex` object (`durable_wait.rs`). |
-| **Effect groups** | A durable set of independently settling children with journaled membership, replay-stable settlement ranks, the `live → closing → settled` lifecycle and the drain barrier ([ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md), [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)). An engine supports the whole surface or refuses it coherently. | The `EffectGroupIndex` and `EffectGroupPayload` objects and the `EffectGroupDispatch` workflow (`effect_group.rs`, `effect_group/`). |
-| **Engine-owned retry, and park on exhaustion** | The engine re-drives a live fault under its own policy, with the same identity, and owns backpressure (`owns_commit_backpressure`). Lash never re-drives engine-owned work (ADR 0045). A deterministic failure is recorded once, as a failed turn. An exhausted budget or a replay refusal parks with a typed park and dispatches nothing (ADR 0045, FIG-3586, FIG-3587; ADR 0101 A4). | The deployment's invocation retry policy, and `RestateEffectGroupRetryPolicy` for group dispatch. **Park is not yet implemented on Restate**: an envelope mismatch (`WorkerReplacementAbort`) still aborts as a live fault (ADR 0045; FIG-3600 A4). |
-| **Admission marker before the first effect** | Before any effect of an execution runs, a durable start marker admits it. A fresh execution of work that already started is refused (`SubstrateLost`) and never re-run: a false `Abandoned` is accepted, a duplicate effect is not (ADR 0045, FIG-3588 amendment). | Two journaled steps, a verdict with a nonce and then a set-if-absent marker, which yield the `SegmentStarted` proof (`process/admission.rs`). Stated today for process segments. |
-| **Cancellation** | A durable, externally addressable stop request whose first winner is a keyed promise ([ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md)). It is honoured `Immediate` or `AfterStep`, and it reaches group children. Cancelling an engine invocation is a host break-glass action and never proves a lash `Cancelled` result. | Turn-control gate promises on the durable-wait workflow, and invocation cancel for group dispatch children (`effect_group/dispatch.rs`). |
-| **Replay determinism** | A re-drive by the same build issues the same effects in the same order under the same replay keys, with a nested effect's identity being its issue ordinal ([ADR 0103](0103-code-cells-replay-by-re-execution-on-every-host.md)). A mismatch is detected before dispatch and parks. A journal written by another generation is refused before any effect. | SDK journal replay over named entries, lash's envelope and replay-hash checks, and the `RESTATE_PROCESS_JOURNAL_VERSION` gate (ADR 0045, FIG-3588 amendment). |
-| **Bounded journal** | Executing a process never needs an unbounded single-invocation journal ([ADR 0025](0025-bounded-journals-are-an-effect-controller-obligation.md)). | Segments chained across invocations keyed by process and segment, under a journal budget (`controller/journal_budget.rs`, `process/workflow.rs`). |
+| **Per-session serialized execution** (O1) | One authorized logical drive per session; stale mutations are refused; retried external operations have stable idempotency identities. No engine alone makes arbitrary external effects non-overlapping, so a fence cannot retract a request already sent: the external operation's idempotency covers that. The session-head CAS stays the commit authority ([ADR 0029](0029-claims-are-generation-fenced-under-the-session-lease.md), ADR 0045). | A virtual object keyed by session, which owns ingress, claims and wakes (FIG-3600). **Not yet implemented**: today the Restate path takes the SQL session-execution lease and claim CAS, which FIG-3600 deletes. |
+| **Durable acceptance and scheduling** (O2) | Persist acceptance and recoverable scheduling intent together; acknowledge engine submission separately; reconcile every unacknowledged intent. This covers ingress items, wakes and control commands. A guaranteed background recovery owner exists; a status read is not liveness. A drive request's id carries application dedupe across engine runs. | Acceptance rows in SQL ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md), [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md)); the ingress sweep submits per row and Restate coalesces a submission onto a live key (ADR 0045). |
+| **Durable step result** | Redrive preserves recorded outcomes: an effect's outcome is recorded before the execution depends on it, and a redrive returns it under the same replay key without dispatching again. | `ctx.run(..).name("lash:<replay_key>")` (`controller/journaled_effect.rs`). |
+| **Durable timer** | A sleep survives a crash, fires once at or after its deadline and holds no worker while it waits. Deadlines are retained across replay and segment handover. | `ContextTimers::sleep` (`controller/context.rs`; wait deadlines in `durable_wait.rs`). |
+| **Durable keyed promise** | A one-shot promise, addressed by a neutral key and scope-agnostic, that an execution parks on and anything holding the key resolves; every richer wait compiles onto it ([ADR 0003](0003-keyed-promise-is-scope-agnostic.md), [ADR 0012](0012-durable-waits-via-effect-host-engines.md)). Engine wait ids, such as awakeable ids, are never exposed. | `LashDurableWaitWorkflow` promises, indexed per session by the `LashDurableWaitIndex` object (`durable_wait.rs`). |
+| **Effect groups** | The durable group of [ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md) and [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md), which exceeds a step journal. An engine supports the whole surface or refuses it coherently. | The `EffectGroupIndex` and `EffectGroupPayload` objects and the `EffectGroupDispatch` workflow (`effect_group.rs`, `effect_group/`). |
+| **Engine-owned retry, and park** (O3) | Preserve recoverable history and prohibit fresh semantic admission while parked; reconcile classified engine failures. The engine re-drives a live fault under its own policy and owns backpressure (`owns_commit_backpressure`); lash never re-drives engine-owned work (ADR 0045). Retry needs an explicit attempt and timeout policy. An attempt count is not a divergence diagnosis, and not every engine pause means exhaustion: pause is adapter-private, and attempt and failure details are optional. Stalled session wrappers and children are reconciled as well as turns and processes, through retained owner mappings. | The deployment's invocation retry policy, and `RestateEffectGroupRetryPolicy` for group dispatch. **Park is not yet implemented on Restate**: an envelope mismatch (`WorkerReplacementAbort`) still aborts as a live fault (ADR 0045; FIG-3600 A4). |
+| **Redrive, cancellation and recovery** (O4) | Redrive preserves recorded outcomes; cancellation cooperates with Lash closure; unsafe recovery returns a typed refusal. Cancellation is a durable, externally addressable stop request whose first winner is a keyed promise ([ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md)), honoured `Immediate` or `AfterStep`, and it reaches group children. Cancelling or killing an engine invocation is host break-glass and never proves a lash `Cancelled` result; it cannot substitute for tool draining or lifetime closure. Reset is not redrive: it discards history after a prefix and is never an ordinary recovery path. | Turn-control gate promises on the durable-wait workflow, and invocation cancel for group dispatch children (`effect_group/dispatch.rs`). |
+| **Replay determinism** | A redrive by the same build issues the same effects in the same order under the same replay keys, with a nested effect's identity being its issue ordinal ([ADR 0103](0103-code-cells-replay-by-re-execution-on-every-host.md)). A mismatch is detected before dispatch and parks. A journal written by another generation is refused before any effect. | SDK journal replay over named entries, lash's envelope and replay-hash checks, and the `RESTATE_PROCESS_JOURNAL_VERSION` gate (ADR 0045, FIG-3588 amendment). |
+| **Process identity across runs** (O5) | Preserve logical process identity, durable continuation and child obligations across engine runs. A journal is never unbounded ([ADR 0025](0025-bounded-journals-are-an-effect-controller-obligation.md)), and a run handover, like continue-as-new, explicitly carries continuation, dedupe and unresolved obligations, because the next run does not inherit history. | Segments chained across invocations keyed by process and segment, under a journal budget (`controller/journal_budget.rs`, `process/workflow.rs`). |
+| **Admission before the first effect** (O6) | Validate current generation and retained execution authority before new effects, including child entries; preserve the admission marker across replay. A fresh execution of work that already started is refused (`SubstrateLost`) and never re-run: a false `Abandoned` is accepted, a duplicate effect is not (ADR 0045, FIG-3588 amendment). A cached first-step result does not prove current authority. | Two journaled steps, a verdict with a nonce and then a set-if-absent marker, which yield the `SegmentStarted` proof (`process/admission.rs`). Stated today for process segments. |
 | **Process execution and terminal wait** | The engine admits pending process rows and executes them. A terminal wait goes only through `ProcessWorkSubstrate::await_process_terminal` ([ADR 0016](0016-process-waits-live-on-the-work-driver-seam.md)). Recovery applies the declared disposition mechanically ([ADR 0019](0019-process-recovery-obeys-declared-disposition.md)). | `LashProcessWorkflow` (`process/workflow.rs`) and the process-attach workflow (`process_attach.rs`). |
 
 **Conformance laws are written against the interface.** The engine-owed laws
@@ -161,10 +214,31 @@ are the host-generic suites in `lash-conformance`: `effect_host_tests!`,
 `turn_crash_matrix_tests!` and their siblings. They reach an engine only through
 the backend and the ports above, so a future engine runs the same suite
 unchanged. Every obligation in the table owes laws there, and an obligation
-without them is a gap in lash. Two gaps are known today. The admission marker's
-laws live only in `lash-restate` (`tests::substrate_lost`), because they are
-written against Restate's identity and retry semantics. Per-session serialized
-execution has no engine laws until FIG-3600 makes it an engine obligation.
+without them is a gap in lash. The suite must hold these laws explicitly; "the
+existing contract, unchanged" is not a law:
+
+- **Groups.** Groups retain membership, replay validation, settlement rank,
+  cancellation admission fences and protected-declaration drain across crashes.
+- **Waits.** Wait registration and resolution survive resolve-before-wait,
+  duplicate delivery and restart; resolution is first-writer-wins; revocation
+  and timer/cancel races replay their winner. Timer deadlines survive replay and
+  segment handover.
+- **Admission.** The FIG-3588 admission identity is journaled before work is
+  published; missing retained history refuses recovery rather than allocating
+  anew.
+- **Lifetime.** Only logical terminal evidence closes lifetime scopes; parking
+  and segment changes do not. Protected tool declarations drain before terminal
+  evidence, and Until-scope cancellation is then requested durably. Detached
+  processes survive. Pinned history is retained, with its counts and bytes
+  exposed (FIG-3607). Engine child-parent policies never replace these rules.
+- **Observation.** Outcome attachment is root-addressed, observation cursors
+  are replay-safe, and reconciliation failures are visible. Engine success,
+  timeout or termination alone is not lash terminal evidence.
+
+Two gaps are known today. The admission marker's laws live only in
+`lash-restate` (`tests::substrate_lost`), because they are written against
+Restate's identity and retry semantics. Per-session serialized execution has no
+engine laws until FIG-3600 makes it an engine obligation.
 
 Tests of how Restate implements an obligation live in `lash-restate`: the
 protocol, always-replay, the `RESTATE_PROCESS_JOURNAL_VERSION` gate and

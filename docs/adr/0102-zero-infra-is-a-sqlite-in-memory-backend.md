@@ -263,7 +263,7 @@ assembled by hand. The runtime builder takes it as a required argument, and no
 in-memory default exists anywhere. The kernel names no concrete store and no
 concrete engine, and the crate-graph rule stands. Failure settlement is
 classified by cause. The `sqlite` feature stays optional with no default. The
-Lashlang artifact port stays an extension of the backend and its store set.
+Lashlang artifact port stays with the storage: the store set supplies it.
 The PostgreSQL store set still takes its attachment backend at construction.
 FIG-3585 still deletes the native host, `lash-core-memory`, `EffectJournaling`
 and store-delegated turn control, and still rewrites the passages listed under
