@@ -2646,6 +2646,7 @@ dependencies = [
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-protocol-standard",
+ "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-subagents",
@@ -2664,6 +2665,32 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "lash-internal-restate-test"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "base64",
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "lash-internal-core",
+ "lash-internal-core-worker",
+ "lash-internal-http-transport",
+ "lash-internal-restate",
+ "lash-internal-sqlite-store",
+ "lash-runtime",
+ "prost",
+ "restate-sdk",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -2954,6 +2981,7 @@ dependencies = [
  "lash-internal-provider-auth",
  "lash-internal-provider-google",
  "lash-internal-provider-openai",
+ "lash-internal-restate-test",
  "lash-internal-rlm-types",
  "lash-internal-s3-store",
  "lash-internal-sansio",

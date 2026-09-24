@@ -599,6 +599,171 @@ lash_conformance::effect_host_await_event_witness_tests!(
     }
 );
 
+/// The live effect-group suites above, on the in-process `lash-restate-test`
+/// server double: the same endpoint and the same laws, with the Restate
+/// server simulated in process — no sockets, no Docker, virtual time.
+mod on_the_server_double {
+    use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+    use super::*;
+
+    lash_conformance::effect_group_host_tests!({
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        let factory = harness.group_host_factory();
+        (harness, factory)
+    });
+
+    lash_conformance::effect_group_cancelled_child_terminal_tests!({
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        let factory = harness.group_host_factory();
+        (harness, factory)
+    });
+
+    lash_conformance::tool_child_invocation_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let fixture = harness.tool_child_law_fixture();
+        (harness, "restate", fixture)
+    });
+
+    lash_conformance::turn_runner_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let registry =
+            Arc::new(lash_core::TestLocalProcessRegistry::default()) as Arc<dyn ProcessRegistry>;
+        let terminal = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+            serde_json::json!({"signal": "observed"}),
+        ));
+        let (process_work, wait_transport) =
+            conformance_restate_process_work(Arc::clone(&registry), terminal);
+        let verify_transport = Arc::clone(&wait_transport);
+        let prefix: &'static str = Box::leak(
+            format!("restate-public-signal-intent-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        let target = ProcessId::from(format!("{prefix}-target"));
+        (
+            (harness, wait_transport),
+            prefix,
+            effect_host,
+            registry,
+            process_work,
+            turn_runner,
+            move |law: &'static str| async move {
+                if law == "public_signal_intent_wakes_parked_process" {
+                    verify_transport.assert_reattached_to(&target);
+                }
+            },
+        )
+    });
+
+    // The crash is a handler attempt that dies mid-turn; the server double
+    // redelivers it and the redrive replays the crashed attempt's journal.
+    lash_conformance::migrated_tools_redrive_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let effect_host = harness.endpoint_host();
+        let turn_runner = harness.turn_runner();
+        let registry = harness.process_registry();
+        let prefix: &'static str =
+            Box::leak(format!("restate-migrated-tools-{}", harness.run_nonce()).into_boxed_str());
+        let orchestration: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
+            Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+            Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
+                lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                    lash_subagents::StaticCapability::new(
+                        "default",
+                        lash_core::facade_support::SessionSpec::inherit(),
+                    ),
+                )),
+            ))),
+        ];
+        (
+            harness,
+            prefix,
+            effect_host,
+            registry,
+            turn_runner,
+            orchestration,
+        )
+    });
+
+    lash_conformance::effect_host_await_event_witness_tests!({
+        let harness = Arc::new(LiveConformanceHarness::start_on(HarnessServer::in_process()).await);
+        let make = harness.effect_host_factory();
+        let witness_harness = Arc::clone(&harness);
+        let teardown_harness = Arc::clone(&harness);
+        (
+            harness,
+            Duration::from_secs(240),
+            make,
+            move |host, assert_retirement| async move {
+                witness_harness
+                    .run_active_wait_registration_witnesses(host, assert_retirement)
+                    .await;
+            },
+            async move { teardown_harness.finish().await },
+        )
+    });
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn effect_group_design_witnesses() {
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        tokio::time::timeout(Duration::from_secs(240), harness.run_design_witnesses())
+            .await
+            .expect("design witnesses on the server double exceeded 240 seconds");
+        harness.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn close_releases_an_unstarted_wait_child() {
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            harness.run_unstarted_wait_child_release_witness(),
+        )
+        .await
+        .expect("unstarted-wait-child witness on the server double exceeded 60 seconds");
+        harness.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn executing_effect_quiescence_witness() {
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        tokio::time::timeout(
+            Duration::from_secs(240),
+            harness.run_executing_effect_quiescence_witness(),
+        )
+        .await
+        .expect("quiescence witness on the server double exceeded 240 seconds");
+        harness.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn fig1464_over_budget_group_open_gives_up_before_the_group_is_opened() {
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        tokio::time::timeout(
+            Duration::from_secs(120),
+            harness.run_group_open_budget_witness(),
+        )
+        .await
+        .expect("group-open budget witness on the server double exceeded 120 seconds");
+        harness.finish().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn cold_reopen_witnesses() {
+        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
+        tokio::time::timeout(
+            Duration::from_secs(240),
+            harness.run_cold_reopen_witnesses(),
+        )
+        .await
+        .expect("cold-reopen witnesses on the server double exceeded 240 seconds");
+        harness.finish().await;
+    }
+}
+
 #[tokio::test]
 pub(super) async fn durable_trace_reemits_on_redrive_without_adding_a_journal_command() {
     let context = Arc::new(ReplayableRecordingContext::default());

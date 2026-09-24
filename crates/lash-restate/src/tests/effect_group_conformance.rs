@@ -27,6 +27,7 @@ use restate_sdk::http_server::HttpServer;
 use restate_sdk::serde::Json;
 
 use super::live_turn_probe::ConformanceTurnProbe as _;
+use crate::RestateConnection;
 use crate::durable_wait::arm_wait_registration_witness;
 use crate::effect_group::{
     EffectGroupChildRequest, admit_wait_request, arm_admission_witness, decode_wait_resolution,
@@ -48,6 +49,7 @@ use crate::{
     RestateEffectGroupRetryPolicy, RestateEffectGroupServices, RestateEffectHost,
     RestateIngressClient,
 };
+use lash_http_transport::HttpRequest;
 
 /// The endpoint's process runner for the tool-child laws: a tool child's
 /// orchestrating body records its durable starts through the Restate process
@@ -330,8 +332,53 @@ impl GroupExecutors for WitnessExecutors {
 type GroupHostFactory =
     Box<dyn Fn(Option<Arc<dyn GroupExecutors>>) -> Arc<dyn lash_core::EffectHost> + Send + Sync>;
 
+/// Which Restate server a harness drives its endpoint through.
+#[derive(Clone)]
+pub(super) enum HarnessServer {
+    /// A live `restate-server` (the `just effect-group-conformance-e2e`
+    /// gate): the endpoint serves over TCP and registers through the admin
+    /// API the environment names.
+    Live,
+    /// The in-process `lash-restate-test` server double under this seed.
+    InProcess { seed: u64, always_replay: bool },
+}
+
+impl HarnessServer {
+    /// The in-process double under a fresh seed: the law's identities stay
+    /// distinct while each run is reproducible from its printed seed.
+    ///
+    /// `LASH_RESTATE_TEST_SEED` replays one printed seed;
+    /// `LASH_RESTATE_TEST_ALWAYS_REPLAY=1` runs every suite in always-replay
+    /// mode, suspending at every await.
+    pub(super) fn in_process() -> Self {
+        let seed = std::env::var("LASH_RESTATE_TEST_SEED")
+            .ok()
+            .and_then(|seed| seed.parse().ok())
+            .unwrap_or_else(|| u64::try_from(nonce() & u128::from(u64::MAX)).unwrap_or(0));
+        let always_replay =
+            std::env::var("LASH_RESTATE_TEST_ALWAYS_REPLAY").is_ok_and(|v| v == "1");
+        println!("lash-restate-test seed {seed} always_replay {always_replay}");
+        Self::InProcess {
+            seed,
+            always_replay,
+        }
+    }
+}
+
+/// The harness's admin face: where it modifies retained service state.
+#[derive(Clone)]
+enum HarnessAdmin {
+    Live {
+        admin_url: String,
+    },
+    InProcess {
+        server: lash_restate_test::RestateTestServer,
+    },
+}
+
 pub(super) struct LiveConformanceHarness {
-    ingress_url: String,
+    connection: RestateConnection,
+    admin: HarnessAdmin,
     host: Arc<RestateEffectHost>,
     executors: Arc<ConformanceExecutors>,
     process_registry: Arc<lash_core::TestLocalProcessRegistry>,
@@ -341,16 +388,26 @@ pub(super) struct LiveConformanceHarness {
 }
 
 impl LiveConformanceHarness {
+    /// The shared-laws endpoint on a live server.
+    pub(super) async fn start() -> Self {
+        Self::start_on(HarnessServer::Live).await
+    }
+
     /// The shared-laws endpoint: the suite's staged resolver is registered on
     /// the host, so `install_tool_child_host` wins nothing here.
-    pub(super) async fn start() -> Self {
+    pub(super) async fn start_on(target: HarnessServer) -> Self {
         let executors = Arc::new(ConformanceExecutors::default());
         let registered = Arc::clone(&executors);
-        Self::start_with(executors, false, move |host| {
+        Self::start_with(target, executors, false, move |host| {
             host.register_group_executors(registered)
                 .expect("register the conformance resolver on the endpoint host")
         })
         .await
+    }
+
+    /// The tool-child laws' endpoint on a live server.
+    pub(super) async fn start_for_tool_children() -> Self {
+        Self::start_for_tool_children_on(HarnessServer::Live).await
     }
 
     /// The tool-child laws' endpoint: nothing is registered, so the runtime's
@@ -360,23 +417,57 @@ impl LiveConformanceHarness {
     /// an orchestrating child's durable start submits `LashProcessWorkflow/run`
     /// through the handler's context, and a deployment that does not serve it
     /// makes that submission a permanently failing command.
-    pub(super) async fn start_for_tool_children() -> Self {
-        Self::start_with(Arc::new(ConformanceExecutors::default()), true, |_| {}).await
+    pub(super) async fn start_for_tool_children_on(target: HarnessServer) -> Self {
+        Self::start_with(
+            target,
+            Arc::new(ConformanceExecutors::default()),
+            true,
+            |_| {},
+        )
+        .await
     }
 
     async fn start_with(
+        target: HarnessServer,
         executors: Arc<ConformanceExecutors>,
         bind_process_surface: bool,
         register: impl FnOnce(&RestateEffectHost),
     ) -> Self {
-        let ingress_url = required("RESTATE_INGRESS_URL");
-        let admin_url = required("RESTATE_ADMIN_URL");
-        let bind_addr = required("EG_RESTATE_ENDPOINT_BIND")
-            .parse::<SocketAddr>()
-            .expect("valid EG_RESTATE_ENDPOINT_BIND");
-        let endpoint_url = required("EG_RESTATE_ENDPOINT_URL");
-        let ingress = RestateIngressClient::new(ingress_url.clone());
-        let host = Arc::new(RestateEffectHost::new_for_test(ingress_url.clone()));
+        let (connection, admin, live) = match &target {
+            HarnessServer::Live => {
+                let ingress_url = required("RESTATE_INGRESS_URL");
+                let admin_url = required("RESTATE_ADMIN_URL");
+                let bind_addr = required("EG_RESTATE_ENDPOINT_BIND")
+                    .parse::<SocketAddr>()
+                    .expect("valid EG_RESTATE_ENDPOINT_BIND");
+                let endpoint_url = required("EG_RESTATE_ENDPOINT_URL");
+                (
+                    RestateConnection::new(ingress_url),
+                    HarnessAdmin::Live {
+                        admin_url: admin_url.clone(),
+                    },
+                    Some((admin_url, bind_addr, endpoint_url)),
+                )
+            }
+            HarnessServer::InProcess {
+                seed,
+                always_replay,
+            } => {
+                let server = lash_restate_test::RestateTestServer::new(
+                    lash_restate_test::ServerConfig::default()
+                        .with_seed(*seed)
+                        .always_replay(*always_replay),
+                )
+                .expect("start the in-process Restate server double");
+                (
+                    RestateConnection::with_transport(server.ingress_url(), server.transport()),
+                    HarnessAdmin::InProcess { server },
+                    None,
+                )
+            }
+        };
+        let ingress = RestateIngressClient::new(connection.clone());
+        let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
         register(&host);
         let services = RestateEffectGroupServices::new(
             &host,
@@ -386,9 +477,6 @@ impl LiveConformanceHarness {
         );
         let process_registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
         let process_runner = Arc::new(LawProcessRunner::default());
-        let listener = tokio::net::TcpListener::bind(bind_addr)
-            .await
-            .expect("bind Restate effect-group endpoint");
         let mut endpoint = Endpoint::builder()
             .bind(ScopeLivenessProbeImpl.serve())
             .bind(GroupOpenBudgetProbeImpl.serve())
@@ -422,25 +510,44 @@ impl LiveConformanceHarness {
         )
         .await
         .expect("effect-group conformance endpoint must bind the whole group surface");
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let server = tokio::spawn(async move {
-            HttpServer::new(endpoint)
-                .serve_with_cancel(listener, async {
-                    let _ = shutdown_rx.await;
-                })
-                .await;
-        });
-        wait_for_endpoint(bind_addr).await;
-        register_deployment(&admin_url, &endpoint_url).await;
+        let (shutdown_tx, server) = match (live, &admin) {
+            (Some((admin_url, bind_addr, endpoint_url)), _) => {
+                let listener = tokio::net::TcpListener::bind(bind_addr)
+                    .await
+                    .expect("bind Restate effect-group endpoint");
+                let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+                let server = tokio::spawn(async move {
+                    HttpServer::new(endpoint)
+                        .serve_with_cancel(listener, async {
+                            let _ = shutdown_rx.await;
+                        })
+                        .await;
+                });
+                wait_for_endpoint(bind_addr).await;
+                register_deployment(&admin_url, &endpoint_url).await;
+                (Some(shutdown_tx), Some(server))
+            }
+            (None, HarnessAdmin::InProcess { server }) => {
+                server
+                    .register(endpoint)
+                    .await
+                    .expect("register the effect-group endpoint on the server double");
+                (None, None)
+            }
+            (None, HarnessAdmin::Live { .. }) => {
+                unreachable!("a live harness always has its live endpoint address")
+            }
+        };
 
         Self {
-            ingress_url,
+            connection,
+            admin,
             host,
             executors,
             process_registry,
             process_runner,
-            shutdown_tx: tokio::sync::Mutex::new(Some(shutdown_tx)),
-            server: tokio::sync::Mutex::new(Some(server)),
+            shutdown_tx: tokio::sync::Mutex::new(shutdown_tx),
+            server: tokio::sync::Mutex::new(server),
         }
     }
 
@@ -503,7 +610,7 @@ impl LiveConformanceHarness {
     /// endpoint.
     pub(super) fn turn_runner(&self) -> Arc<dyn lash_conformance::ConformanceTurnRunner> {
         super::live_turn_probe::LiveTurnRunner::shared(
-            self.ingress_url.clone(),
+            self.connection.clone(),
             Arc::clone(&self.process_runner),
         )
     }
@@ -518,9 +625,9 @@ impl LiveConformanceHarness {
     pub(super) fn effect_host_factory(
         &self,
     ) -> Box<dyn Fn() -> Arc<dyn lash_core::EffectHost> + Send + Sync> {
-        let ingress_url = self.ingress_url.clone();
+        let connection = self.connection.clone();
         Box::new(move || {
-            Arc::new(RestateEffectHost::new_for_test(ingress_url.clone()))
+            Arc::new(RestateEffectHost::new_for_test(connection.clone()))
                 as Arc<dyn lash_core::EffectHost>
         })
     }
@@ -555,12 +662,12 @@ impl LiveConformanceHarness {
     }
 
     pub(super) fn group_host_factory(&self) -> GroupHostFactory {
-        let ingress_url = self.ingress_url.clone();
+        let connection = self.connection.clone();
         let executors = Arc::clone(&self.executors);
         Box::new(move |resolver| match resolver {
             Some(resolver) => {
                 executors.install(resolver);
-                Arc::new(RestateEffectHost::new_for_test(ingress_url.clone()))
+                Arc::new(RestateEffectHost::new_for_test(connection.clone()))
                     as Arc<dyn lash_core::EffectHost>
             }
             None => Arc::new(lash_core::facade_support::NativeEffectHost::default())
@@ -585,7 +692,7 @@ impl LiveConformanceHarness {
     /// of the group.
     pub(super) async fn run_group_open_budget_witness(&self) {
         let operation = format!("fig3564-group-open-budget-{}", nonce());
-        let ingress = RestateIngressClient::new(self.ingress_url.clone());
+        let ingress = RestateIngressClient::new(self.connection.clone());
         let refused = ingress
             .call_workflow_json::<_, Option<RuntimeEffectControllerError>>(
                 "GroupOpenBudgetProbe",
@@ -631,7 +738,7 @@ impl LiveConformanceHarness {
     /// invocation never runs, so only the close can answer the wait.
     pub(super) async fn run_unstarted_wait_child_release_witness(&self) {
         use lash_core::AwaitEventResolver as _;
-        let ingress = RestateIngressClient::new(self.ingress_url.clone());
+        let ingress = RestateIngressClient::new(self.connection.clone());
         let group_key = witness_key("unstarted-wait");
         let scope = ExecutionScope::runtime_operation(group_key.clone());
         let wait_key = self
@@ -901,7 +1008,7 @@ impl LiveConformanceHarness {
     }
 
     pub(super) async fn run_design_witnesses(&self) {
-        run_design_witnesses(&self.ingress_url, &self.executors).await;
+        run_design_witnesses(&self.connection, &self.admin, &self.executors).await;
     }
 
     /// The handler-side half of the quiescence law (FIG-2499 fix round 3,
@@ -911,7 +1018,7 @@ impl LiveConformanceHarness {
     /// law early-returns on it; this witness runs the effect where Restate
     /// runs it.
     pub(super) async fn run_executing_effect_quiescence_witness(&self) {
-        let ingress = RestateIngressClient::new(self.ingress_url.clone());
+        let ingress = RestateIngressClient::new(self.connection.clone());
         let host = (self.effect_host_factory())();
         let scope_id = format!("live-effect-{}", nonce());
         let scope = ExecutionScope::runtime_operation(scope_id.clone());
@@ -1036,7 +1143,7 @@ impl LiveConformanceHarness {
         .expect("an empty scope retires before registration");
 
         let late_registration = arm_wait_registration_witness(&retired_key);
-        let ingress = RestateIngressClient::new(self.ingress_url.clone());
+        let ingress = RestateIngressClient::new(self.connection.clone());
         let workflow_key = RestateDurableWaitAddress::for_key(&retired_key).workflow_key;
         let late_workflow = lash_core::task::spawn(async move {
             ingress
@@ -1328,8 +1435,12 @@ async fn cold_reopen_admits_the_registered_process<F, Fut>(
     .expect("the registered process mints after the cold reopen");
 }
 
-async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExecutors>) {
-    let ingress = RestateIngressClient::new(ingress_url.to_owned());
+async fn run_design_witnesses(
+    connection: &RestateConnection,
+    admin: &HarnessAdmin,
+    executors: &Arc<ConformanceExecutors>,
+) {
+    let ingress = RestateIngressClient::new(connection.clone());
     let witness_executors = Arc::new(WitnessExecutors::default());
     executors.install_mapping_current(Arc::clone(&witness_executors) as Arc<dyn GroupExecutors>);
 
@@ -1628,7 +1739,7 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
     );
     println!("EFFECT_GROUP_WITNESS m admission-enumeration PASS");
 
-    run_drain_barrier_witnesses(&ingress).await;
+    run_drain_barrier_witnesses(&ingress, admin).await;
 }
 
 /// FIG-3598. The §5 barrier's drained wake is released by retirement: a
@@ -1637,7 +1748,7 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
 /// invocation — must be released as `Retired`. And an index whose state
 /// another protocol version wrote refuses at handler entry with the typed
 /// terminal error.
-async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient) {
+async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &HarnessAdmin) {
     use crate::effect_group::{
         EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
         EffectGroupDrainBlockersRequest, EffectGroupDrainBlockersResponse, drained_wait_request,
@@ -1739,7 +1850,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient) {
         "shape_digest": stale_shape.digest().expect("witness shape digest"),
         "lifecycle": {"type": "retired", "cleanup": {"type": "complete"}},
     });
-    overwrite_index_state(&stale_group, &stale_state).await;
+    overwrite_index_state(admin, &stale_group, &stale_state).await;
     let refused = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let probed = ingress
@@ -1770,29 +1881,50 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient) {
 
 /// Replace an effect-group index's retained state through the Restate admin
 /// API.
-async fn overwrite_index_state(group_key: &str, state: &serde_json::Value) {
-    let admin_url = required("RESTATE_ADMIN_URL");
-    let client = reqwest::Client::builder()
-        .http2_prior_knowledge()
-        .build()
-        .expect("build Restate admin client");
+async fn overwrite_index_state(admin: &HarnessAdmin, group_key: &str, state: &serde_json::Value) {
     let bytes = serde_json::to_vec(state).expect("encode the index state");
-    let response = client
-        .post(format!(
-            "{}/services/EffectGroupIndex/state",
-            admin_url.trim_end_matches('/')
-        ))
-        .json(&serde_json::json!({
-            "object_key": group_key,
-            "new_state": { "effect-group/v1/state": bytes },
-        }))
-        .send()
-        .await
-        .expect("modify the effect-group index state");
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let body = serde_json::json!({
+        "object_key": group_key,
+        "new_state": { "effect-group/v1/state": bytes },
+    });
+    let (status, body) = match admin {
+        HarnessAdmin::Live { admin_url } => {
+            let client = reqwest::Client::builder()
+                .http2_prior_knowledge()
+                .build()
+                .expect("build Restate admin client");
+            let response = client
+                .post(format!(
+                    "{}/services/EffectGroupIndex/state",
+                    admin_url.trim_end_matches('/')
+                ))
+                .json(&body)
+                .send()
+                .await
+                .expect("modify the effect-group index state");
+            let status = response.status().as_u16();
+            (status, response.text().await.unwrap_or_default())
+        }
+        HarnessAdmin::InProcess { server } => {
+            let request = HttpRequest::post(
+                format!("{}/services/EffectGroupIndex/state", server.ingress_url()),
+                serde_json::to_vec(&body).expect("encode the state modification"),
+            )
+            .with_header("content-type", "application/json");
+            let response = server
+                .transport()
+                .send(request, None)
+                .await
+                .expect("modify the effect-group index state");
+            let status = response.status;
+            let bytes = lash_http_transport::read_http_body_bytes(response.body, None, "state")
+                .await
+                .unwrap_or_default();
+            (status, String::from_utf8_lossy(&bytes).into_owned())
+        }
+    };
     assert!(
-        status.is_success(),
+        (200..300).contains(&status),
         "Restate state modification failed: {status} {body}"
     );
 }

@@ -149,34 +149,36 @@ impl<T> Future for CatchUnwind<'_, T> {
 /// Runs each conformance turn inside a [`ConformanceTurnProbe`] handler on the
 /// live endpoint.
 pub(super) struct LiveTurnRunner {
-    ingress_url: String,
+    connection: crate::RestateConnection,
     process_runner: std::sync::Arc<super::effect_group_conformance::LawProcessRunner>,
 }
 
 impl LiveTurnRunner {
     pub(super) fn shared(
-        ingress_url: String,
+        connection: crate::RestateConnection,
         process_runner: std::sync::Arc<super::effect_group_conformance::LawProcessRunner>,
     ) -> std::sync::Arc<dyn lash_conformance::ConformanceTurnRunner> {
         std::sync::Arc::new(Self {
-            ingress_url,
+            connection,
             process_runner,
         })
     }
 
     async fn run_parked(&self, admitted: lash_core::AdmittedScope, attempts: ParkedAttempts) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let key = format!(
-            "turn-probe-{}",
+            "turn-probe-{}-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("clock after the epoch")
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         );
         pending_turns()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(key.clone(), (admitted, attempts));
-        let ran = RestateIngressClient::new(self.ingress_url.clone())
+        let ran = RestateIngressClient::new(self.connection.clone())
             .call_workflow_json::<_, bool>("ConformanceTurnProbe", &key, "run", &key)
             .await;
         let parked = pending_turns()

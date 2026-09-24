@@ -1,0 +1,816 @@
+// Copyright (c) 2023 - Restate Software, Inc., Restate GmbH
+//
+// This file is part of the Restate service protocol, which is
+// released under the MIT license.
+//
+// You can find a copy of the license in file LICENSE in the root
+// directory of this repository or package, or at
+// https://github.com/restatedev/service-protocol/blob/main/LICENSE
+
+syntax = "proto3";
+
+package dev.restate.service.protocol;
+
+option java_package = "dev.restate.generated.service.protocol";
+option go_package = "restate.dev/sdk-go/pb/service/protocol";
+
+// Service protocol version.
+enum ServiceProtocolVersion {
+  SERVICE_PROTOCOL_VERSION_UNSPECIFIED = 0;
+  // initial service protocol version
+  V1 = 1;
+  // Added
+  // * Entry retry mechanism: ErrorMessage.next_retry_delay, StartMessage.retry_count_since_last_stored_entry and StartMessage.duration_since_last_stored_entry
+  V2 = 2;
+  // **Yanked**
+  V3 = 3;
+  // **Yanked**
+  V4 = 4;
+  // Immutable journal. Added:
+  // * New command to cancel invocations
+  // * Both Call and Send commands now return an additional notification to return the invocation id
+  // * New field to set idempotency key for Call/Send commands
+  // * New command to attach to existing invocation
+  // * New command to get output of existing invocation
+  V5 = 5;
+  // Added:
+  // * StartMessage.random_seed
+  // * Failure.metadata
+  V6 = 6;
+  // Added:
+  // * Future & AwaitingOnMessage + Changed the SuspensionMessage
+  // * CallCommandMessage.scope and CallCommandMessage.limit_key
+  // * OneWayCallCommandMessage.scope and OneWayCallCommandMessage.limit_key
+  // * WorkflowTarget.scope
+  // * IdempotentRequestTarget.scope
+  // * StartMessage.scope, StartMessage.limit_key and StartMessage.idempotency_key
+  // * Semantic changes to Run proposal response, introduced ProposeRunCompletionAckMessage
+  // * ErrorMessage.behavior to customize retry behavior
+  V7 = 7;
+}
+
+// --- Core frames ---
+
+// Type: 0x0000 + 0
+message StartMessage {
+  message StateEntry {
+    bytes key = 1;
+    // If value is an empty byte array,
+    // then it means the value is empty and not "missing" (e.g. empty string).
+    bytes value = 2;
+  }
+
+  // Unique id of the invocation. This id is unique across invocations and won't change when replaying the journal.
+  bytes id = 1;
+
+  // Invocation id that can be used for logging.
+  // The user can use this id to address this invocation in admin and status introspection apis.
+  string debug_id = 2;
+
+  // This is the sum of known commands + notifications
+  uint32 known_entries = 3;
+
+  // protolint:disable:next REPEATED_FIELD_NAMES_PLURALIZED
+  repeated StateEntry state_map = 4;
+  bool partial_state = 5;
+
+  // If this invocation has a key associated (e.g. for objects and workflows), then this key is filled in. Empty otherwise.
+  string key = 6;
+
+  // Retry count since the last stored entry.
+  //
+  // Please note that this count might not be accurate, as it's not durably stored,
+  // thus it might get reset in case Restate crashes/changes leader.
+  uint32 retry_count_since_last_stored_entry = 7;
+
+  // Duration since the last stored entry, in milliseconds.
+  //
+  // Please note this duration might not be accurate,
+  // and might change depending on which Restate replica executes the request.
+  uint64 duration_since_last_stored_entry = 8;
+
+  // Random seed to use to seed the deterministic RNG exposed in the context API.
+  // This will be stable across restarts.
+  uint64 random_seed = 9;
+
+  // If this invocation was called within a scope, returns the scope
+  // Since V7
+  optional string scope = 10;
+
+  // If this invocation was called with a limit key, returns the limit key
+  // Since V7
+  optional string limit_key = 11;
+
+  // If this invocation was called with an idempotency key, returns the idempotency key
+  // Since V7
+  optional string idempotency_key = 12;
+}
+
+// Defines how a set of child futures are combined.
+enum CombinatorType {
+  // Should be treated as FIRST_COMPLETED.
+  COMBINATOR_TYPE_UNKNOWN = 0;
+  // Resolve as soon as any one child future completes with success, or with failure (same as JS Promise.race).
+  FIRST_COMPLETED = 1;
+  // Wait for every child to complete, regardless of success or failure (same as JS Promise.allSettled).
+  ALL_COMPLETED = 2;
+  // Resolve on the first success; fail only if all children fail (same as JS Promise.any).
+  FIRST_SUCCEEDED_OR_ALL_FAILED = 3;
+  // Resolve when all children succeed; short-circuit on the first failure (same as JS Promise.all).
+  ALL_SUCCEEDED_OR_FIRST_FAILED = 4;
+}
+
+// Recursively describes an await point as a tree of future combinators.
+//
+// Leaf data is the set of notification IDs this node is waiting for.
+// For representation purposes, the list of notification ids is flattened in 3 lists to avoid a per-element oneof wrapper.
+// Inner nodes combine their children (leaves + nested) via `combinator_type`.
+//
+// Example: Promise.all([completion_3, Promise.race([signal_1, signal_2])]) becomes:
+//
+//   Future {
+//     combinator_type: ALL_SUCCEEDED_OR_FIRST_FAILED
+//     waiting_completions: [3]
+//     nested: [
+//       Future {
+//         combinator_type: FIRST_COMPLETED
+//         waiting_signals: [1, 2]
+//       }
+//     ]
+//   }
+message Future {
+  repeated uint32 waiting_completions = 1;
+  repeated uint32 waiting_signals = 2;
+  repeated string waiting_named_signals = 3;
+  repeated Future nested_futures = 4;
+  CombinatorType combinator_type = 5;
+}
+
+// Type: 0x0000 + 1
+// Implementations MUST send this message when suspending an invocation.
+message SuspensionMessage {
+  // These used to be the old waiting_ fields. Reserved to simplify parsing.
+  reserved 1, 2, 3;
+  // Describes the await point.
+  Future awaiting_on = 4;
+}
+
+// Type: 0x0000 + 2
+message ErrorMessage {
+  // The code can be any HTTP status code, as described https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml.
+  // In addition, we define the following error codes that MAY be used by the SDK for better error reporting:
+  // * JOURNAL_MISMATCH = 570, that is when the SDK cannot replay a journal due to the mismatch between the journal and the actual code.
+  // * PROTOCOL_VIOLATION = 571, that is when the SDK receives an unexpected message or an expected message variant, given its state.
+  uint32 code = 1;
+  // Contains a concise error message, e.g. Throwable#getMessage() in Java.
+  string message = 2;
+  // The exception stacktrace, if available.
+  string stacktrace = 3;
+
+  // Command that caused the failure. This may be outside the current stored journal size.
+  // If no specific entry caused the failure, the current replayed/processed entry can be used.
+  optional uint32 related_command_index = 4;
+  // Name of the entry that caused the failure.
+  optional string related_command_name = 5;
+  // Command type.
+  optional uint32 related_command_type = 6;
+
+  // Delay before executing the next retry, specified as duration in milliseconds.
+  // If provided, it will override the default retry policy used by Restate's invoker ONLY for the next retry attempt.
+  //
+  // This field is relevant only if behavior = RETRY.
+  optional uint64 next_retry_delay = 8;
+
+  // What to do in case of an ErrorMessage
+  ErrorBehavior behavior = 9;
+}
+
+// What to do in case of an ErrorMessage.
+enum ErrorBehavior {
+  // Retry this invocation.
+  //
+  // When retrying, next_retry_delay will be used if set, otherwise the runtime will follow the currently used retry policy.
+  //
+  // We use 0 for this so that unset `behavior` field is interpreter as RETRY,
+  // which matches the default behavior in previous service protocols.
+  RETRY = 0;
+  // Pause the invocation.
+  PAUSE = 1;
+  // Fail this invocation, without retrying.
+  FAIL = 2;
+}
+
+// Type: 0x0000 + 3
+// Implementations MUST send this message when the invocation lifecycle ends.
+message EndMessage {
+}
+
+// Type: 0x0000 + 4
+message CommandAckMessage {
+  uint32 command_index = 1;
+}
+
+// Type: 0x0000 + 5
+//
+// This is a special control message to propose ctx.run completions to the runtime.
+// This won't be written to the journal immediately, but will appear later as a new notification (meaning the result was stored).
+//
+// In response to this message, the SDK expects the runtime to either:
+// * if requested_ack = true -> Send back ProposeRunCompletionAckMessage with the related completion_id
+// * if requested_ack = false -> Send back the whole notification just proposed
+message ProposeRunCompletionMessage {
+  uint32 result_completion_id = 1;
+  oneof result {
+    bytes value = 14;
+    Failure failure = 15;
+  };
+}
+
+// Type: 0x0000 + 6
+// The SDK MAY send this message to the runtime when inside an await point, to notify what the user code is currently blocked awaiting on.
+// This information SHOULD be considered outdated by the runtime as soon as a notification in the future tree is sent over.
+message AwaitingOnMessage {
+  // Describes the await point.
+  Future awaiting_on = 1;
+  // True if any of the notifications the SDK is awaiting on are side effects the SDK is currently executing.
+  bool executing_side_effects = 2;
+}
+
+// Type: 0x0000 + 7
+//
+// This is a message sent as response to ProposeRunCompletionMessage to acknowledge the proposal was correctly stored and replicated.
+//
+// Its ordering is considered to be "relative" to the ordering of notifications.
+// In other words, the SDK expects that on replay the RunCompletionMessage,
+// to which the ProposeRunCompletionAckMessage relates to,
+// is sent in the same order relative to the other notifications.
+//
+// For example, if when PROCESSING the first time the SDK sees:
+//
+// -> SleepCompletionMessage id = 1
+// -> ProposeRunCompletionAckMessage id = 3
+// -> SleepCompletionMessage id = 2
+//
+// Then on the next replay, the SDK expects to see notifications in the following order:
+//
+// -> SleepCompletionMessage id = 1
+// -> RunCompletionMessage id = 3 (the actual completion here replaces the ack)
+// -> SleepCompletionMessage id = 2
+
+//
+// This message will only ever be sent as response to ProposeRunCompletionMessage, and will be sent only in the PROCESSING phase of the protocol, never during REPLAY.
+message ProposeRunCompletionAckMessage {
+  uint32 completion_id = 1;
+}
+
+// --- Commands and Notifications ---
+
+// The Journal is modelled as commands and notifications.
+// Commands define the operations executed, while notifications can be:
+// * Completions to commands
+// * Unnamed signals
+// * Named signals
+//
+// An individual command can produce 0 or more completions, where the respective completion id(s) are defined in the command message.
+
+// A notification message follows the following duck-type:
+//
+message NotificationTemplate {
+  reserved 12;
+
+  oneof id {
+    uint32 completion_id = 1;
+    uint32 signal_id = 2;
+    string signal_name = 3;
+  }
+
+  oneof result {
+    Void void = 4;
+    Value value = 5;
+    Failure failure = 6;
+
+    // Used by specific commands
+    string invocation_id = 16;
+    StateKeys state_keys = 17;
+  };
+}
+
+// ------ Input and output ------
+
+// Completable: No
+// Fallible: No
+// Type: 0x0400 + 0
+message InputCommandMessage {
+  repeated Header headers = 1;
+
+  Value value = 14;
+
+  // Entry name
+  string name = 12;
+}
+
+// Completable: No
+// Fallible: No
+// Type: 0x0400 + 1
+message OutputCommandMessage {
+  oneof result {
+    Value value = 14;
+    Failure failure = 15;
+  };
+
+  // Entry name
+  string name = 12;
+}
+
+// ------ State access ------
+
+// Completable: Yes
+// Fallible: No
+// Type: 0x0400 + 2
+message GetLazyStateCommandMessage {
+  bytes key = 1;
+
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for GetLazyStateCommandMessage
+// Type: 0x8000 + 2
+message GetLazyStateCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 6, 7, 8, 12;
+
+  uint32 completion_id = 1;
+
+  oneof result {
+    Void void = 4;
+    Value value = 5;
+  };
+}
+
+// Completable: No
+// Fallible: No
+// Type: 0x0400 + 3
+message SetStateCommandMessage {
+  bytes key = 1;
+  Value value = 3;
+
+  // Entry name
+  string name = 12;
+}
+
+// Completable: No
+// Fallible: No
+// Type: 0x0400 + 4
+message ClearStateCommandMessage {
+  bytes key = 1;
+
+  // Entry name
+  string name = 12;
+}
+
+// Completable: No
+// Fallible: No
+// Type: 0x0400 + 5
+message ClearAllStateCommandMessage {
+  // Entry name
+  string name = 12;
+}
+
+// Completable: Yes
+// Fallible: No
+// Type: 0x0400 + 6
+message GetLazyStateKeysCommandMessage {
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for GetLazyStateKeysCommandMessage
+// Type: 0x8000 + 6
+message GetLazyStateKeysCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2 to 8, 12, 16;
+
+  uint32 completion_id = 1;
+  StateKeys state_keys = 17;
+}
+
+// Completable: No
+// Fallible: No
+// Type: 0x0400 + 7
+message GetEagerStateCommandMessage {
+  bytes key = 1;
+
+  oneof result {
+    Void void = 13;
+    Value value = 14;
+  };
+
+  // Entry name
+  string name = 12;
+}
+
+// Completable: No
+// Fallible: No
+// Type: 0x0400 + 8
+message GetEagerStateKeysCommandMessage {
+  StateKeys value = 14;
+
+  // Entry name
+  string name = 12;
+}
+
+// Completable: Yes
+// Fallible: No
+// Type: 0x0400 + 9
+message GetPromiseCommandMessage {
+  string key = 1;
+
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for GetPromiseCommandMessage
+// Type: 0x8000 + 9
+message GetPromiseCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 4, 12, 16, 17;
+
+  uint32 completion_id = 1;
+
+  oneof result {
+    Value value = 5;
+    Failure failure = 6;
+  };
+}
+
+// Completable: Yes
+// Fallible: No
+// Type: 0x0400 + A
+message PeekPromiseCommandMessage {
+  string key = 1;
+
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for PeekPromiseCommandMessage
+// Type: 0x8000 + A
+message PeekPromiseCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 12, 16, 17;
+
+  uint32 completion_id = 1;
+
+  oneof result {
+    Void void = 4;
+    Value value = 5;
+    Failure failure = 6;
+  };
+}
+
+// Completable: Yes
+// Fallible: No
+// Type: 0x0400 + B
+message CompletePromiseCommandMessage {
+  string key = 1;
+
+  // The value to use to complete the promise
+  oneof completion {
+    Value completion_value = 2;
+    Failure completion_failure = 3;
+  };
+
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for CompletePromiseCommandMessage
+// Type: 0x8000 + B
+message CompletePromiseCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 5, 7, 8, 12, 16, 17;
+
+  uint32 completion_id = 1;
+
+  oneof result {
+    Void void = 4;
+    Failure failure = 6;
+  };
+}
+
+// ------ Syscalls ------
+
+// Completable: Yes
+// Fallible: No
+// Type: 0x0400 + C
+message SleepCommandMessage {
+  // Wake up time.
+  // The time is set as duration since UNIX Epoch.
+  uint64 wake_up_time = 1;
+
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for SleepCommandMessage
+// Type: 0x8000 + C
+message SleepCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 5, 6, 7, 8, 12, 16, 17;
+
+  uint32 completion_id = 1;
+  Void void = 4;
+}
+
+// Completable: Yes (two notifications: one with invocation id, then one with the actual result)
+// Fallible: Yes
+// Type: 0x0400 + D
+message CallCommandMessage {
+  string service_name = 1;
+  string handler_name = 2;
+
+  bytes parameter = 3;
+
+  repeated Header headers = 4;
+
+  // If this invocation has a key associated (e.g. for objects and workflows), then this key is filled in. Empty otherwise.
+  string key = 5;
+
+  // If present, it must be non empty.
+  optional string idempotency_key = 6;
+
+  // Scope for the invocation target. Empty string means no scope (unscoped invocation).
+  // Since V7.
+  optional string scope = 7;
+
+  // Limit key for the invocation. Empty string means no limit key.
+  // A limit key is only valid if scope is set.
+  // Since V7.
+  optional string limit_key = 8;
+
+  uint32 invocation_id_notification_idx = 10;
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for CallCommandMessage and OneWayCallCommandMessage
+// Type: 0x8000 + E
+message CallInvocationIdCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 4, 5, 6, 7, 8, 12, 17;
+
+  uint32 completion_id = 1;
+  string invocation_id = 16;
+}
+
+// Notification for CallCommandMessage
+// Type: 0x8000 + D
+message CallCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 4, 12, 16, 17;
+
+  uint32 completion_id = 1;
+
+  oneof result {
+    Value value = 5;
+    Failure failure = 6;
+  };
+}
+
+// Completable: Yes (only one notification with invocation id)
+// Fallible: Yes
+// Type: 0x0400 + E
+message OneWayCallCommandMessage {
+  string service_name = 1;
+  string handler_name = 2;
+
+  bytes parameter = 3;
+
+  // Time when this BackgroundInvoke should be executed.
+  // The time is set as duration since UNIX Epoch.
+  // If this value is not set, equal to 0, or past in time,
+  // the runtime will execute this BackgroundInvoke as soon as possible.
+  uint64 invoke_time = 4;
+
+  repeated Header headers = 5;
+
+  // If this invocation has a key associated (e.g. for objects and workflows), then this key is filled in. Empty otherwise.
+  string key = 6;
+
+  // If present, it must be non empty.
+  optional string idempotency_key = 7;
+
+  // Scope for the invocation target. Empty string means no scope (unscoped invocation).
+  // Since V7.
+  optional string scope = 8;
+
+  // Limit key for the invocation. Empty string means no limit key.
+  // A limit key is only valid if scope is set.
+  // Since V7.
+  optional string limit_key = 9;
+
+  uint32 invocation_id_notification_idx = 10;
+  string name = 12;
+}
+
+// Completable: No
+// Fallible: Yes
+// Type: 0x04000 + 10
+message SendSignalCommandMessage {
+  string target_invocation_id = 1;
+
+  oneof signal_id {
+    uint32 idx = 2;
+    string name = 3;
+  }
+
+  oneof result {
+    Void void = 4;
+    Value value = 5;
+    Failure failure = 6;
+  };
+
+  // Cannot use the field 'name' here because used above
+  string entry_name = 12;
+}
+
+// Proposals for Run completions are sent through ProposeRunCompletionMessage
+//
+// Completable: Yes
+// Fallible: No
+// Type: 0x0400 + 11
+message RunCommandMessage {
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for RunCommandMessage
+// Type: 0x8000 + 11
+message RunCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 4, 12, 16, 17;
+
+  uint32 completion_id = 1;
+
+  oneof result {
+    Value value = 5;
+    Failure failure = 6;
+  };
+}
+
+// Completable: Yes
+// Fallible: Yes
+// Type: 0x0400 + 12
+message AttachInvocationCommandMessage {
+  oneof target {
+    // Target invocation id
+    string invocation_id = 1;
+    // Target idempotent request
+    IdempotentRequestTarget idempotent_request_target = 3;
+    // Target workflow target
+    WorkflowTarget workflow_target = 4;
+  }
+
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for AttachInvocationCommandMessage
+// Type: 0x8000 + 12
+message AttachInvocationCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 4, 12, 16, 17;
+
+  uint32 completion_id = 1;
+
+  oneof result {
+    Value value = 5;
+    Failure failure = 6;
+  };
+}
+
+// Completable: Yes
+// Fallible: Yes
+// Type: 0x0400 + 13
+message GetInvocationOutputCommandMessage {
+  oneof target {
+    // Target invocation id
+    string invocation_id = 1;
+    // Target idempotent request
+    IdempotentRequestTarget idempotent_request_target = 3;
+    // Target workflow target
+    WorkflowTarget workflow_target = 4;
+  }
+
+  uint32 result_completion_id = 11;
+  string name = 12;
+}
+
+// Notification for GetInvocationOutputCommandMessage
+// Type: 0x8000 + 13
+message GetInvocationOutputCompletionNotificationMessage {
+  // See NotificationMessage above
+  reserved 2, 3, 12, 16, 17;
+
+  uint32 completion_id = 1;
+
+  oneof result {
+    Void void = 4;
+    Value value = 5;
+    Failure failure = 6;
+  };
+}
+
+// We have this for backward compatibility, because we need to parse both old and new awakeable id.
+// Completable: No
+// Fallible: Yes
+// Type: 0x0400 + 14
+message CompleteAwakeableCommandMessage {
+  string awakeable_id = 1;
+
+  oneof result {
+    Value value = 2;
+    Failure failure = 3;
+  };
+
+  // Cannot use the field 'name' here because used above
+  string name = 12;
+}
+
+// Notification message for signals
+// Type: 0xFBFF
+message SignalNotificationMessage {
+  // See NotificationMessage above
+  reserved 1, 12, 16, 17;
+
+  oneof signal_id {
+    uint32 idx = 2;
+    string name = 3;
+  }
+
+  oneof result {
+    Void void = 4;
+    Value value = 5;
+    Failure failure = 6;
+  };
+}
+
+// --- Nested messages
+
+message StateKeys {
+  repeated bytes keys = 1;
+}
+
+message Value {
+  bytes content = 1;
+}
+
+// This failure object carries user visible errors,
+// e.g. invocation failure return value or failure result of an InvokeCommandMessage.
+message Failure {
+  // The code can be any HTTP status code, as described https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml.
+  uint32 code = 1;
+  // Contains a concise error message, e.g. Throwable#getMessage() in Java.
+  string message = 2;
+
+  // Error metadata
+  repeated FailureMetadata metadata = 3;
+}
+
+message FailureMetadata {
+  string key = 1;
+  string value = 2;
+}
+
+message Header {
+  string key = 1;
+  string value = 2;
+}
+
+message WorkflowTarget {
+  string workflow_name = 1;
+  string workflow_key = 2;
+  // Scope for the invocation target. Empty string means no scope (unscoped invocation).
+  // Since V7.
+  optional string scope = 3;
+}
+
+message IdempotentRequestTarget {
+  string service_name = 1;
+  optional string service_key = 2;
+  string handler_name = 3;
+  string idempotency_key = 4;
+  // Scope for the invocation target. Empty string means no scope (unscoped invocation).
+  // Since V7.
+  optional string scope = 5;
+}
+
+message Void {
+}
+
+enum BuiltInSignal {
+  SIGNAL_UNKNOWN = 0;
+  CANCEL = 1;
+  reserved 2 to 15;
+}

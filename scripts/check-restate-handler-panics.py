@@ -24,7 +24,13 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_ROOTS = sorted(ROOT.glob("crates/lash-restate*/src"))
+# The Restate handler code lash ships. The lash-restate-test server double is
+# test support, not handler code: its partition model indexes its own
+# invocation table on invariants it owns, and a violated one fails the test
+# that tripped it. Its one handler, the test handler host in backend.rs, is
+# still held to the rule.
+SOURCE_ROOTS = [ROOT / "crates/lash-restate/src"]
+EXTRA_SOURCES = [ROOT / "crates/lash-restate-test/src/backend.rs"]
 CFG_TEST = re.compile(r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]")
 PANIC_CAPABLE = re.compile(
     r"\b(?:panic|unreachable|todo|unimplemented|assert|assert_eq|assert_ne|debug_assert(?:_eq|_ne)?)\s*!\s*\("
@@ -180,7 +186,7 @@ def production_sources() -> list[Path]:
         for path in sorted(source_root.rglob("*.rs"))
         if path.name != "tests.rs"
         and "tests" not in path.relative_to(source_root).parts
-    ]
+    ] + [path for path in EXTRA_SOURCES if path.exists()]
 
 
 def main() -> int:

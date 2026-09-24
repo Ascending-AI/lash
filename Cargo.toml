@@ -23,6 +23,7 @@ members = [
     "crates/lash-postgres-store",
     "crates/lash-s3-store",
     "crates/lash-restate",
+    "crates/lash-restate-test",
     "crates/lash",
     "crates/lash-protocol-rlm",
     "crates/lash-protocol-standard",
@@ -231,6 +232,9 @@ libc = "0.2"
 loom = { version = "0.7", features = ["futures"] }
 object_store = { version = "0.13.2", default-features = false }
 percent-encoding = "2.3"
+# The Restate service-protocol messages the in-process server double encodes
+# (lash-restate-test); the same major restate-sdk-shared-core pins.
+prost = "0.14"
 # Assertion diffs for the conformance laws: a failed store law prints a
 # line-oriented diff of the two structures instead of two wrapped Debug blobs.
 pretty_assertions = "1"
@@ -295,6 +299,7 @@ lash-provider-openai = { package = "lash-internal-provider-openai", path = "crat
 lash-regress = { path = "crates/lash-regress", version = "=0.0.0-dev", features = ["utf16"] }
 lash-remote-protocol = { package = "lash-internal-remote-protocol", path = "crates/lash-remote-protocol", version = "=0.0.0-dev" }
 lash-restate = { package = "lash-internal-restate", path = "crates/lash-restate", version = "=0.0.0-dev" }
+lash-restate-test = { package = "lash-internal-restate-test", path = "crates/lash-restate-test" }
 lash-rlm-types = { package = "lash-internal-rlm-types", path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
 lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", version = "=0.0.0-dev" }
 lash-store-sql = { package = "lash-internal-store-sql", path = "crates/lash-store-sql", version = "=0.0.0-dev" }

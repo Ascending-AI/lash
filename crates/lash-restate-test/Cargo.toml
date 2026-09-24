@@ -1,0 +1,43 @@
+[package]
+name = "lash-internal-restate-test"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+description = "In-process Restate server double for testing lash-restate: the real endpoint and shared-core VM on virtual time"
+
+[lib]
+name = "lash_restate_test"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+lash-core = { workspace = true, features = ["testing"] }
+lash-core-worker = { workspace = true }
+lash-http-transport = { workspace = true }
+lash-restate = { workspace = true }
+lash-sqlite-store = { workspace = true }
+prost = { workspace = true }
+restate-sdk = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+lash ={ workspace = true }
+tokio ={ workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time", "test-util"] }
