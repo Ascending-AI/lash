@@ -393,6 +393,17 @@ worker. `SessionServices` has no members yet; P10a defines them.
     call's result is recorded, so there a call on a drifted tool parks either
     way, as a cell's does (FIG-3587).
   - Effect-journal generation 3.
+- **Implemented (FIG-3683, the first store read as a recorded step).** A tool
+  child reads its recorded execution environment through its own
+  `LoadExecutionEnv` step, so a replay executes under the recorded spec and
+  never reads the store again. The step records only deterministic answers:
+  the spec, or the refusal of an environment this build cannot use. A store
+  that did not answer is an engine fault, never the step's outcome: the
+  executor marks it with derivation retry authority, and Restate ends the
+  attempt without journaling it, so the invocation retry runs the step again.
+  A refusal the step recorded is its outcome on every replay, so a recorded
+  park settles the child rather than ending the handler. Effect-journal
+  generation 4.
 
 ### 11. Validation and laws
 

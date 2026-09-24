@@ -351,7 +351,74 @@ enum LocalTarget {
     /// FIG-3420): run the session's ordered presentation steps once over the
     /// journaled `PresentToolResult` input.
     Presentation(PresentationLocalExecution),
+    /// The recorded execution-environment load's store read (FIG-3683).
+    ExecutionEnvLoad(ExecutionEnvLoadExecution),
     OwnedRunner(Box<dyn RuntimeEffectLocalRunner + Send + 'static>),
+}
+
+/// The store a [`LoadExecutionEnv`](RuntimeEffectCommand::LoadExecutionEnv)
+/// step reads, and whose environment it is, for the refusal's message.
+pub struct ExecutionEnvLoadExecution {
+    store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    subject: String,
+}
+
+impl ExecutionEnvLoadExecution {
+    async fn execute(
+        self,
+        envelope: RuntimeEffectEnvelope,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        let RuntimeEffectCommand::LoadExecutionEnv { env } = envelope.command else {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                format!(
+                    "execution-environment executor cannot execute {} command directly",
+                    envelope.command.kind().as_str()
+                ),
+            ));
+        };
+        match crate::runtime::load_process_execution_env(self.store.as_ref(), &env).await {
+            Ok(spec) => Ok(RuntimeEffectOutcome::LoadExecutionEnv {
+                spec: Box::new(spec),
+            }),
+            Err(error) => Err(unresolved_execution_env(&self.subject, &env, error)),
+        }
+    }
+}
+
+/// The refusal of a recorded execution environment that did not load.
+///
+/// A child never invents an environment (ADR 0099 §3), so either way it runs
+/// nothing; what differs is whose fact the failure is (FIG-3575). An
+/// environment the store holds but this build cannot reconstruct — absent,
+/// bound to other bytes, undecodable — is the request's, and every redrive
+/// meets it again: it is refused with its request-version outcome, which the
+/// step records. A store that did not answer is this attempt's: its error
+/// settles by its own cause, and a live fault is marked retryable, so an
+/// engine runs the step again instead of recording it (FIG-3683) and a redrive
+/// under a healthy store loads the environment.
+fn unresolved_execution_env(
+    subject: &str,
+    env: &crate::ProcessExecutionEnvRef,
+    error: crate::runtime::ProcessExecutionEnvLoadError,
+) -> RuntimeEffectControllerError {
+    let refusal = crate::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion;
+    let context = format!("{subject} could not resolve its recorded execution environment `{env}`");
+    match error {
+        crate::runtime::ProcessExecutionEnvLoadError::Store(store) => {
+            let mut settled = RuntimeEffectControllerError::from(store.into_turn_failure(refusal));
+            settled.message = format!("{context}: {}", settled.message);
+            if settled.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+                settled.retryable_uncommitted_derivation()
+            } else {
+                settled
+            }
+        }
+        unresolved => RuntimeEffectControllerError::new(
+            refusal,
+            format!("{context}: {unresolved}; a child never invents an environment (ADR 0099 §3)"),
+        ),
+    }
 }
 
 /// Everything the presentation boundary needs that is not on the journaled
@@ -721,6 +788,25 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
+    /// Binds the store a recorded
+    /// [`LoadExecutionEnv`](RuntimeEffectCommand::LoadExecutionEnv) step reads
+    /// on its first execution; replay serves the recorded spec. `subject`
+    /// names whose environment it is in a refusal.
+    pub fn execution_env_load(
+        store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        subject: impl Into<String>,
+    ) -> Self {
+        Self {
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::ExecutionEnvLoad(
+                ExecutionEnvLoadExecution {
+                    store,
+                    subject: subject.into(),
+                },
+            )),
+            replay_trace: None,
+        }
+    }
+
     pub fn triggers(store: Arc<dyn crate::TriggerStore>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(
@@ -961,6 +1047,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 })
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(execution)) => {
+                execution.execute(envelope).await
+            }
+            RuntimeEffectLocalExecutorState::Target(LocalTarget::ExecutionEnvLoad(execution)) => {
                 execution.execute(envelope).await
             }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store)) => {

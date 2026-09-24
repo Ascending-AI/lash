@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use lash_core::{
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectOutcome, facade_support::CanonicalRuntimeEffectEnvelope,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    facade_support::CanonicalRuntimeEffectEnvelope,
 };
 use restate_sdk::serde::Json;
 
@@ -22,10 +23,20 @@ use super::journal_budget::{
     unjournalable_envelope_give_up,
 };
 use super::{
-    RecordedRuntimeEffect, RestateEffectError, RestateRuntimeEffectController, restate_effect_name,
-    validate_recorded_effect_envelope,
+    RecordedRuntimeEffect, RestateEffectError, RestateRuntimeEffectController,
+    execute_restate_journaled_effect, restate_effect_name, validate_recorded_effect_envelope,
 };
 use crate::effect_group::EffectGroupOpenRequest;
+
+/// Whether a journaled run records a fault of its body as its outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EngineFaults {
+    /// Every outcome the body returns is journaled, a fault included.
+    Recorded,
+    /// A fault the executor marks retryable is never journaled: the attempt
+    /// ends and the engine runs the step again (ADR 0105 §1, FIG-3683).
+    Retried,
+}
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
 where
@@ -212,6 +223,97 @@ where
             }),
         )
         .await
+    }
+
+    /// Run a journaled effect's body in its journal slot, recording or
+    /// retrying its faults as `engine_faults` says.
+    pub(super) async fn record_journaled_run<'run>(
+        &'run self,
+        invocation: &RuntimeEffectInvocation,
+        recorded_envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'run>,
+        engine_faults: EngineFaults,
+    ) -> Result<RecordedRuntimeEffect, RestateEffectError>
+    where
+        'ctx: 'run,
+    {
+        let effect_kind = envelope.command.kind();
+        let journaled_envelope = Arc::clone(recorded_envelope);
+        let body = execute_restate_journaled_effect(envelope, local_executor);
+        match engine_faults {
+            EngineFaults::Recorded => {
+                self.record_effect(
+                    invocation,
+                    recorded_envelope,
+                    Box::pin(async move {
+                        RecordedRuntimeEffect {
+                            envelope: journaled_envelope,
+                            outcome: body.await,
+                        }
+                    }),
+                )
+                .await
+            }
+            EngineFaults::Retried => {
+                self.record_effect_or_retry(
+                    invocation,
+                    recorded_envelope,
+                    Box::pin(async move {
+                        match body.await {
+                            Err(fault)
+                                if fault
+                                    .journal_disposition(effect_kind)
+                                    .is_retryable_derivation() =>
+                            {
+                                Err(fault.to_string())
+                            }
+                            outcome => Ok(RecordedRuntimeEffect {
+                                envelope: journaled_envelope,
+                                outcome,
+                            }),
+                        }
+                    }),
+                )
+                .await
+            }
+        }
+    }
+
+    /// [`Self::record_effect`] for a step whose engine faults are never its
+    /// recorded outcome (ADR 0105 §1, FIG-3683): the future answers `Err` for
+    /// a fault, and the attempt ends retryably without journaling anything, so
+    /// the engine runs the step again.
+    pub(super) async fn record_effect_or_retry<'run, F>(
+        &'run self,
+        metadata: &RuntimeEffectInvocation,
+        envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
+        future: F,
+    ) -> Result<RecordedRuntimeEffect, RestateEffectError>
+    where
+        'ctx: 'run,
+        F: Future<Output = Result<RecordedRuntimeEffect, String>> + Send + 'run,
+    {
+        if let Some(give_up) = self.journaled_effect_give_up(metadata, envelope).await {
+            return give_up;
+        }
+        let effect_name = restate_effect_name(metadata);
+        let payload_budget = self.options.journaled_effect_byte_budget;
+        let poisoned_effect_name = effect_name.clone();
+        let Json(entry) = self
+            .context
+            .run_json_or_retry_send(effect_name.clone(), async move {
+                future.await.map(|recorded| {
+                    journalable_recorded_effect(&poisoned_effect_name, payload_budget, recorded)
+                })
+            })
+            .await
+            .map_err(|source| RestateEffectError::Terminal {
+                effect: effect_name.clone(),
+                terminal: source,
+            })?;
+        recorded_effect_from_journal(envelope, &effect_name, entry)
+            .map_err(RestateEffectError::Refused)
     }
 
     /// Execute an eager effect (a durable process command) through the

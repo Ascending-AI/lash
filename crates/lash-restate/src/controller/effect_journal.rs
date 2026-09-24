@@ -33,7 +33,10 @@ use serde::{Deserialize, Serialize};
 /// 3: every execution-environment sync records the tool surface it built,
 /// which the drive installs as the turn's catalog (FIG-3672 P7b); a turn
 /// machine always opens with its protocol-start sync.
-pub const EFFECT_JOURNAL_VERSION: u32 = 3;
+/// 4: a tool child reads its recorded execution environment through its own
+/// recorded `load_execution_env` step, the first effect it journals, so a
+/// replay never reads the store again (FIG-3683).
+pub const EFFECT_JOURNAL_VERSION: u32 = 4;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

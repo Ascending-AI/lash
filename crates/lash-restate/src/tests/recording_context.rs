@@ -1105,9 +1105,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v8-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v8-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v8-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v9-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v9-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v9-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1148,6 +1148,7 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
     const PRE_STAMP: &str = "carries no effect-journal generation";
     const GENERATION_ONE: &str = "carries effect-journal generation 1;";
     const GENERATION_TWO: &str = "carries effect-journal generation 2;";
+    const GENERATION_THREE: &str = "carries effect-journal generation 3;";
     for (name, checked_in, refusal) in [
         (
             "v1-full-drain",
@@ -1238,6 +1239,24 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
             include_bytes!("../../tests/fixtures/tool_intent_journals/v7-full-drain.json")
                 .as_slice(),
             GENERATION_TWO,
+        ),
+        (
+            "v8-mid-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v8-mid-drain.json")
+                .as_slice(),
+            GENERATION_THREE,
+        ),
+        (
+            "v8-mid-intent",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v8-mid-intent.json")
+                .as_slice(),
+            GENERATION_THREE,
+        ),
+        (
+            "v8-full-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v8-full-drain.json")
+                .as_slice(),
+            GENERATION_THREE,
         ),
     ] {
         let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(checked_in)
@@ -1349,16 +1368,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v8-mid-drain",
+            "v9-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v8-mid-intent",
+            "v9-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v8-full-drain", "full_drain", full),
+        ("v9-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {

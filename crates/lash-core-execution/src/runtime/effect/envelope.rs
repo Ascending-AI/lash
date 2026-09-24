@@ -445,6 +445,19 @@ pub enum RuntimeEffectCommand {
     /// call runs under (FIG-3538); every sync carries it, the protocol-start
     /// one included (FIG-3587).
     SyncExecutionEnvironment,
+    /// Read the execution environment a tool child's request records
+    /// (ADR 0099 §3, FIG-3683): a recorded step, so the store is read once
+    /// and every replay serves the recorded spec.
+    ///
+    /// Only a deterministic answer is its outcome: the spec, or the refusal
+    /// of an environment the store holds but this build cannot reconstruct.
+    /// A store that did not answer is a fault of this attempt, never the
+    /// step's outcome: the executor marks it retryable (see
+    /// [`RuntimeEffectControllerError::retryable_uncommitted_derivation`]),
+    /// and an engine runs the step again rather than recording it.
+    LoadExecutionEnv {
+        env: crate::ProcessExecutionEnvRef,
+    },
     /// Sleep for a relative duration or until an absolute wall-clock deadline.
     ///
     /// The intent is the journaled parameter, never a duration derived from the
@@ -522,6 +535,7 @@ impl RuntimeEffectCommand {
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
+            Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
             Self::Sleep { .. } => RuntimeEffectKind::Sleep,
             Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
             Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,
@@ -1183,6 +1197,12 @@ pub enum RuntimeEffectOutcome {
         /// P7b). Empty when the sync failed.
         tool_surface: Vec<crate::ToolDefinition>,
     },
+    /// The environment a [`LoadExecutionEnv`](RuntimeEffectCommand::LoadExecutionEnv)
+    /// step read, recorded so a replay executes under the same spec without
+    /// reading the store again.
+    LoadExecutionEnv {
+        spec: Box<crate::ProcessExecutionEnvSpec>,
+    },
     Sleep,
     AwaitEvent {
         resolution: crate::Resolution,
@@ -1565,6 +1585,19 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    /// The execution environment a recorded load read.
+    pub fn into_execution_env(
+        self,
+    ) -> Result<crate::ProcessExecutionEnvSpec, RuntimeEffectControllerError> {
+        match self {
+            Self::LoadExecutionEnv { spec } => Ok(*spec),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::LoadExecutionEnv,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_await_event(self) -> Result<crate::Resolution, RuntimeEffectControllerError> {
         match self {
             Self::AwaitEvent { resolution } => Ok(resolution),
@@ -1621,6 +1654,7 @@ impl RuntimeEffectOutcome {
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
+            Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
             Self::Sleep => RuntimeEffectKind::Sleep,
             Self::AwaitEvent { .. } => RuntimeEffectKind::AwaitEvent,
             Self::PeekAwaitEvent { .. } => RuntimeEffectKind::PeekAwaitEvent,

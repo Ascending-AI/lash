@@ -673,13 +673,7 @@ pub(crate) async fn run_tool_child<'run>(
     // reconstruct completely is a child it would run under partial authority.
     request.validate()?;
 
-    let process_env_store = host.process_env_store.lock_recover().clone();
-    let execution_env_spec = crate::runtime::load_process_execution_env(
-        process_env_store.as_ref(),
-        &request.execution_env,
-    )
-    .await
-    .map_err(|err| unresolved_execution_env(request, err))?;
+    let execution_env_spec = load_execution_env(host, request, &controller).await?;
 
     // The controller arrives bound to the request's recorded admitted pair:
     // the claim scope *and* the incarnation it was admitted under, one checked
@@ -749,36 +743,39 @@ pub(crate) async fn run_tool_child<'run>(
     })
 }
 
-/// The refusal of a child whose recorded execution environment did not load.
-///
-/// A child never invents an environment (ADR 0099 §3), so either way it runs
-/// nothing; what differs is whose fact the failure is (FIG-3575). An
-/// environment the store holds but this build cannot reconstruct — absent,
-/// bound to other bytes, undecodable — is the request's, and every redrive
-/// meets it again: the child is refused with its request-version outcome. A
-/// store that did not answer is this attempt's: its error settles by its own
-/// cause, so a pool timeout or lost connection aborts as the live fault it is
-/// and a redrive under a healthy store runs the child.
-fn unresolved_execution_env(
+/// The environment the child was admitted under, read through a recorded
+/// step on its own controller (FIG-3683): the store is read once, and every
+/// replay of the child executes under the recorded spec instead of reading it
+/// again. A store that did not answer is not recorded; the engine runs the
+/// step again (see `ExecutionEnvLoadExecution`).
+async fn load_execution_env(
+    host: &ToolChildHost,
     request: &ToolChildRequest,
-    error: crate::runtime::ProcessExecutionEnvLoadError,
-) -> RuntimeEffectControllerError {
-    let refusal = crate::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion;
-    let context = format!(
-        "tool child `{}` could not resolve its recorded execution environment `{}`",
-        request.call.call_id, request.execution_env
-    );
-    match error {
-        crate::runtime::ProcessExecutionEnvLoadError::Store(store) => {
-            let mut settled = RuntimeEffectControllerError::from(store.into_turn_failure(refusal));
-            settled.message = format!("{context}: {}", settled.message);
-            settled
-        }
-        unresolved => RuntimeEffectControllerError::new(
-            refusal,
-            format!("{context}: {unresolved}; a child never invents an environment (ADR 0099 §3)"),
-        ),
-    }
+    controller: &ScopedEffectController<'_>,
+) -> Result<crate::ProcessExecutionEnvSpec, RuntimeEffectControllerError> {
+    let store = host.process_env_store.lock_recover().clone();
+    let scope = controller.execution_scope();
+    let replay_key = format!("{}:env", request.call.call_id);
+    let address = crate::EffectAddress::new(scope.clone(), replay_key.clone())?;
+    let attribution = scope
+        .session_id()
+        .map(crate::RuntimeAttribution::for_session)
+        .unwrap_or_else(crate::RuntimeAttribution::none);
+    controller
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                crate::RuntimeEffectInvocation::new(address, attribution, replay_key),
+                RuntimeEffectCommand::LoadExecutionEnv {
+                    env: request.execution_env.clone(),
+                },
+            ),
+            RuntimeEffectLocalExecutor::execution_env_load(
+                store,
+                format!("tool child `{}`", request.call.call_id),
+            ),
+        )
+        .await
+        .and_then(RuntimeEffectOutcome::into_execution_env)
 }
 
 /// Authenticates the recorded authority set against this host before any key

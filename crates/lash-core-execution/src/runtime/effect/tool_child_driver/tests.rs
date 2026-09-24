@@ -1061,28 +1061,48 @@ impl crate::ProcessExecutionEnvStore for FailingEnvStore {
 /// How a child whose recorded environment does not load settles, per cause
 /// (FIG-3575): a store that did not answer is the attempt's live fault, and
 /// an environment the store holds but this build cannot use is the request's
-/// outcome.
+/// outcome. Only the live fault carries the retry authority that keeps it out
+/// of the load step's journal (FIG-3683).
 #[tokio::test]
 async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     let request = request();
     async fn settle(
         request: &ToolChildRequest,
-        store: &dyn crate::ProcessExecutionEnvStore,
+        store: Arc<dyn crate::ProcessExecutionEnvStore>,
     ) -> RuntimeEffectControllerError {
-        let error = crate::runtime::load_process_execution_env(store, &request.execution_env)
+        let address = crate::EffectAddress::new(
+            request.scope.admitted_scope.scope().clone(),
+            format!("{}:env", request.call.call_id),
+        )
+        .expect("a valid load address");
+        RuntimeEffectLocalExecutor::execution_env_load(store, "tool child")
+            .execute(RuntimeEffectEnvelope::new(
+                crate::RuntimeEffectInvocation::new(
+                    address,
+                    crate::RuntimeAttribution::none(),
+                    "load",
+                ),
+                RuntimeEffectCommand::LoadExecutionEnv {
+                    env: request.execution_env.clone(),
+                },
+            ))
             .await
-            .expect_err("the environment does not load");
-        unresolved_execution_env(request, error)
+            .expect_err("the environment does not load")
     }
+    let retried = |error: &RuntimeEffectControllerError| {
+        error
+            .journal_disposition(crate::RuntimeEffectKind::LoadExecutionEnv)
+            .is_retryable_derivation()
+    };
 
     // Store I/O: an opaque session-seam error is a live fault.
     let timed_out = settle(
         &request,
-        &FailingEnvStore(|| {
+        Arc::new(FailingEnvStore(|| {
             crate::PluginError::Session(
                 "pool timed out while waiting for an open connection".into(),
             )
-        }),
+        })),
     )
     .await;
     assert_eq!(
@@ -1091,16 +1111,20 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
         "a store that did not answer is this attempt's fault: {timed_out}"
     );
     assert!(timed_out.message.contains("pool timed out"));
+    assert!(
+        retried(&timed_out),
+        "a live fault is never the load's record"
+    );
 
     // A carried code keeps its own cause.
     let parked = settle(
         &request,
-        &FailingEnvStore(|| {
+        Arc::new(FailingEnvStore(|| {
             crate::PluginError::RuntimeEffectController(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::LashlangCellReplayDivergence,
                 "diverged",
             ))
-        }),
+        })),
     )
     .await;
     assert_eq!(
@@ -1108,13 +1132,14 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
         crate::RuntimeErrorCode::LashlangCellReplayDivergence
     );
     assert_eq!(parked.turn_failure_cause(), crate::TurnFailureCause::Parked);
+    assert!(!retried(&parked), "a park is the load's recorded outcome");
 
     // A refusal the store answers with is the request's outcome.
     let invalid = settle(
         &request,
-        &FailingEnvStore(|| {
+        Arc::new(FailingEnvStore(|| {
             crate::PluginError::Invoke("invalid process execution environment reference".into())
-        }),
+        })),
     )
     .await;
     assert_eq!(
@@ -1127,8 +1152,12 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     );
 
     // Nothing stored under the reference: the request's outcome.
-    let empty = crate::InMemoryProcessExecutionEnvStore::new();
-    let missing = settle(&request, &empty).await;
+    let missing = settle(
+        &request,
+        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+    )
+    .await;
+    assert!(!retried(&missing), "a missing environment is recorded");
     assert_eq!(
         missing.code,
         crate::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion

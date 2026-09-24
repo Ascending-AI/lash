@@ -515,10 +515,11 @@ impl lash_core::testing::EffectLayer for CapturingRuntimeReplayController {
                     .await
             }
             // The consumer journals its incorporated prefix and each child its
-            // recorded presentation, and the turn machine's environment comes
-            // from its sync; this double runs all three locally, as the shared
-            // recording double does.
+            // recorded environment and presentation, and the turn machine's
+            // environment comes from its sync; this double runs all four
+            // locally, as the shared recording double does.
             command @ (RuntimeEffectCommand::IncorporateGroupSettlements { .. }
+            | RuntimeEffectCommand::LoadExecutionEnv { .. }
             | RuntimeEffectCommand::PresentToolResult { .. }
             | RuntimeEffectCommand::SyncExecutionEnvironment) => {
                 local_executor

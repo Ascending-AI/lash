@@ -311,6 +311,33 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         T: Serialize + DeserializeOwned + Send + 'static,
         Fut: Future<Output = T> + Send + 'run;
 
+    /// Runs one journaled `ctx.run` step whose fault is never recorded
+    /// (ADR 0105 §1: an engine fault is not a domain outcome).
+    ///
+    /// An `Ok` value is journaled and replayed like
+    /// [`run_json_send`](Self::run_json_send)'s. An `Err` ends this attempt
+    /// retryably and writes nothing: the step carries no retry policy of its
+    /// own, so the engine's invocation retry replays the journal up to it and
+    /// runs it again (FIG-3683). A context that cannot end an attempt — the
+    /// recording test contexts — records the fault and surfaces it as a
+    /// terminal error instead.
+    fn run_json_or_retry_send<'run, T, Fut>(
+        &'run self,
+        effect_name: String,
+        future: Fut,
+    ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+    where
+        'ctx: 'run,
+        T: Serialize + DeserializeOwned + Send + 'static,
+        Fut: Future<Output = Result<T, String>> + Send + 'run,
+    {
+        let run = self.run_json_send::<Result<T, String>, _>(effect_name, None, future);
+        async move {
+            let Json(result) = run.await?;
+            result.map(Json).map_err(TerminalError::new)
+        }
+    }
+
     /// Submits the process's workflow run.
     ///
     /// The failure is classified because the scheduling boundary compensates on
@@ -840,6 +867,34 @@ macro_rules! impl_restate_controller_context {
                         // so fuse it here rather than trusting every caller.
                         guard_restate_run_future(run, closure_relay).await
                     })
+                }
+
+                fn run_json_or_retry_send<'run, T, Fut>(
+                    &'run self,
+                    effect_name: String,
+                    future: Fut,
+                ) -> impl Future<Output = Result<Json<T>, TerminalError>> + Send + 'run
+                where
+                    'ctx: 'run,
+                    T: Serialize + DeserializeOwned + Send + 'static,
+                    Fut: Future<Output = Result<T, String>> + Send + 'run,
+                {
+                    async move {
+                        let closure_relay = Arc::new(ClosureWakeRelay::default());
+                        let relay = Arc::clone(&closure_relay);
+                        let run = restate_sdk::context::ContextSideEffects::run(self, move || async move {
+                            // A retryable closure failure under the SDK's
+                            // default (infinite) policy fails the attempt
+                            // without journaling a completion; the invocation
+                            // retry runs the step again.
+                            relay_closure_wakes(future, relay)
+                                .await
+                                .map(Json)
+                                .map_err(|fault| HandlerError::from(std::io::Error::other(fault)))
+                        });
+                        let run = restate_sdk::context::RunFuture::name(run, effect_name);
+                        guard_restate_run_future(run, closure_relay).await
+                    }
                 }
 
                 fn start_process_workflow<'run>(
