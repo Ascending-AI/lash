@@ -24,36 +24,7 @@ const REFUSALS: &str = include_str!("round_trip_refusals.tsv");
 /// Programs that break the law through an open lens defect, each with the
 /// ticket that owns it. A ratchet like the refusal rows: a listed program
 /// that stops violating the law fails until its row is removed.
-const OPEN_VIOLATIONS: [(&str, &str); 7] = [
-    (
-        "test262:test/language/expressions/call/S11.2.4_A1.4_T4.js",
-        "FIG-3663",
-    ),
-    (
-        "test262:test/language/expressions/does-not-equals/S11.9.2_A6.2_T2.js",
-        "FIG-3663",
-    ),
-    (
-        "test262:test/language/expressions/less-than-or-equal/S11.8.3_A4.4.js",
-        "FIG-3663",
-    ),
-    (
-        "test262:test/language/expressions/logical-or/S11.11.2_A4_T4.js",
-        "FIG-3663",
-    ),
-    (
-        "test262:test/language/line-terminators/comment-multi-lf.js",
-        "FIG-3663",
-    ),
-    (
-        "test262:test/language/literals/numeric/S7.8.3_A1.1_T2.js",
-        "FIG-3663",
-    ),
-    (
-        "test262:test/language/literals/numeric/S7.8.3_A3.4_T2.js",
-        "FIG-3663",
-    ),
-];
+const OPEN_VIOLATIONS: [(&str, &str); 0] = [];
 
 /// What the round trip did with one program.
 #[derive(Debug, PartialEq)]

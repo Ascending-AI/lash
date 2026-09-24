@@ -87,5 +87,7 @@ mod execution_site_correlation;
 
 #[path = "workflow_graph.rs"]
 mod workflow_graph;
+#[path = "workflow_graph_round_trip.rs"]
+mod workflow_graph_round_trip;
 #[path = "workflow_graph_schema.rs"]
 mod workflow_graph_schema;

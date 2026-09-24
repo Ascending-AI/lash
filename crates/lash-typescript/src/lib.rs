@@ -109,15 +109,18 @@ pub fn parse_cell(
 /// Unlike a cell, a fragment was cut out of a program the lens projected: its
 /// ambient names are the bindings live where the fragment sits, and a fragment
 /// that reassigns one of them is ordinary edited source, not a const violation.
-/// `processes` names the process bodies the module declares, which a fragment
-/// may start through the catalogue tools.
+/// `session_globals` are the names earlier cells of the session bound, which
+/// the program itself linked against — readable like a cell's own globals but
+/// never reassignable. `processes` names the process bodies the module
+/// declares, which a fragment may start through the catalogue tools.
 pub fn parse_workflow_fragment(
     source: &str,
     globals: &std::collections::BTreeSet<String>,
+    session_globals: &std::collections::BTreeSet<String>,
     processes: &std::collections::BTreeSet<String>,
 ) -> Result<lashlang::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
-    lower::lower_workflow_fragment(&normalized, globals, processes)
+    lower::lower_workflow_fragment(&normalized, globals, session_globals, processes)
 }
 
 pub fn validate(source: &str) -> Result<(), Diagnostic> {
