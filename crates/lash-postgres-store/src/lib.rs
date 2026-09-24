@@ -507,7 +507,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `attempts` — and adds `lash_turn_park_clock`, the feed's sequence row, and
 // `lash_turn_park_events`, the durable ledger of park transitions.
 // Component-127 and older catalogs are rejected and recreated.
-const SCHEMA_VERSION: i32 = 128;
+// Version 129 (FIG-3585) drops `runtime_perf_start_gate_retry` and
+// `tool_completion_key_process_lifetime` from the durable error-code
+// vocabulary. No relation changes; component-128 catalogs are rejected and
+// recreated.
+const SCHEMA_VERSION: i32 = 129;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

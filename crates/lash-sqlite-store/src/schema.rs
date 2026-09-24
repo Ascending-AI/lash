@@ -891,7 +891,13 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `attempts` — and the catalog gains `turn_park_clock`, the feed's sequence
 /// row, and `turn_park_events`, the durable ledger of park transitions. A
 /// pre-87 database is rejected at open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 87;
+/// Bumped to 88 for FIG-3585: the durable `RuntimeErrorCode` vocabulary drops
+/// `runtime_perf_start_gate_retry` and `tool_completion_key_process_lifetime`,
+/// and the durable core no longer carries the await-event tables that
+/// store-delegated turn control used (the effect-replay database keeps its
+/// own). A pre-88 database is rejected at open and recreated; it is not
+/// migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 88;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
