@@ -39,6 +39,7 @@ FAMILIES = (
     "stores",
     "functional_e2e",
     "workers_e2e",
+    "restate_suites",
     "workbench",
     "regress",
     "schema",
@@ -295,6 +296,10 @@ FEATURE_LANES_JOB = "feature-lanes"
 # postgres-store is intentionally absent: every `lash-postgres-store` test
 # binary runs on pull requests and merge groups, while its simulator,
 # pool-wait and cross-backend steps remain dispatch-only.
+# functional-e2e and functional-e2e-process-operations are the exception: a
+# trusted pull request whose diff selects `restate_suites` runs their live
+# Restate legs, so the conclusion accepts their success on that event alone
+# (RESTATE_SUITE_JOBS). The merge group still skips them.
 DISPATCH_ONLY_JOBS = {
     "heavy-tests",
     "stack-budget",
@@ -349,6 +354,14 @@ WORKERS_E2E_JOBS = {
     "restate-postgres-workers",
     "restate-postgres-workers-summary",
 }
+
+# The dispatch-only jobs a trusted, restate-selected pull request runs: the
+# functional-e2e legs that host the live Restate suites. The workers board is
+# not listed here because it is not dispatch-only -- its pull-request gate is
+# the `ci:workers` label, to which `restate_suites` is a second opt-in.
+RESTATE_SUITE_JOBS = frozenset(
+    {"functional-e2e", "functional-e2e-process-operations"}
+)
 
 BAZEL_TEST_JOB = "bazel-tests"
 # Trusted Rust events run the core partition in `bazel-tests`. The tail is
@@ -912,6 +925,103 @@ def _is_stores_path(path: str, path_class: PathClass, store_dirs: frozenset[str]
     return path_class.kind is PathKind.DATA and path.startswith("fixtures/")
 
 
+# `restate_suites` gates the live Restate board: the functional-e2e legs that
+# run pinned `restate-server`s and the Restate + Postgres + S3 workers jobs.
+# They ran on `workflow_dispatch` alone, so a pull request that broke the
+# Restate execution path merged green and surfaced only in the next manual
+# run — #2106 (FIG-3699) and #2148 (FIG-3697) both landed that way, and the
+# workbench's Restate recovery coverage died with #2085.
+#
+# The selection is a path rule, not a dependency closure: the suite owners'
+# first-party closures cover most of the workspace, so "whatever the suites
+# link" would run the board on nearly every diff. The rule instead names the
+# code the suites exercise, from three sources:
+#
+# * `restate_suite_dirs()` — the manifest directories of the test binaries
+#   `scripts/restate-suites.toml` registers. The registry is the suite
+#   inventory; deriving the owners from it keeps a new suite covered without
+#   a second table.
+# * `RESTATE_SUITE_PACKAGES` — what the registry cannot name: the Restate
+#   endpoints and runbooks the suites mount, and `lash-conformance`, whose
+#   law definitions the effect-group suite expands into its test binary.
+# * `RESTATE_CORE_SUBTREES` — the Restate execution path inside the two
+#   shared runtime crates, matched on path segments so `src/` and its
+#   `tests/` kernel mirrors count alike.
+RESTATE_SUITES_REGISTRY = "scripts/restate-suites.toml"
+
+
+@lru_cache(maxsize=None)
+def restate_suite_dirs(root: str | None = None) -> frozenset[str]:
+    """The manifest directories owning the registered live Restate suites."""
+
+    base = Path(root) if root is not None else REPO_ROOT
+    with (base / RESTATE_SUITES_REGISTRY).open("rb") as handle:
+        registry = tomllib.load(handle)
+    return frozenset(
+        PurePosixPath(suite["label"][2:].split(":", 1)[0]).as_posix()
+        for suite in registry["suites"].values()
+    )
+
+
+# Packages whose whole tree a live Restate suite mounts or expands: the
+# agent-service endpoint (`agent-service-restate-e2e` cargo-tests it beside a
+# Restate container), the runbooks whose binaries and scenarios the workers
+# and process-operations legs drive, and the conformance law catalogue the
+# effect-group suite's `conformance_and_poison` cases are built from — a law
+# edit can fail the suite without touching another selected path (#2148).
+RESTATE_SUITE_PACKAGES = frozenset(
+    {
+        "crates/lash-conformance",
+        "examples/agent-service",
+        "runbooks/process-operations",
+        "runbooks/restate-postgres-workers",
+    }
+)
+
+# The Restate execution path inside the shared runtime crates: the subtrees
+# #2106 and #2148 changed when they broke the live suites. A run of stems is
+# matched consecutively, so `src/session/tool_execution`, its
+# `tests/store_backed/kernel/...` mirror and a flat `tool_dispatch.rs` all
+# count, while the crate's other machinery stays out.
+RESTATE_CORE_SUBTREES: Mapping[str, tuple[tuple[str, ...], ...]] = {
+    "crates/lash-core-execution": (
+        ("runtime", "effect"),
+        ("session", "tool_execution"),
+        ("tool_dispatch",),
+    ),
+    "crates/lash-core": (
+        ("turn_driver",),
+        ("turn_loop",),
+    ),
+}
+
+
+def _contains_stem_run(path: str, run: tuple[str, ...]) -> bool:
+    stems = [PurePosixPath(part).stem for part in PurePosixPath(path).parts]
+    width = len(run)
+    return any(
+        tuple(stems[index : index + width]) == run
+        for index in range(len(stems) - width + 1)
+    )
+
+
+def _is_restate_suite_path(
+    path: str, path_class: PathClass, suite_dirs: frozenset[str]
+) -> bool:
+    if path_class.kind is not PathKind.PACKAGE or path_class.package is None:
+        return False
+    if path_class.package in suite_dirs or path_class.package in RESTATE_SUITE_PACKAGES:
+        return True
+    subtrees = RESTATE_CORE_SUBTREES.get(path_class.package)
+    if subtrees is None:
+        return False
+    # A shared crate's manifest can change the suites' build even though it
+    # sits beside, not inside, the execution subtrees.
+    return path_class.manifest or any(
+        _contains_stem_run(path, subtree) for subtree in subtrees
+    )
+
+
 # `facade` gates the untrusted Cargo seal lane: only the facade crate's public
 # API or the root manifests can break the API surface it seals. Trusted events
 # seal on every run inside `bazel-tests`, where an unchanged seal is a cache
@@ -1265,6 +1375,7 @@ def classify(
     event_name: str = "",
     workbench_dirs: frozenset[str] | None = None,
     store_dirs: frozenset[str] | None = None,
+    restate_dirs: frozenset[str] | None = None,
 ) -> dict[str, str]:
     if not changes:
         raise PlanError("the changed path set was empty")
@@ -1278,6 +1389,11 @@ def classify(
             store_dirs = postgres_store_dependency_dirs()
         except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
             return fail_open(f"Postgres store dependency closure is underivable: {error}")
+    if restate_dirs is None:
+        try:
+            restate_dirs = restate_suite_dirs()
+        except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
+            return fail_open(f"Restate suite registry is underivable: {error}")
     unknown_statuses = sorted({status for status, _ in changes if status not in CHANGE_STATUSES})
     if unknown_statuses:
         statuses = ", ".join(repr(status) for status in unknown_statuses)
@@ -1354,12 +1470,17 @@ def classify(
         "workers_e2e": breadth,
         "workbench": workbench_hit,
         "regress": any(_is_regress_path(path) for path in build),
+        "restate_suites": any(
+            _is_restate_suite_path(path, classes[path], restate_dirs)
+            for path in build
+        ),
         "schema": any(_is_schema_path(path) for path in build),
         "facade": any(_is_facade_path(path) for path in build),
         "tooling": any(_is_tooling_class(classes[path]) for path in build),
         # `stores` follows the Postgres store closure (see _is_stores_path);
         # `functional_e2e` and `workers_e2e` keep the breadth flag because
-        # their jobs are dispatch/label-only anyway.
+        # their jobs are dispatch/label-only anyway. `restate_suites` is the
+        # one E2E selection a pull request acts on, so it is a real path rule.
         "stores": any(
             _is_stores_path(path, classes[path], store_dirs) for path in build
         ),
@@ -1418,6 +1539,16 @@ def evaluate_conclusion(
         # `tooling`: a non-docs plan that selects nothing is a classifier fault.
         problems.append("plan selects no family for a non-docs diff")
 
+    # A trusted pull request whose diff touches the Restate execution path
+    # runs the live Restate suites: the functional-e2e Restate legs and the
+    # workers board. An untrusted event cannot stage the suite binaries from
+    # the shared cache, and a merge group keeps its old board either way.
+    restate_pr = (
+        event_name == "pull_request"
+        and bazel_is_trusted
+        and plan_outputs.get("restate_suites") == "true"
+    )
+
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
         if job in BAZEL_TEST_JOBS:
@@ -1435,17 +1566,22 @@ def evaluate_conclusion(
                     f" expected {wanted}"
                 )
             continue
-        if job in WORKERS_E2E_JOBS and not workers_e2e_enabled:
+        if job in WORKERS_E2E_JOBS and not workers_e2e_enabled and not restate_pr:
             if result != "skipped":
                 problems.append(
                     f"workers E2E job {job} ended with {result!r} while disabled, expected skipped"
                 )
             continue
         if job in DISPATCH_ONLY_JOBS and event_name in DEFERRED_EVENTS:
-            if result != "skipped":
+            wanted = (
+                "success"
+                if restate_pr and job in RESTATE_SUITE_JOBS
+                else "skipped"
+            )
+            if result != wanted:
                 problems.append(
                     f"dispatch-only job {job} ended with {result!r} on a"
-                    f" {event_name} event, expected skipped"
+                    f" {event_name} event, expected {wanted}"
                 )
             continue
         if job == FEATURE_LANES_JOB:

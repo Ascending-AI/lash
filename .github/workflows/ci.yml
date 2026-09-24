@@ -21,7 +21,9 @@ name: CI
 # package the diff touches), the workspace clippy, the feature
 # lanes (every feature variant of scripts/feature-coverage.toml compiled, plus
 # the executable lanes), the `lash-postgres-store` suites on one PostgreSQL
-# major (16) when the diff reaches that crate's closure, and the path-gated
+# major (16) when the diff reaches that crate's closure, the live Restate
+# suites when the diff touches the Restate execution path (`restate_suites`;
+# see the selection rule in scripts/ci_plan.py), and the path-gated
 # script jobs. The merge group runs the same set on the combined tree plus
 # the test tail, the feature-lane clippy and, for a schema diff, the PG14/PG18
 # compatibility legs. Cached Bazel results mean a merge group re-executes
@@ -31,11 +33,11 @@ name: CI
 # Manual-only gates run on `workflow_dispatch` alone, the full profile
 # release.yml certifies against, and why each stays there:
 #
-# * Test heavy suites, Test S3 store against Garage, Functional E2E, the
-#   stack budget and the PostgreSQL pool-wait, simulator-backend-fault and
-#   cross-backend-differential steps of Test Postgres store: deferred by the
-#   2026-08-25 CI-scope ruling for their runner cost, until the FIG-2169
-#   test-prune sweep reassesses them.
+# * Test heavy suites, Test S3 store against Garage, the non-Restate
+#   Functional E2E legs, the stack budget and the PostgreSQL pool-wait,
+#   simulator-backend-fault and cross-backend-differential steps of Test
+#   Postgres store: deferred by the 2026-08-25 CI-scope ruling for their
+#   runner cost, until the FIG-2169 test-prune sweep reassesses them.
 # * Fuzz smoke: a bounded libFuzzer run on the nightly toolchain, kept off
 #   the pull-request critical path by design (FIG-878).
 # * Test deferred Unicode suites: slow regress suites, excluded from the PR
@@ -44,7 +46,7 @@ name: CI
 #   carried by the release dispatch (FIG-2854).
 # * Worker release artifacts and the Restate + Postgres + S3 workers E2E:
 #   release builds and multi-service harnesses. A pull request opts in with
-#   the `ci:workers` label.
+#   the `ci:workers` label, or by touching the Restate execution path.
 # * The PG14/PG18 compatibility legs on a non-schema diff: they compare
 #   catalog rendering, which only a schema diff can move.
 
@@ -143,6 +145,7 @@ jobs:
       stores: ${{ steps.classify.outputs.stores }}
       functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
+      restate_suites: ${{ steps.classify.outputs.restate_suites }}
       workbench: ${{ steps.classify.outputs.workbench }}
       regress: ${{ steps.classify.outputs.regress }}
       facade: ${{ steps.classify.outputs.facade }}
@@ -1795,6 +1798,9 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
+      || (github.event_name == 'pull_request'
+          && needs.plan.outputs.bazel_trusted == 'true'
+          && needs.plan.outputs.restate_suites == 'true')
     # Trusted events take the worker binaries from the shared build cache
     # (FIG-3666): the Cargo release build took 38 of this job's 40 minutes
     # and gated every workers and process-operations leg behind it. Untrusted
@@ -1802,7 +1808,7 @@ jobs:
     environment: build-cache
     env:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
-      RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
+      RUN_WORKER_ARTIFACTS: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.functional_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
     steps:
       - name: Explain plan deferral
         if: env.RUN_WORKER_ARTIFACTS != 'true'
@@ -1929,14 +1935,25 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     needs: plan
-    # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
-    # The live Restate suites (`bazel: true`) build their test binaries from
+    # The non-Restate legs stay deferred to the manual full-profile dispatch
+    # per the 2026-08-25 CI-scope ruling; reassess after the FIG-2169
+    # test-prune sweep. A trusted pull request whose diff selects
+    # `restate_suites` runs the `restate` legs only (#2106, #2148 and #2085
+    # all reached main past a dispatch-only suite); the merge group keeps
+    # skipping the job.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true')
+      || (github.event_name == 'pull_request'
+          && needs.plan.outputs.bazel_trusted == 'true'
+          && needs.plan.outputs.restate_suites == 'true')
+    # The live Restate suites (`restate: true`) build their test binaries from
     # the shared cache and run them here, beside pinned restate-servers that
     # scripts/ci/restate_suite.py starts (FIG-3666). A dispatch is always a
     # trusted event, so every leg may read the build-cache credentials.
     environment: build-cache
+    env:
+      # A dispatch runs every leg; a pull request runs the live Restate legs.
+      RUN_FUNCTIONAL_E2E: ${{ github.event_name == 'workflow_dispatch' || matrix.restate }}
 
     strategy:
       fail-fast: false
@@ -1948,6 +1965,7 @@ jobs:
             artifact: none
             browser: false
             bazel: false
+            restate: true
             runner: ubuntu-24.04
           - name: agent-workbench
             recipe: agent-workbench-restate-e2e
@@ -1955,6 +1973,7 @@ jobs:
             artifact: agent-workbench
             browser: false
             bazel: true
+            restate: true
             runner: ubuntu-24.04
           - name: effect-group-conformance
             recipe: effect-group-conformance-e2e
@@ -1962,6 +1981,7 @@ jobs:
             artifact: effect-group-conformance
             browser: false
             bazel: true
+            restate: true
             runner: ubuntu-24.04
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify
@@ -1969,6 +1989,7 @@ jobs:
             artifact: none
             browser: false
             bazel: false
+            restate: false
             runner: ubuntu-24.04
           - name: version-bump-recreation
             recipe: version-bump-recreation-e2e
@@ -1976,6 +1997,7 @@ jobs:
             artifact: version-bump-recreation
             browser: false
             bazel: false
+            restate: false
             runner: ubuntu-24.04
           - name: session-lease-triage
             recipe: session-lease-triage-e2e
@@ -1983,6 +2005,7 @@ jobs:
             artifact: session-lease-triage
             browser: false
             bazel: false
+            restate: false
             runner: ubuntu-24.04
           - name: slack-clone-full-host
             recipe: slack-clone-full-host-e2e
@@ -1990,16 +2013,46 @@ jobs:
             artifact: none
             browser: true
             bazel: false
+            restate: false
             runner: ubuntu-24.04
 
     steps:
-      - *checkout
+      - name: Explain plan deferral
+        if: env.RUN_FUNCTIONAL_E2E != 'true'
+        run: echo "This leg is not a live Restate suite; a pull request runs the Restate legs only."
+
+      - name: Check out repository
+        if: env.RUN_FUNCTIONAL_E2E == 'true'
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
 
       - name: Reclaim runner disk
+        if: env.RUN_FUNCTIONAL_E2E == 'true'
         run: bash scripts/ci-reclaim-disk.sh
 
       - name: Configure shared build cache
-        if: matrix.bazel
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && matrix.bazel
         uses: ./.github/actions/bazel-shared-cache
         env:
           CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
@@ -2010,22 +2063,22 @@ jobs:
           CACHE_KEY: ${{ secrets.CACHE_KEY }}
 
       - name: Install Rust toolchain
-        if: ${{ !matrix.bazel }}
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.bazel
         uses: ./.github/actions/rust-toolchain
 
       - name: Install protoc
-        if: ${{ !matrix.bazel }}
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.bazel
         uses: ./.github/actions/install-tools
         with:
           tool: protoc
 
       # Provides the linker the workflow-level RUSTFLAGS names.
       - name: Install mold
-        if: ${{ !matrix.bazel }}
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.bazel
         uses: ./.github/actions/setup-mold
 
       - name: Install Node
-        if: matrix.node
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && matrix.node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -2033,11 +2086,11 @@ jobs:
           cache-dependency-path: examples/workflow-graph-roundtrip/frontend/package-lock.json
 
       - name: Install uv
-        if: matrix.browser
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && matrix.browser
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
 
       - name: Install Chromium for Playwright
-        if: matrix.browser
+        if: env.RUN_FUNCTIONAL_E2E == 'true' && matrix.browser
         run: uv run --with playwright==1.62.0 playwright install --with-deps chromium
 
       # The repo-local installer uses checksum-pinned release archives instead
@@ -2045,11 +2098,13 @@ jobs:
       # the API-listing path (extractions/setup-just) hit rate limits and
       # ejected whole trains.
       - name: Install just
+        if: env.RUN_FUNCTIONAL_E2E == 'true'
         uses: ./.github/actions/install-tools
         with:
           tool: just
 
       - name: Run functional E2E
+        if: env.RUN_FUNCTIONAL_E2E == 'true'
         env:
           LASH_PROCESS_OPERATIONS_ARTIFACT_DIR: target/functional-e2e-artifacts/process-operations
           LASH_VERSION_BUMP_ARTIFACT_DIR: target/functional-e2e-artifacts/version-bump-recreation
@@ -2060,12 +2115,12 @@ jobs:
         run: just ${{ matrix.recipe }}
 
       - name: Remove client credentials
-        if: always() && matrix.bazel
+        if: always() && env.RUN_FUNCTIONAL_E2E == 'true' && matrix.bazel
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
       - name: Upload functional E2E failure artifacts
-        if: failure() && matrix.artifact != 'none'
+        if: failure() && env.RUN_FUNCTIONAL_E2E == 'true' && matrix.artifact != 'none'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: functional-e2e-${{ matrix.artifact }}-attempt-${{ github.run_attempt }}
@@ -2073,7 +2128,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload slack-clone full-host E2E failure artifacts
-        if: failure() && matrix.browser
+        if: failure() && env.RUN_FUNCTIONAL_E2E == 'true' && matrix.browser
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: slack-clone-full-host-e2e-attempt-${{ github.run_attempt }}
@@ -2086,8 +2141,14 @@ jobs:
     timeout-minutes: 40
     needs: [plan, worker-artifacts]
     # Deferred to the manual full-profile dispatch per the 2026-08-25 CI-scope
-    # ruling; reassess after the FIG-2169 test-prune sweep.
-    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
+    # ruling; reassess after the FIG-2169 test-prune sweep — except on a
+    # trusted pull request whose diff selects `restate_suites`, which runs
+    # this leg because it drives the worker binaries on a Restate runbook.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true')
+      || (github.event_name == 'pull_request'
+          && needs.plan.outputs.bazel_trusted == 'true'
+          && needs.plan.outputs.restate_suites == 'true')
     # Its test binaries come from the shared build cache (FIG-3666); a
     # dispatch is always a trusted event.
     environment: build-cache
@@ -2190,6 +2251,9 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
+      || (github.event_name == 'pull_request'
+          && needs.plan.outputs.bazel_trusted == 'true'
+          && needs.plan.outputs.restate_suites == 'true')
     # The harness has grown to 24 workflows + turn-control gates; 30 minutes
     # was hit on 2026-07-20 (job-timeout shows as 'cancelled').
     timeout-minutes: 75
@@ -2202,7 +2266,7 @@ jobs:
       segment_2_artifact_name: ${{ steps.prepare-segment-2.outputs.artifact_name }}
       segment_2_producer_attempt: ${{ steps.prepare-segment-2.outputs.producer_attempt }}
     env:
-      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
+      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -2406,12 +2470,15 @@ jobs:
     if: >-
       always()
       && (github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')))
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers'))
+      || (github.event_name == 'pull_request'
+          && needs.plan.outputs.bazel_trusted == 'true'
+          && needs.plan.outputs.restate_suites == 'true'))
     needs:
       - plan
       - restate-postgres-workers
     env:
-      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
+      RUN_WORKERS_E2E: ${{ needs.plan.outputs.workers_e2e == 'true' || needs.plan.outputs.restate_suites == 'true' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:workers')) }}
 
     steps:
       - name: Check out repository
