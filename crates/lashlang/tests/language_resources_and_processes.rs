@@ -10,11 +10,7 @@
 // only path those IR nodes still have.
 
 use super::*;
-use crate::ast_support::{call, finish, finish_program, list, number, program, string};
-
-fn var(name: &str) -> lashlang::Expr {
-    lashlang::Expr::Variable(name.into())
-}
+use crate::ast_support::{number, program, string};
 
 #[expect(
     clippy::expect_used,

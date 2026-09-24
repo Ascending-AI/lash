@@ -8,7 +8,6 @@
 // a property of the IR rather than of any dialect, built straight from the AST.
 
 use super::*;
-use crate::ast_support::{call, finish_program, number, string};
 
 #[tokio::test(flavor = "current_thread")]
 async fn executes_if_for_and_list_concat() {
@@ -812,17 +811,4 @@ async fn tool_calls_return_values_and_throw_on_failure() {
     };
     assert_eq!(record["found"], Value::String("pub fn main() {}".into()));
     assert_eq!(record["missing"], Value::Bool(true));
-}
-
-/// Compiles an IR program as the main entry of the raw module artifact it
-/// forms, through the one public compile entry.
-fn lashlang_compile_program(
-    program: &lashlang::Program,
-) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
-    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
-    Ok(lashlang::compile(
-        &artifact,
-        lashlang::Entry::Main,
-        Some(&program.spans),
-    )?)
 }
