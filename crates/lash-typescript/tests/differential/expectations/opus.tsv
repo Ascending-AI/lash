@@ -1,0 +1,164 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+opus	1	accept	"null == undefined"	"true"	-
+opus	2	accept	"null === undefined"	"false"	-
+opus	3	accept	"null == false"	"false"	-
+opus	4	accept	"null == 0"	"false"	-
+opus	5	accept	"null == ''"	"false"	-
+opus	6	accept	"undefined == false"	"false"	-
+opus	7	accept	"undefined == 0"	"false"	-
+opus	8	accept	"NaN === NaN"	"false"	-
+opus	9	accept	"-0 === 0"	"true"	-
+opus	10	accept	"'' == 0"	"true"	-
+opus	11	accept	"'0' == false"	"true"	-
+opus	12	accept	"'' == false"	"true"	-
+opus	13	accept	"[] == false"	"true"	-
+opus	14	accept	"[] == ''"	"true"	-
+opus	15	accept	"[] == 0"	"true"	-
+opus	16	accept	"[[]] == 0"	"true"	-
+opus	17	accept	"[1] == 1"	"true"	-
+opus	18	accept	"({}) == '[object Object]'"	"true"	-
+opus	19	accept	"true == '1'"	"true"	-
+opus	20	accept	"true == ['1']"	"true"	-
+opus	21	accept	"false == []"	"true"	-
+opus	22	accept	"0 == []"	"true"	-
+opus	23	accept	"'abc' == 'abc'"	"true"	-
+opus	24	accept	"1 == '1'"	"true"	-
+opus	25	accept	"1 == '0x1'"	"true"	-
+opus	26	accept	"1 == '+1'"	"true"	-
+opus	27	accept	"typeof undefined"	"undefined"	-
+opus	28	accept	"typeof null"	"object"	-
+opus	29	accept	"typeof 1"	"number"	-
+opus	30	accept	"typeof 'a'"	"string"	-
+opus	31	accept	"typeof true"	"boolean"	-
+opus	32	accept	"typeof {}"	"object"	-
+opus	33	accept	"typeof []"	"object"	-
+opus	34	accept	"typeof (() => 1)"	"function"	-
+opus	35	accept	"!''"	"true"	-
+opus	36	accept	"!0"	"true"	-
+opus	37	accept	"!-0"	"true"	-
+opus	38	accept	"!NaN"	"true"	-
+opus	39	accept	"![]"	"false"	-
+opus	40	accept	"!({})"	"false"	-
+opus	41	accept	"!undefined"	"true"	-
+opus	42	accept	"!null"	"true"	-
+opus	43	accept	"0 || 'x'"	"x"	-
+opus	44	accept	"'' || null"	"null"	-
+opus	45	accept	"1 && 2"	"2"	-
+opus	46	accept	"null ?? 3"	"3"	-
+opus	47	accept	"undefined ?? 3"	"3"	-
+opus	48	accept	"0 ?? 3"	"0"	-
+opus	49	accept	"false ?? 3"	"false"	-
+opus	50	accept	"1 + '2'"	"12"	-
+opus	51	accept	"1 + null"	"1"	-
+opus	52	accept	"1 + undefined"	"NaN"	-
+opus	53	accept	"'a' + null"	"anull"	-
+opus	54	accept	"'a' + undefined"	"aundefined"	-
+opus	55	accept	"[] + []"	""	-
+opus	56	accept	"[] + 1"	"1"	-
+opus	57	accept	"1 + []"	"1"	-
+opus	58	runtime-reject	"({}) + 1"	"[object Object]1"	TS_OBJECT_STRING_COERCION
+opus	59	runtime-reject	"1 + ({})"	"1[object Object]"	TS_OBJECT_STRING_COERCION
+opus	60	accept	"[1,2] + '!'"	"1,2!"	-
+opus	61	accept	"[null] + '!'"	"!"	-
+opus	62	accept	"[undefined] + '!'"	"!"	-
+opus	63	accept	"[[1,2],[3]] + '!'"	"1,2,3!"	-
+opus	64	accept	"'5' - 2"	"3"	-
+opus	65	accept	"'5' * '2'"	"10"	-
+opus	66	accept	"'a' * 2"	"NaN"	-
+opus	67	accept	"true + true"	"2"	-
+opus	68	accept	"null * 3"	"0"	-
+opus	69	accept	"undefined + 1"	"NaN"	-
+opus	70	accept	"5 % 3"	"2"	-
+opus	71	accept	"-5 % 3"	"-2"	-
+opus	72	accept	"1 / 0"	"Infinity"	-
+opus	73	accept	"-1 / 0"	"-Infinity"	-
+opus	74	accept	"0 / 0"	"NaN"	-
+opus	75	accept	"+''"	"0"	-
+opus	76	accept	"+'  12  '"	"12"	-
+opus	77	accept	"+'0x10'"	"16"	-
+opus	78	accept	"+'+0x10'"	"NaN"	-
+opus	79	accept	"+'-0x10'"	"NaN"	-
+opus	80	accept	"+'0b101'"	"5"	-
+opus	81	accept	"+'0o17'"	"15"	-
+opus	82	accept	"+'inf'"	"NaN"	-
+opus	83	accept	"+'Infinity'"	"Infinity"	-
+opus	84	accept	"+'infinity'"	"NaN"	-
+opus	85	accept	"+'INF'"	"NaN"	-
+opus	86	accept	"+'nan'"	"NaN"	-
+opus	87	accept	"+'1e3'"	"1000"	-
+opus	88	accept	"+'1_0'"	"NaN"	-
+opus	89	accept	"+'.5'"	"0.5"	-
+opus	90	accept	"+'5.'"	"5"	-
+opus	91	accept	"+'0xFFFFFFFFFFFFFFFFF'"	"295147905179352830000"	-
+opus	92	accept	"+'12abc'"	"NaN"	-
+opus	93	accept	"-'3'"	"-3"	-
+opus	94	accept	"+true"	"1"	-
+opus	95	accept	"+null"	"0"	-
+opus	96	accept	"+undefined"	"NaN"	-
+opus	97	accept	"+[]"	"0"	-
+opus	98	accept	"+[7]"	"7"	-
+opus	99	accept	"+[1,2]"	"NaN"	-
+opus	100	accept	"'a' < 'b'"	"true"	-
+opus	101	accept	"'10' < '9'"	"true"	-
+opus	102	accept	"10 < 9"	"false"	-
+opus	103	accept	"'10' < 9"	"false"	-
+opus	104	accept	"null < 1"	"true"	-
+opus	105	accept	"undefined < 1"	"false"	-
+opus	106	accept	"NaN < 1"	"false"	-
+opus	107	accept	"NaN >= 1"	"false"	-
+opus	108	accept	"[] < 1"	"true"	-
+opus	109	accept	"'\\u{10000}' < '\\uff61'"	"true"	-
+opus	110	accept	"`${1e21}`"	"1e+21"	-
+opus	111	accept	"`${1e-7}`"	"1e-7"	-
+opus	112	accept	"`${1e-6}`"	"0.000001"	-
+opus	113	accept	"`${1e20}`"	"100000000000000000000"	-
+opus	114	accept	"`${123456789012345678901234}`"	"1.2345678901234569e+23"	-
+opus	115	accept	"`${1e300}`"	"1e+300"	-
+opus	116	accept	"`${5e-324}`"	"5e-324"	-
+opus	117	accept	"`${0.1 + 0.2}`"	"0.30000000000000004"	-
+opus	118	accept	"`${-0}`"	"0"	-
+opus	119	accept	"`${1/0}`"	"Infinity"	-
+opus	120	accept	"`${0/0}`"	"NaN"	-
+opus	121	accept	"`${1.5}`"	"1.5"	-
+opus	122	accept	"`${-1.5e-9}`"	"-1.5e-9"	-
+opus	123	accept	"`${null}`"	"null"	-
+opus	124	accept	"`${undefined}`"	"undefined"	-
+opus	125	accept	"`${[1,2]}`"	"1,2"	-
+opus	126	runtime-reject	"`${({})}`"	"[object Object]"	TS_OBJECT_STRING_COERCION
+opus	127	accept	"`${true}`"	"true"	-
+opus	128	accept	"`${'x'}`"	"x"	-
+opus	129	accept	"`${[null,undefined,1]}`"	",,1"	-
+opus	130	accept	"`a${1}b${2}c`"	"a1b2c"	-
+opus	131	accept	"'abc'.toUpperCase()"	"ABC"	-
+opus	132	accept	"'  a '.trim()"	"a"	-
+opus	133	accept	"'abc'.includes('')"	"true"	-
+opus	134	accept	"'abc'.startsWith('')"	"true"	-
+opus	135	accept	"'abc'.endsWith('')"	"true"	-
+opus	136	accept	"'abc'.split('')"	"a,b,c"	-
+opus	137	accept	"'a,b'.split(',')"	"a,b"	-
+opus	138	accept	"[1,2].join('-')"	"1-2"	-
+opus	139	accept	"'abc'.length"	"3"	-
+opus	140	accept	"[1,2,3].length"	"3"	-
+opus	141	accept	"[1,2,3][0]"	"1"	-
+opus	142	accept	"[1,2,3][-1]"	"undefined"	-
+opus	143	accept	"[1,2,3][5]"	"undefined"	-
+opus	144	accept	"({a:1}).a"	"1"	-
+opus	145	accept-unlinked	"({a:1}).b"	"undefined"	TS_LINK_ERROR
+opus	146	accept	"({a:1})['a']"	"1"	-
+opus	147	accept	"void 0"	"undefined"	-
+opus	148	accept	"2 ** 3"	"8"	-
+opus	149	accept	"1 & 3"	"1"	-
+opus	150	accept	"1 | 2"	"3"	-
+opus	151	accept	"1 ^ 3"	"2"	-
+opus	152	accept	"~1"	"-2"	-
+opus	153	accept	"1 << 2"	"4"	-
+opus	154	accept	"8 >> 2"	"2"	-
+opus	155	accept	"-8 >>> 2"	"1073741822"	-
+opus	156	reject	"(1, 2)"	"2"	TS_SEQUENCE_UNSUPPORTED
+opus	157	accept	"'a' in ({a:1})"	"true"	-
+opus	158	accept	"1 instanceof Object"	"false"	-
+opus	159	accept	"delete ({a:1}).a"	"true"	-
+opus	160	accept	"true ? 1 : 2"	"1"	-
+opus	161	accept	"(() => 1)()"	"1"	-
+opus	162	accept	"((x: number) => x + 1)(1)"	"2"	-
+opus	163	reject	"null ?? 1 || 2"	"ERR<SyntaxError>"	TS_SYNTAX_ERROR

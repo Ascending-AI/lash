@@ -40,6 +40,21 @@ class RatchetTest(unittest.TestCase):
         failed = dict(self.base, **{"a.js": ("fail", "TS_NEW_CODE")})
         self.assertEqual(len(ratchet.regressions(self.base, failed, frozenset({"TS_NEW_CODE"}))), 1)
 
+    def test_tallies_derive_the_record_counts(self):
+        self.assertEqual(
+            ratchet.tallies(self.base),
+            {
+                ("selected", "-"): 4,
+                ("pass", "*"): 1,
+                ("fail", "*"): 1,
+                ("fail", "FIG-1"): 1,
+                ("refused", "*"): 1,
+                ("refused", "TS_NEW_UNSUPPORTED"): 1,
+                ("harness", "*"): 1,
+                ("harness", "program-size"): 1,
+            },
+        )
+
     def test_rejected_rows_reads_the_census(self):
         census = "# kind\tname\tstatus\treason\tprobe\nfeature\tx\trejected\tTS_A\tp\nfeature\ty\taccepted\t-\t-\ntypescript\tz\trejected\tTS_B\tq\n"
         self.assertEqual(

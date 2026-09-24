@@ -1,4 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -11,11 +19,16 @@ if (process.version !== NODE_VERSION) {
 }
 
 const directory = dirname(fileURLToPath(import.meta.url));
-const lanes = [
-  ['opus', 'opus-expressions.txt', 163],
-  ['sol', 'sol-expressions.txt', 124],
-  ['findings', 'findings-expressions.txt', 437],
-];
+const findingsDirectory = join(directory, 'findings');
+const expectationsDirectory = join(directory, 'expectations');
+
+// Every `findings/<shard>.txt`, sorted by shard name. A shard is one file per
+// ticket or review lane; a row's corpus id is `differential:<shard>:<n>` with
+// n 1-based within the shard, so a new shard conflicts with nothing.
+const shards = readdirSync(findingsDirectory)
+  .filter((name) => name.endsWith('.txt'))
+  .map((name) => name.slice(0, -'.txt'.length))
+  .sort();
 
 // Every non-accepted expression and the diagnostic it must name, from
 // `dispositions.tsv`, which the oracle test also reads.
@@ -32,14 +45,10 @@ const dispositions = new Map(
     }),
 );
 
-function expressions(file, expectedCount) {
-  const values = readFileSync(join(directory, file), 'utf8')
+function expressions(shard) {
+  return readFileSync(join(findingsDirectory, `${shard}.txt`), 'utf8')
     .split('\n')
     .filter((line) => line.length > 0);
-  if (values.length !== expectedCount) {
-    throw new Error(`${file}: expected ${expectedCount} rows, got ${values.length}`);
-  }
-  return values;
 }
 
 function eraseTypesForNode(expression) {
@@ -92,25 +101,40 @@ function typescriptNodeString(expression) {
   }
 }
 
-const rows = [['lane', 'index', 'disposition', 'expression', `node_${NODE_VERSION}`, 'diagnostic']];
-for (const [lane, file, expectedCount] of lanes) {
-  for (const [offset, expression] of expressions(file, expectedCount).entries()) {
+mkdirSync(expectationsDirectory, { recursive: true });
+const header = ['lane', 'index', 'disposition', 'expression', `node_${NODE_VERSION}`, 'diagnostic'];
+let total = 0;
+const distinct = new Set();
+for (const shard of shards) {
+  const rows = [header];
+  for (const [offset, expression] of expressions(shard).entries()) {
     const { disposition, diagnostic } = dispositions.get(expression) ?? {
       disposition: 'accept',
       diagnostic: '-',
     };
     rows.push([
-      lane,
+      shard,
       String(offset + 1),
       disposition,
       JSON.stringify(expression),
       JSON.stringify(nodeString(expression)),
       diagnostic,
     ]);
+    distinct.add(JSON.stringify(expression));
   }
+  writeFileSync(
+    join(expectationsDirectory, `${shard}.tsv`),
+    `${rows.map((row) => row.join('\t')).join('\n')}\n`,
+  );
+  total += rows.length - 1;
+  console.log(`expectations/${shard}.tsv: ${rows.length - 1} rows`);
 }
 
-writeFileSync(
-  join(directory, 'expectations.tsv'),
-  `${rows.map((row) => row.join('\t')).join('\n')}\n`,
-);
+// A shard's table is stale once its findings file is gone.
+for (const name of readdirSync(expectationsDirectory)) {
+  if (name.endsWith('.tsv') && !shards.includes(name.slice(0, -'.tsv'.length))) {
+    unlinkSync(join(expectationsDirectory, name));
+    console.log(`expectations/${name}: removed (no findings/${name.slice(0, -'.tsv'.length)}.txt)`);
+  }
+}
+console.log(`total: ${total} rows, ${distinct.size} distinct expressions`);

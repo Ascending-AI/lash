@@ -31,11 +31,12 @@ fn full_selection_matches_the_ratchet() {
     let paths = runner::vendored_tests().into_iter().collect::<Vec<_>>();
     let observed = runner::run_all(&paths);
     if runner::bless(&paths, &observed, &recorded) {
-        eprintln!("blessed outcomes.tsv and expected-counts.tsv from the run");
+        eprintln!("blessed outcomes.tsv from the run");
         return;
     }
     let mismatches = runner::compare(&paths, &observed, &recorded);
     eprintln!("{}", runner::summary(&recorded));
+    eprintln!("{}", runner::tally_lines(&recorded));
     assert!(
         mismatches.is_empty(),
         "{} Test262 outcomes changed; a new pass must be promoted, a new failure \

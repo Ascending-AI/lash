@@ -959,8 +959,8 @@ class PrTailLabelTests(unittest.TestCase):
 
     `bazel-tests-tail` runs only on merge groups and dispatches, and lash PRs
     are often admin-merged past the queue: #2109 appended to
-    `corpus_laws__test`'s expectations file and main went red because nothing
-    ran the deferred test on the PR.
+    `corpus_laws__test`'s expectations file (now sharded) and main went red
+    because nothing ran the deferred test on the PR.
     """
 
     # Every `dev-deferred` label the checked-in inventory currently assigns to
@@ -976,11 +976,11 @@ class PrTailLabelTests(unittest.TestCase):
 
     def test_the_2109_diff_yields_the_typescript_deferred_labels(self) -> None:
         labels = ci_plan.pr_tail_labels(
-            ["crates/lash-typescript/tests/differential/expectations.tsv"]
+            ["crates/lash-typescript/tests/differential/expectations/findings.tsv"]
         )
         self.assertEqual(self.TYPESCRIPT_TAIL, labels)
         plan = ci_plan.classify(
-            [("M", "crates/lash-typescript/tests/differential/expectations.tsv")]
+            [("M", "crates/lash-typescript/tests/differential/expectations/findings.tsv")]
         )
         self.assertEqual(" ".join(self.TYPESCRIPT_TAIL), plan["pr_tail_labels"])
 
