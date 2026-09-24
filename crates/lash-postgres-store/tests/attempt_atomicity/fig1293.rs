@@ -438,7 +438,8 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
             &storage,
             Arc::clone(&first_effect_host),
             Arc::clone(&postgres_registry),
-        ),
+        )
+        .await,
         postgres_model.clone(),
         Arc::clone(&postgres_store),
         postgres_policy.clone(),
@@ -458,7 +459,8 @@ async fn fig1293_public_migrated_tools_are_literal_on_inline_and_postgres_redriv
             &storage,
             Arc::clone(&replay_effect_host),
             Arc::clone(&postgres_registry),
-        ),
+        )
+        .await,
         postgres_model,
         postgres_store,
         postgres_policy,
@@ -689,7 +691,7 @@ async fn fig1293_crash_and_redrive(
     let state = fig1293_state(&policy);
     let store = detached_session_store().await;
     let mut first = fig1293_runtime(
-        pg_law_backend(&storage, Arc::clone(&effect_host), Arc::clone(&registry)),
+        pg_law_backend(&storage, Arc::clone(&effect_host), Arc::clone(&registry)).await,
         model.clone(),
         Arc::clone(&store),
         policy.clone(),
@@ -722,7 +724,8 @@ async fn fig1293_crash_and_redrive(
             &storage,
             Arc::clone(&replay_effect_host),
             Arc::clone(&registry),
-        ),
+        )
+        .await,
         model,
         store,
         policy,

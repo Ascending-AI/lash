@@ -798,11 +798,20 @@ fn postgres_public_turn_scope(
 /// with `effect_host` (a host over the same storage, possibly under a test
 /// layer) and `registry` (the law's handle on the same storage's registry) in
 /// place of the backend's own.
-fn pg_law_backend(
+///
+/// These laws certify the PostgreSQL effect journal and registry. The session
+/// history a law runtime and its worker's child runtimes commit is outside what
+/// they check, so each law runtime keeps it in a detached session catalog of
+/// its own (see [`detached_session_store`]). A law "crashes" a host by
+/// aborting its turn task while that host's child runtimes live on, so a
+/// catalog shared across hosts would leave the redrive waiting on a child
+/// session lease the crashed host still renews.
+async fn pg_law_backend(
     storage: &PostgresStorage,
     effect_host: Arc<dyn EffectHost>,
     registry: Arc<dyn lash_core_execution::ProcessRegistry>,
 ) -> Arc<dyn lash_core_execution::Backend> {
+    let detached = held_memory_backend().await;
     // The laws write no attachment; the backend's attachment port is an
     // in-process byte store.
     lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
@@ -813,7 +822,23 @@ fn pg_law_backend(
     ))
     .map_effect_host(|_| effect_host)
     .map_process_registry(|_| registry)
+    .map_session_store_factory(|_| lash_core_execution::Backend::session_store_factory(&detached))
     .into_backend()
+}
+
+/// A fresh SQLite memory backend, held for the life of the test binary: its
+/// named in-memory databases live while any handle does, and the stores it
+/// hands out reach sibling databases by name.
+async fn held_memory_backend() -> lash_sqlite_store::SqliteBackend {
+    static HELD: std::sync::Mutex<Vec<lash_sqlite_store::SqliteBackend>> =
+        std::sync::Mutex::new(Vec::new());
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend");
+    HELD.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(backend.clone());
+    backend
 }
 
 /// The law runtime's session store. These laws certify the PostgreSQL effect
@@ -822,9 +847,8 @@ fn pg_law_backend(
 /// in PostgreSQL session rows a rerun would inherit.
 async fn detached_session_store() -> Arc<dyn lash_core_execution::RuntimePersistence> {
     Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
+        held_memory_backend()
             .await
-            .expect("open a SQLite memory backend")
             .open_store()
             .await
             .expect("open a detached session store"),
@@ -1370,7 +1394,8 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
             &storage,
             crossing_host(first_host.clone()),
             Arc::clone(&registry),
-        ),
+        )
+        .await,
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
         PublicIntentKind::Signal,
@@ -1444,7 +1469,8 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
             &storage,
             crossing_host(replay_host.clone()),
             Arc::clone(&registry),
-        ),
+        )
+        .await,
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
         PublicIntentKind::Signal,
@@ -1548,7 +1574,7 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
     let model_calls = Arc::new(AtomicUsize::new(0));
     let effect_host = Arc::new(storage.effect_host());
     let mut first = public_signal_runtime(
-        pg_law_backend(&storage, effect_host.clone(), Arc::clone(&registry)),
+        pg_law_backend(&storage, effect_host.clone(), Arc::clone(&registry)).await,
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
         PublicIntentKind::ParentEnd,
