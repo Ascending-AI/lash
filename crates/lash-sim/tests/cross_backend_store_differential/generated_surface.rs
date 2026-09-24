@@ -390,6 +390,16 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
         self.inner.controller().effect_journaling()
     }
 
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<lash_core::IndependentEffectWork<'work>>,
+    ) {
+        self.inner
+            .controller()
+            .drive_independent_effect_work(work)
+            .await;
+    }
+
     fn wants_segment_boundary(
         &self,
         progress: &lash_core::SegmentProgress,

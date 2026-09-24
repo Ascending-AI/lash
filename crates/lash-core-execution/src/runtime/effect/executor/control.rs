@@ -395,6 +395,23 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         EffectJournaling::Local
     }
 
+    /// Drives independent pieces of work that each issue effects on this
+    /// controller, every one to completion, one at a time in the given order.
+    ///
+    /// Running them one at a time is what a journal replayed by position
+    /// needs, and it is correct on every journal. Pieces that ran together
+    /// would commit in whatever order they reached the journal, and a replay
+    /// issuing them in another order would meet a recorded entry of another
+    /// name (FIG-3671). A controller whose effects cannot be misread by the
+    /// order they commit in overrides this to run the pieces concurrently.
+    /// That covers a controller that finds each recorded effect by its replay
+    /// key and one that records nothing. Forwarding wrappers forward.
+    async fn drive_independent_effect_work<'work>(&self, work: Vec<IndependentEffectWork<'work>>) {
+        for piece in work {
+            piece.await;
+        }
+    }
+
     /// Advises an engine to end the current in-process execution segment at a
     /// quiescent point. Engines may decline when live state is not capturable,
     /// but must make progress before returning another decline. In particular,
@@ -711,6 +728,13 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         }
     }
 }
+
+/// One piece of work handed to
+/// [`drive_independent_effect_work`](RuntimeEffectController::drive_independent_effect_work):
+/// a future that issues effects on the controller and reports its result
+/// through whatever it captured.
+pub type IndependentEffectWork<'work> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'work>>;
 
 /// A controller's answer to
 /// [`read_recorded_journal`](RuntimeEffectController::read_recorded_journal).

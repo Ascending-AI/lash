@@ -131,6 +131,13 @@ impl RuntimeEffectController for SeamEffectController {
         self.inner.effect_journaling()
     }
 
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<crate::IndependentEffectWork<'work>>,
+    ) {
+        self.inner.drive_independent_effect_work(work).await;
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -556,6 +563,13 @@ impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
 impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
     fn effect_journaling(&self) -> crate::EffectJournaling {
         self.inner.effect_journaling()
+    }
+
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<crate::IndependentEffectWork<'work>>,
+    ) {
+        self.inner.drive_independent_effect_work(work).await;
     }
 
     async fn execute_effect(

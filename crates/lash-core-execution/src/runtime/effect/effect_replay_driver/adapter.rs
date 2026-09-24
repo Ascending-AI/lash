@@ -345,6 +345,15 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
         crate::EffectJournaling::Journaled
     }
 
+    /// Concurrent: the store journal finds each recorded effect by its replay
+    /// key, so the order the pieces commit in changes nothing a replay reads.
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<crate::IndependentEffectWork<'work>>,
+    ) {
+        futures_util::future::join_all(work).await;
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

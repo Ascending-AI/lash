@@ -1170,3 +1170,237 @@ async fn a_refused_presentation_refuses_the_child_rather_than_settling_as_its_re
         "the refusal carries the controller's own error: {refused:?}"
     );
 }
+
+/// Counts how many journaled tool attempts are in flight at once on one
+/// controller, and in which order they were issued. Each attempt yields a few
+/// times before it runs, so an attempt issued alongside a sibling is still in
+/// flight when the sibling is polled. `concurrent` makes it drive independent
+/// work the way a keyed journal's controller does; left false, it keeps the
+/// seam's default, which is what Restate's controller answers.
+struct IssueOrderRecorder {
+    concurrent: bool,
+    in_flight: std::sync::atomic::AtomicUsize,
+    peak_in_flight: std::sync::atomic::AtomicUsize,
+    issued: std::sync::Mutex<Vec<String>>,
+}
+
+impl IssueOrderRecorder {
+    fn new(concurrent: bool) -> Self {
+        Self {
+            concurrent,
+            in_flight: std::sync::atomic::AtomicUsize::new(0),
+            peak_in_flight: std::sync::atomic::AtomicUsize::new(0),
+            issued: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl crate::AwaitEventResolver for IssueOrderRecorder {}
+
+#[async_trait::async_trait]
+impl crate::RuntimeEffectController for IssueOrderRecorder {
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<crate::IndependentEffectWork<'work>>,
+    ) {
+        if self.concurrent {
+            futures_util::future::join_all(work).await;
+        } else {
+            for piece in work {
+                piece.await;
+            }
+        }
+    }
+
+    async fn execute_effect(
+        &self,
+        envelope: RuntimeEffectEnvelope,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        use std::sync::atomic::Ordering;
+        if !matches!(
+            &envelope.command,
+            crate::RuntimeEffectCommand::ToolAttempt { .. }
+        ) {
+            return local_executor.execute(envelope).await;
+        }
+        self.issued
+            .lock_recover()
+            .push(envelope.invocation.replay_key().to_owned());
+        let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak_in_flight.fetch_max(now, Ordering::SeqCst);
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        let outcome = local_executor.execute(envelope).await;
+        self.in_flight.fetch_sub(1, Ordering::SeqCst);
+        outcome
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("IssueOrderRecorder"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::CancellationToken,
+    ) -> Result<crate::GroupSettlement, RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("IssueOrderRecorder"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("IssueOrderRecorder"))
+    }
+
+    async fn commit_group_child_final(
+        &self,
+        _commit: crate::runtime::effect::GroupChildFinalCommit,
+    ) -> Result<crate::runtime::effect::EffectGroupChildCommitOutcome, RuntimeEffectControllerError>
+    {
+        Ok(crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped)
+    }
+}
+
+/// A leaf that answers at once.
+struct EchoLeafTools;
+
+#[async_trait::async_trait]
+impl crate::ToolProvider for EchoLeafTools {
+    fn tool_manifests(&self) -> Vec<ToolManifest> {
+        vec![manifest("echo-leaf")]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        (name == "echo-leaf").then(|| Arc::new(crate::ToolContract::default()))
+    }
+
+    async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        crate::ToolOutcome::ok(serde_json::json!("echoed")).into()
+    }
+}
+
+/// Runs a three-call nested batch from a group child's body on `recorder`,
+/// returning the replies.
+async fn run_nested_batch(recorder: Arc<IssueOrderRecorder>) -> Vec<crate::ToolInvocationReply> {
+    let controller = ScopedEffectController::shared(
+        recorder,
+        crate::AdmittedScope::turn("child-session", "turn"),
+    )
+    .expect("a valid child scope");
+    let request = request();
+    let mut lent = lent();
+    // Every nested call emits its stream start on the lent channel; `lent()`'s
+    // one-slot channel would block the second call's send.
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
+    std::mem::forget(event_rx);
+    lent.event_tx = event_tx;
+    lent.tools = Arc::new(EchoLeafTools);
+    lent.tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(vec![
+        crate::ToolDefinition {
+            manifest: manifest("echo-leaf"),
+            contract: crate::ToolContract::default(),
+        },
+    ]));
+    let dispatch = Arc::new(
+        rebind_child_dispatch(
+            &lent,
+            &request,
+            controller,
+            spec(3),
+            &ToolUsageLedger::new(),
+        )
+        .expect("the lent client's test service binds to any recorded authority"),
+    );
+    let wait = child_turn_cancel_wait(
+        &dispatch,
+        &request,
+        &tokio_util::sync::CancellationToken::new(),
+    );
+    let body_context = child_tool_context(
+        &dispatch,
+        &request,
+        wait,
+        crate::tool_dispatch::OrchestratingChildSinks::default(),
+    );
+    crate::OrchestrationContext::new(body_context)
+        .call_tool_batch(
+            ["nested-0", "nested-1", "nested-2"]
+                .into_iter()
+                .map(|id| {
+                    crate::ToolInvocation::new(id, manifest("echo-leaf").id, serde_json::json!({}))
+                })
+                .collect(),
+        )
+        .await
+}
+
+/// FIG-3671: a group child's nested batch hands its calls to the body's
+/// controller as independent work, and a controller on the seam's default
+/// (Restate's, whose journal replays by position) issues them one at a time,
+/// in source order. Calls issued concurrently would commit in whatever order
+/// they reached that journal, and the redrive, reissuing them in another
+/// order, would meet a recorded entry of another name. On Restate that was
+/// the journal mismatch that stranded the migrated-tools law's batch child.
+#[tokio::test]
+async fn a_nested_batch_issues_its_calls_one_at_a_time_in_source_order_on_the_default_controller() {
+    let recorder = Arc::new(IssueOrderRecorder::new(false));
+
+    let replies = run_nested_batch(Arc::clone(&recorder)).await;
+
+    assert_eq!(replies.len(), 3, "every nested call settles");
+    assert!(
+        replies.iter().all(|reply| reply.output.is_success()),
+        "every nested call succeeds: {replies:?}"
+    );
+    assert_eq!(
+        recorder
+            .peak_in_flight
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the default controller never holds two of the body's attempts in flight"
+    );
+    let issued = recorder.issued.lock_recover().clone();
+    assert_eq!(
+        issued.len(),
+        3,
+        "one journaled attempt per call: {issued:?}"
+    );
+    for (issued, call) in issued.iter().zip(["nested-0", "nested-1", "nested-2"]) {
+        assert!(
+            issued.contains(call),
+            "attempts are issued in source order: {issued} should be {call}'s"
+        );
+    }
+}
+
+/// The keyed counterpart: a controller that drives independent work
+/// concurrently, as one whose journal finds each attempt by its replay key
+/// does, still overlaps the nested calls, because the order they commit in
+/// changes nothing a redrive reads.
+#[tokio::test]
+async fn a_nested_batch_overlaps_its_calls_on_a_controller_that_drives_work_concurrently() {
+    let recorder = Arc::new(IssueOrderRecorder::new(true));
+
+    let replies = run_nested_batch(Arc::clone(&recorder)).await;
+
+    assert_eq!(replies.len(), 3, "every nested call settles");
+    assert!(
+        replies.iter().all(|reply| reply.output.is_success()),
+        "every nested call succeeds: {replies:?}"
+    );
+    assert_eq!(
+        recorder
+            .peak_in_flight
+            .load(std::sync::atomic::Ordering::SeqCst),
+        3,
+        "a concurrent controller overlaps the body's attempts"
+    );
+}

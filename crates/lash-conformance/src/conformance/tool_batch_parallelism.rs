@@ -52,8 +52,10 @@
 //! handler. Restate is not registered yet: its direct batches overlap as
 //! effect groups of child invocations (FIG-3397), but an orchestrating relay's
 //! nested batch still runs its leaves on the relay child's own invocation
-//! journal, which cannot overlap them. There is no expected-failure mechanism
-//! here and none may be added.
+//! journal. Restate replays that journal by position, so its controller
+//! drives the leaves one at a time (`drive_independent_effect_work`,
+//! FIG-3671). There is no expected-failure mechanism here and none may be
+//! added.
 
 use crate::admit;
 use std::collections::BTreeMap;
