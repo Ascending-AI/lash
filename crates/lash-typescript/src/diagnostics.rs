@@ -724,6 +724,10 @@ mod tests {
             ),
             ("lower/array_map.rs", include_str!("lower/array_map.rs")),
             (
+                "lower/array_literal.rs",
+                include_str!("lower/array_literal.rs"),
+            ),
+            (
                 "lower/array_callbacks.rs",
                 include_str!("lower/array_callbacks.rs"),
             ),
