@@ -553,12 +553,7 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         &self,
         query: &lash_core::store::TurnParkQuery,
     ) -> Result<Vec<lash_core::store::TurnPark>, StoreError> {
-        let Some(inner) = &self.inner else {
-            return Err(StoreError::UnsupportedStoreOperation {
-                operation: "SessionStoreFactory::list_turn_parks",
-            });
-        };
-        inner.list_turn_parks(query).await
+        self.inner.list_turn_parks(query).await
     }
 
     async fn turn_park_feed(
@@ -566,24 +561,14 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         after: lash_core::store::TurnParkFeedCursor,
         limit: std::num::NonZeroUsize,
     ) -> Result<lash_core::store::TurnParkFeedPage, StoreError> {
-        let Some(inner) = &self.inner else {
-            return Err(StoreError::UnsupportedStoreOperation {
-                operation: "SessionStoreFactory::turn_park_feed",
-            });
-        };
-        inner.turn_park_feed(after, limit).await
+        self.inner.turn_park_feed(after, limit).await
     }
 
     async fn compact_turn_park_feed(
         &self,
         through: lash_core::store::TurnParkFeedCursor,
     ) -> Result<(), StoreError> {
-        let Some(inner) = &self.inner else {
-            return Err(StoreError::UnsupportedStoreOperation {
-                operation: "SessionStoreFactory::compact_turn_park_feed",
-            });
-        };
-        inner.compact_turn_park_feed(through).await
+        self.inner.compact_turn_park_feed(through).await
     }
 }
 
