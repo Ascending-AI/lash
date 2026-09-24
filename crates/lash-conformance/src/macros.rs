@@ -750,22 +750,39 @@ macro_rules! effect_group_cancelled_child_terminal_tests {
     };
 }
 
+/// The fixture yields `(guard, make, witness)`: the witness is how this host
+/// proves its active-wait registration before the quiescence law asks for
+/// retirement (`effect_host_journaled_wait_registration_witness` for a store
+/// journal).
 #[macro_export]
 macro_rules! effect_host_await_event_tests {
     ($fixture:block) => {
+        $crate::effect_host_await_event_tests!(@witnessed $fixture; [
+            (effect_host_await_events_with_active_wait_witness, "effect-host-await-event"),
+        ]);
         $crate::effect_host_await_event_tests!(@catalogue $fixture; [
-            (effect_host_await_events, "effect-host-await-event"),
             (
                 completion_routing_pairwise_refusal,
                 "completion-routing-pairwise"
             ),
         ]);
     };
+    (@witnessed $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, make, witness) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(make, witness).await;
+                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+            }
+        )*
+    };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, make) = $fixture;
+                let (_fixture_guard, make, _witness) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);

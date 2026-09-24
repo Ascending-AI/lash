@@ -124,15 +124,19 @@ lash_conformance::effect_host_await_event_tests!({
     reset(storage.pool()).await;
     drop(storage);
     let database_url = database_url().expect("configured Postgres database URL");
-    (database_lock, move || {
-        let database_url = database_url.clone();
-        let storage = sync_await(async move {
-            PostgresStorage::connect(&database_url)
-                .await
-                .expect("PostgreSQL effect host")
-        });
-        Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
-    })
+    (
+        database_lock,
+        move || {
+            let database_url = database_url.clone();
+            let storage = sync_await(async move {
+                PostgresStorage::connect(&database_url)
+                    .await
+                    .expect("PostgreSQL effect host")
+            });
+            Arc::new(storage.effect_host()) as Arc<dyn EffectHost>
+        },
+        lash_conformance::effect_host_journaled_wait_registration_witness,
+    )
 });
 
 // The durable PostgreSQL tier answers the effect-group contract the same way

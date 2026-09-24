@@ -1478,10 +1478,14 @@ lash_conformance::turn_work_driver_tests!({
 lash_conformance::effect_host_await_event_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let reopen = backend.clone();
-    (backend, move || {
-        let backend = reopen.clone();
-        sync_await(async move { backend.reopen().await.effect_host() }) as Arc<dyn EffectHost>
-    })
+    (
+        backend,
+        move || {
+            let backend = reopen.clone();
+            sync_await(async move { backend.reopen().await.effect_host() }) as Arc<dyn EffectHost>
+        },
+        lash_conformance::effect_host_journaled_wait_registration_witness,
+    )
 });
 
 lash_conformance::tool_batch_parallelism_tests!({

@@ -578,9 +578,11 @@ mod tests {
     // No replay/retirement/fencing macros: the native host owns no durable journal.
 
     crate::effect_host_await_event_tests!({
-        ((), || {
-            Arc::new(crate::NativeEffectHost::default()) as Arc<dyn crate::EffectHost>
-        })
+        (
+            (),
+            || Arc::new(crate::NativeEffectHost::default()) as Arc<dyn crate::EffectHost>,
+            crate::effect_host_await_event_when_quiescent_waits_for_live_waits,
+        )
     });
 
     // No cold-AwaitEvent invocation: the native host has no durable reopen boundary.
