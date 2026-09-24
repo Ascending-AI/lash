@@ -31,7 +31,13 @@ where
     C: RestateControllerContext<'ctx>,
 {
     let read = context
-        .effect_group_read_rank(group_key.to_string(), EffectGroupReadRankRequest { rank })
+        .effect_group_read_rank(
+            group_key.to_string(),
+            EffectGroupReadRankRequest {
+                rank,
+                for_caller: false,
+            },
+        )
         .await
         .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
     let (record, child_replay_key) = match read {

@@ -1382,7 +1382,10 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
             "EffectGroupIndex",
             &group_key,
             "read_rank",
-            &EffectGroupReadRankRequest { rank: 1 },
+            &EffectGroupReadRankRequest {
+                rank: 1,
+                for_caller: false,
+            },
         )
         .await
         .expect("dispatcher witness rank reads");

@@ -572,6 +572,7 @@ macro_rules! effect_group_host_tests {
             (every_child_is_delivered_once_in_rank_order, "group-order", wired),
             (siblings_settling_together_get_distinct_sequences, "group-concurrent-ranks", wired),
             (a_close_racing_its_children_seats_one_terminal_per_child, "group-close-race", wired),
+            (a_closed_group_serves_its_caller_no_further_settlements, "group-closed-caller", wired),
             (the_wake_rule_is_identity_and_the_host_filters_nothing, "group-wake-identity", wired),
             (awaiting_past_the_last_child_is_refused, "group-past-last", wired),
             (a_cancelled_await_leaves_the_rank_to_be_read_again, "group-cancelled-await", wired),
@@ -605,30 +606,6 @@ macro_rules! __effect_group_cancelled_child_terminal_register {
             $crate::registration_macro_support::$law(factory).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
-    };
-}
-
-/// Register the closed-group caller law: a replayed frame awaiting a group its
-/// caller already closed is refused by shape. Its own suite so a tier can
-/// park it apart from the rest of the effect-group catalogue; the fixture is
-/// the `effect_group_host_tests!` one.
-#[macro_export]
-macro_rules! effect_group_closed_caller_tests {
-    ($fixture:block) => {
-        $crate::effect_group_closed_caller_tests!(@catalogue [] $fixture);
-    };
-    ($(#[$attr:meta])+ $fixture:block) => {
-        $crate::effect_group_closed_caller_tests!(@catalogue [$(#[$attr])*] $fixture);
-    };
-    (@catalogue [$($attr:tt)*] $fixture:block) => {
-        $crate::effect_group_closed_caller_tests!(@expand [$($attr)*] $fixture; [
-            (a_closed_group_serves_its_caller_no_further_settlements, "group-closed-caller", wired),
-        ]);
-    };
-    (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
-        $(
-            $crate::__effect_group_host_register!($attrs $fixture; $law, $label, $mode);
-        )*
     };
 }
 
