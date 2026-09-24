@@ -115,7 +115,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
 
         Node::Empty => arbitrary,
         Node::Goal => arbitrary,
-        Node::BackRef(..) => arbitrary,
+        Node::BackRef { .. } => arbitrary,
 
         Node::CharSet(chars) => {
             let bytes = chars

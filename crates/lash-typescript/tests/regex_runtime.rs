@@ -479,3 +479,162 @@ fn the_regexp_charge_is_the_documented_ratio() {
         "one regexp call must cost at least the documented charge of {per_call}"
     );
 }
+
+/// FIG-3658: a name shared by capture groups in disjoint alternatives is one
+/// logical group. A backreference to it consults whichever group participated
+/// — matching the empty string when none did — and `groups.name` answers the
+/// participating group's text.
+#[test]
+fn duplicate_named_groups_match_through_whichever_alternative_participated() {
+    let cases = [
+        (
+            "finish(/(?<x>a)|(?<x>b)/.exec('bab').slice(0,3).join('|'));",
+            "b||b",
+        ),
+        (
+            "finish(/(?<x>b)|(?<x>a)/.exec('bab').slice(0,3).join('|'));",
+            "b|b|",
+        ),
+        (
+            "finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('aa').slice(0,3).join('|'));",
+            "aa|a|",
+        ),
+        (
+            "finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('bb').slice(0,3).join('|'));",
+            "bb||b",
+        ),
+        (
+            "finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('abab') === null ? 'null' : 'found');",
+            "null",
+        ),
+        (
+            "finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('cdef') === null ? 'null' : 'found');",
+            "null",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z)\\k<a>$/.exec('xx').slice(0,3).join('|'));",
+            "xx|x|",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z)\\k<a>$/.exec('z').slice(0,3).join('|'));",
+            "z||",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z)\\k<a>$/.exec('zz') === null ? 'null' : 'found');",
+            "null",
+        ),
+        (
+            "finish(/(?<a>x)|(?:zy\\k<a>)/.exec('zy').slice(0,2).join('|'));",
+            "zy|",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.exec('xz').slice(0,3).join('|'));",
+            "xz||",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.exec('yz').slice(0,3).join('|'));",
+            "yz||",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.exec('xzx') === null ? 'null' : 'found');",
+            "null",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.exec('yzy') === null ? 'null' : 'found');",
+            "null",
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+    assert_eq!(
+        finished(
+            "const m=/(?:(?:(?<x>a)|(?<x>b))\\k<x>){2}/.exec('aabb'); finish([m[0],m[1],m[2],m.groups.x]);"
+        ),
+        Value::List(
+            vec![
+                Value::String("aabb".into()),
+                Value::Undefined,
+                Value::String("b".into()),
+                Value::String("b".into()),
+            ]
+            .into()
+        )
+    );
+    assert!(matches!(
+        execute("finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.test('abab'))"),
+        Ok(ExecutionOutcome::Finished(Value::Bool(false)))
+    ));
+}
+
+/// FIG-3658: `(?i:`/`(?-i:` scope ignoreCase to the group — backreferences,
+/// `\b`/`\B`, `\w` and `\p` all read the flag in force at their own position —
+/// and `(?s:`/`(?-s:`/`(?m:`/`(?-m:` scope `dotAll`/`multiline` the same way.
+#[test]
+fn regexp_modifiers_scope_flags_to_their_group() {
+    // Local `i` folds a backreference's comparison; nothing else changes.
+    let re1 = "/(a)(?i:\\1)/";
+    for (input, expected) in [("AA", false), ("Aa", false), ("aa", true), ("aA", true)] {
+        assert_eq!(
+            finished(&format!("finish({re1}.test('{input}'));")),
+            Value::Bool(expected),
+            "{re1} vs {input}"
+        );
+    }
+    // Local `-i` preserves a case-sensitive backreference under a global `i`.
+    let re2 = "/(a)(?-i:\\1)/i";
+    for (input, expected) in [("AA", true), ("aA", false), ("Aa", false), ("aa", true)] {
+        assert_eq!(
+            finished(&format!("finish({re2}.test('{input}'));")),
+            Value::Bool(expected),
+            "{re2} vs {input}"
+        );
+    }
+    // `\b`/`\B` under local `i` + `u` use the Unicode fold: ſ and K count as
+    // word characters inside the group only.
+    assert_eq!(
+        finished(
+            "finish([/(?i:\\b)/u.test('\\u017f'),/(?i:\\b)/u.test('\\u212a'),/(?-i:\\b)/ui.test('\\u017f'),/(?-i:\\b)/ui.test('\\u212a'),/(?i:Z\\B)/u.test('Z\\u017f'),/(?i:Z\\B)/u.test('Z\\u212a'),/(?-i:Z\\B)/ui.test('Z\\u017f'),/(?-i:Z\\B)/ui.test('Z\\u212a'),/(?i:\\w)/u.test('\\u017f'),/(?-i:\\w)/iu.test('\\u017f')]);"
+        ),
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+    // `\p` under local `i` closes over case folds; `\P` negates the raw set
+    // first, so both a and A answer.
+    assert_eq!(
+        finished(
+            "finish([/(?i:\\p{Lu})/u.test('a'),/(?i:\\p{Lu})/u.test('\\u03c3'),/(?-i:\\p{Lu})/iu.test('a'),/(?i:\\P{Lu})/u.test('A'),/(?i:\\P{Lu})/u.test('a')]);"
+        ),
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(true),
+            ]
+            .into()
+        )
+    );
+    // `(?s:` widens `.` inside the group only and `(?m:`/`(?-m:` scope `^`/`$`
+    // the same way.
+    assert_eq!(
+        finished(
+            "finish([/(?s:.)/.test('\\n'),/(?m:^b$)/.test('a\\nb'),/(?-m:^b$)/m.test('a\\nb')]);"
+        ),
+        Value::List(vec![Value::Bool(true), Value::Bool(true), Value::Bool(false)].into())
+    );
+}

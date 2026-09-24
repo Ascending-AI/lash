@@ -896,22 +896,32 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         next_or_bt!(true)
                     }
 
-                    &Insn::BackRef(cg_idx) => {
-                        let cg = self.s.groups.mat(cg_idx as usize);
-                        // Backreferences to a capture group that did not match always succeed (ES5
-                        // 15.10.2.9).
-                        // Note we may be in the capture group we are examining, e.g. /(abc\1)/.
-                        let matched;
-                        if let Some(orig_range) = cg.as_range() {
-                            if re.flags.icase {
-                                matched = matchers::backref_icase(input, dir, orig_range, &mut pos);
+                    Insn::BackRef { groups, icase } => {
+                        // A backreference may name several capture groups when
+                        // the name is shared across disjoint alternations.
+                        // Only groups which actually participated may be
+                        // consulted; if none did, the reference matches the
+                        // empty string (ES6 21.2.2.9).
+                        // Note we may be in the capture group we are examining,
+                        // e.g. /(abc\1)/.
+                        let mut matched = true;
+                        for &cg_idx in groups.iter() {
+                            let Some(orig_range) = self.s.groups.mat(cg_idx as usize).as_range()
+                            else {
+                                continue;
+                            };
+                            matched = false;
+                            let saved_pos = pos;
+                            let attempt = if *icase {
+                                matchers::backref_icase(input, dir, orig_range, &mut pos)
                             } else {
-                                matched = matchers::backref(input, dir, orig_range, &mut pos);
+                                matchers::backref(input, dir, orig_range, &mut pos)
+                            };
+                            if attempt {
+                                matched = true;
+                                break;
                             }
-                        } else {
-                            // This group has not been exited and so the match succeeds (ES6
-                            // 21.2.2.9).
-                            matched = true;
+                            pos = saved_pos;
                         }
                         next_or_bt!(matched)
                     }

@@ -219,19 +219,28 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             nextinsn_or_fail!(true)
         }
 
-        &Insn::BackRef(group_idx) => {
-            let matched;
-            let group = &mut s.groups[group_idx as usize];
-            if let Some(orig_range) = group.as_range() {
-                if re.flags.icase {
-                    matched = matchers::backref_icase(input, dir, orig_range, &mut s.pos);
+        Insn::BackRef { groups, icase } => {
+            // A backreference may name several capture groups when the name is
+            // shared across disjoint alternations. Only groups which actually
+            // participated may be consulted; if none did, the reference matches
+            // the empty string (ES6 21.2.2.9).
+            let mut matched = true;
+            for &group_idx in groups.iter() {
+                let Some(orig_range) = s.groups[group_idx as usize].as_range() else {
+                    continue;
+                };
+                matched = false;
+                let saved_pos = s.pos;
+                let attempt = if *icase {
+                    matchers::backref_icase(input, dir, orig_range, &mut s.pos)
                 } else {
-                    matched = matchers::backref(input, dir, orig_range, &mut s.pos)
+                    matchers::backref(input, dir, orig_range, &mut s.pos)
+                };
+                if attempt {
+                    matched = true;
+                    break;
                 }
-            } else {
-                // This group has not been exited, and therefore the match succeeds
-                // (ES6 21.2.2.9).
-                matched = true;
+                s.pos = saved_pos;
             }
             nextinsn_or_fail!(matched)
         }
