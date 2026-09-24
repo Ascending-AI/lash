@@ -19,15 +19,14 @@ use anyhow::{Context, Result, bail, ensure};
 use lash::persistence::SessionStoreFactory as _;
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash::runtime::{
-    AwaitEventResolver, ExecutionScope, NativeRuntimeEffectController, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError,
+    AwaitEventResolver, ExecutionScope, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
 };
 use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventWaitIdentity, LeaseOwnerIdentity, ProcessAwaitOutput,
     ProcessInput, ProcessListFilter, ProcessProvenance, ProcessRecord, ProcessRegistration,
     ProcessRegistry, ProcessStarted, ProcessStatus, ProcessStatusFilter, RecoveryContract,
-    Resolution, ResolveOutcome, SessionScope,
+    Resolution, ResolveOutcome, SessionScope, facade_support::NativeRuntimeEffectController,
 };
 use lash_postgres_store::PostgresStorage;
 use serde_json::{Value, json};
@@ -486,8 +485,13 @@ fn core(
             .build(),
         Arc::new(storage.lashlang_artifact_store()),
     );
-    lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, protocol)
-        .with_native_queued_work()
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            attachments.path().to_path_buf(),
+        )),
+    ));
+    lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, protocol)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("process-operator-flow-mock")
@@ -495,18 +499,8 @@ fn core(
                 .build()
                 .map_err(anyhow::Error::msg)?,
         )
-        .store_factory(Arc::new(
-            storage.session_store_factory_with_shared_process_registry(),
-        ))
-        .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-            attachments.path().to_path_buf(),
-        )))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(storage.process_env_store()))
-        .process_registry(Arc::new(storage.process_registry()))
-        .trigger_store(Arc::new(storage.trigger_store()))
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .trace_jsonl_path(trace_path)
         .trace_level(lash::tracing::TraceLevel::Extended)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

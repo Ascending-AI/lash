@@ -242,7 +242,7 @@ impl Processes {
         Ok(self
             .core
             .process_observation_hub
-            .subscribe(self.registry()?, process_ref, cursor)
+            .subscribe(self.registry(), process_ref, cursor)
             .await?)
     }
 
@@ -260,17 +260,13 @@ impl Processes {
             .await
     }
 
-    fn registry(&self) -> Result<Arc<dyn lash_core::ProcessRegistry>> {
-        self.core.env.process_registry().cloned().ok_or_else(|| {
-            EmbedError::Plugin(lash_core::PluginError::Session(
-                "process registry is unavailable in this runtime".to_string(),
-            ))
-        })
+    fn registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
+        self.core.process_registry()
     }
 
     fn make_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
         Ok(lash_core::facade_support::ProcessWorkObserver::new(
-            self.registry()?,
+            self.registry(),
         ))
     }
 
@@ -324,15 +320,8 @@ impl Processes {
         command: lash_core::ProcessCommand,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEffectOutcome> {
-        let registry = self.registry()?;
-        let ports = self.core.substrate_slot.ports().await;
-        let process_work = self
-            .core
-            .env
-            .clone()
-            .with_work_ports(ports.process.clone(), ports.queued_port())
-            .process_work()
-            .ok_or(EmbedError::MissingProcessRegistry)?;
+        let registry = self.registry();
+        let process_work = Arc::clone(self.core.substrate_slot.ports().await.process.port());
         let invocation =
             Self::process_invocation(&command, scoped_effect_controller.execution_scope());
         let outcome = scoped_effect_controller
@@ -392,15 +381,7 @@ impl Processes {
                 "process start returned the wrong outcome".to_string(),
             )));
         };
-        let ports = self.core.substrate_slot.ports().await;
-        let resolved = self
-            .core
-            .env
-            .clone()
-            .with_work_ports(ports.process.clone(), ports.queued_port());
-        let process_work = resolved
-            .process_work()
-            .ok_or(EmbedError::MissingProcessRegistry)?;
+        let process_work = Arc::clone(self.core.substrate_slot.ports().await.process.port());
         // Advisory, exactly as the runtime start path treats it: the durable
         // row is the work queue, so a failed nudge delays the run rather than
         // failing the start.
@@ -477,7 +458,7 @@ impl Processes {
         mode: lash_core::ProcessEventQueryMode,
     ) -> Result<crate::process_observation::ProcessEventsRead> {
         Ok(crate::process_observation::read_events(
-            &self.registry()?,
+            &self.registry(),
             Some(self.core.process_observation_hub.as_ref()),
             from,
             limit,
@@ -496,7 +477,7 @@ impl Processes {
             request.process_id.clone(),
             lash_core::ProcessIncarnation::from_registration_sequence(request.incarnation),
         );
-        let registry = self.registry()?;
+        let registry = self.registry();
         let cursor = match request.cursor.clone() {
             Some(cursor) => cursor,
             None => {
@@ -534,18 +515,9 @@ impl Processes {
         let process_ref = self
             .core
             .process_registry()
-            .ok_or(EmbedError::MissingProcessRegistry)?
             .resolve_process_ref(process_id)
             .await?;
-        let ports = self.core.substrate_slot.ports().await;
-        let resolved = self
-            .core
-            .env
-            .clone()
-            .with_work_ports(ports.process.clone(), ports.queued_port());
-        let process_work = resolved
-            .process_work()
-            .ok_or(EmbedError::MissingProcessRegistry)?;
+        let process_work = Arc::clone(self.core.substrate_slot.ports().await.process.port());
         Ok(await_process_terminal(process_work.as_ref(), &process_ref).await?)
     }
 
@@ -558,7 +530,6 @@ impl Processes {
         let process_ref = self
             .core
             .process_registry()
-            .ok_or(EmbedError::MissingProcessRegistry)?
             .resolve_process_ref(process_id)
             .await?;
         #[expect(
@@ -598,7 +569,6 @@ impl Processes {
         let process_ref = self
             .core
             .process_registry()
-            .ok_or(EmbedError::MissingProcessRegistry)?
             .resolve_process_ref(process_id)
             .await?;
         let command = lash_core::ProcessCommand::Signal {
@@ -662,7 +632,7 @@ impl Processes {
         to_scope: &lash_core::SessionScope,
         process_ids: &[ProcessId],
     ) -> Result<()> {
-        self.registry()?
+        self.registry()
             .transfer_observers(
                 &from_scope.session_id,
                 &to_scope.session_id,
@@ -707,7 +677,7 @@ impl Processes {
         filter: Option<&lash_core::ProcessListFilter>,
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<lash_core::ProcessPruneReport> {
-        let registry = self.registry()?;
+        let registry = self.registry();
         Self::prune_selection(filter)?;
         // Survey exactly the rows the registry's prune will delete, with the
         // registry's own eligibility predicate (retired status, cutoff,
@@ -721,16 +691,15 @@ impl Processes {
             .await?;
         for process_id in prunable {
             let process_scope = lash_core::ExecutionScope::process(process_id.clone());
-            if let Some(factory) = self.core.store_factory.as_ref() {
-                // This is the cancellation-admission serialization point. The
-                // factory checks every persisted closure and writes the scope
-                // tombstone under the same backend fence later authorization
-                // uses. Either an existing/new pin makes this call fail, or
-                // every later authorization is refused before it is written.
-                factory
-                    .retire_turn_cancel_closure_scope(&process_scope)
-                    .await?;
-            }
+            // This is the cancellation-admission serialization point. The
+            // factory checks every persisted closure and writes the scope
+            // tombstone under the same backend fence later authorization
+            // uses. Either an existing/new pin makes this call fail, or
+            // every later authorization is refused before it is written.
+            self.core
+                .store_factory
+                .retire_turn_cancel_closure_scope(&process_scope)
+                .await?;
             let staging_owner = lash_core::ArtifactOwner::process_start(&process_id);
             self.core
                 .env
@@ -839,7 +808,7 @@ impl Processes {
             let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
                 registry.as_ref(),
                 trigger_store.as_ref(),
-                self.core.store_factory.as_deref(),
+                Some(self.core.store_factory.as_ref()),
             )
             .await
             {
@@ -882,7 +851,7 @@ impl Processes {
         cutoff_epoch_ms: u64,
         watermark: lash_core::ProjectionWatermark,
     ) -> Result<usize> {
-        let registry = self.registry()?;
+        let registry = self.registry();
         let surveyed_trigger_store = if let Some(trigger_store) =
             self.core.env.trigger_store.as_ref()
         {
@@ -905,7 +874,7 @@ impl Processes {
                 match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
                     registry.as_ref(),
                     &surveyed_trigger_store,
-                    self.core.store_factory.as_deref(),
+                    Some(self.core.store_factory.as_ref()),
                 )
                 .await
                 {
@@ -961,7 +930,7 @@ impl Processes {
         &self,
         state: Option<lash_core::WakeDeliveryState>,
     ) -> Result<Vec<lash_core::WakeDelivery>> {
-        self.registry()?
+        self.registry()
             .list_wake_deliveries(state)
             .await
             .map_err(Into::into)
@@ -969,7 +938,7 @@ impl Processes {
 
     /// Summarize delivery states and name blocked groups with their redrive ids.
     pub async fn wake_delivery_report(&self) -> Result<lash_core::WakeDeliveryReport> {
-        self.registry()?
+        self.registry()
             .wake_delivery_report()
             .await
             .map_err(Into::into)
@@ -977,7 +946,7 @@ impl Processes {
 
     /// Explicitly return a discarded delivery to the pending lane.
     pub async fn redrive_wake_delivery(&self, delivery_id: &str) -> Result<()> {
-        self.registry()?
+        self.registry()
             .redrive_wake_delivery(delivery_id)
             .await
             .map_err(Into::into)
@@ -1007,7 +976,7 @@ impl Processes {
             requested_at_ms: now_epoch_ms(),
             reason,
         };
-        self.registry()?
+        self.registry()
             .request_process_abandon(process_id, request)
             .await?;
         self.get(process_id).await?.ok_or_else(|| {

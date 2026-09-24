@@ -529,12 +529,10 @@ async fn run_high_traffic_operation(
             .send()
             .await?;
         durable_queue_depth = session.durable().pending_turn_inputs().await?.len() as u64;
-        let controller = lash::runtime::NativeRuntimeEffectController::default()
-            .allow_process_lifetime_completion_keys();
         let drain = session
             .queued_turn()
             .drain_id(format!("runtime-perf-load-drain-{ordinal}"))
-            .run_with_effects(&controller)
+            .run()
             .await?;
         if drain.ran().is_none() {
             anyhow::bail!("queued high-traffic operation {ordinal} did not run a turn");
@@ -562,10 +560,8 @@ async fn run_high_traffic_operation(
         )
         .with_source(serde_json::json!({}))
         .for_session(session.session_id());
-        let trigger_controller = lash::runtime::NativeRuntimeEffectController::default()
-            .allow_process_lifetime_completion_keys();
-        let controller = lash_core::ScopedEffectController::borrowed(
-            &trigger_controller,
+        let effect_host = core.effect_host();
+        let controller = effect_host.scoped(
             lash_core::AdmittedScope::unpinned(
                 session.turn_scope(format!("runtime-perf-load-trigger-emission-{ordinal}")),
             )
@@ -622,15 +618,13 @@ async fn run_high_traffic_direct_turn(
     ordinal: usize,
     kind: HighTrafficOperationKind,
 ) -> anyhow::Result<TokenUsage> {
-    let controller = lash::runtime::NativeRuntimeEffectController::default()
-        .allow_process_lifetime_completion_keys();
     let report = session
         .turn(TurnInput::text(format!(
             "load-kind:{kind} operation:{ordinal} session:{}",
             session.session_id()
         )))
         .turn_id(format!("runtime-perf-load-turn-{ordinal}"))
-        .run_with_effects(&controller)
+        .run()
         .await?
         .result;
     if !matches!(report.outcome, lash::TurnOutcome::Finished(_)) {

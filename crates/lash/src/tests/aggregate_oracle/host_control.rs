@@ -50,20 +50,19 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell(tier: &JournaledTi
             aggregate.trim_start_matches("Promise.").to_lowercase()
         );
         let theatre = Arc::new(OracleTheatre::default());
-        let registry = Arc::new(TestLocalProcessRegistry::default());
+        let backend = DecoratedBackend::over(tier.backend().await).effect_host(|inner| {
+            Arc::new(lash_core::testing::LayeredEffectHost::new(
+                inner,
+                Arc::new(SettlementFaultLayer {
+                    fail_settlements: AtomicBool::new(true),
+                }),
+            ))
+        });
+        let registry = lash_core::Backend::process_registry(&backend);
         register_intent_target(registry.as_ref(), &session_id).await;
         let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
-        let host = lash_core::testing::LayeredEffectHost::new(
-            lash_sqlite_store::SqliteBackend::memory()
-                .await
-                .expect("open a memory backend")
-                .effect_host(),
-            Arc::new(SettlementFaultLayer {
-                fail_settlements: AtomicBool::new(true),
-            }),
-        );
         let core = oracle_builder(
-            tier,
+            Arc::new(backend),
             &session_id,
             vec![typescript_block(&format!(
                 r#"try {{
@@ -74,10 +73,8 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell(tier: &JournaledTi
 }}"#
             ))],
             Arc::clone(&theatre),
-            Arc::clone(&registry),
             Arc::clone(&requests),
         )
-        .effect_host(Arc::new(host))
         .build(crate::testing::runtime_lease_owner())?;
         let session = core.session(&session_id).open().await?;
         let report = tokio::time::timeout(

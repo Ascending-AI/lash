@@ -469,10 +469,12 @@ async fn main() -> Result<()> {
             })
             .into_components(),
     );
-    let artifact_store = Arc::new(
-        lash_sqlite_store::Store::open(&args.data_dir.join("artifacts.db"))
+    // One SQLite file backend under the data directory holds the sessions,
+    // the effect journal and the compiled Lashlang artifacts.
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open(args.data_dir.join("sessions"))
             .await
-            .context("open RLM artifact store")?,
+            .context("open the RLM smoke SQLite backend")?,
     );
     let protocol = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
@@ -481,7 +483,7 @@ async fn main() -> Result<()> {
             .wall_clock(lash::rlm::WallClockBound::secs(45))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        artifact_store.clone(),
+        backend.process_env_store(),
     );
     let trace_path = args.artifact_dir.join("trace.jsonl");
     let mut trace_context = lash::tracing::TraceContext {
@@ -491,7 +493,7 @@ async fn main() -> Result<()> {
     trace_context
         .metadata
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
-    let core = LashCore::rlm_builder(lash::TurnBudget::bounded(12), protocol)
+    let core = LashCore::rlm_builder(backend, lash::TurnBudget::bounded(12), protocol)
         .no_progress_budget(lash::NoProgressBudget::bounded(4))
         .without_queued_work()
         .plugins(lash::plugins::runtime_plugin_stack())
@@ -503,14 +505,6 @@ async fn main() -> Result<()> {
                 .context("build model metadata")?,
         )
         .tools(workspace.provider())
-        .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            args.data_dir.join("sessions"),
-        )))
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-            args.data_dir.join("attachments"),
-        )))
-        .process_env_store(artifact_store)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .trace_jsonl_path(&trace_path)

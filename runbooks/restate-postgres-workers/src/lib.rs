@@ -4,16 +4,11 @@ mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;
 use anyhow::{Context, Result, bail};
-use lash::durability::EffectHost;
-use lash::persistence::{
-    AttachmentStore, LashlangArtifactStore, LeaseOwnerIdentity, ProcessExecutionEnvStore,
-    SessionStoreFactory,
-};
+use lash::persistence::{AttachmentStore, LashlangArtifactStore, LeaseOwnerIdentity};
 use lash::plugins::{
     PluginExtensionContribution, PluginFactory, PluginRegistrar, PluginSessionContext,
     SessionPlugin,
 };
-use lash::process::ProcessRegistry;
 use lash::rlm::{
     InstructionBound, LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog,
     LashlangLanguageFeatures, LashlangSurfaceContribution, MemoryBound, NamedDataType, RlmChannel,
@@ -449,12 +444,35 @@ pub async fn record_turn_activity(
     Ok(())
 }
 
+/// The Restate backend every worker and runner core of the harness runs on:
+/// the Restate engine host over the PostgreSQL store set, whose attachment
+/// bytes live in `attachment_store`.
+pub fn e2e_backend(
+    storage: &lash_postgres_store::PostgresStorage,
+    attachment_store: Arc<dyn AttachmentStore>,
+    restate_ingress_url: impl Into<lash_restate::RestateConnection>,
+    restate_authority_id: lash_restate::RestateAuthorityId,
+) -> Arc<lash_restate::RestateBackend> {
+    Arc::new(lash_restate::RestateBackend::new(
+        restate_ingress_url,
+        restate_authority_id,
+        Arc::new(lash_postgres_store::PostgresStoreSet::new(
+            storage,
+            attachment_store,
+        )),
+        // Restate turns must enter through an explicit handler-scoped effect
+        // controller. The harness drains durable ingress from its workflow
+        // handlers, so an ambient local queue pump would race those handlers
+        // and cannot legally execute their effects.
+        lash_restate::RestateQueuedWork::Disabled,
+    ))
+}
+
 #[derive(Clone)]
 pub struct E2eCoreConfig {
     pub worker_id: String,
     pub storage: lash_postgres_store::PostgresStorage,
-    pub attachment_store: Arc<dyn AttachmentStore>,
-    pub process_work_driver: lash::process::ProcessWorkWiring,
+    pub backend: Arc<lash_restate::RestateBackend>,
     pub restate_ingress_url: String,
     pub restate_authority_id: lash_restate::RestateAuthorityId,
     pub mock_provider_base_url: String,
@@ -469,12 +487,6 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
     );
     let artifact_store =
         Arc::new(config.storage.lashlang_artifact_store()) as Arc<dyn LashlangArtifactStore>;
-    let process_env_store =
-        Arc::new(config.storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
-    let session_store_factory =
-        Arc::new(config.storage.session_store_factory()) as Arc<dyn SessionStoreFactory>;
-    let trigger_store =
-        Arc::new(config.storage.trigger_store()) as Arc<dyn lash_core::TriggerStore>;
     let provider = lash_core::facade_support::ProviderHandle::new(
         OpenAiCompatibleProvider::new(
             "e2e-key",
@@ -497,7 +509,11 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             trace_dir.join(format!("{}.lashlang.jsonl", config.worker_id)),
         );
     }
-    let mut builder = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    let mut builder = lash::LashCore::rlm_builder(
+        Arc::clone(&config.backend) as Arc<dyn lash::Backend>,
+        lash::TurnBudget::Unbounded,
+        factory,
+    )
         .provider(provider)
         .model(
             lash::ModelSpec::builder("e2e-mock")
@@ -505,25 +521,8 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
                 .build()
                 .map_err(|err| anyhow::anyhow!(err))?,
         )
-        .store_factory(session_store_factory)
-        .attachment_store(config.attachment_store)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(process_env_store)
-        .effect_host(
-            Arc::new(RestateEffectHost::new(
-                config.restate_ingress_url.clone(),
-                config.restate_authority_id.clone(),
-            ))
-                as Arc<dyn EffectHost>,
-        )
-        .trigger_store(trigger_store)
-        .process_work(config.process_work_driver)
-        // Restate turns must enter through an explicit handler-scoped effect
-        // controller. The harness drains durable ingress from its workflow
-        // handlers, so an ambient local queue pump would race those handlers
-        // and cannot legally execute their effects.
-        .without_queued_work()
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
         // The `processes` module is catalogue presence, not an ability bit
         // (ADR 0095): the scripted programs this harness serves author
@@ -550,18 +549,6 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
 fn process_incarnation_id() -> &'static str {
     static INCARNATION_ID: OnceLock<String> = OnceLock::new();
     INCARNATION_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
-}
-
-pub fn process_registry_from_storage(
-    storage: &lash_postgres_store::PostgresStorage,
-) -> Arc<dyn ProcessRegistry> {
-    Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>
-}
-
-pub fn process_continuations_from_storage(
-    storage: &lash_postgres_store::PostgresStorage,
-) -> Arc<dyn lash_core::ProcessContinuationStore> {
-    Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessContinuationStore>
 }
 
 #[derive(Clone)]

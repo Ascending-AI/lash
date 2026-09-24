@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use lash::{QueuedTurnDrain, TurnInput};
 use lash_core::runtime::{RuntimeTurnPhase, RuntimeTurnPhaseProbe};
-use lash_core::{LeaseOwnerIdentity, ProcessRegistry, facade_support::LeaseTimings};
+use lash_core::{LeaseOwnerIdentity, facade_support::LeaseTimings};
 use lash_postgres_store::PostgresStorage;
 use lash_provider_openai::OpenAiCompatibleProvider;
 use serde_json::json;
@@ -106,7 +106,11 @@ async fn run(mode: &str) -> Result<()> {
     let lease_timings = LeaseTimings::new(RECOVERY_LEASE_TTL, RECOVERY_LEASE_RENEW_INTERVAL)
         .context("validate frame-crash recovery lease timings")?;
     let owner = LeaseOwnerIdentity::opaque("frame-crash-worker", uuid::Uuid::new_v4().to_string());
-    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        &storage,
+        Arc::new(s3_store_from_env()?),
+    ));
+    let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("e2e-mock")
@@ -114,14 +118,8 @@ async fn run(mode: &str) -> Result<()> {
                 .build()
                 .map_err(anyhow::Error::msg)?,
         )
-        .store_factory(Arc::new(storage.session_store_factory()))
-        .attachment_store(Arc::new(s3_store_from_env()?))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(storage.process_env_store()))
-        .process_registry(Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>)
-        .trigger_store(Arc::new(storage.trigger_store()))
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
         .without_queued_work()
         .lease_timings(lease_timings)
         .build(owner)

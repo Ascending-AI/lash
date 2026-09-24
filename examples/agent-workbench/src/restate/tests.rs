@@ -78,7 +78,7 @@ impl lash::runtime::RuntimeEffectController for CountingProcessEffectController 
 }
 
 struct OccurrenceFailureTriggerStore {
-    inner: lash::triggers::InMemoryTriggerStore,
+    inner: Arc<lash_sqlite_store::SqliteTriggerStore>,
     occurrence_failure: Option<lash::plugins::PluginError>,
     list_subscriptions_failure: Option<lash::plugins::PluginError>,
     list_subscription_calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -87,7 +87,7 @@ struct OccurrenceFailureTriggerStore {
 impl OccurrenceFailureTriggerStore {
     fn new(failure: lash::plugins::PluginError) -> Self {
         Self {
-            inner: lash::triggers::InMemoryTriggerStore::new(),
+            inner: crate::tests::memory_trigger_store(),
             occurrence_failure: Some(failure),
             list_subscriptions_failure: None,
             list_subscription_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -96,7 +96,7 @@ impl OccurrenceFailureTriggerStore {
 
     fn for_subscription_list(failure: lash::plugins::PluginError) -> Self {
         Self {
-            inner: lash::triggers::InMemoryTriggerStore::new(),
+            inner: crate::tests::memory_trigger_store(),
             occurrence_failure: None,
             list_subscriptions_failure: Some(failure),
             list_subscription_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -337,7 +337,7 @@ async fn worker_replacement_abort_settles_typed_and_leaves_the_session_reusable(
     let data_dir = tempfile::tempdir().expect("tempdir");
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
-        Arc::new(lash::triggers::InMemoryTriggerStore::default()),
+        crate::tests::memory_trigger_store(),
     )
     .await;
     let session_id = state.current_session_id();
@@ -568,7 +568,7 @@ async fn cron_occurrence_call_site_terminalizes_typed_refusals_and_retries_unkno
 #[tokio::test]
 async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let trigger_store = Arc::new(lash::triggers::InMemoryTriggerStore::default());
+    let trigger_store = crate::tests::memory_trigger_store();
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
@@ -647,31 +647,26 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 }
 
 /// Replay ownership chooses where effects execute; it does not stop the facade
-/// from deriving and handing the turn scope to the configured effect host.
-/// A deployment-only Restate host can still reject an effect that needs a live
-/// handler, but that refusal now comes from the scoped host controller rather
-/// than from a facade ownership preflight.
+/// from deriving and handing the turn scope to the backend's effect host.
+/// A Restate backend can still reject an effect that needs a live handler,
+/// but that refusal comes from the scoped host controller rather than from a
+/// facade ownership preflight.
 #[tokio::test]
 async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
     let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
 
-    let native_host: Arc<dyn lash::durability::EffectHost> =
-        Arc::new(lash::durability::NativeEffectHost::default());
-    let durable_host: Arc<dyn lash::durability::EffectHost> =
-        lash_restate::RestateTurnDeployment::new(
-            lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
-            lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
-        )
-        .effect_host();
-    let scope = lash::runtime::AdmittedScope::turn("routing-session", "routing-turn");
-    let native_scoped = native_host.scoped(scope.clone()).expect("inline scope");
-    assert!(matches!(
-        native_host
-            .turn_control_binding(&native_scoped)
-            .await
-            .expect("inline binding"),
-        lash::runtime::TurnControlBinding::HostOwned { .. }
+    let restate: Arc<lash_restate::RestateBackend> = Arc::new(lash_restate::RestateBackend::new(
+        lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
+        lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
+        Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open(data_dir.path().join("lash-sessions"))
+                .await
+                .expect("open the SQLite store set"),
+        ),
+        lash_restate::RestateQueuedWork::Disabled,
     ));
+    let durable_host: Arc<dyn lash::durability::EffectHost> = restate.effect_host();
+    let scope = lash::runtime::AdmittedScope::turn("routing-session", "routing-turn");
     let durable_scoped = durable_host.scoped(scope).expect("durable scope");
     assert!(matches!(
         durable_host
@@ -686,7 +681,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     ));
 
     let provider_calls = Arc::new(AtomicUsize::new(0));
-    let ownership_core = |effect_host: Arc<dyn lash::durability::EffectHost>, name: &str| {
+    let ownership_core = |backend: Arc<dyn lash::Backend>, name: &str| {
         let provider_calls = Arc::clone(&provider_calls);
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-effect-replay-ownership")
@@ -701,7 +696,18 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             })
             .build()
             .into_handle();
-        crate::tests::explicit_durable_test_facets(data_dir.path())
+        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            lash::rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash::rlm::RlmChannel::Cell)
+                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .wall_clock(lash::rlm::WallClockBound::secs(30))
+                .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+                .build(),
+            Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+        );
+        lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("test-model")
@@ -709,15 +715,11 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
                     .build()
                     .expect("model spec"),
             )
-            .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-                data_dir.path().join("lash-sessions"),
-            )))
-            .effect_host(effect_host)
             .build(crate::test_core_owner())
             .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
     };
 
-    let controller_owned = ownership_core(durable_host.clone(), "controller-owned");
+    let controller_owned = ownership_core(restate, "Restate");
     let session = controller_owned
         .session("workbench-controller-owned-replay")
         .open()
@@ -745,25 +747,28 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     );
     session.close().await.expect("close the failed session");
 
-    // A runtime-owned host uses the same facade entry point and executes the
-    // local provider body instead.
-    let runtime_owned = ownership_core(Arc::clone(&native_host), "runtime-owned");
-    let session = runtime_owned
+    // A backend whose host journals effects in process uses the same
+    // facade entry point and executes the local provider body instead.
+    let in_process = ownership_core(
+        crate::tests::test_file_backend(&data_dir.path().join("in-process")),
+        "SQLite",
+    );
+    let session = in_process
         .session("workbench-runtime-owned-replay")
         .open()
         .await
-        .expect("reopen the session under runtime-owned replay");
+        .expect("open the session on the in-process host");
     let mut stream = session
         .turn(lash::TurnInput::text("drive me from the foreground"))
         .stream()
-        .expect("a runtime-owned host creates a scoped foreground stream");
+        .expect("an in-process host creates a scoped foreground stream");
     while let Some(activity) = stream.next_activity().await {
-        activity.expect("the runtime-owned host streams turn activity");
+        activity.expect("the in-process host streams turn activity");
     }
     let report = stream
         .finish()
         .await
-        .expect("a runtime-owned host executes the same foreground turn");
+        .expect("an in-process host executes the same foreground turn");
     assert_eq!(
         report.final_value(),
         Some(&serde_json::json!("ownership answer"))
@@ -771,7 +776,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         1,
-        "runtime-owned replay runs the turn the controller-owned host refused"
+        "the in-process host runs the turn the Restate host refused"
     );
     session.close().await.expect("close the executed session");
 }
@@ -808,7 +813,7 @@ async fn restate_turn_settlement_attempts_terminal_once_and_retryable_again() {
     let data_dir = tempfile::tempdir().expect("tempdir");
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
-        Arc::new(lash::triggers::InMemoryTriggerStore::default()),
+        crate::tests::memory_trigger_store(),
     )
     .await;
 
@@ -849,7 +854,7 @@ async fn turn_body_reader_treats_ambiguous_errors_as_terminal() {
     let data_dir = tempfile::tempdir().expect("tempdir");
     let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
         data_dir.path(),
-        Arc::new(lash::triggers::InMemoryTriggerStore::default()),
+        crate::tests::memory_trigger_store(),
     )
     .await;
     let session_id = state.current_session_id();

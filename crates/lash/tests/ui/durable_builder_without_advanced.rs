@@ -9,7 +9,13 @@ async fn durable_core_without_advanced(
         .build()
         .expect("valid model metadata");
 
+    // One file backend supplies every port and the effect host.
+    let backend = lash_sqlite_store::SqliteBackend::open(data_dir)
+        .await
+        .expect("sqlite backend");
+    let artifact_store = backend.process_env_store();
     lash::LashCore::rlm_builder(
+        Arc::new(backend),
         lash::TurnBudget::Unbounded,
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -18,23 +24,13 @@ async fn durable_core_without_advanced(
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(
-                lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-                    .await
-                    .expect("sqlite artifact store"),
-            ),
+            artifact_store,
         ),
     )
-    .with_native_queued_work()
     .provider(provider)
     .model(model)
-    .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("sessions"),
-    )))
-    .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-        data_dir.join("attachments"),
-    )))
-    .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
     .termination(lash::durability::TerminationPolicy::default())
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         "durable-builder-test-worker",

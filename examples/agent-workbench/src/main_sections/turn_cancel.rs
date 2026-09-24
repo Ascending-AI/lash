@@ -223,7 +223,7 @@ pub(crate) async fn cancel_turn(
     State(state): State<AppState>,
     Query(query): Query<TurnCancelQuery>,
 ) -> Result<(StatusCode, Json<TurnCancelResponse>), AppError> {
-    let driver = state.core.turn_work_driver().map_err(AppError::internal)?;
+    let driver = state.core.turn_work_driver();
     cancel_turn_with_driver(state, query, &driver).await
 }
 

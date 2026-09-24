@@ -13,7 +13,8 @@
 //! [`Clock`](lash_core_execution::Clock): this store runs in the same clock domain as its
 //! host, and every other durable stamp in the crate already comes from there.
 
-use std::path::{Path, PathBuf};
+#[cfg(any(test, feature = "testing"))]
+use std::path::Path;
 use std::sync::Arc;
 
 use lash_core_execution::facade_support::effect_replay_driver;
@@ -43,7 +44,9 @@ use lash_store_sql::effect::replay::ReplayStatements;
 
 use super::*;
 use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events, wait_sql};
-use crate::location::{DatabaseLocation, DatabaseTarget, validate_file_database_path};
+#[cfg(any(test, feature = "testing"))]
+use crate::location::validate_file_database_path;
+use crate::location::{DatabaseLocation, DatabaseTarget};
 use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema, fence_sql};
 
 mod row_store;
@@ -292,7 +295,7 @@ pub struct SqliteEffectReplayOptions {
     pub drain_budget: lash_core_execution::EffectGroupDrainBudget,
 }
 
-/// Deployment-level SQLite effect host.
+/// Backend-level SQLite effect host.
 ///
 /// This host persists runtime effect history in a local SQLite database and
 /// returns scoped controllers that replay completed outcomes by
@@ -340,16 +343,6 @@ lash_core_execution::impl_store_replay_await_event_resolver!(impl lash_core_exec
 impl effect_replay_driver::StoreReplayHost for SqliteEffectHost {
     fn turn_control_binding_id(&self) -> String {
         self.journal.identity().to_string()
-    }
-
-    fn effect_scope_fence_database(&self) -> Option<PathBuf> {
-        self.journal.target().file_path().map(Path::to_path_buf)
-    }
-
-    fn bind_process_registry(&self, binding: lash_core_execution::ProcessRegistryBinding) {
-        if let Some(path) = binding.fence_database {
-            self.attach_process_registry(DatabaseTarget::File(path));
-        }
     }
 
     #[expect(
@@ -457,10 +450,20 @@ impl effect_replay_driver::StoreReplayController for SqliteRuntimeEffectControll
 }
 
 impl SqliteEffectHost {
+    /// Testing only: a standalone journal attaches no process registry, so
+    /// its process-scope fences stay in the journal file, not atomic with
+    /// registration. Production opens the host through
+    /// [`SqliteBackend`](crate::SqliteBackend).
+    #[cfg(any(test, feature = "testing"))]
     pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
         Self::open_with_options(path, SqliteEffectReplayOptions::default()).await
     }
 
+    /// Testing only: a standalone journal attaches no process registry, so
+    /// its process-scope fences stay in the journal file, not atomic with
+    /// registration. Production opens the host through
+    /// [`SqliteBackend`](crate::SqliteBackend).
+    #[cfg(any(test, feature = "testing"))]
     pub async fn open_with_clock(
         path: &Path,
         clock: Arc<dyn lash_core_execution::Clock>,
@@ -468,6 +471,11 @@ impl SqliteEffectHost {
         Self::open_with_options_and_clock(path, SqliteEffectReplayOptions::default(), clock).await
     }
 
+    /// Testing only: a standalone journal attaches no process registry, so
+    /// its process-scope fences stay in the journal file, not atomic with
+    /// registration. Production opens the host through
+    /// [`SqliteBackend`](crate::SqliteBackend).
+    #[cfg(any(test, feature = "testing"))]
     pub async fn open_with_options(
         path: &Path,
         options: SqliteEffectReplayOptions,
@@ -483,6 +491,12 @@ impl SqliteEffectHost {
     /// The host over the journal file at `path`. The file is its own
     /// location: the host's binding identity is `sqlite:<canonical path>`,
     /// stable across relative spellings and symlinked configuration.
+    ///
+    /// Testing only: a standalone journal attaches no process registry, so
+    /// its process-scope fences stay in the journal file, not atomic with
+    /// registration. Production opens the host through
+    /// [`SqliteBackend`](crate::SqliteBackend).
+    #[cfg(any(test, feature = "testing"))]
     pub async fn open_with_options_and_clock(
         path: &Path,
         options: SqliteEffectReplayOptions,
@@ -595,10 +609,20 @@ impl SqliteEffectHost {
 }
 
 impl SqliteRuntimeEffectController {
+    /// Testing only: a standalone journal attaches no process registry, so
+    /// its process-scope fences stay in the journal file, not atomic with
+    /// registration. Production opens the host through
+    /// [`SqliteBackend`](crate::SqliteBackend).
+    #[cfg(any(test, feature = "testing"))]
     pub async fn open(path: &Path, scope: ExecutionScope) -> tokio_rusqlite::Result<Self> {
         Self::open_with_options(path, scope, SqliteEffectReplayOptions::default()).await
     }
 
+    /// Testing only: a standalone journal attaches no process registry, so
+    /// its process-scope fences stay in the journal file, not atomic with
+    /// registration. Production opens the host through
+    /// [`SqliteBackend`](crate::SqliteBackend).
+    #[cfg(any(test, feature = "testing"))]
     pub async fn open_with_clock(
         path: &Path,
         scope: ExecutionScope,
@@ -608,6 +632,11 @@ impl SqliteRuntimeEffectController {
             .await
     }
 
+    /// Testing only: a standalone journal attaches no process registry, so
+    /// its process-scope fences stay in the journal file, not atomic with
+    /// registration. Production opens the host through
+    /// [`SqliteBackend`](crate::SqliteBackend).
+    #[cfg(any(test, feature = "testing"))]
     pub async fn open_with_options(
         path: &Path,
         scope: ExecutionScope,
@@ -622,6 +651,11 @@ impl SqliteRuntimeEffectController {
         .await
     }
 
+    /// Testing only: a standalone journal attaches no process registry, so
+    /// its process-scope fences stay in the journal file, not atomic with
+    /// registration. Production opens the host through
+    /// [`SqliteBackend`](crate::SqliteBackend).
+    #[cfg(any(test, feature = "testing"))]
     pub async fn open_with_options_and_clock(
         path: &Path,
         scope: ExecutionScope,

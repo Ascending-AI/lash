@@ -434,7 +434,6 @@ pub(super) fn registry_binding(
     state: &Arc<Mutex<super::types::RegistryState>>,
 ) -> crate::ProcessRegistryBinding {
     crate::ProcessRegistryBinding {
-        fence_database: None,
         registrations: Arc::new(ManagedRegistrationProbe {
             state: Arc::clone(state),
         }),

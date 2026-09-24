@@ -149,9 +149,9 @@ commands=()
 
 run_sqlite() {
   local out="$destination/sqlite.jsonl"
-  commands+=("$bin --backend sqlite --widths $widths --reps $reps --producers $producers --out $out --db-path <scratch>/effect.db")
+  commands+=("$bin --backend sqlite --widths $widths --reps $reps --producers $producers --out $out --db-path <scratch>/sqlite-backend")
   "$bin" --backend sqlite --widths "$widths" --reps "$reps" \
-    --producers "$producers" --out "$out" --db-path "$scratch/effect.db"
+    --producers "$producers" --out "$out" --db-path "$scratch/sqlite-backend"
 }
 
 run_postgres() {

@@ -1,5 +1,5 @@
 use super::tests::{
-    explicit_durable_test_facets, in_memory_trigger_store, run_async_test_on_stack_budget,
+    detached_trigger_store, explicit_durable_test_facets, run_async_test_on_stack_budget,
     spawn_restate_ingress_capture, text_response,
 };
 use super::*;
@@ -58,7 +58,6 @@ fn expiring_terminal_driver(
     let driver = state
         .core
         .turn_work_driver()
-        .expect("workbench core has a session catalog")
         .with_test_attach(Arc::new(ExpiringTerminalAttach {
             started,
             release: tokio::sync::Mutex::new(release),
@@ -96,14 +95,6 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
     let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
     );
@@ -120,8 +111,6 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build core");
@@ -134,7 +123,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -362,14 +351,6 @@ async fn turn_cancel_test_state_with_ingress(
     admin_url: String,
     restate_ingress_url: String,
 ) -> AppState {
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
     let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
     );
@@ -386,8 +367,6 @@ async fn turn_cancel_test_state_with_ingress(
     let core = explicit_durable_test_facets(data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -399,7 +378,7 @@ async fn turn_cancel_test_state_with_ingress(
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -661,7 +640,7 @@ async fn stop_over_real_process_await_commits_cancelled_terminal_inner() {
     std::fs::create_dir_all(&data_dir).expect("create Stop-over-process data dir");
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
+            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
             data_dir.join("lash-sessions"),
         )
         .await
@@ -693,8 +672,6 @@ finish(await handle);
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build Stop-over-process core");
     let process_observer = core
@@ -707,7 +684,7 @@ finish(await handle);
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -899,14 +876,14 @@ fn concurrent_stops_publish_one_done_and_trace_winning_request() {
         let session_id = state.current_session_id();
         state.track_turn(&session_id, &TurnId::from("concurrent-stop"));
         let mut events = state.event_tx.subscribe(&session_id);
-        let driver = state
-            .core
-            .turn_work_driver()
-            .expect("workbench core has a session catalog")
-            .with_test_attach(Arc::new(ConcurrentCancelTerminal {
-                state: state.clone(),
-                attached: tokio::sync::Barrier::new(2),
-            }));
+        let driver =
+            state
+                .core
+                .turn_work_driver()
+                .with_test_attach(Arc::new(ConcurrentCancelTerminal {
+                    state: state.clone(),
+                    attached: tokio::sync::Barrier::new(2),
+                }));
         let cancel = || {
             cancel_turn_with_driver(
                 state.clone(),
@@ -1095,7 +1072,6 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
     let seeded = state
         .core
         .turn_work_driver()
-        .expect("workbench core has a session catalog")
         .request_cancel(
             lash::TurnCancelRequest::new(
                 session.turn_address("escalate-turn"),
@@ -1181,7 +1157,7 @@ async fn both_cancel_modes_request_cancellation_of_the_turns_awaited_process_inn
     let session_id = state.current_session_id();
     let registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
+            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
             data_dir.join("lash-sessions"),
         )
         .await

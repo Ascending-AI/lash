@@ -239,7 +239,7 @@ pub(super) async fn fig790_pre_pr_suspended_process_call(
     call.clone()
 }
 
-// Deployment compatibility gate: a process-await invocation suspended before
+// Backend compatibility gate: a process-await invocation suspended before
 // FIG-790 has only `await_terminal` in its journal. Its terminal redrive must
 // accept that command as an exact prefix and append cancellation observation.
 #[tokio::test]
@@ -293,7 +293,7 @@ pub(super) async fn fig790_pre_pr_suspended_process_await_redrives_to_terminal()
     );
 }
 
-// Deployment compatibility gate: the same pre-PR suspended prefix must also
+// Backend compatibility gate: the same pre-PR suspended prefix must also
 // redrive when turn cancellation was already resolved before registration.
 // This is deliberately distinct from a revoked session.
 #[tokio::test]
@@ -2017,4 +2017,17 @@ lash_conformance::effect_host_tests!({
     ((), || {
         Arc::new(RestateEffectHost::new_for_test("http://127.0.0.1:8080")) as Arc<dyn EffectHost>
     })
+});
+
+lash_conformance::backend_tests!({
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("SQLite memory store set");
+    let backend = Arc::new(crate::RestateBackend::new(
+        "http://127.0.0.1:8080",
+        crate::RestateAuthorityId::new("lash-restate-backend-law").expect("valid authority"),
+        Arc::new(stores),
+        crate::RestateQueuedWork::Disabled,
+    )) as Arc<dyn lash_core::Backend>;
+    ((), backend)
 });

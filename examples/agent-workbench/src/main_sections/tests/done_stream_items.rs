@@ -13,14 +13,6 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(sync_await({
-        let path = data_dir.join("processes.db");
-        async move {
-            lash_sqlite_store::SqliteProcessRegistry::open(&path, path.with_extension("sessions"))
-                .await
-                .expect("open registry")
-        }
-    })) as Arc<dyn lash::process::ProcessRegistry>;
     let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         data_dir.join("lash-sessions"),
     ));
@@ -35,8 +27,6 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -48,7 +38,7 @@ fn done_stream_items_are_transient_and_not_snapshotted() {
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -95,14 +85,6 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(sync_await({
-        let path = data_dir.join("processes.db");
-        async move {
-            lash_sqlite_store::SqliteProcessRegistry::open(&path, path.with_extension("sessions"))
-                .await
-                .expect("open registry")
-        }
-    })) as Arc<dyn lash::process::ProcessRegistry>;
     let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
     );
@@ -116,8 +98,6 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -129,7 +109,7 @@ fn trigger_dispatch_done_does_not_clear_an_active_turn() {
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),

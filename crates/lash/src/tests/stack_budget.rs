@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn stack_budget_rlm_lashlang_process_turn() -> Result<()> {
     run_async_test_on_stack_budget("stack-budget-rlm-lashlang-process-turn", || async {
-        let core = explicit_ephemeral_facets(rlm_core_builder())
+        let core = explicit_ephemeral_facets(rlm_core_builder().await)
             .provider(queued_text_provider(vec![typescript_block(
                 r#"
 const child = async (value) => {
@@ -22,15 +22,11 @@ finish({
             )]))
             .model(mock_model_spec())
             .tools(Arc::new(AppTools))
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
             // ADR 0095: `processes` is catalogue presence, so a scripted cell
             // that authors `processes.start` needs this factory installed.
             .plugin(Arc::new(
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
             ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("stack-budget-rlm-lashlang").open().await?;
         let events = RecordingEvents::default();

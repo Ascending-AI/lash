@@ -481,7 +481,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
         let mut endpoint = LiveRestateEndpoint::start(
             &admin_url,
             harness.state.clone(),
-            harness.process_deployment,
+            harness.backend,
             harness.process_worker,
         )
         .await;

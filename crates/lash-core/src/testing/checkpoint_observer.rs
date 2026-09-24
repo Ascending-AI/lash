@@ -329,6 +329,54 @@ pub fn fresh_runtime_persistence_handle(
 
 #[async_trait::async_trait]
 impl SessionStoreFactory for ObservedSessionStoreFactory {
+    // The backend binds its host and artifact stores through whatever
+    // factory it hands out; the observer passes both to the catalog it wraps.
+    fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
+        self.inner.bind_effect_host(effect_host);
+    }
+
+    fn bind_artifact_stores(
+        &self,
+        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        process_engines: crate::ProcessEngineRegistry,
+    ) {
+        self.inner
+            .bind_artifact_stores(process_env_store, process_engines);
+    }
+
+    async fn pending_turn_cancel_closure_pins(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError> {
+        self.inner
+            .pending_turn_cancel_closure_pins(session_id)
+            .await
+    }
+
+    async fn retire_turn_cancel_closure_scope(
+        &self,
+        scope: &crate::ExecutionScope,
+    ) -> Result<(), StoreError> {
+        self.inner.retire_turn_cancel_closure_scope(scope).await
+    }
+
+    async fn has_claimable_queued_work(
+        &self,
+        request: &SessionStoreCreateRequest,
+        now_epoch_ms: u64,
+    ) -> Result<Option<bool>, StoreError> {
+        self.inner
+            .has_claimable_queued_work(request, now_epoch_ms)
+            .await
+    }
+
+    async fn reclaim_retained_evidence(
+        &self,
+        bound: crate::store::RetentionBound,
+    ) -> crate::store::MaintenanceResult<crate::store::RetentionReport> {
+        self.inner.reclaim_retained_evidence(bound).await
+    }
+
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,

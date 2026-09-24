@@ -362,3 +362,17 @@ lash_conformance::migrated_tools_redrive_tests!({
         orchestration,
     )
 });
+
+lash_conformance::backend_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres backend conformance: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    reset(storage.pool()).await;
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        &storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+    )) as Arc<dyn lash_core_execution::Backend>;
+    ((database_lock, attachments), backend)
+});

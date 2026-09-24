@@ -10,7 +10,7 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
+            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
             data_dir.join("lash-sessions"),
         )
         .await
@@ -22,9 +22,7 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -35,7 +33,7 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -279,7 +277,7 @@ async fn register_terminal_processes(
     // The same SQLite registry file the workbench state opened, so these rows
     // are the session's own work rather than a second registry's.
     let registry = lash_sqlite_store::SqliteProcessRegistry::open(
-        &data_dir.join("processes.db"),
+        &crate::tests::sessions_root(data_dir).join("process-registry.db"),
         data_dir.join("lash-sessions"),
     )
     .await

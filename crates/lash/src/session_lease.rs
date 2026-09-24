@@ -149,11 +149,7 @@ impl LashCore {
         session_id: impl AsRef<str>,
     ) -> Result<Option<crate::session_lease::SessionLeaseDiagnostics>> {
         let session_id = SessionId::from(session_id.as_ref());
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable {
-                operation: "session_lease_diagnostics",
-            });
-        };
+        let store_factory = &self.store_factory;
         let request = lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
@@ -199,9 +195,11 @@ mod tests {
             Arc::new(lash_core::testing::TestClock::new(STORE_NOW_MS));
         let host_clock: Arc<dyn lash_core::Clock> =
             Arc::new(lash_core::testing::TestClock::new(host_now_ms));
-        let factory = Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::with_clock(store_clock),
-        );
+        let backend = crate::tests::DecoratedBackend::over(
+            crate::tests::memory_backend_with_clock(store_clock).await,
+        )
+        .runtime_clock(host_clock);
+        let factory = lash_core::Backend::session_store_factory(&backend);
         let request = lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
@@ -212,27 +210,15 @@ mod tests {
             .create_store(&request)
             .await
             .expect("create clock-domain fixture store");
-        let core = LashCore::standard_builder(lash_core::TurnBudget::Unbounded)
+        let core = LashCore::standard_builder(Arc::new(backend), lash_core::TurnBudget::Unbounded)
             .model(
                 lash_core::ModelSpec::builder("session-lease-clock-domain-model")
                     .context_window_tokens(4_096)
                     .build()
                     .expect("valid fixture model"),
             )
-            .store_factory(factory)
-            .clock(host_clock)
             .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
-            .effect_host(Arc::new(
-                lash_core::facade_support::NativeEffectHost::default()
-                    .allow_process_lifetime_completion_keys(),
-            ))
-            .attachment_store(Arc::new(
-                lash_core::facade_support::InMemoryAttachmentStore::new(),
-            ))
-            .process_env_store(Arc::new(
-                lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
-            ))
             .without_queued_work()
             .build(crate::testing::runtime_lease_owner())
             .expect("build clock-domain fixture core");

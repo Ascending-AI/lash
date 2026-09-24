@@ -5,9 +5,8 @@ use lash::SessionId;
 use std::sync::Arc;
 
 use lash::persistence::{
-    InMemoryAttachmentStore, InMemoryProcessExecutionEnvStore, InMemorySessionStoreFactory,
     LeaseOwnerIdentity, RuntimeCommit, RuntimeSessionState, SessionRelation,
-    SessionStoreCreateRequest,
+    SessionStoreCreateRequest, SessionStoreFactory as _,
 };
 use lash::process::{
     ProcessInput, ProcessObserverBy, ProcessObserverRegistry as _, ProcessProvenance,
@@ -34,17 +33,16 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .context_window_tokens(8_192)
         .build()
         .expect("valid test model");
-    let stores = Arc::new(InMemorySessionStoreFactory::new());
-    let processes = Arc::new(lash::testing::TestLocalProcessRegistry::default());
-    let core = LashCore::standard_builder(TurnBudget::Unbounded)
-        .with_native_queued_work()
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("SQLite memory backend"),
+    );
+    let stores = backend.session_store_factory();
+    let processes = backend.process_registry();
+    let core = LashCore::standard_builder(backend, TurnBudget::Unbounded)
         .provider(provider)
         .model(model.clone())
-        .store_factory(Arc::clone(&stores) as Arc<dyn lash::persistence::SessionStoreFactory>)
-        .process_registry(Arc::clone(&processes) as Arc<dyn lash::process::ProcessRegistry>)
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(InMemoryProcessExecutionEnvStore::new()))
         .commit_budget(CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(QueuedWorkBatchingConfig::new(1024))
         .build(LeaseOwnerIdentity::opaque(
@@ -281,10 +279,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .map(lash::process::ProcessRef::from_record)
         .collect::<Vec<_>>();
 
-    let administration = core
-        .session_administration()
-        .await
-        .expect("source session administration");
+    let administration = core.session_administration().await;
     let context = administration
         .delete_context(SOURCE_SESSION)
         .expect("source session delete context");

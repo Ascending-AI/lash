@@ -9,16 +9,15 @@ use super::*;
 #[tokio::test]
 async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()> {
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend_serving(store.clone()).await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
 
-    let pinning = core
-        .session("provider-pin-conflict")
-        .store(Arc::clone(&store))
-        .open()
-        .await?;
+    let pinning = core.session("provider-pin-conflict").open().await?;
     pinning
         .turn(TurnInput::text("pin the provider"))
         .run()
@@ -31,7 +30,6 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
 
     let error = match core
         .session("provider-pin-conflict")
-        .store(Arc::clone(&store))
         .provider(other_kind_provider())
         .open()
         .await
@@ -60,11 +58,7 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
     );
 
     // The refused open changed nothing: the session still runs on its pin.
-    let reopened = core
-        .session("provider-pin-conflict")
-        .store(store)
-        .open()
-        .await?;
+    let reopened = core.session("provider-pin-conflict").open().await?;
     assert_eq!(
         reopened.policy_snapshot().recorded_provider_id(),
         "embed-test"
@@ -79,11 +73,13 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
 #[tokio::test]
 async fn related_session_open_records_the_provider_pin() -> Result<()> {
     let factory = Arc::new(RecordingStoreFactory::default());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(factory.clone())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend_with_catalog(factory.clone()).await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session("provider-pin-root").open().await?;
 
     core.session("provider-pin-child")

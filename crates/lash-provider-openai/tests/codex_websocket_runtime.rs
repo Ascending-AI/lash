@@ -45,8 +45,13 @@ fn websocket_provider(server: &ScriptedWsServer) -> ProviderHandle {
     ProviderHandle::new(provider.into_components())
 }
 
-fn websocket_core(provider: ProviderHandle) -> LashCore {
-    LashCore::standard_builder(lash::TurnBudget::Unbounded)
+async fn websocket_core(provider: ProviderHandle) -> LashCore {
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("memory backend"),
+    );
+    LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
         .model(
@@ -55,16 +60,8 @@ fn websocket_core(provider: ProviderHandle) -> LashCore {
                 .build()
                 .expect("valid model spec"),
         )
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "codex-websocket-runtime-test",
             "codex-websocket-runtime-test-boot",
@@ -80,7 +77,7 @@ async fn codex_websocket_facade_turn_streams_text_from_local_server() {
         text: "hello over the websocket",
     }])
     .await;
-    let core = websocket_core(websocket_provider(&server));
+    let core = websocket_core(websocket_provider(&server)).await;
     let session = core
         .session("codex-ws-runtime-text")
         .open()
@@ -175,7 +172,12 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
     ])
     .await;
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("memory backend"),
+    );
+    let core = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(websocket_provider(&server))
         .model(
@@ -190,16 +192,8 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
                 seen: Arc::clone(&seen),
             },
         )))
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "codex-websocket-runtime-tool-test",
             "codex-websocket-runtime-tool-test-boot",

@@ -55,7 +55,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
                 .complete_error("queued-work controls should not call the provider")
                 .build()
                 .into_handle(),
-            in_memory_trigger_store(),
+            detached_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_port()),
         )
@@ -181,7 +181,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
         ));
         std::fs::create_dir_all(&data_dir).expect("create selected-drain refusal dir");
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-            Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+            crate::tests::memory_session_store_factory();
         let state = recoverable_chat_test_state_with_dependencies_and_context(
             &data_dir,
             16,
@@ -194,7 +194,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
                 })
                 .build()
                 .into_handle(),
-            in_memory_trigger_store(),
+            detached_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
@@ -219,22 +219,25 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
             })
             .await
             .expect("open selected-drain refusal store");
+        let mut batch_ids = Vec::new();
         for (source_key, merge_key) in [
             ("workbench-selected-a1", "a"),
             ("workbench-selected-b1", "b"),
             ("workbench-selected-a2", "a"),
         ] {
-            store
+            let batch = store
                 .enqueue_queued_work(
                     queued_work_test_draft(&session_id, source_key).with_merge_key(merge_key),
                 )
                 .await
                 .expect("enqueue selected-drain refusal row");
+            batch_ids.push(batch.batch_id.as_str().to_string());
         }
+        let [a1, b1, a2] = <[String; 3]>::try_from(batch_ids).expect("three enqueued rows");
 
         let error = session
             .queued_turn()
-            .batch_ids(["recording-qwb-1", "recording-qwb-3"])
+            .batch_ids([a1.as_str(), a2.as_str()])
             .run()
             .await
             .expect_err("a key break refuses the original selected set");
@@ -242,7 +245,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
             lash::EmbedError::SelectedQueuedWorkDrainRefused { cause } => match cause {
                 lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
                     unclaimed_batch_ids,
-                } => assert_eq!(unclaimed_batch_ids, vec!["recording-qwb-3".to_string()]),
+                } => assert_eq!(unclaimed_batch_ids, vec![a2.clone()]),
                 lash::SelectedQueuedWorkDrainRefusalCause::
                     InterruptedBatchRequiresFullComposition { required_batch_ids } => panic!(
                     "key-break example did not create interrupted composition {required_batch_ids:?}"
@@ -260,7 +263,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
 
         let output = session
             .queued_turn()
-            .batch_ids(["recording-qwb-1"])
+            .batch_ids([a1.as_str()])
             .run()
             .await
             .expect("re-select the claimable prefix")
@@ -275,7 +278,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
                     }
                     _ => None,
                 }),
-            Some(vec!["recording-qwb-1".to_string()])
+            Some(vec![a1.clone()])
         );
         assert_eq!(
             session
@@ -286,7 +289,7 @@ fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
                 .iter()
                 .map(|batch| batch.batch_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["recording-qwb-2", "recording-qwb-3"]
+            vec![b1.as_str(), a2.as_str()]
         );
         let _ = std::fs::remove_dir_all(data_dir);
     });
@@ -315,7 +318,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 })
                 .build()
                 .into_handle(),
-            in_memory_trigger_store(),
+            detached_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
@@ -348,11 +351,12 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("valid stale claim age");
         assert_eq!(wake_delivery_config.delivery_expiry_ms, 10_000);
         assert_eq!(wake_delivery_config.enqueuing_stale_after_ms, 25);
-        let registry = Arc::new(
-            lash::testing::TestLocalProcessRegistry::default()
-                .with_clock(Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>)
-                .with_wake_delivery_config(wake_delivery_config),
-        ) as Arc<dyn lash::process::ProcessRegistry>;
+        let registry = crate::tests::standalone_process_registry(
+            &data_dir,
+            Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
+            Some(wake_delivery_config),
+        )
+        .await;
         let process_id = "workbench-targeted-wake-process";
         registry
             .register_process(
@@ -518,11 +522,12 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("valid boundary wake expiry")
             .with_enqueuing_stale_after_ms(25)
             .expect("valid boundary stale age");
-        let expiry_registry = Arc::new(
-            lash::testing::TestLocalProcessRegistry::default()
-                .with_clock(Arc::clone(&expiry_clock) as Arc<dyn lash::runtime::Clock>)
-                .with_wake_delivery_config(expiry_config),
-        ) as Arc<dyn lash::process::ProcessRegistry>;
+        let expiry_registry = crate::tests::standalone_process_registry(
+            &data_dir,
+            Arc::clone(&expiry_clock) as Arc<dyn lash::runtime::Clock>,
+            Some(expiry_config),
+        )
+        .await;
         expiry_registry
             .register_process(
                 lash::process::ProcessRegistration::new(
@@ -617,11 +622,12 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .delete_session(&SessionId::from(deleted_target_id))
             .await
             .expect("delete wake target before delivery");
-        let target_gone_registry = Arc::new(
-            lash::testing::TestLocalProcessRegistry::default()
-                .with_clock(Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>)
-                .with_wake_delivery_config(wake_delivery_config),
-        ) as Arc<dyn lash::process::ProcessRegistry>;
+        let target_gone_registry = crate::tests::standalone_process_registry(
+            &data_dir,
+            Arc::clone(&clock) as Arc<dyn lash::runtime::Clock>,
+            Some(wake_delivery_config),
+        )
+        .await;
         target_gone_registry
             .register_process(
                 lash::process::ProcessRegistration::new(
@@ -846,7 +852,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                 .complete(|_| async { Ok(text_response(WAKE_REPLY)) })
                 .build()
                 .into_handle(),
-            in_memory_trigger_store(),
+            detached_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
@@ -871,8 +877,12 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             })
             .await
             .expect("open wake single-reply receiver");
-        let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default())
-            as Arc<dyn lash::process::ProcessRegistry>;
+        let registry = crate::tests::standalone_process_registry(
+            &data_dir,
+            Arc::new(lash::runtime::SystemClock),
+            None,
+        )
+        .await;
         let process_id = "workbench-wake-single-reply-process";
         registry
             .register_process(
@@ -1051,7 +1061,7 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
         ));
         std::fs::create_dir_all(&data_dir).expect("create selected-drain outcome dir");
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-            Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+            crate::tests::memory_session_store_factory();
         let state = recoverable_chat_test_state_with_dependencies_and_context(
             &data_dir,
             16,
@@ -1064,7 +1074,7 @@ fn selected_drain_reports_claimed_and_already_satisfied_batches() {
                 })
                 .build()
                 .into_handle(),
-            in_memory_trigger_store(),
+            detached_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
@@ -1178,7 +1188,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
                 })
                 .build()
                 .into_handle(),
-            in_memory_trigger_store(),
+            detached_trigger_store(),
             Arc::clone(&store_factory),
             Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
@@ -1246,8 +1256,12 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             })
             .await
             .expect("open wake keeps-previous receiver");
-        let registry = Arc::new(lash::testing::TestLocalProcessRegistry::default())
-            as Arc<dyn lash::process::ProcessRegistry>;
+        let registry = crate::tests::standalone_process_registry(
+            &data_dir,
+            Arc::new(lash::runtime::SystemClock),
+            None,
+        )
+        .await;
         let process_id = "workbench-wake-keeps-previous-process";
         registry
             .register_process(

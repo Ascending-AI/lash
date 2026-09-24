@@ -60,29 +60,31 @@ impl lash_core::facade_support::PluginFactory for ShutdownRecordingPluginFactory
 async fn core_shutdown_visits_protocol_then_common_factories_and_continues_after_error()
 -> Result<()> {
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let core =
-        explicit_ephemeral_facets(LashCore::standard_builder(lash_core::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .protocol_plugin(Arc::new(ShutdownRecordingPluginFactory {
-                id: "protocol",
-                calls: Arc::clone(&calls),
-                failure: None,
-                standard_protocol: true,
-            }))
-            .plugin(Arc::new(ShutdownRecordingPluginFactory {
-                id: "first",
-                calls: Arc::clone(&calls),
-                failure: Some("first failed"),
-                standard_protocol: false,
-            }))
-            .plugin(Arc::new(ShutdownRecordingPluginFactory {
-                id: "second",
-                calls: Arc::clone(&calls),
-                failure: None,
-                standard_protocol: false,
-            }))
-            .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        lash_core::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .protocol_plugin(Arc::new(ShutdownRecordingPluginFactory {
+        id: "protocol",
+        calls: Arc::clone(&calls),
+        failure: None,
+        standard_protocol: true,
+    }))
+    .plugin(Arc::new(ShutdownRecordingPluginFactory {
+        id: "first",
+        calls: Arc::clone(&calls),
+        failure: Some("first failed"),
+        standard_protocol: false,
+    }))
+    .plugin(Arc::new(ShutdownRecordingPluginFactory {
+        id: "second",
+        calls: Arc::clone(&calls),
+        failure: None,
+        standard_protocol: false,
+    }))
+    .build(crate::testing::runtime_lease_owner())?;
 
     let error = core
         .shutdown()
@@ -109,11 +111,14 @@ fn persisted_tool_state_at_generation(
 
 #[tokio::test]
 async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .plugin(Arc::new(SurfacePluginFactory))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(Arc::new(SurfacePluginFactory))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("plugin-surface").open().await?;
     let events = RecordingEvents::default();
 
@@ -142,7 +147,7 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
 
 #[tokio::test]
 async fn embedded_sessions_always_expose_tool_state() -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("dynamic-default").open().await?;
 
     let state = session.admin().tools().state().await?;
@@ -153,11 +158,14 @@ async fn embedded_sessions_always_expose_tool_state() -> Result<()> {
 
 #[tokio::test]
 async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("static-tools").open().await?;
 
     let state = session.admin().tools().state().await?;
@@ -168,11 +176,14 @@ async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
 
 #[tokio::test]
 async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("tool-state").open().await?;
     let app_tool = lash_core::ToolId::from("tool:app_lookup");
 
@@ -218,11 +229,14 @@ async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
 
 #[tokio::test]
 async fn persisted_session_restores_tool_state() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("persisted-tools").open().await?;
     session
         .admin()
@@ -244,13 +258,14 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     };
     state.set_tool_state_snapshot(Some(persisted_tool_state));
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
-    let reopened_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .tools(Arc::new(AppTools))
-            .store_factory(Arc::new(ReusableStoreFactory { store }))
-            .build(crate::testing::runtime_lease_owner())?;
+    let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend_serving(store).await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
 
     let reopened = reopened_core.session("persisted-tools").open().await?;
     let state = reopened.admin().tools().state().await?;
@@ -324,19 +339,17 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
             })
             .build()
             .into_handle();
-        let standard_core =
-            explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-                .provider(standard_provider)
-                .model(mock_model_spec())
-                .tools(Arc::new(LongTextTools))
-                .store_factory(Arc::new(
-                    lash_core::facade_support::InMemorySessionStoreFactory::new(),
-                ))
-                .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-                .configure_plugins(|plugins| {
-                    plugins.replace(projection.clone());
-                })
-                .build(crate::testing::runtime_lease_owner())?;
+        let standard_core = explicit_ephemeral_facets(LashCore::standard_builder(
+            memory_backend().await,
+            crate::TurnBudget::Unbounded,
+        ))
+        .provider(standard_provider)
+        .model(mock_model_spec())
+        .tools(Arc::new(LongTextTools))
+        .configure_plugins(|plugins| {
+            plugins.replace(projection.clone());
+        })
+        .build(crate::testing::runtime_lease_owner())?;
         let standard_session = standard_core.session("standard-projection").open().await?;
         let standard_events = RecordingEvents::default();
         let _ = standard_session
@@ -366,17 +379,13 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
 
         #[cfg(feature = "rlm")]
         {
-            let rlm_core = explicit_ephemeral_facets(rlm_core_builder())
+            let rlm_core = explicit_ephemeral_facets(rlm_core_builder().await)
                 .provider(queued_text_provider(vec![typescript_block(
                     r#"const value = await tools.app_lookup({});
 finish("done");"#,
                 )]))
                 .model(mock_model_spec())
                 .tools(Arc::new(LongTextTools))
-                .store_factory(Arc::new(
-                    lash_core::facade_support::InMemorySessionStoreFactory::new(),
-                ))
-                .process_registry(Arc::new(TestLocalProcessRegistry::default()))
                 .configure_plugins(|plugins| {
                     plugins.replace(projection);
                 })

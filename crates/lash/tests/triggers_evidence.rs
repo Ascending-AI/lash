@@ -40,11 +40,6 @@ fn drain_area_witnesses() {
     type_witness::<lash::tools::ToolTriggerClient>();
     // W0010: lash::tools::ToolTriggerClient::emit [function]
     let _ = lash::tools::ToolTriggerClient::emit;
-    // W0011: lash::triggers::InMemoryTriggerStore::clear_occurrence_delete_failure_for_testing [function]
-    let _ = lash::triggers::InMemoryTriggerStore::clear_occurrence_delete_failure_for_testing;
-    // W0012: lash::triggers::InMemoryTriggerStore::fail_occurrence_delete_for_testing [function]
-    let _: fn(&lash::triggers::InMemoryTriggerStore, String) =
-        lash::triggers::InMemoryTriggerStore::fail_occurrence_delete_for_testing;
     // W0015: lash::triggers::LashSchema::object [function]
     let _ = lash::triggers::LashSchema::object;
     // W0016: lash::triggers::LashSchema::schema [field]

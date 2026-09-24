@@ -1,23 +1,27 @@
 use super::*;
 
-/// The standard core over `effect_host`: a scope an advanced turn brings must
+/// The standard core over `backend`: a scope an advanced turn brings must
 /// be lent by the host the core controls turns through.
-fn standard_core_over(effect_host: Arc<dyn lash_core::EffectHost>) -> Result<LashCore> {
-    explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(effect_host)
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())
+fn standard_core_over(backend: Arc<dyn lash_core::Backend>) -> Result<LashCore> {
+    explicit_ephemeral_facets(LashCore::standard_builder(
+        backend,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())
 }
 
 #[tokio::test]
 pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effects() -> Result<()> {
     let recorder = EffectRecorder::default();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(recorder.effect_host().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        recorder.backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("configured-effect-host").open().await?;
 
     let output = session.turn(TurnInput::text("inline")).run().await?;
@@ -40,19 +44,12 @@ pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effect
 
 #[tokio::test]
 pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_points() -> Result<()> {
-    let dir = tempfile::tempdir().expect("tempdir");
     let effect_host = Arc::new(DurableNoopEffectHost::default());
-    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
-        .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
-            dir.path().join("attachments"),
-        )))
+    let host = Arc::clone(&effect_host);
+    let backend = DecoratedBackend::over(memory_backend().await).effect_host(move |_| host);
+    let core = LashCore::standard_builder(Arc::new(backend), crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .process_env_store(Arc::new(DurableInMemoryProcessEnvStore::default()))
-        .effect_host(effect_host.clone())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
         .without_queued_work()
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -127,13 +124,14 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
 #[tokio::test]
 pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()> {
     let recorder = EffectRecorder::default();
-    let effect_host = recorder.effect_host().await;
+    let backend = recorder.backend().await;
+    let effect_host = lash_core::Backend::effect_host(backend.as_ref());
     let custom_scope = lash_core::ExecutionScope::runtime_operation("custom-foreground-scope");
     let scoped_effect_controller = effect_host.scoped(
         lash_core::AdmittedScope::unpinned(custom_scope.clone())
             .expect("a runtime-operation scope admits unpinned"),
     )?;
-    let core = standard_core_over(effect_host.clone())?;
+    let core = standard_core_over(backend.clone())?;
     let session = core.session("custom-effect-scope").open().await?;
 
     let output = session
@@ -155,12 +153,13 @@ pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()
 #[tokio::test]
 pub(super) async fn advanced_turn_rejects_mismatched_turn_scope_and_trace_identity() -> Result<()> {
     let recorder = EffectRecorder::default();
-    let effect_host = recorder.effect_host().await;
+    let backend = recorder.backend().await;
+    let effect_host = lash_core::Backend::effect_host(backend.as_ref());
     let scoped_effect_controller = effect_host.scoped(lash_core::AdmittedScope::turn(
         "mismatched-turn-scope",
         "admitted-turn",
     ))?;
-    let core = standard_core_over(effect_host.clone())?;
+    let core = standard_core_over(backend.clone())?;
     let session = core.session("mismatched-turn-scope").open().await?;
 
     let error = session
@@ -194,11 +193,13 @@ pub(super) async fn advanced_turn_rejects_mismatched_turn_scope_and_trace_identi
 #[tokio::test]
 pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
     let recorder = EffectRecorder::default();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(recorder.effect_host().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        recorder.backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("stable-turn-id").open().await?;
 
     session
@@ -226,8 +227,9 @@ pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<
 pub(super) async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallback() -> Result<()>
 {
     let recorder = EffectRecorder::default();
-    let effect_host = recorder.effect_host().await;
-    let core = standard_core_over(effect_host.clone())?;
+    let backend = recorder.backend().await;
+    let effect_host = lash_core::Backend::effect_host(backend.as_ref());
+    let core = standard_core_over(backend.clone())?;
 
     // A session pins the physical scope its turns are cancelled under at its
     // first admitted turn, so a runtime-operation scope and a turn scope run
@@ -272,7 +274,7 @@ pub(super) async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallb
 #[tokio::test]
 pub(super) async fn explicit_effect_controller_creates_turn_scope_internally() -> Result<()> {
     let recorder = RecordingNativeEffectController::default();
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("explicit-handler-effects").open().await?;
 
     session
@@ -309,15 +311,14 @@ pub(super) async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .with_native_queued_work()
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-turn-run").open().await?;
     session
         .durable()
@@ -349,15 +350,14 @@ pub(super) async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle
 #[tokio::test]
 pub(super) async fn queued_turn_id_sets_physical_activity_and_effect_identity() -> Result<()> {
     let recorder = EffectRecorder::default();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(recorder.effect_host().await)
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        recorder.backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-identified-queued-turn").open().await?;
     session
         .durable()
@@ -420,13 +420,16 @@ pub(super) fn assert_turn_started_first(activities: &[TurnActivity], expected_tu
 
 #[tokio::test]
 pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "queued-builder-turn-starts";
     let session = core.session(session_id).open().await?;
     let controller = RecordingNativeEffectController::default();
@@ -465,9 +468,13 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
         &TurnId::from("scoped-automatic-queued-turn"),
     );
 
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("opened session retains its in-memory store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its in-memory store");
     let selected = store
         .enqueue_queued_work(
             crate::persistence::QueuedWorkBatchDraft::new(
@@ -545,15 +552,14 @@ pub(super) async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Res
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .with_native_queued_work()
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pre-cancelled-queued-turn").open().await?;
     session
         .durable()
@@ -601,23 +607,22 @@ pub(super) async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Res
 
 #[tokio::test]
 pub(super) async fn anonymous_selected_noops_leave_no_unreachable_receipt() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("anonymous-selected-noops").open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&session.session_id())
-        .expect("opened session retains its store");
 
     for ids in [Vec::new(), vec![crate::BatchId::new("already-absent")]] {
         let outcome = session.queued_turn().batch_ids(ids).run().await?;
         assert!(outcome.turn.is_none());
         assert!(
-            store.queued_runs.lock().unwrap().is_empty(),
+            sqlite_queued_run_count(&backend) == 0,
             "an unnamed empty selection has no reachable receipt to retain"
         );
     }
@@ -634,14 +639,14 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("turn-started-cancel-target").open().await?;
     let expected_turn_id = "turn-started-cancel-target-id";
     let mut stream = session
@@ -686,14 +691,14 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
 
 #[tokio::test]
 pub(super) async fn queued_turn_rejects_drain_id_with_turn_id_at_dispatch() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("conflicting-queued-turn-scope-ids")
         .open()
@@ -727,20 +732,20 @@ pub(super) async fn queued_turn_rejects_drain_id_with_turn_id_at_dispatch() -> R
 /// Only the exhausted queue is terminal, so the drain names which one it hit.
 #[tokio::test]
 pub(super) async fn an_exhausted_queue_reports_an_empty_claim_refusal() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(
-            crate::testing::TestProvider::builder()
-                .kind("empty-drain-reason")
-                .complete(|_| async { Ok(text_response("echo")) })
-                .build()
-                .into_handle(),
-        )
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(
+        crate::testing::TestProvider::builder()
+            .kind("empty-drain-reason")
+            .complete(|_| async { Ok(text_response("echo")) })
+            .build()
+            .into_handle(),
+    )
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("empty-drain-reason").open().await?;
 
     let drain = session.queued_turn().run().await?;
@@ -780,24 +785,31 @@ pub(super) async fn an_exhausted_queue_reports_an_empty_claim_refusal() -> Resul
 
 #[tokio::test]
 pub(super) async fn refused_automatic_drain_does_not_block_a_direct_turn() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(
-            crate::testing::TestProvider::builder()
-                .kind("refused-drain-direct-turn")
-                .complete(|_| async { Ok(text_response("direct turn completed")) })
-                .build()
-                .into_handle(),
-        )
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(
+        crate::testing::TestProvider::builder()
+            .kind("refused-drain-direct-turn")
+            .complete(|_| async { Ok(text_response("direct turn completed")) })
+            .build()
+            .into_handle(),
+    )
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("refused-drain-direct-turn").open().await?;
     let session_id = session.session_id();
-    let store = store_factory
-        .raw_store_for_testing(&session_id)
-        .expect("opened session retains its store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &session_id,
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its store");
     let delayed = store
         .enqueue_queued_work(
             crate::persistence::QueuedWorkBatchDraft::new(
@@ -840,19 +852,26 @@ pub(super) async fn refused_automatic_drain_does_not_block_a_direct_turn() -> Re
 
 #[tokio::test]
 pub(super) async fn automatic_pickup_keeps_an_explicit_empty_run_receipt() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("explicit-empty-pickup").open().await?;
     session.turn(TurnInput::text("seed head")).run().await?;
     let session_id = session.session_id();
-    let store = store_factory
-        .raw_store_for_testing(&session_id)
-        .expect("opened session retains its store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &session_id,
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its store");
     let state = lash_core::store::load_persisted_session_state(store.as_ref())
         .await?
         .expect("opened session has a persisted head");
@@ -897,19 +916,26 @@ pub(super) async fn automatic_pickup_keeps_an_explicit_empty_run_receipt() -> Re
 
 #[tokio::test]
 pub(super) async fn explicit_reentry_keeps_an_anonymous_empty_run_receipt() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("anonymous-empty-reentry").open().await?;
     session.turn(TurnInput::text("seed head")).run().await?;
     let session_id = session.session_id();
-    let store = store_factory
-        .raw_store_for_testing(&session_id)
-        .expect("opened session retains its store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &session_id,
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its store");
     let state = lash_core::store::load_persisted_session_state(store.as_ref())
         .await?
         .expect("opened session has a persisted head");
@@ -983,19 +1009,26 @@ pub(super) async fn explicit_reentry_keeps_an_anonymous_empty_run_receipt() -> R
 
 #[tokio::test]
 pub(super) async fn automatic_pickup_settles_a_frozen_selected_empty_run() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("selected-empty-pickup").open().await?;
     session.turn(TurnInput::text("seed head")).run().await?;
     let session_id = session.session_id();
-    let store = store_factory
-        .raw_store_for_testing(&session_id)
-        .expect("opened session retains its store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &session_id,
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its store");
     let state = lash_core::store::load_persisted_session_state(store.as_ref())
         .await?
         .expect("opened session has a persisted head");
@@ -1048,39 +1081,27 @@ pub(super) async fn automatic_pickup_settles_a_frozen_selected_empty_run() -> Re
     Ok(())
 }
 
-/// Facade admission refuses a session with no explicitly selected store before
-/// a queue or turn can be addressed.
-#[tokio::test]
-pub(super) async fn a_session_without_a_store_never_exposes_a_queue() -> Result<()> {
-    let core = core_without_session_store();
-    let error = match core.session("missing-store-drain-reason").open().await {
-        Ok(_) => panic!("facade session admission requires a store"),
-        Err(error) => error,
-    };
-    assert!(matches!(error, EmbedError::MissingSessionStore));
-    Ok(())
-}
-
 /// An automatic drain names why it ran no turn, and a row that can never fit is
 /// not such a reason: it is a terminal fault. Before FIG-1575 this path reached
 /// a selected-drain refusal on a drain that selected nothing, and panicked.
 #[tokio::test]
 pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(
-            crate::testing::TestProvider::builder()
-                .kind("oversized-queued-row")
-                .complete(|_| async { Ok(text_response("echo")) })
-                .build()
-                .into_handle(),
-        )
-        .model(crate::tests::harness::model_spec("mock-model", None, 1_024))
-        .store_factory(
-            Arc::clone(&store_factory) as Arc<dyn crate::persistence::SessionStoreFactory>
-        )
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(
+        crate::testing::TestProvider::builder()
+            .kind("oversized-queued-row")
+            .complete(|_| async { Ok(text_response("echo")) })
+            .build()
+            .into_handle(),
+    )
+    .model(crate::tests::harness::model_spec("mock-model", None, 1_024))
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("oversized-queued-row").open().await?;
     {
         let store = store_factory
@@ -1130,13 +1151,15 @@ pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -
 pub(super) async fn a_busy_execution_lane_is_never_reported_as_an_exhausted_queue() -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory)
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let holder = core.session("busy-lane-drain-reason").open().await?;
     // Both runtimes recover before either owns the lane. Once the first drain
     // starts, the already-admitted peer must report lane contention rather
@@ -1182,18 +1205,25 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
         })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-queued-turn-key-break-refusal";
     let session = core.session(session_id).open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("opened session retains its in-memory store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its in-memory store");
     let enqueue = |source_key: &'static str, merge_key: &'static str| {
         let store = Arc::clone(&store);
         async move {
@@ -1247,7 +1277,7 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
         .expect_err("a failed explicit receipt cannot label unexecuted batches satisfied");
     assert!(matches!(retry, EmbedError::Runtime(_)));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
-    let retained_explicit = store.queued_runs.lock().unwrap().len();
+    let retained_explicit = sqlite_queued_run_count(&backend);
     for _ in 0..2 {
         assert!(matches!(
             session
@@ -1258,7 +1288,7 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
             Err(EmbedError::SelectedQueuedWorkDrainRefused { .. })
         ));
         assert_eq!(
-            store.queued_runs.lock().unwrap().len(),
+            sqlite_queued_run_count(&backend),
             retained_explicit,
             "an unnamed refused selection has no reachable receipt to retain"
         );
@@ -1296,18 +1326,25 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
         })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-interrupted-composition";
     let session = core.session(session_id).open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("opened session retains its in-memory store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its in-memory store");
     for source_key in ["interrupted-w1", "interrupted-w2"] {
         store
             .enqueue_queued_work(
@@ -1329,6 +1366,11 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
             .await
             .expect("enqueue interrupted composition row");
     }
+    // Batch ids are the store's to mint; read them back in enqueue order.
+    let batch_ids = sqlite_queued_work_claims(&backend)
+        .into_iter()
+        .map(|(batch_id, _)| batch_id)
+        .collect::<Vec<_>>();
     let owner_a = lash_core::LeaseOwnerIdentity::opaque(
         "selected-interrupted-owner-a",
         "selected-interrupted-owner-a:incarnation",
@@ -1362,9 +1404,8 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
             .iter()
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["recording-qwb-1", "recording-qwb-2"]
+        vec![batch_ids[0].as_str(), batch_ids[1].as_str()]
     );
-    assert_eq!(claim_a.claim_id, "recording-qwc:1:1");
     store
         .release_session_execution_lease(&lease_a.completion())
         .await
@@ -1372,7 +1413,7 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
 
     let error = session
         .queued_turn()
-        .batch_ids(["recording-qwb-1"])
+        .batch_ids([batch_ids[0].clone()])
         .run()
         .await
         .expect_err("a selected drain cannot split an interrupted composition");
@@ -1380,36 +1421,23 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
         EmbedError::SelectedQueuedWorkDrainRefused { cause } => assert_eq!(
             cause,
             SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
-                required_batch_ids: vec![
-                    "recording-qwb-1".to_string().into(),
-                    "recording-qwb-2".to_string().into(),
-                ],
+                required_batch_ids: vec![batch_ids[0].clone().into(), batch_ids[1].clone().into(),],
             }
         ),
         other => panic!("expected interrupted-composition refusal, got {other:?}"),
     }
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     assert_eq!(
-        store
-            .raw_queued_work_for_testing()
-            .into_iter()
-            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id.to_string(), claim_id))
-            .collect::<Vec<_>>(),
+        sqlite_queued_work_claims(&backend),
         vec![
-            (
-                "recording-qwb-1".to_string(),
-                Some("recording-qwc:1:1".to_string()),
-            ),
-            (
-                "recording-qwb-2".to_string(),
-                Some("recording-qwc:1:1".to_string()),
-            ),
+            (batch_ids[0].clone(), Some(claim_a.claim_id.clone()),),
+            (batch_ids[1].clone(), Some(claim_a.claim_id.clone()),),
         ]
     );
 
     let output = session
         .queued_turn()
-        .batch_ids(["recording-qwb-1", "recording-qwb-2"])
+        .batch_ids([batch_ids[0].clone(), batch_ids[1].clone()])
         .run()
         .await?
         .expect("the complete interrupted composition executes");
@@ -1422,12 +1450,9 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
                 TurnEvent::QueuedWorkStarted { batch_ids, .. } => Some(batch_ids.clone()),
                 _ => None,
             }),
-        Some(vec![
-            "recording-qwb-1".to_string(),
-            "recording-qwb-2".to_string(),
-        ])
+        Some(vec![batch_ids[0].clone(), batch_ids[1].clone(),])
     );
-    assert!(store.raw_queued_work_for_testing().is_empty());
+    assert!(sqlite_queued_work_claims(&backend).is_empty());
     Ok(())
 }
 
@@ -1439,18 +1464,25 @@ pub(super) async fn selected_queued_turn_reports_claimed_now_and_already_satisfi
         .complete(|_| async { Ok(text_response("selected outcome")) })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-idempotent-outcome";
     let session = core.session(session_id).open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("opened session retains its in-memory store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its in-memory store");
     let batch = store
         .enqueue_queued_work(
             crate::persistence::QueuedWorkBatchDraft::new(
@@ -1515,18 +1547,25 @@ pub(super) async fn selected_queued_turn_deduplicates_absent_ids_and_requires_la
         })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-duplicate-absent";
     let session = core.session(session_id).open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("opened session retains its in-memory store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its in-memory store");
 
     let expected = vec![
         crate::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
@@ -1591,18 +1630,25 @@ pub(super) async fn selected_queued_turn_deduplicates_present_claimable_id() -> 
         })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-duplicate-present";
     let session = core.session(session_id).open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("opened session retains its in-memory store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its in-memory store");
     let batch = store
         .enqueue_queued_work(
             crate::persistence::QueuedWorkBatchDraft::new(
@@ -1653,13 +1699,15 @@ pub(super) async fn selected_queued_turn_empty_selection_is_satisfied_noop() -> 
         })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory)
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("selected-empty-noop").open().await?;
     session
         .durable()
@@ -1700,18 +1748,25 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
         })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-two-interrupted-compositions";
     let session = core.session(session_id).open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("opened session retains its in-memory store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its in-memory store");
     for source_key in ["claim-a1", "claim-a2", "claim-b1", "claim-b2"] {
         store
             .enqueue_queued_work(
@@ -1760,6 +1815,11 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
         .expect("claim predecessor A")
         .claim()
         .expect("predecessor A exists");
+    // Batch ids are the store's to mint; read them back in enqueue order.
+    let batch_ids = sqlite_queued_work_claims(&backend)
+        .into_iter()
+        .map(|(batch_id, _)| batch_id)
+        .collect::<Vec<_>>();
     let claim_b = store
         .claim_ready_queued_work(
             &SessionId::from(session_id),
@@ -1778,18 +1838,16 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
             .iter()
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["recording-qwb-1", "recording-qwb-2"]
+        vec![batch_ids[0].as_str(), batch_ids[1].as_str()]
     );
-    assert_eq!(claim_a.claim_id, "recording-qwc:1:1");
     assert_eq!(
         claim_b
             .batches
             .iter()
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["recording-qwb-3", "recording-qwb-4"]
+        vec![batch_ids[2].as_str(), batch_ids[3].as_str()]
     );
-    assert_eq!(claim_b.claim_id, "recording-qwc:3:1");
     store
         .release_session_execution_lease(&predecessor_lease.completion())
         .await
@@ -1797,7 +1855,11 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
 
     let partial_error = session
         .queued_turn()
-        .batch_ids(["recording-qwb-1", "recording-qwb-2", "recording-qwb-3"])
+        .batch_ids([
+            batch_ids[0].clone(),
+            batch_ids[1].clone(),
+            batch_ids[2].clone(),
+        ])
         .run()
         .await
         .expect_err("full A plus partial B must refuse before reclaiming A");
@@ -1805,48 +1867,29 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
         EmbedError::SelectedQueuedWorkDrainRefused { cause } => assert_eq!(
             cause,
             SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
-                required_batch_ids: vec![
-                    "recording-qwb-3".to_string().into(),
-                    "recording-qwb-4".to_string().into(),
-                ],
+                required_batch_ids: vec![batch_ids[2].clone().into(), batch_ids[3].clone().into(),],
             }
         ),
         other => panic!("expected incomplete-B refusal, got {other:?}"),
     }
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     assert_eq!(
-        store
-            .raw_queued_work_for_testing()
-            .into_iter()
-            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id.to_string(), claim_id))
-            .collect::<Vec<_>>(),
+        sqlite_queued_work_claims(&backend),
         vec![
-            (
-                "recording-qwb-1".to_string(),
-                Some("recording-qwc:1:1".to_string()),
-            ),
-            (
-                "recording-qwb-2".to_string(),
-                Some("recording-qwc:1:1".to_string()),
-            ),
-            (
-                "recording-qwb-3".to_string(),
-                Some("recording-qwc:3:1".to_string()),
-            ),
-            (
-                "recording-qwb-4".to_string(),
-                Some("recording-qwc:3:1".to_string()),
-            ),
+            (batch_ids[0].clone(), Some(claim_a.claim_id.clone()),),
+            (batch_ids[1].clone(), Some(claim_a.claim_id.clone()),),
+            (batch_ids[2].clone(), Some(claim_b.claim_id.clone()),),
+            (batch_ids[3].clone(), Some(claim_b.claim_id.clone()),),
         ]
     );
 
     let complete_error = session
         .queued_turn()
         .batch_ids([
-            "recording-qwb-1",
-            "recording-qwb-2",
-            "recording-qwb-3",
-            "recording-qwb-4",
+            batch_ids[0].clone(),
+            batch_ids[1].clone(),
+            batch_ids[2].clone(),
+            batch_ids[3].clone(),
         ])
         .run()
         .await
@@ -1855,38 +1898,19 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
         EmbedError::SelectedQueuedWorkDrainRefused { cause } => assert_eq!(
             cause,
             SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
-                unclaimed_batch_ids: vec![
-                    "recording-qwb-3".to_string().into(),
-                    "recording-qwb-4".to_string().into(),
-                ],
+                unclaimed_batch_ids: vec![batch_ids[2].clone().into(), batch_ids[3].clone().into(),],
             }
         ),
         other => panic!("expected second-composition refusal, got {other:?}"),
     }
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     assert_eq!(
-        store
-            .raw_queued_work_for_testing()
-            .into_iter()
-            .map(|(batch, claim_id, _, _, _, _)| (batch.batch_id.to_string(), claim_id))
-            .collect::<Vec<_>>(),
+        sqlite_queued_work_claims(&backend),
         vec![
-            (
-                "recording-qwb-1".to_string(),
-                Some("recording-qwc:1:1".to_string()),
-            ),
-            (
-                "recording-qwb-2".to_string(),
-                Some("recording-qwc:1:1".to_string()),
-            ),
-            (
-                "recording-qwb-3".to_string(),
-                Some("recording-qwc:3:1".to_string()),
-            ),
-            (
-                "recording-qwb-4".to_string(),
-                Some("recording-qwc:3:1".to_string()),
-            ),
+            (batch_ids[0].clone(), Some(claim_a.claim_id.clone()),),
+            (batch_ids[1].clone(), Some(claim_a.claim_id.clone()),),
+            (batch_ids[2].clone(), Some(claim_b.claim_id.clone()),),
+            (batch_ids[3].clone(), Some(claim_b.claim_id.clone()),),
         ]
     );
     Ok(())
@@ -1907,19 +1931,26 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
         })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(2))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(2))
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-redrive-over-row-limit";
     let session = core.session(session_id).open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("opened session retains its in-memory store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its in-memory store");
     for source_key in [
         "selected-limit-w1",
         "selected-limit-w2",
@@ -1960,6 +1991,11 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
         .expect("claim selected row-limit predecessor lease")
         .acquired()
         .expect("selected row-limit predecessor lane is free");
+    // Batch ids are the store's to mint; read them back in enqueue order.
+    let batch_ids = sqlite_queued_work_claims(&backend)
+        .into_iter()
+        .map(|(batch_id, _)| batch_id)
+        .collect::<Vec<_>>();
     let predecessor_claim = store
         .claim_ready_queued_work(
             &SessionId::from(session_id),
@@ -1978,7 +2014,11 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
             .iter()
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["recording-qwb-1", "recording-qwb-2", "recording-qwb-3"]
+        vec![
+            batch_ids[0].as_str(),
+            batch_ids[1].as_str(),
+            batch_ids[2].as_str()
+        ]
     );
     store
         .release_session_execution_lease(&predecessor_lease.completion())
@@ -1987,7 +2027,11 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
 
     let output = session
         .queued_turn()
-        .batch_ids(["recording-qwb-1", "recording-qwb-2", "recording-qwb-3"])
+        .batch_ids([
+            batch_ids[0].clone(),
+            batch_ids[1].clone(),
+            batch_ids[2].clone(),
+        ])
         .run()
         .await?
         .expect("selected predecessor composition ignores successor max_rows=2");
@@ -2001,9 +2045,9 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
                 _ => None,
             }),
         Some(vec![
-            "recording-qwb-1".to_string(),
-            "recording-qwb-2".to_string(),
-            "recording-qwb-3".to_string(),
+            batch_ids[0].clone(),
+            batch_ids[1].clone(),
+            batch_ids[2].clone(),
         ])
     );
     Ok(())
@@ -2024,18 +2068,25 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
         })
         .build()
         .into_handle();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-execution-lane-busy";
     let session = core.session(session_id).open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("opened session retains its in-memory store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("opened session retains its in-memory store");
     store
         .enqueue_queued_work(
             crate::persistence::QueuedWorkBatchDraft::new(
@@ -2054,6 +2105,11 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
         )
         .await
         .expect("enqueue busy selected row");
+    // Batch ids are the store's to mint; read them back in enqueue order.
+    let batch_ids = sqlite_queued_work_claims(&backend)
+        .into_iter()
+        .map(|(batch_id, _)| batch_id)
+        .collect::<Vec<_>>();
     let held_owner = lash_core::LeaseOwnerIdentity::opaque(
         "selected-busy-holder",
         "selected-busy-holder:incarnation",
@@ -2072,7 +2128,7 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
 
     let error = session
         .queued_turn()
-        .batch_ids(["recording-qwb-1"])
+        .batch_ids([batch_ids[0].clone()])
         .run()
         .await
         .expect_err("selected drain under a held lease is typed contention");
@@ -2092,7 +2148,7 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
             .iter()
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["recording-qwb-1"]
+        vec![batch_ids[0].as_str()]
     );
     store
         .release_session_execution_lease(&held_lease.completion())
@@ -2104,14 +2160,14 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
 #[tokio::test]
 pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
 -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("idle-input-application").open().await?;
     let cursor = session.observe().current_remote_observation().cursor;
     let empty_admission = session
@@ -2186,22 +2242,22 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
 
 #[tokio::test]
 pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::new(
-                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
-                    max_events_per_session: 1,
-                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
-                },
-            ),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(Arc::new(
+        lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+            },
+        ),
+    ))
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-input-application-gap").open().await?;
     let stale_cursor = session.observe().current_remote_observation().cursor;
     let admission = session
@@ -2250,14 +2306,14 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
 pub(super) async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> Result<()>
 {
     let recorder = RecordingNativeEffectController::default();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-explicit-effects").open().await?;
     session
         .durable()
@@ -2286,17 +2342,24 @@ pub(super) async fn queued_turn_explicit_effects_create_queue_drain_scope_intern
 pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_scope() -> Result<()>
 {
     let recorder = RecordingNativeEffectController::default();
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(store_factory.clone())
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session_id = "selected-explicit-effects";
     let session = core.session(session_id).open().await?;
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from(session_id))
-        .expect("session store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("session store");
     let receipt = store
         .enqueue_queued_work(
             crate::persistence::QueuedWorkBatchDraft::new(

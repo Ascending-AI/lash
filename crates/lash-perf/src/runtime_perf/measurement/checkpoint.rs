@@ -779,7 +779,7 @@ pub(crate) async fn run_once_embed(
     let (store, session) = run
         .build(async {
             let store = Arc::new(RuntimePerfStore::default());
-            let core = build_embed_core(scenario, Arc::clone(&store))?;
+            let core = build_embed_core(scenario, Arc::clone(&store)).await?;
             let session = core
                 .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
                 .await

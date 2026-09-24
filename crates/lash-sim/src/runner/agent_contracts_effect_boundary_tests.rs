@@ -122,17 +122,12 @@ impl lash_core::ToolProvider for RecordingToolProvider {
     }
 }
 
-/// The contract world's own host — the one every other agent contract runs
-/// on — with the recording layer over it.
-fn recording_effect_host(
+/// The recording layer the contract world runs over its own host — the one
+/// every other agent contract runs on.
+fn recording_layer(
     recorder: Arc<ToolAttemptInvariantRecorder>,
-) -> Arc<dyn lash_core::EffectHost> {
-    Arc::new(lash_core::testing::LayeredEffectHost::new(
-        Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ),
-        Arc::new(ToolAttemptRecordingLayer { recorder }),
-    ))
+) -> Option<Arc<dyn lash_core::testing::EffectLayer>> {
+    Some(Arc::new(ToolAttemptRecordingLayer { recorder }))
 }
 
 struct BatchEnvelopeProbeTools;
@@ -189,7 +184,7 @@ async fn scalar_lashlang_pending_provider_invocation_crosses_tool_attempt_effect
     facade_agent_durable_input_execution_with(
         tools,
         registered_tools,
-        recording_effect_host(Arc::clone(&recorder)),
+        recording_layer(Arc::clone(&recorder)),
         &mut key_rx,
     )
     .await
@@ -205,7 +200,7 @@ async fn batched_lashlang_provider_invocations_cross_tool_attempt_effect_boundar
         recorder: Arc::clone(&recorder),
         delegate: Arc::new(BatchEnvelopeProbeTools),
     });
-    let (core, _) = agent_process_contract_core_with_effect_host(
+    let (core, _) = agent_process_contract_core_with_effect_layer(
         "lash_runtime batched tool attempt envelope",
         vec![
             r#"<typescript>
@@ -221,8 +216,9 @@ finish(await handle);
 </typescript>"#,
         ],
         Some(tools),
-        recording_effect_host(Arc::clone(&recorder)),
+        recording_layer(Arc::clone(&recorder)),
     )
+    .await
     .expect("build batch envelope contract");
     let session = core
         .session("sim-agent-batched-tool-attempt-envelope")

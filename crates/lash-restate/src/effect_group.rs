@@ -134,7 +134,7 @@ impl RestateEffectGroupServices {
     ///
     /// Deliberately an associated function rather than an
     /// `assert_endpoint_bound(&self)` like
-    /// [`RestateTurnDeployment`](crate::RestateTurnDeployment) has: binding an
+    /// [`RestateBackend`](crate::RestateBackend) has: binding an
     /// endpoint moves this struct's four service fields into the builder, so
     /// by the only point where an `Endpoint` exists to check there is no
     /// `&self` left to call. Those deployments survive binding; this one does

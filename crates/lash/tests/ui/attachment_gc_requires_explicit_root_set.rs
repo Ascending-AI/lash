@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use lash::SessionId;
 use lash::persistence::{
-    AttachmentReclamationPolicy, EmptyRootSetPolicy, InMemoryAttachmentStore,
-    InMemorySessionStoreFactory, RuntimePersistence, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, UnsettledTurnCounts, reclaim_unreferenced_attachments,
+    AttachmentReclamationPolicy, EmptyRootSetPolicy, FileAttachmentStore, RuntimePersistence,
+    SessionStoreCreateRequest, SessionStoreFactory, StoreError, UnsettledTurnCounts,
+    reclaim_unreferenced_attachments,
 };
 
 struct DelegatingFactory {
-    inner: InMemorySessionStoreFactory,
+    inner: Arc<dyn SessionStoreFactory>,
 }
 
 #[async_trait::async_trait]
@@ -52,7 +52,7 @@ impl SessionStoreFactory for DelegatingFactory {
 }
 
 async fn try_gc(factory: &DelegatingFactory) {
-    let backend = InMemoryAttachmentStore::new();
+    let backend = FileAttachmentStore::new("attachments");
     let _ = reclaim_unreferenced_attachments(
         factory,
         &backend,

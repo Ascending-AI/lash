@@ -46,9 +46,8 @@ impl lash_core::plugin::ProtocolSessionPlugin for RefusingBeforeLlmCall {
 }
 
 struct SqliteBackend {
-    directory: tempfile::TempDir,
-    effect_host: Arc<lash_sqlite_store::SqliteEffectHost>,
-    clock: Arc<dyn lash_core::Clock>,
+    _directory: tempfile::TempDir,
+    backend: Arc<lash_sqlite_store::SqliteBackend>,
 }
 
 impl SqliteBackend {
@@ -59,18 +58,18 @@ impl SqliteBackend {
     /// The backend with every lease and record timestamp read from `clock`.
     async fn open_on(clock: Arc<dyn lash_core::Clock>) -> Self {
         let directory = tempfile::tempdir().expect("temporary durable backend");
-        let effect_host = Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open_with_clock(
-                &directory.path().join("effects.sqlite"),
-                Arc::clone(&clock),
+        let backend = Arc::new(
+            lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+                directory.path(),
+                lash_sqlite_store::SqliteBackendOptions::default(),
+                clock,
             )
             .await
-            .expect("file-backed SQLite effect journal"),
+            .expect("file-backed SQLite backend"),
         );
         Self {
-            directory,
-            effect_host,
-            clock,
+            _directory: directory,
+            backend,
         }
     }
 
@@ -88,7 +87,8 @@ impl SqliteBackend {
         protocol: Option<Arc<dyn lash_core::plugin::ProtocolSessionPlugin>>,
         plugins: Vec<Arc<dyn PluginFactory>>,
     ) -> LashCore {
-        let builder = LashCore::standard_builder(crate::TurnBudget::Unbounded);
+        let builder =
+            LashCore::standard_builder(self.backend.clone(), crate::TurnBudget::Unbounded);
         let builder = match protocol {
             Some(protocol) => builder.protocol_plugin(
                 lash_core::testing::test_standard_protocol_factory_with_runtime_state(
@@ -103,14 +103,6 @@ impl SqliteBackend {
         explicit_ephemeral_facets(builder)
             .provider(provider)
             .model(mock_model_spec())
-            .clock(Arc::clone(&self.clock))
-            .effect_host(Arc::clone(&self.effect_host) as Arc<dyn EffectHost>)
-            .store_factory(Arc::new(
-                lash_sqlite_store::SqliteSessionStoreFactory::new(
-                    self.directory.path().join("sessions"),
-                )
-                .with_clock(Arc::clone(&self.clock)),
-            ))
             .build(crate::testing::runtime_lease_owner())
             .expect("file-backed SQLite backend")
     }
@@ -375,7 +367,7 @@ async fn abort_direct_turn_with_live_fault(
     session_id: &str,
     turn_id: &str,
 ) -> (EmbedError, lash_core::InputId) {
-    let faults = backend.effect_host.effect_journal_faults();
+    let faults = backend.backend.effect_host().effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Claim,
         &first_llm_call_key(session_id, turn_id),
@@ -620,7 +612,7 @@ async fn cancelling_a_bound_input_returns_the_rest_of_its_drive_to_the_queue() -
         .id("earlier-admission")
         .send()
         .await?;
-    let faults = backend.effect_host.effect_journal_faults();
+    let faults = backend.backend.effect_host().effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Claim,
         &first_llm_call_key(SESSION, "absorbing-turn"),
@@ -718,7 +710,7 @@ async fn a_drive_whose_outcome_was_lost_still_binds_its_input() -> Result<()> {
         None,
     );
     let session = core.session(SESSION).open().await?;
-    let faults = backend.effect_host.effect_journal_faults();
+    let faults = backend.backend.effect_host().effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Finalize,
         &format!("{SESSION}:drive-lost-turn:accept_turn_input:claim_accepted_turn_input"),
@@ -988,7 +980,7 @@ async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_re
         .id("journal-blip")
         .send()
         .await?;
-    let faults = backend.effect_host.effect_journal_faults();
+    let faults = backend.backend.effect_host().effect_journal_faults();
     faults.fail_next(
         EffectJournalFaultPoint::Claim,
         &first_llm_call_key(SESSION, "queued-turn"),

@@ -19,15 +19,12 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     let session_id = first_session_ids.current();
     let first_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
+            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
             data_dir.join("lash-sessions"),
         )
         .await
         .expect("open first process registry"),
     ) as Arc<dyn lash::process::ProcessRegistry>;
-    let first_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
-    );
     let first_response = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let first_response_for_provider = Arc::clone(&first_response);
     let first_provider = lash::testing::TestProvider::builder()
@@ -56,8 +53,6 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     let first_core = explicit_durable_test_facets(&data_dir)
         .provider(first_provider)
         .model(model.clone())
-        .store_factory(Arc::clone(&first_store_factory))
-        .process_registry(Arc::clone(&first_registry))
         .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build first workbench core");
@@ -216,22 +211,12 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         })
         .build()
         .into_handle();
-    let resumed_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("reopen process registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
     let resumed_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
     );
     let resumed_core = explicit_durable_test_facets(&data_dir)
         .provider(resumed_provider)
         .model(model)
-        .store_factory(Arc::clone(&resumed_store_factory))
-        .process_registry(Arc::clone(&resumed_registry))
         .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build reconstructed workbench core");
@@ -246,7 +231,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         core: resumed_core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&resumed_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: resumed_session_ids,

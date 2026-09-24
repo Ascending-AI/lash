@@ -21,15 +21,11 @@ const WORKBENCH_SEARCH_MCP_URL: &str = "https://search.parallel.ai/mcp";
     reason = "a 2s TTL renewed every 666ms leaves over three renewal windows, satisfying \
               LeaseTimings' three-renewal invariant (see the comment below)"
 )]
-pub(crate) fn apply_workbench_lease_timings(
-    config: lash::durability::RuntimeHostConfig,
-) -> lash::durability::RuntimeHostConfig {
-    let timings =
-        lash::durability::LeaseTimings::new(Duration::from_secs(2), Duration::from_millis(666))
-            .expect("workbench lease timings satisfy the three-renewal TTL invariant");
+pub(crate) fn workbench_lease_timings() -> lash::durability::LeaseTimings {
     // Workbench-only: keeps takeover terminal inside the 5s attach budget;
     // tolerates one missed renew; fencing (ADR 0029) bounds stale-owner risk.
-    config.with_lease_timings(timings)
+    lash::durability::LeaseTimings::new(Duration::from_secs(2), Duration::from_millis(666))
+        .expect("workbench lease timings satisfy the three-renewal TTL invariant")
 }
 
 pub(crate) fn configure_workbench_plugins(
@@ -173,10 +169,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .filter(|value| !value.trim().is_empty());
     let stores = WorkbenchStores::open(&data_dir, database_url.as_deref()).await?;
     eprintln!("agent-workbench durable store: {}", stores.backend);
-    let core_store_factory = Arc::clone(&stores.session_store_factory);
-    let process_registry = Arc::clone(&stores.process_registry);
-    let process_continuations = Arc::clone(&stores.process_continuations);
-    let trigger_store = Arc::clone(&stores.trigger_store);
+    let core_store_factory = stores.stores.session_store_factory();
+    let trigger_store = stores.stores.trigger_store();
     let artifact_store = Arc::clone(&stores.artifact_store);
     let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
     let mail_world = mail::MailWorld::new();
@@ -251,22 +245,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         process_event_tx,
         worker_fault_tx,
     )) as Arc<dyn lash::process::ProcessEventSink>;
-    let process_deployment = lash_restate::RestateProcessDeployment::new_with_sink(
-        lash_restate::RestateConnection::with_config(
-            restate_ingress_url.clone(),
-            lash_restate::RestateConnectionConfig {
-                control_timeout_ms: 30_000,
-                attach_ceiling_ms: 6 * 60 * 60 * 1_000,
-            },
-        ),
-        restate_authority_id.clone(),
-        process_registry,
-        process_continuations,
-        Some(Arc::clone(&process_event_sink)),
-    );
-    // Retained so a host-facing "wait for the work item" flow can route through
-    // the process-work port (see the `/api/work/{id}/await` route).
-    let process_work_driver = process_deployment.process_work();
     let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
         sessions: sessions.clone(),
         store_factory: Arc::clone(&core_store_factory),
@@ -277,27 +255,25 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle.clone());
     let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
 
-    let turn_deployment = lash_restate::RestateTurnDeployment::new(
-        lash_restate::RestateConnection::with_client(
+    // One Restate backend over the store set: the engine host journals the
+    // turns' effects, runs the background processes, whose appended events
+    // reach the sink best-effort after their durable write, and hands each
+    // queued turn to the workbench's queued-turn workflow.
+    let backend = Arc::new(lash_restate::RestateBackend::with_process_event_sink(
+        lash_restate::RestateConnection::with_client_and_config(
             restate_ingress_url.clone(),
             restate_http.clone(),
+            lash_restate::RestateConnectionConfig {
+                control_timeout_ms: 30_000,
+                attach_ceiling_ms: 6 * 60 * 60 * 1_000,
+            },
         ),
         restate_authority_id.clone(),
-    );
-
-    let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
-        data_dir.join("attachments"),
-    )) as Arc<dyn lash::persistence::AttachmentStore>;
-    let mut runtime_host_config =
-        apply_workbench_lease_timings(lash::durability::RuntimeHostConfig::new(
-            turn_deployment.effect_host(),
-            Arc::clone(&attachment_store),
-            Arc::clone(&stores.process_env_store),
-            lash::CommitBudget::bounded(1024 * 1024, 512),
-            lash::QueuedWorkBatchingConfig::new(1024),
-        ));
-    runtime_host_config.tracing.trace_sink = Some(Arc::clone(&trace_sink));
-    runtime_host_config.tracing.trace_level = TraceLevel::Extended;
+        Arc::clone(&stores.stores),
+        lash_restate::RestateQueuedWork::Engine(queued_work_port),
+        Some(Arc::clone(&process_event_sink)),
+    ));
+    let attachment_store = stores.stores.attachment_store();
 
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
@@ -324,22 +300,29 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .transpose()
         .map_err(|error| anyhow!("invalid AGENT_WORKBENCH_OUTPUT_TOKEN_CAP: {error}"))?;
     let shutdown_provider = provider.clone();
-    let builder = LashCore::rlm_builder(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS), factory)
-        .provider(provider)
-        .session_spec(
-            lash::SessionSpec::new()
-                .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS))
-                .generation(lash::direct::GenerationOptions {
-                    output_token_cap,
-                    ..Default::default()
-                }),
-        )
-        .no_progress_budget(lash::NoProgressBudget::bounded(
-            WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
-        ))
-        .model(model_spec)
-        .store_factory(Arc::clone(&core_store_factory))
-        .trigger_store(Arc::clone(&trigger_store));
+    let builder = LashCore::rlm_builder(
+        Arc::clone(&backend) as Arc<dyn lash::Backend>,
+        lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS),
+        factory,
+    )
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .lease_timings(workbench_lease_timings())
+    .trace_sink(Arc::clone(&trace_sink))
+    .trace_level(TraceLevel::Extended)
+    .provider(provider)
+    .session_spec(
+        lash::SessionSpec::new()
+            .turn_budget(lash::TurnBudget::bounded(WORKBENCH_MAX_TURNS))
+            .generation(lash::direct::GenerationOptions {
+                output_token_cap,
+                ..Default::default()
+            }),
+    )
+    .no_progress_budget(lash::NoProgressBudget::bounded(
+        WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS,
+    ))
+    .model(model_spec);
     let builder = if let Some(tool_provider) =
         dev_provider_scenario.and_then(failure_provider::DevProviderScenario::tool_provider)
     {
@@ -381,14 +364,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 plugins.push(marker);
             }
         })
-        .process_work(process_work_driver.clone())
-        // The driver already carries this sink for appended events; the core
-        // needs it too, because the durable process worker it configures
-        // reports its faults there and nowhere else.
+        // The backend's process work already carries this sink for
+        // appended events; the core needs it too, because the durable process
+        // worker it configures reports its faults there and nowhere else.
         .process_event_sink(Arc::clone(&process_event_sink))
-        .with_queued_work(queued_work_port)
-        .advanced()
-        .runtime_host_config(runtime_host_config)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "agent-workbench",
             process_incarnation_id(),
@@ -562,7 +541,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         let restate_task = restate::spawn_owned_restate_endpoint(
             restate_listener,
             state,
-            process_deployment,
+            Arc::clone(&backend),
             process_worker,
             host_shutdown.subscribe(),
         );
@@ -721,16 +700,10 @@ mod startup_tests {
 
     #[test]
     fn workbench_runtime_host_keeps_takeover_inside_terminal_attach_budget() {
-        let host = apply_workbench_lease_timings(lash::durability::RuntimeHostConfig::in_memory(
-            lash::CommitBudget::bounded(1024, 16),
-            lash::QueuedWorkBatchingConfig::new(16),
-        ));
+        let timings = workbench_lease_timings();
 
-        assert_eq!(host.control.lease_timings.ttl(), Duration::from_secs(2));
-        assert_eq!(
-            host.control.lease_timings.renew_interval(),
-            Duration::from_millis(666)
-        );
+        assert_eq!(timings.ttl(), Duration::from_secs(2));
+        assert_eq!(timings.renew_interval(), Duration::from_millis(666));
     }
 
     #[test]

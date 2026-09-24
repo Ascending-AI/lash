@@ -25,19 +25,13 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         runtime_provider_components(OPENAI_COMPATIBLE, &transport).expect("runtime provider");
     let trace_dir = tempfile::tempdir().expect("trace directory");
     let trace_path = trace_dir.path().join("provider-requests.jsonl");
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .with_native_queued_work()
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
+    let backend = crate::backend::memory_backend()
+        .await
+        .expect("SQLite memory backend");
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .provider(provider)
         .model(model)
         .prompt_template(PromptTemplate::new(vec![PromptTemplateSection::untitled(

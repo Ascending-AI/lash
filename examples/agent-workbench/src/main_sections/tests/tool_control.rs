@@ -120,12 +120,9 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             })
             .build()
             .into_handle();
-        let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            data_dir.join("lash-sessions"),
-        )) as Arc<dyn lash::persistence::SessionStoreFactory>;
         let process_registry = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open(
-                &data_dir.join("processes.db"),
+                &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
                 data_dir.join("lash-sessions"),
             )
             .await
@@ -141,8 +138,6 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             )
             .tools(workbench_control_tools())
             .plugin(Arc::new(WorkbenchPluginFactory::new()))
-            .store_factory(store_factory)
-            .process_registry(Arc::clone(&process_registry))
             .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build tool control workbench core");

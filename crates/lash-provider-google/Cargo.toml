@@ -46,5 +46,6 @@ lash-provider-google = { package = "lash-internal-provider-google", path = ".", 
 lash = { package = "lash-runtime", path = "../lash" }
 lash-core = { workspace = true, features = ["testing"] }
 lash-llm-transport = { workspace = true, features = ["proptest-support", "testing"] }
+lash-sqlite-store = { workspace = true }
 proptest = "1"
 tokio = { workspace = true, features = ["rt", "time"] }

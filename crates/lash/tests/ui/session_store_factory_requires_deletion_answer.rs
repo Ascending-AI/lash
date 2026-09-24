@@ -12,12 +12,12 @@ use std::sync::Arc;
 use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
-    AttachmentRootSet, InMemorySessionStoreFactory, RuntimePersistence, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, UnsettledTurnCounts,
+    AttachmentRootSet, RuntimePersistence, SessionStoreCreateRequest, SessionStoreFactory,
+    StoreError, UnsettledTurnCounts,
 };
 
 struct SilentFactory {
-    inner: InMemorySessionStoreFactory,
+    inner: Arc<dyn SessionStoreFactory>,
 }
 
 #[async_trait::async_trait]

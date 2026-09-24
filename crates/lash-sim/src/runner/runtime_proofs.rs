@@ -10,21 +10,12 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
     let (provider_handle, model, provider_kind) =
         runtime_provider_components(OPENAI_COMPATIBLE, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    let backend = crate::backend::memory_backend().await?;
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .provider(provider_handle)
         .model(model)
         .build(crate::sim_process_owner())
@@ -130,21 +121,11 @@ pub(super) async fn run_live_turn_facts(
     let (provider_handle, model, provider_kind) =
         runtime_provider_components(provider_kind, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .with_native_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
+    let backend = crate::backend::memory_backend().await?;
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .provider(provider_handle)
         .model(model)
         .build(crate::sim_process_owner())
@@ -284,23 +265,11 @@ pub(super) async fn prove_pending_tool_completion_through_turn()
 -> Result<PendingToolCompletionProof, FixedScriptRunnerError> {
     let (key_tx, key_rx) = tokio::sync::oneshot::channel();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .with_native_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
+    let backend = crate::backend::memory_backend().await?;
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-            as Arc<dyn lash_core::ProcessRegistry>)
         .provider(pending_tool_roundtrip_provider())
         .model(
             lash_core::ModelSpec::builder("mock-model")
@@ -527,23 +496,11 @@ pub(super) async fn prove_final_value_semantic_channel()
             .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .with_native_queued_work()
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
+    let backend = crate::backend::memory_backend().await?;
+    let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-            as Arc<dyn lash_core::ProcessRegistry>)
         .provider(rlm_final_value_provider())
         .model(
             lash_core::ModelSpec::builder("mock-rlm-final-value")

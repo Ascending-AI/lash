@@ -78,7 +78,6 @@ use crate::stack_policy::{
 };
 use crate::store::{
     CheckpointComponentWriteKind, CheckpointWriteCollector, CheckpointWriteEvent, ModelStore,
-    ObservedSessionStoreFactory,
 };
 use crate::trace::{
     AbstractWorldSummary, OracleCensus, OracleStatus, OracleVerdict, SimulationTrace,

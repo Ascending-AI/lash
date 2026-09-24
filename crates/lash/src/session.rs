@@ -27,15 +27,13 @@ use lash_remote_protocol::{
 
 /// Builder for one host-named session.
 ///
-/// Every successful facade session is bound to an explicit store. Use
-/// [`SessionBuilder::store`] for a pre-opened store or configure the core's
-/// store provider; an absent source is refused before execution.
+/// Every facade session's store comes from the core's backend catalog;
+/// there is no way to hand a session a store from anywhere else.
 pub struct SessionBuilder {
     pub(crate) core: LashCore,
     pub(crate) session_id: SessionId,
     pub(crate) spec: SessionSpec,
     pub(crate) parent_session_id: Option<SessionId>,
-    pub(crate) store: Option<Arc<dyn RuntimePersistence>>,
     pub(crate) provider: Option<ProviderHandle>,
     pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
     /// Plugin-keyed, serializable open-time options. They ride the protocol
@@ -51,7 +49,7 @@ pub struct SessionBuilder {
 
 struct ResolvedSessionStore {
     store: Arc<dyn RuntimePersistence>,
-    catalog: Option<Arc<dyn lash_core::SessionStoreFactory>>,
+    catalog: Arc<dyn lash_core::SessionStoreFactory>,
 }
 
 fn empty_runtime_session_state(
@@ -101,17 +99,6 @@ impl SessionBuilder {
     /// policy, not a facade service.
     pub fn parent(mut self, parent_session_id: impl Into<SessionId>) -> Self {
         self.parent_session_id = Some(parent_session_id.into());
-        self
-    }
-
-    /// Use a specific persistence store for this root session.
-    ///
-    /// This is the right API for a host-owned, pre-opened session database.
-    /// Sessions created from this running session never reuse the exact store;
-    /// configure `LashCoreBuilder::session_creation_store_factory` when this
-    /// session can create more sessions.
-    pub fn store(mut self, store: Arc<dyn RuntimePersistence>) -> Self {
-        self.store = Some(store);
         self
     }
 
@@ -196,27 +183,14 @@ impl SessionBuilder {
     /// writer in another process.
     ///
     /// Acquisition resolves an *existing* store through the catalog's
-    /// non-creating seam (or, with [`store`](Self::store), the exact store the
-    /// host supplied), at most once per handle. The session id must already be
+    /// non-creating seam, at most once per handle. The session id must already be
     /// known; see [`DurableSession`] for the typed refusals.
     pub async fn durable(self) -> Result<DurableSession> {
         let queued = self.core.substrate_slot.ports().await.queued_port();
         let live_replay_store = Arc::clone(&self.core.live_replay_store);
-        if let Some(store) = self.store.as_ref() {
-            return Ok(DurableSession::from_exact_store(
-                self.session_id.clone(),
-                Arc::clone(store),
-                queued,
-                live_replay_store,
-                self.core.store_factory.clone(),
-            ));
-        }
-        let Some(catalog) = self.core.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStore);
-        };
         Ok(DurableSession::from_catalog(
             self.session_id,
-            Arc::clone(catalog),
+            Arc::clone(&self.core.store_factory),
             queued,
             live_replay_store,
         ))
@@ -242,12 +216,12 @@ impl SessionBuilder {
         let policy = self.session_policy();
         let resolved = self.create_store(&policy).await?;
         let queued = self.core.substrate_slot.ports().await.queued_port();
-        Ok(DurableSession::from_exact_store(
+        Ok(DurableSession::from_binding(
             self.session_id,
             resolved.store,
             queued,
             Arc::clone(&self.core.live_replay_store),
-            resolved.catalog.or_else(|| self.core.store_factory.clone()),
+            resolved.catalog,
         ))
     }
 
@@ -381,7 +355,7 @@ impl SessionBuilder {
         )?;
         env.plugin_host = Some(Arc::new(plugin_host));
         let ports = self.core.substrate_slot.ports().await;
-        env = env.with_work_ports(ports.process.clone(), ports.queued_port());
+        env = env.with_work_ports(Some(ports.process.clone()), ports.queued_port());
         let binding = Arc::new(BoundSession::new(
             session_id,
             Arc::clone(&resolved.store),
@@ -416,9 +390,11 @@ impl SessionBuilder {
             lash_core::facade_support::settle_reopen_seeded_config(&mut runtime, persisted_config)
                 .await?;
         }
-        if let Some(process) = binding.process() {
-            drive_process_on_open(ports.drive_process_on_open, process.port().as_ref()).await?;
-        }
+        drive_process_on_open(
+            ports.drive_process_on_open,
+            binding.process().port().as_ref(),
+        )
+        .await?;
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.core.live_replay_store),
@@ -450,26 +426,21 @@ impl SessionBuilder {
                 .unwrap_or_default(),
             policy: policy.clone(),
         };
-        if let Some(store) = self.store.as_ref() {
-            store
-                .admit_and_bind_session(&lash_core::SessionBinding::from_create_request(&request))
-                .await
-                .map_err(EmbedError::Store)?;
-            return Ok(ResolvedSessionStore {
-                store: Arc::clone(store),
-                catalog: None,
-            });
-        }
-        let Some(factory) = self.core.store_factory.as_ref() else {
-            return Err(EmbedError::MissingSessionStore);
-        };
+        let factory = &self.core.store_factory;
         let store = factory
             .create_store(&request)
             .await
             .map_err(EmbedError::Store)?;
+        // Admission is where a store answers a conflicting relation (FIG-1559):
+        // a rebind naming another parent is refused rather than absorbed into
+        // the row the catalog already holds.
+        store
+            .admit_and_bind_session(&lash_core::SessionBinding::from_create_request(&request))
+            .await
+            .map_err(EmbedError::Store)?;
         Ok(ResolvedSessionStore {
             store,
-            catalog: Some(Arc::clone(factory)),
+            catalog: Arc::clone(factory),
         })
     }
 }
@@ -669,14 +640,10 @@ impl ParkedSession {
 }
 
 impl LashSession {
-    /// A root opened with an explicit store has no implied catalog authority;
-    /// callers must obtain administration from the owner that selected it.
-    pub fn session_administration(&self) -> Result<lash_core::SessionAdministration> {
-        self.binding
-            .administration()
-            .ok_or(EmbedError::SessionCatalogUnavailable {
-                operation: "session_administration",
-            })
+    /// The lifecycle owner of this session: the catalog, effect host,
+    /// process services and trigger store its open was bound to.
+    pub fn session_administration(&self) -> lash_core::SessionAdministration {
+        self.binding.administration()
     }
 
     /// What this session's open (or its latest internal reload) found when it
@@ -1036,10 +1003,7 @@ impl LashSession {
     pub fn admin(&self) -> SessionAdmin {
         SessionAdmin {
             runtime: self.runtime.clone(),
-            process_work: self
-                .binding
-                .process()
-                .map(|process| Arc::clone(process.port())),
+            process_work: Arc::clone(self.binding.process().port()),
         }
     }
 

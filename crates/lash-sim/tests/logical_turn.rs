@@ -179,179 +179,56 @@ fn model() -> lash_core::ModelSpec {
         .expect("valid sim model")
 }
 
-fn standard_core(
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a SQLite memory backend that refuses to open panics the harness with its case name by design"
+)]
+async fn memory_backend() -> Arc<lash_sqlite_store::SqliteBackend> {
+    Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("SQLite memory backend"),
+    )
+}
+
+async fn standard_core(
     provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
     trace: Arc<RecordingTraceSink>,
 ) -> lash::LashCore {
-    standard_core_with_attachment_policy(
-        provider,
-        tools,
-        trace,
-        Arc::new(lash_core::test_support::OpenAttachmentSourcePolicy),
-    )
+    standard_core_with_attachment_limit(provider, tools, trace, None).await
 }
 
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-fn standard_core_with_attachment_policy(
+async fn standard_core_with_attachment_limit(
     provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
     trace: Arc<RecordingTraceSink>,
-    attachment_source_policy: Arc<dyn lash_core::test_support::AttachmentSourcePolicy>,
+    max_attachment_bytes: Option<u64>,
 ) -> lash::LashCore {
     let provider_id = provider.kind().to_string();
-    let mut runtime_host_config = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_attachment_source_policy(attachment_source_policy);
-    runtime_host_config.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider),
-    );
-    runtime_host_config.tracing.trace_sink = Some(trace);
-
-    lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
+    lash::LashCore::standard_builder(memory_backend().await, lash::TurnBudget::Unbounded)
         .session_spec(
             lash::SessionSpec::new()
                 .provider_id(provider_id)
                 .turn_budget(lash::TurnBudget::Unbounded),
         )
+        .provider(provider)
         .model(model())
         .tools(tools)
+        .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
+        .max_attachment_bytes(max_attachment_bytes)
+        .trace_sink(trace)
         .without_queued_work()
-        .advanced()
-        .runtime_host_config(runtime_host_config)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",
         ))
         .expect("build logical-turn sim core")
-}
-
-#[test]
-fn whole_runtime_host_config_rejects_queued_work_batching_override() {
-    let result = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .model(model())
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .without_queued_work()
-        .advanced()
-        .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-        ))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "logical-turn-conflict-test",
-            "logical-turn-conflict-test-boot",
-        ));
-
-    let error = match result {
-        Ok(_) => panic!("duplicate queued-work batching configuration must fail"),
-        Err(error) => error,
-    };
-    assert!(matches!(
-        error,
-        lash::EmbedError::RuntimeHostConfigConflict {
-            field: "queued_work_batching"
-        }
-    ));
-}
-
-#[test]
-fn whole_runtime_host_config_rejects_provider_resolver_override() {
-    let builder_provider = lash_core::testing::TestProvider::builder()
-        .kind("logical-turn-builder-provider")
-        .complete(|_| async { Ok(text_response("unused")) })
-        .build()
-        .into_handle();
-    let configured_provider = lash_core::testing::TestProvider::builder()
-        .kind("logical-turn-configured-provider")
-        .complete(|_| async { Ok(text_response("unused")) })
-        .build()
-        .into_handle();
-    let mut runtime_host_config = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
-    runtime_host_config.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(configured_provider),
-    );
-    let result = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .provider(builder_provider)
-        .model(model())
-        .without_queued_work()
-        .advanced()
-        .runtime_host_config(runtime_host_config)
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "logical-turn-provider-resolver-conflict-test",
-            "logical-turn-provider-resolver-conflict-test-boot",
-        ));
-
-    let error = match result {
-        Ok(_) => panic!("duplicate provider resolver configuration must fail"),
-        Err(error) => error,
-    };
-    assert!(matches!(
-        error,
-        lash::EmbedError::RuntimeHostConfigConflict {
-            field: "provider_resolver"
-        }
-    ));
-}
-
-#[tokio::test]
-async fn whole_runtime_host_config_without_resolver_uses_builder_provider() {
-    let builder_provider = lash_core::testing::TestProvider::builder()
-        .kind("logical-turn-builder-provider")
-        .complete(|_| async { Ok(text_response("builder provider response")) })
-        .build()
-        .into_handle();
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .provider(builder_provider)
-        .model(model())
-        .tools(Arc::new(NoTools))
-        .without_queued_work()
-        .advanced()
-        .runtime_host_config(lash_core::facade_support::RuntimeHostConfig::in_memory(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-        ))
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "logical-turn-builder-provider-test",
-            "logical-turn-builder-provider-test-boot",
-        ))
-        .expect("whole config without a resolver accepts the builder provider");
-    let session = core
-        .session("logical-turn-builder-provider")
-        .open()
-        .await
-        .expect("open builder-provider session");
-    session
-        .durable()
-        .enqueue(TurnInput::text("use the builder provider"))
-        .send()
-        .await
-        .expect("enqueue builder-provider turn");
-
-    let output = session
-        .queued_turn()
-        .run()
-        .await
-        .expect("builder-provider turn succeeds")
-        .expect("builder-provider turn runs");
-
-    assert_eq!(
-        output.assistant_message(),
-        Some("builder provider response")
-    );
 }
 
 fn canonical_seed_nodes(state: &lash_core::SessionSnapshot, frame_id: &str) -> Vec<Value> {
@@ -433,17 +310,10 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    let backend = memory_backend().await;
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .provider(provider)
         .model(model())
         .tools(Arc::new(SeedSwitchTool { initial_nodes }))
@@ -671,29 +541,13 @@ impl ToolProvider for BoundedSwitchTools {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
-    #[derive(Debug)]
-    struct DenyAttachments;
-
-    impl lash_core::test_support::AttachmentSourcePolicy for DenyAttachments {
-        fn authorize(
-            &self,
-            producer: &lash_core::test_support::AttachmentProducer,
-            _source: &lash_core::AttachmentSource,
-        ) -> Result<(), lash_core::test_support::AttachmentSourcePolicyError> {
-            Err(lash_core::test_support::AttachmentSourcePolicyError {
-                producer: producer.clone(),
-                reason: "attachment denied for logical-turn settlement test".to_string(),
-            })
-        }
-    }
-
     let finish_trace = Arc::new(RecordingTraceSink::default());
     let finish_provider = lash_core::testing::TestProvider::builder()
         .kind("logical-turn-finish")
         .complete(|_| async { Ok(text_response("finished")) })
         .build()
         .into_handle();
-    let finish_core = standard_core(finish_provider, Arc::new(NoTools), finish_trace.clone());
+    let finish_core = standard_core(finish_provider, Arc::new(NoTools), finish_trace.clone()).await;
     let finish_session = finish_core
         .session("logical-turn-finish")
         .open()
@@ -733,7 +587,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         })
         .build()
         .into_handle();
-    let cancel_core = standard_core(cancel_provider, Arc::new(NoTools), cancel_trace.clone());
+    let cancel_core = standard_core(cancel_provider, Arc::new(NoTools), cancel_trace.clone()).await;
     let cancel_session = cancel_core
         .session("logical-turn-cancel")
         .open()
@@ -767,12 +621,15 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .complete(|_| async { panic!("normalization errors must not call the provider") })
         .build()
         .into_handle();
-    let error_core = standard_core_with_attachment_policy(
+    // An inline attachment over the core's attachment limit fails input
+    // normalization before any provider call.
+    let error_core = standard_core_with_attachment_limit(
         error_provider,
         Arc::new(NoTools),
         error_trace.clone(),
-        Arc::new(DenyAttachments),
-    );
+        Some(8),
+    )
+    .await;
     let error_session = error_core
         .session("logical-turn-error")
         .open()
@@ -781,9 +638,9 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
     error_session
         .durable()
         .enqueue(TurnInput::items([InputItem::attachment(
-            lash_core::AttachmentSource::external_url(
+            lash_core::AttachmentSource::inline(
                 lash_core::MediaType::parse("application/pdf").unwrap(),
-                "https://example.test/denied.pdf",
+                vec![0_u8; 64],
             ),
         )]))
         .send()
@@ -834,7 +691,8 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
             switch_count: SWITCH_BOUND,
         }),
         bound_trace.clone(),
-    );
+    )
+    .await;
     let bound_session = bound_core
         .session("logical-turn-bound")
         .open()
@@ -930,19 +788,10 @@ finish({ baton: baton });
             .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    let backend = memory_backend().await;
+    let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-            as Arc<dyn lash_core::ProcessRegistry>)
         .provider(provider)
         .model(model())
         .trace_sink(trace.clone())
@@ -1061,19 +910,10 @@ await control.continue_as({
             .build(),
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
-    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+    let backend = memory_backend().await;
+    let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(lash_core::TestLocalProcessRegistry::default())
-            as Arc<dyn lash_core::ProcessRegistry>)
         .provider(provider)
         .model(model())
         .without_queued_work()
@@ -1150,7 +990,8 @@ await control.continue_as({
 
 #[tokio::test]
 async fn terminal_checkpoint_withheld_claim_is_traced_once() {
-    let factory = Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+    let backend = memory_backend().await;
+    let factory: Arc<dyn lash_core::SessionStoreFactory> = backend.session_store_factory();
     let trace = Arc::new(RecordingTraceSink::default());
     let calls = Arc::new(AtomicUsize::new(0));
     let session_id = SessionId::from("logical-turn-withheld-trace");
@@ -1190,15 +1031,9 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
         })
         .build()
         .into_handle();
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .store_factory(factory)
         .provider(provider)
         .model(model())
         .tools(Arc::new(NoTools))

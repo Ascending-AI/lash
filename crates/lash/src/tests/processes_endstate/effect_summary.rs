@@ -48,23 +48,14 @@ fn disable_missing_trigger() -> lashlang::Expr {
     )
 }
 
-/// The durable stores one host runs over, reopened fresh for each host so a
-/// "crash" drops every in-memory handle.
+/// The durable backend one host runs over, reopened fresh for each host so
+/// a "crash" drops every in-memory handle.
 #[derive(Clone)]
 enum SummaryBackend {
-    Sqlite(DurableAdmissionPaths),
+    /// The root of a SQLite file backend.
+    Sqlite(std::path::PathBuf),
     /// A database URL, and the directory attachments live in.
     Postgres(String, std::path::PathBuf),
-}
-
-/// The durable stores one host is built over.
-struct SummaryStores {
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-    trigger_store: Arc<dyn lash_core::TriggerStore>,
-    effect_host: Arc<dyn lash_core::EffectHost>,
-    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
-    attachments: std::path::PathBuf,
 }
 
 struct SummaryHost {
@@ -74,19 +65,36 @@ struct SummaryHost {
 }
 
 impl SummaryBackend {
-    async fn artifact_store(&self) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> {
+    /// A fresh backend over this backend's durable state, with the
+    /// Lashlang artifact store that goes with it.
+    async fn backend(
+        &self,
+        owner: &str,
+    ) -> (
+        Arc<dyn lash_core::Backend>,
+        Arc<dyn lash_lashlang_runtime::LashlangArtifactStore>,
+    ) {
         match self {
-            Self::Sqlite(paths) => Arc::new(
-                lash_sqlite_store::Store::open(&paths.artifacts)
+            Self::Sqlite(root) => {
+                let backend = lash_sqlite_store::SqliteBackend::open(root)
                     .await
-                    .expect("open SQLite artifact store"),
-            ),
-            Self::Postgres(url, _) => Arc::new(
-                lash_postgres_store::PostgresStorage::connect(url)
+                    .expect("open the SQLite backend");
+                let artifact = backend.process_env_store();
+                (Arc::new(backend), artifact)
+            }
+            Self::Postgres(url, attachments) => {
+                let storage = lash_postgres_store::PostgresStorage::connect(url)
                     .await
-                    .expect("connect PostgreSQL storage")
-                    .lashlang_artifact_store(),
-            ),
+                    .expect("connect PostgreSQL storage");
+                let artifact = Arc::new(storage.lashlang_artifact_store());
+                let backend = lash_postgres_store::PostgresBackend::new(
+                    &storage,
+                    Arc::new(crate::persistence::FileAttachmentStore::new(
+                        attachments.join(owner),
+                    )),
+                );
+                (Arc::new(backend), artifact)
+            }
         }
     }
 
@@ -96,76 +104,24 @@ impl SummaryBackend {
         let sink = CollectingProcessEventSink::default();
         let provider = mock_provider();
         let provider_id = provider.kind().to_string();
-        let artifact = self.artifact_store().await;
-        let SummaryStores {
-            registry,
-            env_store,
-            trigger_store,
-            effect_host,
-            store_factory,
-            attachments,
-        } = match self {
-            Self::Sqlite(paths) => SummaryStores {
-                registry: Arc::new(
-                    lash_sqlite_store::SqliteProcessRegistry::open(
-                        &paths.processes,
-                        &paths.sessions,
-                    )
-                    .await
-                    .expect("open SQLite process registry"),
-                ),
-                env_store: Arc::new(
-                    lash_sqlite_store::Store::open(&paths.artifacts)
-                        .await
-                        .expect("open SQLite process-environment store"),
-                ),
-                trigger_store: Arc::new(
-                    lash_sqlite_store::SqliteTriggerStore::open(&paths.triggers)
-                        .await
-                        .expect("open SQLite trigger store"),
-                ),
-                effect_host: Arc::new(
-                    lash_sqlite_store::SqliteEffectHost::open(&paths.effects)
-                        .await
-                        .expect("open SQLite effect journal"),
-                ),
-                store_factory: Arc::new(
-                    lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
-                        &paths.sessions,
-                        &paths.processes,
-                    ),
-                ),
-                attachments: paths.attachments.clone(),
-            },
-            Self::Postgres(url, attachments) => {
-                let storage = lash_postgres_store::PostgresStorage::connect(url)
-                    .await
-                    .expect("connect PostgreSQL storage");
-                SummaryStores {
-                    registry: Arc::new(storage.process_registry()),
-                    env_store: Arc::new(storage.process_env_store()),
-                    trigger_store: Arc::new(storage.trigger_store()),
-                    effect_host: Arc::new(storage.effect_host()),
-                    store_factory: Arc::new(
-                        storage.session_store_factory_with_shared_process_registry(),
-                    ),
-                    attachments: attachments.join(owner),
-                }
-            }
-        };
-        let (registry, faults) = match fault {
+        let (backend, artifact) = self.backend(owner).await;
+        let (backend, faults): (Arc<dyn lash_core::Backend>, _) = match fault {
             Some((event_type, count)) => {
                 let faults = Arc::new(lash_core::EffectSummaryAppendFaults::new(
-                    registry, event_type, count,
+                    backend.process_registry(),
+                    event_type,
+                    count,
                 ));
+                let registry = Arc::clone(&faults) as Arc<dyn lash_core::ProcessRegistry>;
                 (
-                    Arc::clone(&faults) as Arc<dyn lash_core::ProcessRegistry>,
+                    Arc::new(DecoratedBackend::over(backend).process_registry(move |_| registry)),
                     Some(faults),
                 )
             }
-            None => (registry, None),
+            None => (backend, None),
         };
         let core = LashCore::rlm_builder(
+            backend,
             crate::TurnBudget::Unbounded,
             lash_protocol_rlm::RlmProtocolPluginFactory::new(
                 lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -184,19 +140,11 @@ impl SummaryBackend {
         )
         .provider(provider)
         .model(mock_model_spec())
-        .store_factory(store_factory)
-        .attachment_store(Arc::new(crate::persistence::FileAttachmentStore::new(
-            attachments,
-        )))
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .process_env_store(env_store)
-        .process_registry(registry)
-        .trigger_store(trigger_store)
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
         ))
-        .effect_host(effect_host)
         .process_event_sink(Arc::new(sink.clone()))
         .without_queued_work()
         .build(lash_core::LeaseOwnerIdentity::opaque(
@@ -211,9 +159,11 @@ impl SummaryBackend {
     async fn replay_rows(&self, process_id: &ProcessId) -> BTreeMap<String, String> {
         let pattern = format!("%{process_id}%");
         match self {
-            Self::Sqlite(paths) => {
-                let connection = rusqlite::Connection::open(&paths.effects)
-                    .expect("open SQLite effect replay database");
+            Self::Sqlite(root) => {
+                let connection = rusqlite::Connection::open(
+                    root.join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name()),
+                )
+                .expect("open SQLite effect replay database");
                 let mut query = connection
                     .prepare(
                         "SELECT replay_key, outcome_json FROM runtime_effect_replay \
@@ -305,7 +255,7 @@ async fn start_process(
     process_id: &ProcessId,
     program: lashlang::Program,
 ) {
-    let artifact = backend.artifact_store().await;
+    let (_backend, artifact) = backend.backend("effect-summary-linker").await;
     let process =
         LinkedTestProcess::new_with_catalog(artifact.as_ref(), program, "main", summary_catalog())
             .await;
@@ -404,7 +354,7 @@ fn events_by_key(folded: &[(String, serde_json::Value)]) -> BTreeMap<String, ser
 #[tokio::test]
 async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()> {
     let temp = tempfile::tempdir().expect("effect-summary tempdir");
-    let backend = SummaryBackend::Sqlite(DurableAdmissionPaths::new(temp.path()));
+    let backend = SummaryBackend::Sqlite(temp.path().to_path_buf());
     let host = backend.host("effect-summary-host", None).await;
     let process_id = ProcessId::from("effect-summary-facade");
     start_process(
@@ -580,7 +530,7 @@ async fn effect_summary_is_bounded_on_the_write_side_and_a_redrive_rewrites_it_i
     let process_id = ProcessId::from("effect-summary-capped");
 
     let clean_dir = tempfile::tempdir().expect("clean tempdir");
-    let clean = SummaryBackend::Sqlite(DurableAdmissionPaths::new(clean_dir.path()));
+    let clean = SummaryBackend::Sqlite(clean_dir.path().to_path_buf());
     let clean_host = clean.host("effect-summary-clean", None).await;
     start_process(&clean_host, &clean, &process_id, capped_program()).await;
     wait_for_terminal(
@@ -624,7 +574,7 @@ async fn effect_summary_is_bounded_on_the_write_side_and_a_redrive_rewrites_it_i
     // The omission record's append crashes; the redrive re-derives every
     // count from the recorded effects and writes the identical record.
     let crash_dir = tempfile::tempdir().expect("crash tempdir");
-    let crashed = SummaryBackend::Sqlite(DurableAdmissionPaths::new(crash_dir.path()));
+    let crashed = SummaryBackend::Sqlite(crash_dir.path().to_path_buf());
     let recovered = run_through_append_crash(
         &crashed,
         &process_id,
@@ -741,7 +691,7 @@ async fn assert_crash_window_recovers_once(backend: &SummaryBackend, batch_first
 async fn sqlite_crash_between_replay_row_and_summary_append_redrives_once() -> Result<()> {
     for batch_first in [false, true] {
         let temp = tempfile::tempdir().expect("crash-window tempdir");
-        let backend = SummaryBackend::Sqlite(DurableAdmissionPaths::new(temp.path()));
+        let backend = SummaryBackend::Sqlite(temp.path().to_path_buf());
         assert_crash_window_recovers_once(&backend, batch_first).await;
     }
     Ok(())

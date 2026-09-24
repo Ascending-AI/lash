@@ -258,6 +258,47 @@ impl lash::persistence::RuntimePersistenceDecorator for GatedRuntimePersistence 
     }
 }
 
+/// `inner` with its session catalog replaced by `catalog`, so a backend
+/// over it opens sessions through the admission gate.
+pub(crate) struct GatedStoreSet {
+    pub(super) inner: Arc<dyn lash::durability::StoreSet>,
+    pub(super) catalog: Arc<dyn lash::persistence::SessionStoreFactory>,
+}
+
+impl lash::durability::StoreSet for GatedStoreSet {
+    fn clock(&self) -> Arc<dyn lash::runtime::Clock> {
+        self.inner.clock()
+    }
+
+    fn session_store_factory(&self) -> Arc<dyn lash::persistence::SessionStoreFactory> {
+        Arc::clone(&self.catalog)
+    }
+
+    fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
+        self.inner.process_registry()
+    }
+
+    fn process_continuations(&self) -> Arc<dyn lash::process::ProcessContinuationStore> {
+        self.inner.process_continuations()
+    }
+
+    fn trigger_store(&self) -> Arc<dyn lash::triggers::TriggerStore> {
+        self.inner.trigger_store()
+    }
+
+    fn process_definition_registry(&self) -> Arc<dyn lash::process::ProcessDefinitionRegistry> {
+        self.inner.process_definition_registry()
+    }
+
+    fn process_env_store(&self) -> Arc<dyn lash::persistence::ProcessExecutionEnvStore> {
+        self.inner.process_env_store()
+    }
+
+    fn attachment_store(&self) -> Arc<dyn lash::persistence::AttachmentStore> {
+        self.inner.attachment_store()
+    }
+}
+
 pub(crate) struct GatedSessionStoreFactory {
     pub(super) inner: Arc<dyn lash::persistence::SessionStoreFactory>,
     pub(super) gate: Arc<SessionOpenAdmissionGate>,

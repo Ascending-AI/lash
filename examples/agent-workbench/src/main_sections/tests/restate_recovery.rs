@@ -88,7 +88,7 @@ finish(await handle);
     let mut endpoint = LiveRestateEndpoint::start(
         &admin_url,
         harness.state.clone(),
-        harness.process_deployment,
+        harness.backend,
         harness.process_worker,
     )
     .await;
@@ -225,7 +225,7 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     let mut endpoint = LiveRestateEndpoint::start(
         &admin_url,
         harness.state.clone(),
-        harness.process_deployment,
+        harness.backend,
         harness.process_worker,
     )
     .await;
@@ -276,7 +276,6 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
             .state
             .core
             .turn_work_driver()
-            .expect("workbench core has a session catalog")
             .await_terminal(&address),
     )
     .await
@@ -367,7 +366,7 @@ finish(await handle);
     let mut endpoint = LiveRestateEndpoint::start(
         &admin_url,
         harness.state.clone(),
-        harness.process_deployment,
+        harness.backend,
         harness.process_worker,
     )
     .await;
@@ -423,7 +422,6 @@ finish(await handle);
             .state
             .core
             .turn_work_driver()
-            .expect("workbench core has a session catalog")
             .await_terminal(&address),
     )
     .await
@@ -546,7 +544,6 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
         .state
         .core
         .turn_work_driver()
-        .expect("workbench core has a session catalog")
         .await_terminal_with_timeout(&failed_address, Duration::from_secs(20))
         .await
         .expect("auth failure must publish a turn terminal");
@@ -622,7 +619,6 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
         .state
         .core
         .turn_work_driver()
-        .expect("workbench core has a session catalog")
         .await_terminal_with_timeout(&recovery_address, Duration::from_secs(20))
         .await
         .expect("recovery turn terminal");
@@ -762,7 +758,6 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
         .state
         .core
         .turn_work_driver()
-        .expect("workbench core has a session catalog")
         .await_terminal_with_timeout(&address, Duration::from_secs(20))
         .await
         .expect("retry turn terminal");
@@ -923,7 +918,7 @@ async fn live_failure_path_harness_with_provider(
     let endpoint = LiveRestateEndpoint::start(
         &admin_url,
         state.clone(),
-        harness.process_deployment,
+        harness.backend,
         harness.process_worker,
     )
     .await;
@@ -1114,7 +1109,7 @@ finish(await handle);
     let mut endpoint = LiveRestateEndpoint::start(
         &admin_url,
         harness.state.clone(),
-        harness.process_deployment,
+        harness.backend,
         harness.process_worker,
     )
     .await;
@@ -1307,7 +1302,7 @@ finish("started lifecycle gates");
     let mut endpoint = LiveRestateEndpoint::start(
         &admin_url,
         harness.state.clone(),
-        harness.process_deployment,
+        harness.backend,
         harness.process_worker,
     )
     .await;
@@ -1595,7 +1590,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
     let mut endpoint = LiveRestateEndpoint::start(
         &admin_url,
         harness.state.clone(),
-        harness.process_deployment,
+        harness.backend,
         harness.process_worker,
     )
     .await;
@@ -2031,14 +2026,17 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     let stores = WorkbenchStores::open(&data_dir, database_url.as_deref())
         .await
         .expect("reopen recovery session catalog");
-    let driver = lash_restate::RestateTurnDeployment::new(
+    let driver = lash_restate::RestateBackend::new(
         ingress_url,
         lash_restate::RestateAuthorityId::new(
             std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),
         )
         .expect("valid Restate authority id"),
+        Arc::clone(&stores.stores),
+        // Only its turn-work driver is used; no core runs on it.
+        lash_restate::RestateQueuedWork::Disabled,
     )
-    .turn_work_driver(Arc::clone(&stores.session_store_factory));
+    .turn_work_driver();
     let receipt = driver
         .request_cancel(
             lash::TurnCancelRequest::new(
@@ -2237,7 +2235,7 @@ async fn live_restate_recovery_child() {
     restate::spawn_restate_endpoint(
         endpoint_bind,
         harness.state,
-        harness.process_deployment,
+        harness.backend,
         harness.process_worker,
     );
     std::future::pending::<()>().await;

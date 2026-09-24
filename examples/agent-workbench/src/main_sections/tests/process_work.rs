@@ -1,14 +1,11 @@
 use super::tests::{
-    explicit_durable_test_facets, in_memory_trigger_store, run_async_test_on_stack_budget,
-    spawn_restate_ingress_capture,
+    DecoratedBackend, detached_trigger_store, explicit_durable_test_facets,
+    explicit_durable_test_facets_on, run_async_test_on_stack_budget, spawn_restate_ingress_capture,
+    test_file_backend,
 };
 use super::*;
 use lash::ProcessId;
 use lash::SessionId;
-use lash::process::{
-    ProcessEventLog as _, ProcessLeases as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
-    ProcessQuery as _, ProcessRegistrar as _, ProcessRetention as _,
-};
 
 #[test]
 fn workbench_work_rail_exposes_process_cancellation() {
@@ -35,18 +32,10 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let session_store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-        data_dir.join("lash-sessions"),
-    ));
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
+    let sqlite = test_file_backend(&data_dir);
+    let process_registry = sqlite.process_registry() as Arc<dyn lash::process::ProcessRegistry>;
+    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        sqlite.session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("await-work route test should not call the provider")
@@ -62,11 +51,11 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
     let (sink_tx, mut sink_rx) = mpsc::channel::<lash::process::ProcessEvent>(16);
     let (fault_tx, _fault_rx) = mpsc::channel::<WorkerFaultNotice>(16);
     let (watched, wiring) = watched_process_work(Arc::clone(&process_registry), sink_tx, fault_tx);
-    let core = explicit_durable_test_facets(&data_dir)
+    let artifact_store = sqlite.process_env_store();
+    let backend = Arc::new(DecoratedBackend::over(sqlite).with_process_work(wiring));
+    let core = explicit_durable_test_facets_on(backend, artifact_store)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
-        .process_work(wiring)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -77,7 +66,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -248,7 +237,7 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
+            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
             data_dir.join("lash-sessions"),
         )
         .await
@@ -270,8 +259,6 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -282,7 +269,7 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -391,7 +378,13 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessWorklistCursor,
         ProjectionWatermark, RecoveryContract, SessionScope,
     };
-    let registry = lash::testing::TestLocalProcessRegistry::default();
+    let registry_dir = tempfile::tempdir().expect("process registry tempdir");
+    let registry = crate::tests::standalone_process_registry(
+        registry_dir.path(),
+        Arc::new(lash::runtime::SystemClock),
+        None,
+    )
+    .await;
     let process_id = "invoice-export";
     let frame_node_id =
         lash::testing::frame_node_id(&SessionId::from("session-finance"), "frame-review");
@@ -1063,7 +1056,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
+            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
             data_dir.join("lash-sessions"),
         )
         .await
@@ -1085,8 +1078,6 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -1097,7 +1088,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -1196,11 +1187,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
         "every registered row is on the runtime-wide rail before the delete"
     );
 
-    let administration = state
-        .core
-        .session_administration()
-        .await
-        .expect("build session administration");
+    let administration = state.core.session_administration().await;
     let context = administration
         .delete_context(&deleted_session_id)
         .expect("issue inline session deletion");
@@ -1374,7 +1361,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let process_registry = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
+            &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
             data_dir.join("lash-sessions"),
         )
         .await
@@ -1395,8 +1382,6 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&core_store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -1407,7 +1392,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),

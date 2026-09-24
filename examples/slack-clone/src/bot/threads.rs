@@ -175,22 +175,19 @@ pub async fn open_thread_session(
             .await
             .with_context(|| format!("retain channel boundary {fork_node} for thread fork"))?;
         let parent_id = session_id(&record.channel_id);
-        let observed_processes = if let Some(registry) = core.process_registry() {
-            registry
-                .list_observed_by(
-                    &parent_id.clone().into(),
-                    &lash::process::ProcessListFilter {
-                        status: lash::process::ProcessStatusFilter::Any,
-                        ..Default::default()
-                    },
-                )
-                .await?
-                .iter()
-                .map(lash::process::ProcessRef::from_record)
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let observed_processes = core
+            .process_registry()
+            .list_observed_by(
+                &parent_id.clone().into(),
+                &lash::process::ProcessListFilter {
+                    status: lash::process::ProcessStatusFilter::Any,
+                    ..Default::default()
+                },
+            )
+            .await?
+            .iter()
+            .map(lash::process::ProcessRef::from_record)
+            .collect();
         match core
             .fork_at(lash::ForkRequest {
                 session_id: thread_id.clone().into(),

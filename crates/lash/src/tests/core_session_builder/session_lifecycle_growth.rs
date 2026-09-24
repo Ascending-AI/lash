@@ -47,7 +47,7 @@ impl RuntimePersistenceDecorator for GrowthStore {
 }
 
 struct GrowthFactory {
-    inner: lash_core::facade_support::InMemorySessionStoreFactory,
+    inner: Arc<dyn lash_core::SessionStoreFactory>,
     samples: Arc<Mutex<Vec<CommitSample>>>,
 }
 
@@ -59,7 +59,8 @@ impl SessionStoreFactory for GrowthFactory {
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, StoreError> {
-        lash_core::SessionStoreFactory::open_existing_store_by_id(&self.inner, session_id).await
+        lash_core::SessionStoreFactory::open_existing_store_by_id(self.inner.as_ref(), session_id)
+            .await
     }
 
     async fn session_was_deleted(
@@ -90,7 +91,7 @@ impl SessionStoreFactory for GrowthFactory {
     async fn count_unsettled_turns(
         &self,
     ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
-        lash_core::SessionStoreFactory::count_unsettled_turns(&self.inner).await
+        lash_core::SessionStoreFactory::count_unsettled_turns(self.inner.as_ref()).await
     }
 }
 
@@ -151,13 +152,17 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
             "let large_00 = {replacement:?};\nfinish(\"stored\");"
         )));
         programs.push(typescript_block("let small_00 = 102;\nfinish(\"stored\");"));
-        let core = explicit_ephemeral_facets(rlm_core_builder())
+        let growth_samples = Arc::clone(&samples);
+        let backend =
+            DecoratedBackend::over(memory_backend().await).session_store_factory(move |inner| {
+                Arc::new(GrowthFactory {
+                    inner,
+                    samples: growth_samples,
+                })
+            });
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(Arc::new(backend)))
             .provider(queued_text_provider(programs))
             .model(mock_model_spec())
-            .store_factory(Arc::new(GrowthFactory {
-                inner: lash_core::facade_support::InMemorySessionStoreFactory::new(),
-                samples: Arc::clone(&samples),
-            }))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("flat-checkpoint-growth").open().await?;
         for _ in 0..LARGE_BINDINGS {
@@ -294,13 +299,17 @@ fn checkpoint_flatness_rejects_a_binding_that_grows_each_turn() -> Result<()> {
                 "x".repeat(turn * 256)
             )));
         }
-        let core = explicit_ephemeral_facets(rlm_core_builder())
+        let growth_samples = Arc::clone(&samples);
+        let backend =
+            DecoratedBackend::over(memory_backend().await).session_store_factory(move |inner| {
+                Arc::new(GrowthFactory {
+                    inner,
+                    samples: growth_samples,
+                })
+            });
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(Arc::new(backend)))
             .provider(queued_text_provider(programs))
             .model(mock_model_spec())
-            .store_factory(Arc::new(GrowthFactory {
-                inner: lash_core::facade_support::InMemorySessionStoreFactory::new(),
-                samples: Arc::clone(&samples),
-            }))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("growing-checkpoint-witness").open().await?;
         session

@@ -180,7 +180,6 @@ mod tests {
         SessionStoreFactory,
     };
     use lash::{LashCore, ModelSpec};
-    use lash_sqlite_store::SqliteSessionStoreFactory;
     use std::sync::Arc;
 
     const SESSION_ID: &str = "lease-triage-session";
@@ -201,26 +200,21 @@ mod tests {
     /// A durable core over a scratch SQLite root, with no provider: every test
     /// here reads and manipulates the lease lane directly, so no turn runs.
     async fn durable_core(dir: &std::path::Path) -> (LashCore, Arc<dyn SessionStoreFactory>) {
-        let factory: Arc<dyn SessionStoreFactory> =
-            Arc::new(SqliteSessionStoreFactory::new(dir.join("sessions")));
-        let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
-            .with_native_queued_work()
-            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-            .attachment_store(Arc::new(
-                lash::persistence::InMemoryAttachmentStore::default(),
-            ))
+        let backend = Arc::new(
+            lash_sqlite_store::SqliteBackend::open(dir.join("sessions"))
+                .await
+                .expect("open the scratch SQLite backend"),
+        );
+        let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
+        let core = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(Arc::new(
-                lash::persistence::InMemoryProcessExecutionEnvStore::default(),
-            ))
             .model(
                 ModelSpec::builder("mock/model")
                     .context_window_tokens(8_000)
                     .build()
                     .expect("valid model metadata"),
             )
-            .store_factory(Arc::clone(&factory))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "agent-service-lease-triage-test",
                 "agent-service-lease-triage-test-boot",

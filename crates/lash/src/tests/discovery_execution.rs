@@ -89,6 +89,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             .into_handle();
         let builder = if mode == "rlm" {
             LashCore::rlm_builder(
+                memory_backend().await,
                 crate::TurnBudget::Unbounded,
                 lash_protocol_rlm::RlmProtocolPluginFactory::new(
                     lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -106,15 +107,16 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                 ),
             )
         } else {
-            LashCore::standard_builder(crate::TurnBudget::Unbounded).protocol_plugin(Arc::new(
-                lash_protocol_standard::StandardProtocolPluginFactory::with_config(
-                    lash_protocol_standard::StandardProtocolConfig {
-                        discovery: Some(lash_core::ToolDiscovery {
-                            operation: "search".into(),
-                        }),
-                    },
-                ),
-            ))
+            LashCore::standard_builder(memory_backend().await, crate::TurnBudget::Unbounded)
+                .protocol_plugin(Arc::new(
+                    lash_protocol_standard::StandardProtocolPluginFactory::with_config(
+                        lash_protocol_standard::StandardProtocolConfig {
+                            discovery: Some(lash_core::ToolDiscovery {
+                                operation: "search".into(),
+                            }),
+                        },
+                    ),
+                ))
         };
         let core = explicit_ephemeral_facets(builder)
             .provider(provider)
@@ -122,10 +124,6 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             .tools(Arc::new(DiscoveryTools {
                 calls: calls.clone(),
             }))
-            .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            ))
-            .process_registry(Arc::new(TestLocalProcessRegistry::default()))
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session(format!("discovery-{mode}")).open().await?;
         let output = session

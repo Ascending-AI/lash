@@ -33,6 +33,8 @@ pub mod log;
 pub mod mcp_http_server;
 pub mod mcp_server;
 pub mod platform;
+#[path = "../../shared/prior_store_layout.rs"]
+mod prior_store_layout;
 pub mod secrets;
 pub mod store;
 pub mod wire;

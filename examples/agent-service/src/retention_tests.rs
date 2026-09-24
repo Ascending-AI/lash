@@ -83,7 +83,7 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
     let targets = StoreRetentionTargets {
         factory: Arc::clone(&factory),
         gc_store: Arc::clone(&gc_store) as Arc<dyn lash::persistence::StoreMaintenance>,
-        attachment_store: Arc::clone(&attachment_store),
+        attachment_store: Arc::clone(&attachment_store) as Arc<dyn AttachmentStore>,
     };
     let report = run_store_retention_pass(
         &targets,
@@ -185,7 +185,7 @@ async fn scheduled_retention_refuses_a_witnessed_empty_attachment_root_set() {
         &StoreRetentionTargets {
             factory,
             gc_store: gc_store as Arc<dyn lash::persistence::StoreMaintenance>,
-            attachment_store: Arc::clone(&attachment_store),
+            attachment_store: Arc::clone(&attachment_store) as Arc<dyn AttachmentStore>,
         },
         &[],
         policy,

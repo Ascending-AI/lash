@@ -6,7 +6,7 @@ fn bid() -> lash_core::llm::types::StreamBlockIdentity {
 
 #[tokio::test]
 pub(super) async fn turn_builder_stream_emits_activities_and_finishes() -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("turn-stream").open().await?;
     let mut stream = session.turn(TurnInput::text("stream me")).stream()?;
 
@@ -92,10 +92,13 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("reasoning-single-publication").open().await?;
 
     let output = session
@@ -218,11 +221,14 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("reasoning-tool-publication").open().await?;
 
     let output = session
@@ -267,10 +273,13 @@ async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reason
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("mixed-reasoning-publication").open().await?;
 
     let output = session
@@ -319,10 +328,13 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("reasoning-buffered-text").open().await?;
 
     let output = session
@@ -361,10 +373,13 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("identical-reasoning-publication")
         .open()
@@ -383,7 +398,7 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
 
 #[tokio::test]
 pub(super) async fn session_observation_replays_live_activity_and_commit() -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("session-observation-replay").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
@@ -591,6 +606,7 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         let transport_calls = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(StdMutex::new(Vec::new()));
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            memory_backend().await,
             crate::TurnBudget::Unbounded,
             rlm_factory(),
         ))
@@ -599,10 +615,6 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
             Arc::clone(&requests),
         ))
         .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-provider-retry-prose").open().await?;
 
@@ -731,15 +743,12 @@ pub(super) fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> R
         const MARKER: &str = "natural completion single-copy marker";
         let requests = Arc::new(StdMutex::new(Vec::new()));
         let core = explicit_ephemeral_facets(LashCore::rlm_builder(
+            memory_backend().await,
             lash_core::TurnBudget::Unbounded,
             rlm_factory(),
         ))
         .provider(natural_prose_reasoning_provider(Arc::clone(&requests)))
         .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
         .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-natural-prose-single-copy").open().await?;
 
@@ -830,7 +839,7 @@ pub(super) fn model_attempt_resets(events: &[Arc<lash_core::SessionObservationEv
 #[tokio::test]
 pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_the_turn()
 -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core
         .session("session-observation-turn-identity")
         .open()
@@ -893,10 +902,13 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
 #[tokio::test]
 pub(super) async fn session_observation_retracts_two_retried_visible_attempts_live_and_on_replay()
 -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(retrying_visible_stream_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(retrying_visible_stream_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("retry-visible-observation").open().await?;
     let cursor = session.observe().current_observation().cursor;
     let lash_core::facade_support::SessionObservationSubscription::Subscribed(mut subscription) =
@@ -956,7 +968,7 @@ pub(super) async fn session_observation_retracts_two_retried_visible_attempts_li
 
 #[tokio::test]
 pub(super) async fn session_observation_rejects_cursor_from_another_session() -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("session-observation-a").open().await?;
     let other = core.session("session-observation-b").open().await?;
     let other_cursor = other.observe().current_observation().cursor;
@@ -976,7 +988,7 @@ pub(super) async fn session_observation_rejects_cursor_from_another_session() ->
 #[tokio::test]
 pub(super) async fn session_observation_subscription_replays_buffered_events_before_live_events()
 -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core
         .session("session-observation-subscribe-replay")
         .open()
@@ -1030,7 +1042,7 @@ pub(super) async fn session_observation_subscription_replays_buffered_events_bef
 #[tokio::test]
 pub(super) async fn session_observation_recovery_stream_replays_buffered_events_before_live_events()
 -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core
         .session("session-observation-recovered-stream")
         .open()
@@ -1075,7 +1087,7 @@ pub(super) async fn session_observation_recovery_stream_replays_buffered_events_
 
 #[tokio::test]
 pub(super) async fn session_observation_remote_subscription_replays_dto_events() -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core
         .session("session-observation-remote-subscribe")
         .open()
@@ -1114,18 +1126,21 @@ pub(super) async fn session_observation_remote_subscription_replays_dto_events()
 
 #[tokio::test]
 pub(super) async fn session_observation_remote_recovery_stream_yields_dto_gap() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::new(
-                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
-                    max_events_per_session: 1,
-                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
-                },
-            ),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(Arc::new(
+        lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+            },
+        ),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("session-observation-remote-gap")
         .open()
@@ -1159,18 +1174,21 @@ pub(super) async fn session_observation_remote_recovery_stream_yields_dto_gap() 
 #[tokio::test]
 pub(super) async fn capacity_and_age_trim_force_snapshot_with_matching_observation_cursor()
 -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::new(
-                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
-                    max_events_per_session: 1,
-                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
-                },
-            ),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(Arc::new(
+        lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+            },
+        ),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("session-observation-recovered-gap")
         .open()
@@ -1198,18 +1216,21 @@ pub(super) async fn capacity_and_age_trim_force_snapshot_with_matching_observati
 #[tokio::test]
 pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Result<()>
 {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::new(
-                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
-                    max_events_per_session: 1,
-                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
-                },
-            ),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(Arc::new(
+        lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+            },
+        ),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("trimmed-gap-unseen-auxiliary-event")
         .open()
@@ -1254,7 +1275,7 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
 #[tokio::test]
 pub(super) async fn recoverable_chat_conformance_snapshot_subscription_and_terminal_replacement()
 -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("recoverable-chat-terminal").open().await?;
     let snapshot = session.observe().recoverable_chat_snapshot();
     assert!(snapshot.read_view.messages().is_empty());
@@ -1396,11 +1417,14 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
 #[tokio::test]
 pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<()> {
     let replay_store = Arc::new(FailingAppendReplayStore::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .live_replay_store(replay_store)
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(replay_store)
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("failed-commit-observation-reconciliation")
         .open()
@@ -1450,11 +1474,14 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
 #[tokio::test]
 pub(super) async fn idle_session_reconnect_after_failed_append_yields_gap_without_another_commit()
 -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .live_replay_store(Arc::new(FailingAppendReplayStore::new()))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(Arc::new(FailingAppendReplayStore::new()))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("idle-failed-commit-observation-reconciliation")
         .open()
@@ -1493,12 +1520,14 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
         PublicationBoundary::BeforeNotification,
     ] {
         let replay_store = Arc::new(PausedCommitReplayStore::at(boundary));
-        let core =
-            explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-                .provider(mock_provider())
-                .model(mock_model_spec())
-                .live_replay_store(replay_store.clone())
-                .build(crate::testing::runtime_lease_owner())?;
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(
+            memory_backend().await,
+            crate::TurnBudget::Unbounded,
+        ))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .live_replay_store(replay_store.clone())
+        .build(crate::testing::runtime_lease_owner())?;
         let session_id = SessionId::from(format!("two-histories-{boundary:?}"));
         let session = core.session(session_id).open().await?;
         let before = session.observe().recoverable_chat_snapshot();
@@ -1598,11 +1627,14 @@ pub(super) async fn incarnation_change_invalidates_cursor() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub(super) async fn notification_observes_installed_projection() -> Result<()> {
     let replay_store = Arc::new(PausedCommitReplayStore::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .live_replay_store(replay_store.clone())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(replay_store.clone())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("notification-observes-installed-projection")
         .open()
@@ -1728,7 +1760,7 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
 
 #[tokio::test]
 pub(super) async fn payload_authority_matches_revision_transition() -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("payload-authority-transition").open().await?;
     let initial = session.observe().current_observation();
 
@@ -1952,7 +1984,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
 
 #[tokio::test]
 pub(super) async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("recoverable-chat-redelivery").open().await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     session
@@ -1993,25 +2025,27 @@ pub(super) async fn recoverable_chat_conformance_deduplicates_redelivery_identit
 #[tokio::test]
 pub(super) async fn gap_replacement_then_continuation_after_unavailable_history() -> Result<()> {
     let session_id = "recoverable-chat-restart-cursor";
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let bootstrap_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .store_factory(store_factory.clone())
-            .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let bootstrap_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     Box::pin(bootstrap_core.session(session_id).open().await?.close()).await?;
     drop(bootstrap_core);
 
-    let first_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .store_factory(store_factory.clone())
-            .live_replay_store(Arc::new(
-                lash_core::facade_support::InMemoryLiveReplayStore::default(),
-            ))
-            .build(crate::testing::runtime_lease_owner())?;
+    let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(Arc::new(
+        lash_core::facade_support::InMemoryLiveReplayStore::default(),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
     let initial_cursor = first_session.observe().recoverable_chat_snapshot().cursor;
     first_session.observe().runtime.record_turn_activity(
@@ -2033,15 +2067,16 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
     drop(first_session);
     drop(first_core);
 
-    let second_core =
-        explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .store_factory(store_factory)
-            .live_replay_store(Arc::new(
-                lash_core::facade_support::InMemoryLiveReplayStore::default(),
-            ))
-            .build(crate::testing::runtime_lease_owner())?;
+    let second_core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(Arc::new(
+        lash_core::facade_support::InMemoryLiveReplayStore::default(),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core.session(session_id).open().await?;
     let restarted_at = second_session.observe().recoverable_chat_snapshot().cursor;
     let mut retained_applied_ids = second_session
@@ -2115,18 +2150,21 @@ pub(super) async fn gap_replacement_then_continuation_after_unavailable_history(
 
 #[tokio::test]
 pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::new(
-                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
-                    max_events_per_session: 1,
-                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
-                },
-            ),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(Arc::new(
+        lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+            },
+        ),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("recoverable-chat-gap").open().await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     session
@@ -2175,18 +2213,21 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
 
 #[tokio::test]
 pub(super) async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::new(
-                lash_core::facade_support::InMemoryLiveReplayStoreConfig {
-                    max_events_per_session: 1,
-                    ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
-                },
-            ),
-        ))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .live_replay_store(Arc::new(
+        lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig {
+                max_events_per_session: 1,
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+            },
+        ),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session("subscriber-lag-trimmed-recovery")
         .open()
@@ -2273,10 +2314,13 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(provider)
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("recoverable-chat-disconnect").open().await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     let stream = session.observe().subscribe_recoverable_chat(cursor);

@@ -32,7 +32,7 @@ pub use scope::facade_ops;
 pub use scope::*;
 pub use task::*;
 
-/// Deployment-level factory for scoped effect controllers.
+/// Backend-level factory for scoped effect controllers.
 #[async_trait::async_trait]
 pub trait EffectHost: AwaitEventResolver {
     /// Stable identity of the physical authority that owns this host's reserved
@@ -276,25 +276,13 @@ pub trait EffectHost: AwaitEventResolver {
         Ok(())
     }
 
-    /// The SQLite database file holding this host's effect journal, when the
-    /// journal lives in a file of its own that a session-store factory
-    /// attaches for the retention sweep (ADR 0067). A host whose journal
-    /// shares the store's database, keeps it in memory, or has no durable
-    /// journal answers `None`.
-    fn effect_scope_fence_database(&self) -> Option<std::path::PathBuf> {
-        None
-    }
-
     /// Bind the process registry that owns the process-scope fence
     /// (ADR 0049). Called by [`ProcessRegistrar::bind_effect_host`]
     /// (crate::ProcessRegistrar::bind_effect_host); idempotent.
     ///
-    /// A host with a durable journal of its own in a file beside the
-    /// registry's attaches [`ProcessRegistryBinding::fence_database`]
-    /// (crate::ProcessRegistryBinding::fence_database) and reads and writes
-    /// process-scope fences there, so registration's commit point and
-    /// retirement's commit point are the same file. A host whose fence is a
-    /// cache (the Restate durable-wait index) keeps
+    /// A host whose journal and registry share one backend is wired to the
+    /// registry by that backend's location, not by this binding. A host
+    /// whose fence is a cache (the Restate durable-wait index) keeps
     /// [`ProcessRegistryBinding::registrations`]
     /// (crate::ProcessRegistryBinding::registrations) and treats a fence
     /// on a registered process scope as stale. A host that never fences

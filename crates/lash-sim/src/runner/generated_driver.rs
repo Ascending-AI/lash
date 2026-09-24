@@ -159,12 +159,8 @@ pub async fn replay_workload_serialized_reference(
 ) -> Result<AbstractWorldSummary, FixedScriptRunnerError> {
     let clock = SimClock::new();
     let mut world = GeneratedRuntimeWorld::with_backend(
-        Arc::new(lash::persistence::InMemorySessionStoreFactory::with_clock(
-            clock.clone(),
-        )),
+        crate::backend::sim_memory_backend(clock.clone()).await?,
         RuntimeEffectReplayStore::Memory,
-        Arc::new(lash::persistence::InMemoryAttachmentStore::new()),
-        Arc::new(lash::persistence::InMemoryProcessExecutionEnvStore::new()),
         true,
         clock,
     );
@@ -220,34 +216,20 @@ pub async fn replay_workload_on_sqlite(
     }
     std::fs::create_dir_all(db_root)?;
     let clock = SimClock::new();
-    let store_factory: Arc<dyn SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(db_root.to_path_buf())
-            .with_clock(clock.clone()),
-    );
+    let backend = lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+        db_root,
+        crate::backend::sim_sqlite_options(lash_sqlite_store::SqliteBackendOptions::default()),
+        clock.clone(),
+    )
+    .await
+    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let effect_replay_store =
         RuntimeEffectReplayStore::sqlite_file(db_root.join("runtime-effects.sqlite"));
-    // A durable session store requires durable attachment + process-env stores,
-    // so back them with the real SQLite/file stores (the in-memory reference uses
-    // their ephemeral counterparts). These facets are not under cross-backend
-    // comparison; only the session store's observable Lash state is.
-    let attachment_store: Arc<dyn lash::persistence::AttachmentStore> = Arc::new(
-        lash::persistence::FileAttachmentStore::new(db_root.join("attachments")),
-    );
-    let process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore> = Arc::new(
-        lash_sqlite_store::Store::open_with_clock(
-            &db_root.join("process-env.sqlite"),
-            clock.clone(),
-        )
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?,
-    );
     let mut world = GeneratedRuntimeWorld::with_backend(
-        store_factory,
+        Arc::new(backend),
         effect_replay_store,
-        attachment_store,
-        process_env_store,
         // Serialize live provider turns for the durable re-run so async-store
-        // interleaving cannot change committed outcomes vs the sync in-memory
+        // interleaving cannot change committed outcomes vs the in-process
         // reference; the comparison is then a well-posed durable-state equivalence.
         true,
         clock.clone(),
@@ -285,18 +267,16 @@ pub async fn replay_workload_on_postgres(
         std::fs::remove_dir_all(&attachment_root)?;
     }
     std::fs::create_dir_all(&attachment_root)?;
-    let store_factory: Arc<dyn SessionStoreFactory> =
-        Arc::new(storage.session_store_factory().with_clock(clock.clone()));
     let effect_replay_store = RuntimeEffectReplayStore::postgres(Arc::clone(&storage));
-    let attachment_store: Arc<dyn lash::persistence::AttachmentStore> =
-        Arc::new(lash::persistence::FileAttachmentStore::new(attachment_root));
-    let process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore> =
-        Arc::new(storage.process_env_store());
+    let backend = lash_postgres_store::PostgresBackend::with_options_and_clock(
+        storage.as_ref(),
+        Arc::new(lash::persistence::FileAttachmentStore::new(attachment_root)),
+        crate::backend::sim_postgres_options(),
+        clock.clone(),
+    );
     let mut world = GeneratedRuntimeWorld::with_backend(
-        store_factory,
+        Arc::new(backend),
         effect_replay_store,
-        attachment_store,
-        process_env_store,
         true,
         clock.clone(),
     );
@@ -432,7 +412,7 @@ pub(super) async fn run_generated_workload(
     script_bundle_hash: &str,
     shard_label: &str,
 ) -> Result<SimulationTrace, FixedScriptRunnerError> {
-    let mut world = GeneratedRuntimeWorld::new();
+    let mut world = GeneratedRuntimeWorld::new().await?;
     // Declared before the run so oracles can prove an observation class is
     // absent rather than passing vacuously over an empty set.
     let expectations = workload.expectations();

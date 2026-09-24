@@ -9,8 +9,8 @@
 //! evidence; `scripts/tool-batch-baseline.sh` is the one-command entry point
 //! that wires the services and enforces the quiet-box precondition.
 //!
-//! * `sqlite` opens a fresh `SqliteEffectHost` on `--db-path` and counts the
-//!   delta in the effect database's tables per rep.
+//! * `sqlite` opens a fresh file `SqliteBackend` rooted at `--db-path` and
+//!   counts the delta in its effect journal's tables per rep.
 //! * `postgres` connects to `LASH_POSTGRES_DATABASE_URL` (or `--database-url`),
 //!   creates an isolated database, and counts the same tables under their
 //!   `lash_` names. The build carries lash-postgres-store's `testing` feature,
@@ -70,7 +70,7 @@ struct Args {
     /// JSONL output file, appended.
     #[arg(long)]
     out: PathBuf,
-    /// SQLite effect database (backend=sqlite).
+    /// SQLite backend root directory, created fresh (backend=sqlite).
     #[arg(long)]
     db_path: Option<PathBuf>,
     /// PostgreSQL URL (backend=postgres).
@@ -306,13 +306,15 @@ async fn run_sqlite(
     let db_path = args
         .db_path
         .clone()
-        .unwrap_or_else(|| std::env::temp_dir().join("tool-batch-baseline.db"));
+        .unwrap_or_else(|| std::env::temp_dir().join("tool-batch-baseline"));
     if db_path.exists() {
         anyhow::bail!("--db-path {} exists; pass a fresh path", db_path.display());
     }
-    let host = Arc::new(lash_sqlite_store::SqliteEffectHost::open(&db_path).await?)
-        as Arc<dyn lash_core::EffectHost>;
-    let counter = SqliteJournalCounter { path: db_path };
+    let backend = lash_sqlite_store::SqliteBackend::open(&db_path).await?;
+    let host = backend.effect_host() as Arc<dyn lash_core::EffectHost>;
+    let counter = SqliteJournalCounter {
+        path: db_path.join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name()),
+    };
     for producer in producers {
         for &width in &args.widths {
             for rep in 0..args.reps {

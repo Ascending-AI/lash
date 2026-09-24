@@ -866,16 +866,13 @@ fn assert_remote_round_trip(
 #[tokio::test]
 async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
     let dir = tempfile::tempdir().expect("facade tempdir");
-    let raw: Arc<dyn ProcessRegistry> = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            dir.path().join("sessions"),
-        )
-        .await
-        .expect("open registry"),
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open(dir.path())
+            .await
+            .expect("open the file backend"),
     );
-    let core = crate::tests::standard_core_with_process_registry(Arc::clone(&raw));
-    let watched = core.process_registry().expect("watched registry");
+    let core = crate::tests::standard_core_over(backend);
+    let watched = core.process_registry();
     let process_id = ProcessId::from("l8-facade");
     let record = watched
         .register_process(registration(&process_id, false))

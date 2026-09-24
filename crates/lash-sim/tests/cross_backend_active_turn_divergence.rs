@@ -1,7 +1,7 @@
 //! DISCRIMINATOR (scratch) for the cross-backend SQLite active-turn divergence.
 //!
-//! Builds TWO real `lash::LashCore`s identical except the session store factory (in-memory vs
-//! lash-sqlite-store) and drives the SAME operation sequence on both over the production
+//! Builds TWO real `lash::LashCore`s identical except the backend (SQLite memory vs
+//! SQLite file) and drives the SAME operation sequence on both over the production
 //! transport seam with an UN-GATED `ScriptedLlmHttpTransport` (no `ScriptedTransportSchedule`
 //! / no per-event Notify gating — that gating is the harness artifact under test).
 
@@ -12,17 +12,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use lash::persistence::{
-    AttachmentStore, FileAttachmentStore, InMemoryAttachmentStore,
-    InMemoryProcessExecutionEnvStore, InMemorySessionStoreFactory, ProcessExecutionEnvStore,
-};
-use lash::{LashCore, PendingTurnInputCancelOutcome, TurnInput};
+use lash::{Backend, LashCore, PendingTurnInputCancelOutcome, TurnInput};
+use lash_core::testing::EffectLayer;
 use lash_core::{
-    AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, EffectHost,
-    ExecutionScope, Resolution, ResolveOutcome, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeError, ScopedEffectController, SessionStoreFactory,
-    TurnInputCheckpointBoundary, TurnInputIngress, facade_support::NativeRuntimeEffectController,
+    AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Resolution, RuntimeError,
+    TurnInputCheckpointBoundary, TurnInputIngress,
 };
 use lash_sim::ProviderWireScript;
 use lash_sim::ScriptedLlmHttpTransport;
@@ -45,46 +39,22 @@ fn scripts(n: usize) -> Vec<ProviderWireScript> {
         .expect("scripts")
 }
 
-async fn build_core(
-    store_factory: Arc<dyn SessionStoreFactory>,
-    process_env_store: Arc<dyn ProcessExecutionEnvStore>,
-    attachment_store: Arc<dyn AttachmentStore>,
-    scripts: Vec<ProviderWireScript>,
-) -> (LashCore, Arc<ScriptedLlmHttpTransport>) {
-    build_core_with_effect_host(
-        store_factory,
-        process_env_store,
-        attachment_store,
-        scripts,
-        Arc::new(lash::durability::NativeEffectHost::default()),
-    )
-    .await
-}
-
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-async fn build_core_with_effect_host(
-    store_factory: Arc<dyn SessionStoreFactory>,
-    process_env_store: Arc<dyn ProcessExecutionEnvStore>,
-    attachment_store: Arc<dyn AttachmentStore>,
+async fn build_core(
+    backend: Arc<dyn Backend>,
     scripts: Vec<ProviderWireScript>,
-    effect_host: Arc<dyn EffectHost>,
 ) -> (LashCore, Arc<ScriptedLlmHttpTransport>) {
     // UN-GATED transport: deliver each scripted response complete/synchronously.
     let transport =
         Arc::new(ScriptedLlmHttpTransport::from_scripts(scripts).expect("valid provider scripts"));
     let (provider_handle, model, _kind) =
         runtime_provider_components(PROVIDER_KIND, &transport).expect("provider components");
-    let core = LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .with_native_queued_work()
-        .effect_host(effect_host)
-        .attachment_store(attachment_store)
+    let core = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(process_env_store)
-        .store_factory(store_factory)
         .provider(provider_handle)
         .model(model)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -95,38 +65,15 @@ async fn build_core_with_effect_host(
     (core, transport)
 }
 
-#[derive(Clone)]
-struct YieldBeforeCancelWatchController {
-    inner: NativeRuntimeEffectController,
-}
+/// Yields the scheduler before every turn-cancel gate wait, widening the
+/// window in which a cancellation races the gate.
+struct YieldBeforeCancelWatch;
 
 #[async_trait]
-impl AwaitEventResolver for YieldBeforeCancelWatchController {
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        self.inner.peek_await_event(key).await
-    }
-
+impl EffectLayer for YieldBeforeCancelWatch {
     async fn await_await_event(
         &self,
+        inner: &dyn AwaitEventResolver,
         key: &AwaitEventKey,
         cancel: lash::CancellationToken,
         deadline: Option<Instant>,
@@ -136,152 +83,19 @@ impl AwaitEventResolver for YieldBeforeCancelWatchController {
                 tokio::task::yield_now().await;
             }
         }
-        self.inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
+        inner.await_await_event(key, cancel, deadline).await
     }
 }
 
-#[async_trait]
-impl RuntimeEffectController for YieldBeforeCancelWatchController {
-    async fn execute_effect(
-        &self,
-        envelope: RuntimeEffectEnvelope,
-        local_executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.inner.execute_effect(envelope, local_executor).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.inner.native_effect_groups_substrate()
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
-    }
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        RuntimeEffectControllerError,
-    > {
-        self.inner.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), RuntimeEffectControllerError> {
-        self.inner
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
-    }
-}
-
-impl EffectHost for YieldBeforeCancelWatchController {
-    fn turn_control_binding_id(&self) -> String {
-        "yield-before-cancel-watch-controller".to_string()
-    }
-
-    fn await_event_resolver(&self) -> &dyn lash_core::AwaitEventResolver {
-        self
-    }
-
-    fn scoped<'run>(
-        &'run self,
-        scope: AdmittedScope,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        ScopedEffectController::shared(Arc::new(self.clone()), scope)
-    }
-
-    fn scoped_static(
-        &self,
-        scope: AdmittedScope,
-    ) -> Result<Option<ScopedEffectController<'static>>, RuntimeError> {
-        Ok(Some(ScopedEffectController::shared(
-            Arc::new(self.clone()),
-            scope,
-        )?))
-    }
-}
-
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 async fn build_in_memory(n_scripts: usize) -> (LashCore, Arc<ScriptedLlmHttpTransport>) {
     build_core(
-        Arc::new(InMemorySessionStoreFactory::new()),
-        Arc::new(InMemoryProcessExecutionEnvStore::new()),
-        Arc::new(InMemoryAttachmentStore::new()),
-        scripts(n_scripts),
-    )
-    .await
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-async fn build_sqlite(dir: &Path, n_scripts: usize) -> (LashCore, Arc<ScriptedLlmHttpTransport>) {
-    std::fs::create_dir_all(dir).expect("create sqlite dir");
-    let process_env_store: Arc<dyn ProcessExecutionEnvStore> = Arc::new(
-        lash_sqlite_store::Store::open(&dir.join("process-env.sqlite"))
+        lash_sim::backend::memory_backend()
             .await
-            .expect("process env store"),
-    );
-    build_core(
-        Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            dir.to_path_buf(),
-        )),
-        process_env_store,
-        Arc::new(FileAttachmentStore::new(dir.join("attachments"))),
+            .expect("SQLite memory backend"),
         scripts(n_scripts),
     )
     .await
@@ -291,27 +105,26 @@ async fn build_sqlite(dir: &Path, n_scripts: usize) -> (LashCore, Arc<ScriptedLl
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-async fn build_sqlite_with_effect_host(
+async fn file_backend(dir: &Path) -> Arc<lash_sqlite_store::SqliteBackend> {
+    Arc::new(
+        lash_sqlite_store::SqliteBackend::open(dir)
+            .await
+            .expect("open the SQLite file backend"),
+    )
+}
+
+async fn build_sqlite(dir: &Path, n_scripts: usize) -> (LashCore, Arc<ScriptedLlmHttpTransport>) {
+    build_core(file_backend(dir).await, scripts(n_scripts)).await
+}
+
+async fn build_sqlite_with_effect_layer(
     dir: &Path,
     n_scripts: usize,
-    effect_host: Arc<dyn EffectHost>,
+    layer: Arc<dyn EffectLayer>,
 ) -> (LashCore, Arc<ScriptedLlmHttpTransport>) {
-    std::fs::create_dir_all(dir).expect("create sqlite dir");
-    let process_env_store: Arc<dyn ProcessExecutionEnvStore> = Arc::new(
-        lash_sqlite_store::Store::open(&dir.join("process-env.sqlite"))
-            .await
-            .expect("process env store"),
-    );
-    build_core_with_effect_host(
-        Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            dir.to_path_buf(),
-        )),
-        process_env_store,
-        Arc::new(FileAttachmentStore::new(dir.join("attachments"))),
-        scripts(n_scripts),
-        effect_host,
-    )
-    .await
+    let backend =
+        lash_sim::backend::DecoratedBackend::over(file_backend(dir).await).with_effect_layer(layer);
+    build_core(Arc::new(backend), scripts(n_scripts)).await
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -640,7 +453,7 @@ async fn drive_first_party_cancel_before_start(
         } => lash::TurnAddress::new(session_id, turn_id),
         scope => panic!("expected durable turn scope, got {scope:?}"),
     };
-    let driver = core.turn_work_driver().expect("core has a session catalog");
+    let driver = core.turn_work_driver();
     let first = driver
         .request_cancel(lash::TurnCancelRequest::new(
             address.clone(),
@@ -726,20 +539,16 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
     let session_id = "turn-cancel-sqlite-reopen";
     let turn_id = "cancelled-before-reopen";
 
-    // This witness reopens the session database within one effect deployment.
-    let effect_host: Arc<dyn EffectHost> = Arc::new(YieldBeforeCancelWatchController {
-        inner: NativeRuntimeEffectController::default(),
-    });
+    // This witness reopens the file backend, journal included.
+    let layer: Arc<dyn EffectLayer> = Arc::new(YieldBeforeCancelWatch);
     let (first_core, first_transport) =
-        build_sqlite_with_effect_host(&sqlite_dir, 1, Arc::clone(&effect_host)).await;
+        build_sqlite_with_effect_layer(&sqlite_dir, 1, Arc::clone(&layer)).await;
     let first_session = first_core
         .session(session_id)
         .open()
         .await
         .expect("open first SQLite session");
-    let first_driver = first_core
-        .turn_work_driver()
-        .expect("first core has a session catalog");
+    let first_driver = first_core.turn_work_driver();
     let outcome = first_driver
         .request_cancel(lash::TurnCancelRequest::new(
             match first_session.turn_scope(turn_id) {
@@ -796,7 +605,7 @@ async fn sqlite_reopen_preserves_cancelled_turn_commit_and_allows_next_turn() {
     drop(first_core);
 
     let (reopened_core, reopened_transport) =
-        build_sqlite_with_effect_host(&sqlite_dir, 1, effect_host).await;
+        build_sqlite_with_effect_layer(&sqlite_dir, 1, layer).await;
     let reopened = reopened_core
         .session(session_id)
         .open()

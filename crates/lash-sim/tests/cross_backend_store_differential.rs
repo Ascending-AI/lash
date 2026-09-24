@@ -1054,6 +1054,61 @@ fn normalized_node_json(value: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&value).expect("encode normalized durable node")
 }
 
+/// The in-memory lane's lifecycle backend: a SQLite memory backend
+/// whose session catalog is the in-memory backend under comparison. The
+/// in-memory store has no backend of its own, so its lifecycle core borrows
+/// every other port.
+struct InMemoryCatalogBackend {
+    inner: Arc<lash_sqlite_store::SqliteBackend>,
+    catalog: Arc<dyn SessionStoreFactory>,
+}
+
+impl lash::Backend for InMemoryCatalogBackend {
+    fn binding_identity(&self) -> &str {
+        lash::Backend::binding_identity(self.inner.as_ref())
+    }
+
+    fn clock(&self) -> Arc<dyn Clock> {
+        lash::Backend::clock(self.inner.as_ref())
+    }
+
+    fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
+        Arc::clone(&self.catalog)
+    }
+
+    fn effect_host(&self) -> Arc<dyn lash::durability::EffectHost> {
+        lash::Backend::effect_host(self.inner.as_ref())
+    }
+
+    fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
+        lash::Backend::process_registry(self.inner.as_ref())
+    }
+
+    fn trigger_store(&self) -> Arc<dyn lash_core::TriggerStore> {
+        lash::Backend::trigger_store(self.inner.as_ref())
+    }
+
+    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
+        lash::Backend::process_definition_registry(self.inner.as_ref())
+    }
+
+    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
+        lash::Backend::process_env_store(self.inner.as_ref())
+    }
+
+    fn attachment_store(&self) -> Arc<dyn lash_core::AttachmentStore> {
+        lash::Backend::attachment_store(self.inner.as_ref())
+    }
+
+    fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
+        lash::Backend::process_work(self.inner.as_ref())
+    }
+
+    fn queued_work(&self) -> lash_core::BackendQueuedWork {
+        lash::Backend::queued_work(self.inner.as_ref())
+    }
+}
+
 #[derive(Clone)]
 enum BackendReopen {
     /// Retained-factory, same-object reopen only; this cannot establish
@@ -1081,6 +1136,9 @@ struct BackendRunner {
     reopen: BackendReopen,
     clock: Arc<dyn Clock>,
     handles: BTreeMap<&'static str, NamedHandle>,
+    /// The backend the facade lifecycle core runs on: the backend's own
+    /// backend over the same storage.
+    lifecycle_backend: Arc<dyn lash::Backend>,
     lifecycle_core: Option<lash::LashCore>,
     reopened_postgres_pool: Option<PgPool>,
     first_lease: Option<lash_core::SessionExecutionLease>,
@@ -1156,24 +1214,19 @@ impl BackendRunner {
             &transport,
         )
         .expect("build differential lifecycle provider");
-        lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-            .with_native_queued_work()
-            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-            .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(Arc::new(
-                lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-            ))
-            .store_factory(self.factory() as Arc<dyn SessionStoreFactory>)
-            .provider(provider)
-            .model(model)
-            .clock(Arc::clone(&self.clock))
-            .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "cross-backend-differential-test",
-                "cross-backend-differential-test-boot",
-            ))
-            .expect("build differential lifecycle core")
+        lash::LashCore::standard_builder(
+            Arc::clone(&self.lifecycle_backend),
+            lash::TurnBudget::Unbounded,
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .provider(provider)
+        .model(model)
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "cross-backend-differential-test",
+            "cross-backend-differential-test-boot",
+        ))
+        .expect("build differential lifecycle core")
     }
     async fn close_reopened_postgres_pool(&mut self) {
         if let Some(pool) = self.reopened_postgres_pool.take() {
@@ -1677,10 +1730,7 @@ impl BackendRunner {
             StoreOperation::ReclaimRetainedEvidence => self.reclaim_terminal_evidence().await,
             StoreOperation::DeleteSession => {
                 let core = self.build_lifecycle_core();
-                let administration = core
-                    .session_administration()
-                    .await
-                    .expect("materialized session must have administration");
+                let administration = core.session_administration().await;
                 let context = administration
                     .delete_context(&self.session_id)
                     .expect("issue the differential delete context");
@@ -2106,6 +2156,34 @@ async fn runners_for_case_with_clock(
     let postgres_factory_dyn =
         Arc::clone(&postgres_factory) as Arc<dyn ConformanceSessionStoreFactory>;
 
+    let memory_lifecycle: Arc<dyn lash::Backend> = Arc::new(InMemoryCatalogBackend {
+        inner: Arc::new(
+            lash_sqlite_store::SqliteBackend::memory_with_clock(Arc::clone(&clock))
+                .await
+                .expect("open the in-memory lane's lifecycle backend"),
+        ),
+        catalog: Arc::clone(&memory_factory) as Arc<dyn SessionStoreFactory>,
+    });
+    let sqlite_lifecycle: Arc<dyn lash::Backend> = Arc::new(
+        lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+            &sqlite_case_root,
+            lash_sqlite_store::SqliteBackendOptions::default(),
+            Arc::clone(&clock),
+        )
+        .await
+        .expect("open the SQLite lifecycle backend"),
+    );
+    let postgres_lifecycle: Arc<dyn lash::Backend> = Arc::new(
+        lash_postgres_store::PostgresBackend::with_options_and_clock(
+            postgres,
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                sqlite_case_root.join("postgres-attachments"),
+            )),
+            lash_postgres_store::PostgresBackendOptions::default(),
+            Arc::clone(&clock),
+        ),
+    );
+
     vec![
         BackendRunner {
             name: "in-memory",
@@ -2119,6 +2197,7 @@ async fn runners_for_case_with_clock(
             reopen: BackendReopen::InMemory,
             clock: Arc::clone(&clock),
             handles: BTreeMap::new(),
+            lifecycle_backend: memory_lifecycle,
             lifecycle_core: None,
             reopened_postgres_pool: None,
             first_lease: None,
@@ -2148,6 +2227,7 @@ async fn runners_for_case_with_clock(
             },
             clock: Arc::clone(&clock),
             handles: BTreeMap::new(),
+            lifecycle_backend: sqlite_lifecycle,
             lifecycle_core: None,
             reopened_postgres_pool: None,
             first_lease: None,
@@ -2177,6 +2257,7 @@ async fn runners_for_case_with_clock(
             },
             clock,
             handles: BTreeMap::new(),
+            lifecycle_backend: postgres_lifecycle,
             lifecycle_core: None,
             reopened_postgres_pool: None,
             first_lease: None,

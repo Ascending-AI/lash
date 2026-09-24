@@ -93,41 +93,23 @@ async fn store_maintenance_fixture(
     provider: ProviderHandle,
 ) -> StoreMaintenanceFixture {
     std::fs::create_dir_all(data_dir).expect("create store-maintenance data dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open store-maintenance process registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    // Built the way `WorkbenchStores::open_sqlite` builds the shipped one: the
-    // factory is the deployment's `AttachmentRootSet`, and without the process
-    // registry it cannot resolve process-owned attachment intents, so it warns
-    // and fails safe instead of enumerating that half of the root set. A
-    // reclamation test on the unwired form would be exercising a degraded root
-    // authority the workbench never actually runs.
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
-            data_dir.join("lash-sessions"),
-            data_dir.join("processes.db"),
-        ),
-    );
-    let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
-        data_dir.join("attachments"),
-    )) as Arc<dyn lash::persistence::AttachmentStore>;
+    // The backend the shipped workbench opens: its catalog is the
+    // `AttachmentRootSet`, wired to the process registry so it resolves
+    // process-owned attachment intents instead of warning and failing safe, and
+    // its attachment store holds the bytes the core writes.
+    let backend = test_file_backend(data_dir);
+    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        backend.session_store_factory();
+    let attachment_store: Arc<dyn lash::persistence::AttachmentStore> = backend.attachment_store();
     let model = with_workbench_model_capability(
         lash::ModelSpec::builder("test-model")
             .context_window_tokens(4096)
             .build()
             .expect("store-maintenance model spec"),
     );
-    let core = explicit_durable_test_facets(data_dir)
+    let core = explicit_durable_test_facets_over(backend)
         .provider(provider)
         .model(model)
-        .store_factory(Arc::clone(&store_factory))
-        .process_registry(Arc::clone(&process_registry))
-        .attachment_store(Arc::clone(&attachment_store))
         .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build store-maintenance core");
@@ -139,7 +121,7 @@ async fn store_maintenance_fixture(
         core,
         attachment_store: Arc::clone(&attachment_store),
         session_store_factory: Arc::clone(&store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions: WorkbenchSessions::fresh(),
@@ -556,7 +538,7 @@ async fn store_maintenance_serves_incomplete_sweep_with_failure_counts_inner() {
     state.attachment_store = Arc::new(DeleteFailingWorkbenchAttachmentStore {
         inner: Arc::clone(&inner),
     });
-    state.session_store_factory = Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+    state.session_store_factory = crate::tests::memory_session_store_factory();
 
     let Json(response) = run_store_maintenance(
         State(state.clone()),

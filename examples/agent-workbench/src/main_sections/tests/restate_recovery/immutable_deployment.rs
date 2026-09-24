@@ -40,7 +40,7 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
     let mut endpoint_a = LiveRestateEndpoint::start(
         &admin_url,
         harness_a.state.clone(),
-        harness_a.process_deployment,
+        harness_a.backend,
         harness_a.process_worker,
     )
     .await;
@@ -166,7 +166,7 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
             &admin_url,
             endpoint_a_addr,
             harness_b.state.clone(),
-            harness_b.process_deployment,
+            harness_b.backend,
             harness_b.process_worker,
         )
         .await
@@ -174,7 +174,7 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
         LiveRestateEndpoint::start(
             &admin_url,
             harness_b.state.clone(),
-            harness_b.process_deployment,
+            harness_b.backend,
             harness_b.process_worker,
         )
         .await
@@ -247,7 +247,7 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
         endpoint_a = LiveRestateEndpoint::restart(
             endpoint_a_addr,
             harness_a.state.clone(),
-            harness_a.process_deployment,
+            harness_a.backend,
             harness_a.process_worker,
             deployment_a.clone(),
         )

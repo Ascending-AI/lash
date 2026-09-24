@@ -1,8 +1,5 @@
 use super::*;
-use lash_core::{
-    ProcessEventLog as _, ProcessEventLogTestSupport as _, ProcessObserverRegistry as _,
-    ProcessQuery as _, SessionCommitStore as _,
-};
+use lash_core::ProcessEventLogTestSupport as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
@@ -54,20 +51,17 @@ impl lash_core::facade_support::ProcessToolVisibilityFilter for HideAllProcessTo
     }
 }
 
-fn explicit_runtime_host_config(provider: ProviderHandle) -> RuntimeHostConfig {
-    let mut config = RuntimeHostConfig::new(
-        Arc::new(
-            crate::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ),
-        Arc::new(crate::persistence::InMemoryAttachmentStore::new()),
-        Arc::new(crate::persistence::InMemoryProcessExecutionEnvStore::new()),
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
-    config.providers.provider_resolver = Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider),
-    );
-    config
+/// A memory backend whose processes run in `NoopProcessWork`, wired over
+/// the backend's own registry: a test worker completes them by hand.
+async fn noop_process_work_backend() -> Arc<DecoratedBackend> {
+    Arc::new(
+        DecoratedBackend::over(memory_backend().await).process_work(|registry| {
+            lash_core::ProcessWorkWiring::new(
+                lash_core::facade_support::watch_process_registry(registry),
+                Arc::new(NoopProcessWork),
+            )
+        }),
+    )
 }
 
 fn provider_session_spec(provider: &ProviderHandle) -> crate::SessionSpec {
@@ -131,7 +125,7 @@ impl lash_core::facade_support::ContextCompactor for FixedCompactor {
 
 #[tokio::test]
 async fn session_operations_delegate_to_runtime() -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("session-ops").open().await?;
 
     session.turn(TurnInput::text("usage")).run().await?;
@@ -172,15 +166,18 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
 
 #[tokio::test]
 async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .plugin(Arc::new(StaticPluginFactory::new(
-            "test-compactor",
-            lash_core::facade_support::PluginSpec::new()
-                .with_context_compactor(100, Arc::new(FixedCompactor)),
-        )))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(Arc::new(StaticPluginFactory::new(
+        "test-compactor",
+        lash_core::facade_support::PluginSpec::new()
+            .with_context_compactor(100, Arc::new(FixedCompactor)),
+    )))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("compact-context").open().await?;
     session
         .turn(TurnInput::text("old durable request"))
@@ -348,7 +345,7 @@ impl lash_core::facade_support::ContextCompactor for PromptAssertingCompactor {
 #[tokio::test]
 async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result<()> {
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(crate::TurnBudget::Unbounded)
+        LashCore::standard_builder(memory_backend().await, crate::TurnBudget::Unbounded)
             .instructions("core-layer-guidance-marker"),
     )
     .provider(mock_provider())
@@ -395,14 +392,14 @@ async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result
 
 #[tokio::test]
 async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("command-idempotency").open().await?;
 
     let first = session
@@ -432,14 +429,14 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
 
 #[tokio::test]
 async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queue-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
@@ -486,14 +483,14 @@ async fn queue_enqueue_and_cancel_emit_typed_observation_events() -> Result<()> 
 
 #[tokio::test]
 async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("pending-input-facade-cancel").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
@@ -573,25 +570,17 @@ async fn pending_turn_input_facade_cancels_bulk_and_suffix_by_source_key() -> Re
 
 #[tokio::test]
 async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
-    let watched = lash_core::facade_support::watch_process_registry(
-        registry.clone() as Arc<dyn lash_core::ProcessRegistry>
-    );
-    let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
-    let runtime_host = explicit_runtime_host_config(provider);
-    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
-        .session_spec(session_spec)
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_work(wiring)
-        .with_native_queued_work()
-        .advanced()
-        .runtime_host_config(runtime_host)
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        noop_process_work_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .session_spec(session_spec)
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let registry = core.process_registry();
     let session = core.session("process-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
     let process_id = "observed-process";
@@ -626,7 +615,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let started = session
         .admin()
         .processes()
-        .start(request.clone(), native_process_scope(process_id))
+        .start(request.clone(), process_scope(&core, process_id))
         .await?;
     assert_eq!(
         lash_core::ProcessQuery::get_process(registry.as_ref(), &started.process_id)
@@ -643,9 +632,10 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         .processes()
         .start(
             request,
-            native_scope(lash_core::AdmittedScope::runtime_operation(
-                "process-observation-events-replay",
-            )),
+            host_scope(
+                &core,
+                lash_core::AdmittedScope::runtime_operation("process-observation-events-replay"),
+            ),
         )
         .await
         .expect("public session start replay bypasses the retired staging owner");
@@ -654,7 +644,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         .processes()
         .cancel(
             &ProcessId::from(process_id),
-            native_process_scope(process_id),
+            process_scope(&core, process_id),
         )
         .await?;
     core.env
@@ -921,18 +911,17 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
         "pressed",
         lash_core::LashSchema::any(),
     );
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .plugin(Arc::new(StaticPluginFactory::new(
-            "button-triggers",
-            lash_core::facade_support::PluginSpec::new().with_trigger_event(trigger),
-        )))
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(Arc::new(StaticPluginFactory::new(
+        "button-triggers",
+        lash_core::facade_support::PluginSpec::new().with_trigger_event(trigger),
+    )))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("command-trigger").open().await?;
     let before = session.admin().state().persist_current().await?;
 
@@ -980,26 +969,25 @@ async fn trigger_emit_does_not_append_session_node_or_queue_work() -> Result<()>
 async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(checkpoint_gated_provider(entered_tx, release_rx))
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .plugin(Arc::new(StaticPluginFactory::new(
-            "nonblocking-observation-query",
-            lash_core::facade_support::PluginSpec::new()
-                .with_plugin_query_typed::<NonblockingObservationQuery, _, _>(
-                    |_ctx, _args| async move {
-                        Ok::<_, lash_core::test_support::PluginOperationFailure>(
-                            serde_json::json!({ "ok": true }),
-                        )
-                    },
-                ),
-        )))
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(checkpoint_gated_provider(entered_tx, release_rx))
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .plugin(Arc::new(StaticPluginFactory::new(
+        "nonblocking-observation-query",
+        lash_core::facade_support::PluginSpec::new()
+            .with_plugin_query_typed::<NonblockingObservationQuery, _, _>(
+                |_ctx, _args| async move {
+                    Ok::<_, lash_core::test_support::PluginOperationFailure>(
+                        serde_json::json!({ "ok": true }),
+                    )
+                },
+            ),
+    )))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("nonblocking-observation").open().await?;
     let turn_session = session.clone();
     let scoped_effect_controller = turn_scope(&core, &turn_session.session_id());
@@ -1047,17 +1035,14 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
 async fn processes_cancel_cancels_visible_process() -> Result<()> {
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
-    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
-        .session_spec(session_spec)
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .without_queued_work()
-        .advanced()
-        .runtime_host_config(explicit_runtime_host_config(provider))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .session_spec(session_spec)
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-cancel").open().await?;
     session
         .admin()
@@ -1073,7 +1058,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
                 ),
             )
             .with_observers(["host-cancel".to_string()]),
-            native_process_scope("host-process"),
+            process_scope(&core, "host-process"),
         )
         .await?;
 
@@ -1082,7 +1067,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
         .processes()
         .cancel(
             &ProcessId::from("host-process"),
-            native_process_scope("host-process"),
+            process_scope(&core, "host-process"),
         )
         .await?;
 
@@ -1114,19 +1099,15 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
 async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Result<()> {
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
-    let mut runtime_host = explicit_runtime_host_config(provider);
-    runtime_host.control.process_tool_visibility_filter = Some(Arc::new(HideAllProcessTools));
-    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
-        .session_spec(session_spec)
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(Arc::new(TestLocalProcessRegistry::default()))
-        .without_queued_work()
-        .advanced()
-        .runtime_host_config(runtime_host)
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .session_spec(session_spec)
+    .provider(provider)
+    .model(mock_model_spec())
+    .process_tool_visibility_filter(Arc::new(HideAllProcessTools))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-filter-bypass").open().await?;
     for process_id in ["host-filter-signal", "host-filter-cancel"] {
         session
@@ -1148,7 +1129,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 }])
                 .with_observers(["host-filter-bypass".to_string()]),
-                native_process_scope(process_id),
+                process_scope(&core, process_id),
             )
             .await?;
     }
@@ -1166,7 +1147,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
             "ready",
             "host-filter-signal-id",
             serde_json::json!({"source": "host"}),
-            native_process_scope("host-filter-signal"),
+            process_scope(&core, "host-filter-signal"),
         )
         .await?;
     assert!(
@@ -1191,7 +1172,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         .processes()
         .cancel(
             &ProcessId::from("host-filter-cancel"),
-            native_process_scope("host-filter-cancel"),
+            process_scope(&core, "host-filter-cancel"),
         )
         .await?;
     assert!(
@@ -1227,22 +1208,14 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
 async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     let provider = mock_provider();
     let session_spec = provider_session_spec(&provider);
-    let runtime_host = explicit_runtime_host_config(provider);
-    let registry =
-        Arc::new(TestLocalProcessRegistry::default()) as Arc<dyn lash_core::ProcessRegistry>;
-    let watched = lash_core::facade_support::watch_process_registry(registry);
-    let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
-    let core = LashCore::standard_builder(crate::TurnBudget::Unbounded)
-        .session_spec(session_spec)
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_work(wiring)
-        .with_native_queued_work()
-        .advanced()
-        .runtime_host_config(runtime_host)
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        noop_process_work_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .session_spec(session_spec)
+    .provider(provider)
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-cancel-all").open().await?;
     for process_id in ["host-process-a", "host-process-b"] {
         session
@@ -1259,7 +1232,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
                     ),
                 )
                 .with_observers(["host-cancel-all".to_string()]),
-                native_process_scope(process_id),
+                process_scope(&core, process_id),
             )
             .await?;
     }
@@ -1283,7 +1256,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
 
 #[tokio::test]
 async fn observation_updates_after_completed_turn() -> Result<()> {
-    let core = standard_core();
+    let core = standard_core().await;
     let session = core.session("observation-after-turn").open().await?;
 
     assert!(session.read_view().messages().is_empty());
@@ -1301,11 +1274,14 @@ async fn observation_updates_after_completed_turn() -> Result<()> {
 
 #[tokio::test]
 async fn config_and_tool_mutations_publish_observation_immediately() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("observation-mutations").open().await?;
 
     session
@@ -1340,13 +1316,16 @@ async fn config_and_tool_mutations_publish_observation_immediately() -> Result<(
 
 #[tokio::test]
 async fn config_admin_sets_persisted_tool_access() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .tools(Arc::new(AppTools))
-        .store_factory(Arc::clone(&store_factory) as Arc<dyn SessionStoreFactory>)
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("config-admin-tool-access").open().await?;
     let access = lash_core::SessionToolAccess::ambient()
         .with_hidden_tools(["app_lookup"])
@@ -1354,9 +1333,13 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
 
     Box::pin(session.admin().config().set_tool_access(access.clone())).await?;
 
-    let store = store_factory
-        .raw_store_for_testing(&SessionId::from("config-admin-tool-access"))
-        .expect("session store");
+    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+        store_factory.as_ref(),
+        &SessionId::from("config-admin-tool-access"),
+    )
+    .await
+    .expect("read the opened session\'s store")
+    .expect("session store");
     assert_eq!(
         store
             .load_session_head_meta()
@@ -1377,12 +1360,15 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
 #[tokio::test]
 
 async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
-    let store_factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::clone(&store_factory) as Arc<dyn SessionStoreFactory>)
-        .build(crate::testing::runtime_lease_owner())?;
+    let backend = memory_backend().await;
+    let store_factory = backend.session_store_factory();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let _parent = core.session("parent-control").open().await?;
 
     let child = core
@@ -1414,39 +1400,39 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
 #[tokio::test]
 async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> {
     let sqlite_dir = tempfile::tempdir().expect("create managed-create SQLite directory");
-    let cases: Vec<(&str, Option<Arc<dyn lash_core::SessionStoreFactory>>)> = vec![
+    let cases: Vec<(&str, Arc<dyn lash_core::Backend>)> = vec![
+        ("memory", memory_backend().await),
         (
-            "in-memory",
-            Some(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
-            )),
-        ),
-        (
-            "sqlite",
-            Some(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-                sqlite_dir.path().join("managed-create-sessions"),
-            ))),
+            "file",
+            Arc::new(
+                lash_sqlite_store::SqliteBackend::open(
+                    sqlite_dir.path().join("managed-create-sessions"),
+                )
+                .await
+                .expect("open the file backend"),
+            ),
         ),
     ];
 
-    for (case, store_factory) in cases {
-        let store_factory = store_factory.expect("every case selects a store");
+    for (case, backend) in cases {
         let parent_session_id = SessionId::from(format!("managed-observer-parent-{case}"));
         let child_session_id = SessionId::from(format!("managed-observer-child-{case}"));
         let create_process_id = ProcessId::from(format!("managed-create-process-{case}"));
-        let registry = Arc::new(TestLocalProcessRegistry::default());
-        let process_registry = registry.clone() as Arc<dyn lash_core::ProcessRegistry>;
-        let watched = lash_core::facade_support::watch_process_registry(process_registry);
-        let wiring = lash_core::ProcessWorkWiring::new(watched, Arc::new(NoopProcessWork));
-        let mut builder =
-            explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-                .provider(mock_provider())
-                .model(mock_model_spec())
-                .process_work(wiring);
-        builder = builder
-            .store_factory(Arc::clone(&store_factory))
-            .with_native_queued_work();
-        let core = builder.build(crate::testing::runtime_lease_owner())?;
+        let backend = DecoratedBackend::over(backend).process_work(|registry| {
+            lash_core::ProcessWorkWiring::new(
+                lash_core::facade_support::watch_process_registry(registry),
+                Arc::new(NoopProcessWork),
+            )
+        });
+        let store_factory = lash_core::Backend::session_store_factory(&backend);
+        let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+            Arc::new(backend),
+            crate::TurnBudget::Unbounded,
+        ))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
+        let registry = core.process_registry();
         let _parent = core.session(&parent_session_id).open().await?;
 
         registry
@@ -1464,7 +1450,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
             ))
             .await?;
 
-        let child_store = store_factory
+        store_factory
             .create_store(&lash_core::SessionStoreCreateRequest {
                 pending_observer_intents: vec![
                     lash_core::facade_support::SessionObserverIntent::host_requested(
@@ -1486,7 +1472,6 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
 
         let child = core
             .session(&child_session_id)
-            .store(child_store)
             .parent(&parent_session_id)
             .open()
             .await?;
@@ -1534,14 +1519,14 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
 /// queue uses, and the handle it returns names that admission.
 #[tokio::test]
 async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await,
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("direct-turn-acceptance").open().await?;
 
     let first = session.turn(TurnInput::text("same words")).run().await?;
@@ -1578,18 +1563,5 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
             .expect("the second direct turn is admitted too")
             .input_id
     );
-    Ok(())
-}
-
-/// Facade admission refuses a session with no selected store, so there is no
-/// storeless exception to durable turn acceptance.
-#[tokio::test]
-async fn a_session_without_a_store_cannot_bypass_turn_acceptance() -> Result<()> {
-    let core = core_without_session_store();
-    let error = match core.session("missing-store-acceptance").open().await {
-        Ok(_) => panic!("facade session admission requires a store"),
-        Err(error) => error,
-    };
-    assert!(matches!(error, EmbedError::MissingSessionStore));
     Ok(())
 }

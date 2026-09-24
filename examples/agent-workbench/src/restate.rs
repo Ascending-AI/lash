@@ -346,12 +346,7 @@ impl WorkbenchSessionDeleteWorkflow for WorkbenchSessionDeleteWorkflowImpl {
         let administration = self
             .administration
             .get_or_try_init(|| async {
-                let administration = self
-                    .state
-                    .core
-                    .session_administration()
-                    .await
-                    .map_err(AppError::internal)?;
+                let administration = self.state.core.session_administration().await;
                 Ok::<_, AppError>(lash_restate::RestateSessionAdministration::new(
                     administration,
                     lash_restate::RestateConnection::with_client(
@@ -542,8 +537,13 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
             "workbench-cron:trace-run",
         )
         .await?;
-        let Json(emit_report) =
-            emit_cron_occurrence(self.state.clone(), request, fired_at_text, &controller).await?;
+        let Json(emit_report) = Box::pin(emit_cron_occurrence(
+            self.state.clone(),
+            request,
+            fired_at_text,
+            &controller,
+        ))
+        .await?;
         journaled_workbench_trace(
             controller.context(),
             self.state.clone(),

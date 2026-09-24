@@ -3,7 +3,6 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core::SessionStoreFactory;
 use lash_postgres_store::PostgresStorage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -252,29 +251,24 @@ impl ReplayBackend for PostgresReplayBackend {
     const TARGET: &str = "Postgres";
     const ASSERT_INGRESS_SESSION_ID: bool = false;
 
-    fn session_store_factory(
+    async fn backend(
         &self,
         clock: &Arc<crate::clock::SimClock>,
-    ) -> Arc<dyn SessionStoreFactory> {
-        Arc::new(
-            self.storage
-                .session_store_factory()
-                .with_clock(clock.clone()),
-        )
+    ) -> Result<Arc<dyn lash::Backend>, Self::Error> {
+        Ok(Arc::new(
+            lash_postgres_store::PostgresBackend::with_options_and_clock(
+                self.storage.as_ref(),
+                Arc::new(lash::persistence::FileAttachmentStore::new(
+                    self.attachment_root.clone(),
+                )),
+                crate::backend::sim_postgres_options(),
+                clock.clone(),
+            ),
+        ))
     }
 
     fn effect_replay_store(&self) -> RuntimeEffectReplayStore {
         RuntimeEffectReplayStore::postgres(Arc::clone(&self.storage))
-    }
-
-    async fn process_env_store(
-        &self,
-    ) -> Result<Arc<dyn lash::persistence::ProcessExecutionEnvStore>, Self::Error> {
-        Ok(Arc::new(self.storage.process_env_store()))
-    }
-
-    fn attachment_root(&self) -> PathBuf {
-        self.attachment_root.clone()
     }
 
     fn normalize_observed_extra(kind: BoundaryKind, value: &mut Value) {

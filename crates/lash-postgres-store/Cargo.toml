@@ -60,7 +60,7 @@ lash-protocol-rlm = { workspace = true }
 lash-protocol-standard = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-subagents = { workspace = true }
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { workspace = true, features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }

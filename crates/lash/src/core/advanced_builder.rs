@@ -1,6 +1,5 @@
 use super::{LashCore, LashCoreBuilder};
 use crate::support::{PluginHost, Result};
-use lash_core::facade_support;
 
 /// Escape hatch for host-supplied runtime internals on [`LashCoreBuilder`].
 pub struct AdvancedLashCoreBuilder {
@@ -8,13 +7,6 @@ pub struct AdvancedLashCoreBuilder {
 }
 
 impl AdvancedLashCoreBuilder {
-    /// Fields also configured through the regular builder are rejected by
-    /// [`LashCoreBuilder::build`]; configure each host-config field once.
-    pub fn runtime_host_config(mut self, core: facade_support::RuntimeHostConfig) -> Self {
-        self.builder.runtime_host_config = Some(core);
-        self
-    }
-
     pub fn plugin_host(mut self, plugin_host: PluginHost) -> Self {
         self.builder.plugin_host = Some(plugin_host);
         self

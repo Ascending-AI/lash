@@ -1138,23 +1138,28 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
         recovered: tokio::sync::Notify::new(),
     });
     let recovered = queued_work.recovered.notified();
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+    // A Restate backend whose engine-backed queued driver is the failing
+    // run handle: the enqueue commits, then the driver's wake fails.
+    let backend = Arc::new(crate::RestateBackend::new(
+        "http://127.0.0.1:8080",
+        crate::RestateAuthorityId::new("lash-restate-fig430").expect("valid authority"),
+        Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open(dir.path().join("sessions"))
+                .await
+                .expect("open FIG-430 store set"),
+        ),
+        crate::RestateQueuedWork::Engine(Arc::new(lash_core::NativeQueuedWork::new(
+            queued_work.clone(),
+        ))),
+    ));
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(lash_core::ModelSpec::new(
             "fig-430-model",
             std::num::NonZeroUsize::new(1024).expect("non-zero context window"),
         ))
-        .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            dir.path().join("sessions"),
-        )))
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(DurableMemoryAttachmentStore::default()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(DurableMemoryProcessEnvStore::default()))
-        .with_queued_work(Arc::new(lash_core::NativeQueuedWork::new(
-            queued_work.clone(),
-        )))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "lash-restate-fig430-test",
             "lash-restate-fig430-test-boot",

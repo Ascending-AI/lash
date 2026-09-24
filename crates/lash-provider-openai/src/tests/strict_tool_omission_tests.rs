@@ -199,8 +199,17 @@ fn provider(
     }
 }
 
-fn core(provider: ProviderHandle, seen: Arc<Mutex<Vec<CapturedCall>>>, label: &str) -> LashCore {
-    LashCore::standard_builder(lash::TurnBudget::Unbounded)
+async fn core(
+    provider: ProviderHandle,
+    seen: Arc<Mutex<Vec<CapturedCall>>>,
+    label: &str,
+) -> LashCore {
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("memory backend"),
+    );
+    LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
         .model(
@@ -213,16 +222,8 @@ fn core(provider: ProviderHandle, seen: Arc<Mutex<Vec<CapturedCall>>>, label: &s
             vec![tool_definition()],
             OmissionProbe { seen },
         )))
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             format!("strict-omission-{label}"),
             format!("strict-omission-{label}-boot"),
@@ -314,7 +315,8 @@ async fn run_case(
         provider(endpoint, strict_tools, Arc::clone(&transport)),
         Arc::clone(&seen),
         label,
-    );
+    )
+    .await;
     let session = runtime
         .session(format!("strict-omission-{label}"))
         .open()

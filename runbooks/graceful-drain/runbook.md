@@ -45,7 +45,7 @@ unsatisfiable as an independent fact. Cleanup tickets are named in RULES.md: FIG
 FIG-3022.
 
 **Fixture honesty.** The controller-owned journal in this scenario is an in-process ledger
-of active replay keys, not a claim that `NativeEffectHost` has a durable workflow journal.
+of active replay keys, not the effect journal of the `PostgresBackend` the core runs on.
 It proves the host waited for the exact admitted effect before declaring its journal empty.
 The workflow-engine persistence half belongs to the Restate runbooks. Process rows use
 inert `External` inputs because execution is not under test; drain reads only the persisted

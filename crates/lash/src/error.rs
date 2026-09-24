@@ -11,10 +11,22 @@ pub use lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause;
 #[non_exhaustive]
 pub enum EmbedError {
     #[error(
-        "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(lash::TurnBudget::bounded(...))/LashCore::rlm_builder(lash::TurnBudget::bounded(...), ...)"
+        "protocol plugin is required; call .protocol_plugin(...) or use LashCore::standard_builder(backend, lash::TurnBudget::bounded(...))/LashCore::rlm_builder(backend, lash::TurnBudget::bounded(...), ...)"
     )]
     /// Returned when no protocol plugin was configured.
     MissingProtocolPlugin,
+    #[error(
+        "backend binding mismatch: the backend's binding identity is `{binding_identity}` but its effect host's turn-control binding is `{effect_host_binding}`; a backend's effect host must bind to the backend's own identity"
+    )]
+    /// Returned when a backend's effect host binds to an identity other than
+    /// the backend's own, so its durable records would name a different
+    /// substrate.
+    BackendBindingMismatch {
+        /// [`Backend::binding_identity`](lash_core::Backend::binding_identity).
+        binding_identity: String,
+        /// The effect host's `turn_control_binding_id()`.
+        effect_host_binding: String,
+    },
     #[error("model spec is required; hosts must supply explicit model metadata")]
     /// Returned when the session has no explicit model specification.
     MissingModelSpec,
@@ -23,19 +35,6 @@ pub enum EmbedError {
     )]
     /// Returned when the session has no explicit turn budget.
     MissingTurnBudget,
-    #[error("effect host is required; provide an explicit effect host with .effect_host(...)")]
-    /// Returned when the runtime has no effect host.
-    MissingEffectHost,
-    #[error(
-        "attachment store is required; provide an explicit attachment store with .attachment_store(...)"
-    )]
-    /// Returned when the runtime has no attachment store.
-    MissingAttachmentStore,
-    #[error(
-        "process execution environment store is required; provide an explicit process env store with .process_env_store(...)"
-    )]
-    /// Returned when the runtime has no process-environment store.
-    MissingProcessEnvStore,
     #[error(
         "commit budget is required; provide explicit byte and node limits with .commit_budget(...)"
     )]
@@ -46,25 +45,6 @@ pub enum EmbedError {
     )]
     /// Returned when queued-work batching has not been configured.
     MissingQueuedWorkBatching,
-    #[error(
-        "runtime host config conflicts with builder field `{field}`; configure this value in exactly one place"
-    )]
-    /// Returned when a whole runtime host config and a duplicated builder
-    /// field were both supplied.
-    RuntimeHostConfigConflict {
-        /// Builder field that duplicated a value in the runtime host config.
-        field: &'static str,
-    },
-    #[error(
-        "queued-work composition is required; call .with_native_queued_work(), .with_queued_work(...), or .without_queued_work()"
-    )]
-    /// Returned when the host did not choose how queued work is executed.
-    MissingQueuedWorkSource,
-    #[error(
-        "native queued work requires a session-creation store factory; call .store_factory(...) or .session_creation_store_factory(...), or choose .with_queued_work(...) or .without_queued_work()"
-    )]
-    /// Returned when native queued work cannot rebuild session runtimes.
-    NativeQueuedWorkRequiresStoreFactory,
     #[error("failed to create store for session `{session_id}`: {message}")]
     StoreFactory {
         /// Session whose store could not be created.
@@ -85,11 +65,6 @@ pub enum EmbedError {
     #[error("session store operation failed: {0}")]
     Store(#[from] lash_core::StoreError),
     #[error(
-        "session store is required; pass an explicit store with SessionBuilder::store(...) or configure LashCoreBuilder::store_factory(...)"
-    )]
-    /// Returned before execution when a facade session has no store source.
-    MissingSessionStore,
-    #[error(
         "session `{session_id}` has no durable session store; a Durable Session never creates one, so create the session first with core.session(id).open()"
     )]
     /// A Durable Session operation named a session the catalog has never
@@ -107,17 +82,6 @@ pub enum EmbedError {
         /// Session identifier requested by the builder.
         requested: SessionId,
     },
-    #[error("durable process worker requires a session-creation store factory")]
-    /// Returned when a durable process worker has no store factory.
-    MissingProcessWorkerStoreFactory,
-    #[error(
-        "a process registry is configured for the default native process work runner but no session-creation store factory is wired; the runner rebuilds a session runtime per process and cannot do so without one. Wire .store_factory(...) or .session_creation_store_factory(...) with InMemorySessionStoreFactory::new() for ephemeral process execution, or a durable factory, or use .process_work(...) for an externally driven durable runner."
-    )]
-    /// Returned when the native process runner cannot rebuild sessions without a store factory.
-    ProcessRegistryRequiresStoreFactory,
-    #[error("durable process worker config requires a LashCore process registry")]
-    /// Returned when durable process-worker configuration has no process registry.
-    MissingProcessRegistry,
     #[error("invalid process execution configuration: {0}")]
     ProcessExecutionConcurrency(#[from] lash_core_worker::ProcessExecutionConcurrencyError),
     #[error("invalid queued-work execution configuration: {0}")]
@@ -126,12 +90,6 @@ pub enum EmbedError {
     ),
     #[error("invalid native substrate configuration: {0}")]
     NativeSubstrateConfig(#[from] lash_core::NativeSubstrateConfigError),
-    #[error("session catalog does not support `{operation}` in this LashCore")]
-    /// Returned when an administrative/catalog operation has no selected catalog.
-    SessionCatalogUnavailable {
-        /// The unavailable catalog operation.
-        operation: &'static str,
-    },
     #[error("failed to delete process state for session `{session_id}`: {message}")]
     /// Process-state deletion failed for the identified session.
     SessionDeleteProcess {
@@ -271,29 +229,19 @@ impl EmbedError {
                     | SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow { .. },
             }
             | Self::MissingProtocolPlugin
+            | Self::BackendBindingMismatch { .. }
             | Self::UnknownSession { .. }
             | Self::MissingModelSpec
             | Self::MissingTurnBudget
-            | Self::MissingEffectHost
-            | Self::MissingAttachmentStore
-            | Self::MissingProcessEnvStore
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
-            | Self::RuntimeHostConfigConflict { .. }
-            | Self::MissingQueuedWorkSource
-            | Self::NativeQueuedWorkRequiresStoreFactory
             | Self::StoreFactory { .. }
             | Self::SessionDeleteStorage { .. }
             | Self::Store(_)
-            | Self::MissingSessionStore
             | Self::StoreSessionMismatch { .. }
-            | Self::MissingProcessWorkerStoreFactory
-            | Self::ProcessRegistryRequiresStoreFactory
-            | Self::MissingProcessRegistry
             | Self::ProcessExecutionConcurrency(_)
             | Self::QueuedWorkExecutionConcurrency(_)
             | Self::NativeSubstrateConfig(_)
-            | Self::SessionCatalogUnavailable { .. }
             | Self::SessionDeleteProcess { .. }
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
@@ -314,8 +262,8 @@ impl EmbedError {
     /// The terminal set includes:
     ///
     /// - builder/wiring variants of this enum (missing protocol plugin,
-    ///   model spec, turn budget, effect host, stores, registries, handler
-    ///   context, and store/session mismatches) — the same call fails
+    ///   model spec, turn budget, commit budget, queued-work composition,
+    ///   handler context, and store/session mismatches) — the same call fails
     ///   identically until the host changes its wiring;
     /// - typed runtime wiring, caller-invariant, unsupported-operation,
     ///   deterministic codec, and corrupt durable-state codes;
@@ -337,24 +285,14 @@ impl EmbedError {
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::MissingProtocolPlugin
+            | Self::BackendBindingMismatch { .. }
             | Self::MissingModelSpec
             | Self::MissingTurnBudget
-            | Self::MissingEffectHost
-            | Self::MissingAttachmentStore
-            | Self::MissingProcessEnvStore
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
-            | Self::RuntimeHostConfigConflict { .. }
-            | Self::MissingQueuedWorkSource
-            | Self::NativeQueuedWorkRequiresStoreFactory
             | Self::StoreSessionMismatch { .. }
-            | Self::MissingProcessWorkerStoreFactory
-            | Self::ProcessRegistryRequiresStoreFactory
-            | Self::MissingProcessRegistry
             | Self::ProcessExecutionConcurrency(_)
             | Self::QueuedWorkExecutionConcurrency(_)
-            | Self::MissingSessionStore
-            | Self::SessionCatalogUnavailable { .. }
             | Self::UnknownSession { .. }
             | Self::StaticTurnStreamRequiresStaticEffectHost => true,
             Self::Store(err) => store_error_is_terminal(err),
@@ -522,8 +460,11 @@ mod tests {
     fn wiring_errors_are_terminal_and_not_retryable() {
         for err in [
             EmbedError::MissingProtocolPlugin,
+            EmbedError::BackendBindingMismatch {
+                binding_identity: "backend".to_string(),
+                effect_host_binding: "other".to_string(),
+            },
             EmbedError::MissingTurnBudget,
-            EmbedError::MissingEffectHost,
             runtime_error(RuntimeErrorCode::MissingExecutionScopeId),
         ] {
             assert!(err.is_terminal(), "{err}");

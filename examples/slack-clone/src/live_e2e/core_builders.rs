@@ -8,7 +8,10 @@ use lash::provider::{
     CacheControlDialect, ModelCapability, ProviderHandle, ProviderOptions, ProviderReliability,
     ReasoningCapability, ReasoningEncoding, ReasoningSelection, SamplingCapability,
 };
-use lash::tools::ToolProvider;
+use lash::tools::{
+    StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolCall, ToolDefinition,
+    ToolOutcome, ToolProvider,
+};
 use lash::tracing::{JsonlTraceSink, TraceLevel};
 use lash::{LashCore, ModelSpec, PromptLayerSink as _};
 use lash_provider_openai::{
@@ -17,8 +20,8 @@ use lash_provider_openai::{
 use uuid::Uuid;
 
 use super::{
-    Config, DEFAULT_RLM_MODEL, DEFAULT_STANDARD_MODEL, MAX_MODEL_TURNS_PER_SESSION_TURN,
-    MeteredProvider, SpendLedger,
+    Config, DEFAULT_RLM_MODEL, DEFAULT_STANDARD_MODEL, EchoArgs, EchoOutput,
+    MAX_MODEL_TURNS_PER_SESSION_TURN, MeteredProvider, SpendLedger,
 };
 
 pub(super) fn provider(config: &Config, ledger: &SpendLedger) -> ProviderHandle {
@@ -91,7 +94,47 @@ fn generation(output_cap: usize) -> GenerationOptions {
     }
 }
 
-pub(super) fn standard_core(
+struct EchoTool;
+
+#[async_trait::async_trait]
+impl StaticToolExecute for EchoTool {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
+        (async {
+            match serde_json::from_value::<EchoArgs>(call.args.clone()) {
+                Ok(args) if call.name() == "structural_echo" => {
+                    ToolOutcome::ok(serde_json::json!(EchoOutput { value: args.value }))
+                }
+                Ok(_) => ToolOutcome::err(serde_json::json!("unknown tool")),
+                Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
+            }
+        })
+        .await
+        .into()
+    }
+}
+
+/// The structural-echo tool the standard smoke probe asks the model to call.
+pub(super) fn echo_tools() -> Arc<dyn ToolProvider> {
+    Arc::new(StaticToolProvider::new(
+        vec![ToolDefinition::typed::<EchoArgs, EchoOutput>(
+            "tool:slack_clone.structural_echo",
+            "structural_echo",
+            "Return the supplied value unchanged. You must call this when requested.",
+        )],
+        EchoTool,
+    ))
+}
+
+/// A fresh SQLite memory backend: each live-E2E core is its own substrate.
+async fn memory_backend() -> Result<Arc<lash_sqlite_store::SqliteBackend>> {
+    Ok(Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .map_err(|error| anyhow::anyhow!("open a SQLite memory backend: {error}"))?,
+    ))
+}
+
+pub(super) async fn standard_core(
     provider: ProviderHandle,
     model: ModelSpec,
     output_cap: usize,
@@ -101,24 +144,19 @@ pub(super) fn standard_core(
     trace_path: PathBuf,
     shutdown_witness: Option<Arc<dyn lash::plugins::PluginFactory>>,
 ) -> Result<LashCore> {
-    let mut builder = LashCore::standard_builder(lash::TurnBudget::bounded(turn_budget))
-        .without_queued_work()
-        .provider(provider)
-        .model(model)
-        .generation(generation(output_cap))
-        .instructions(instructions)
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .trace_sink(Arc::new(JsonlTraceSink::new(trace_path)))
-        .trace_level(TraceLevel::Extended);
+    let mut builder = LashCore::standard_builder(
+        memory_backend().await?,
+        lash::TurnBudget::bounded(turn_budget),
+    )
+    .without_queued_work()
+    .provider(provider)
+    .model(model)
+    .generation(generation(output_cap))
+    .instructions(instructions)
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .trace_sink(Arc::new(JsonlTraceSink::new(trace_path)))
+    .trace_level(TraceLevel::Extended);
     if let Some(tools) = tools {
         builder = builder.tools(tools);
     }
@@ -138,7 +176,7 @@ pub(super) fn standard_core(
         .context("build standard live-E2E core")
 }
 
-pub(super) fn rlm_core(
+pub(super) async fn rlm_core(
     provider: ProviderHandle,
     model: ModelSpec,
     output_cap: usize,
@@ -156,6 +194,7 @@ pub(super) fn rlm_core(
         Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
     );
     let mut builder = LashCore::rlm_builder(
+        memory_backend().await?,
         lash::TurnBudget::bounded(MAX_MODEL_TURNS_PER_SESSION_TURN),
         factory,
     )
@@ -165,16 +204,6 @@ pub(super) fn rlm_core(
     .generation(generation(output_cap))
     .instructions(instructions)
     .tools(tools)
-    .effect_host(Arc::new(
-        lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-    ))
-    .store_factory(Arc::new(
-        lash::persistence::InMemorySessionStoreFactory::new(),
-    ))
-    .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-    .process_env_store(Arc::new(
-        lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-    ))
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .trace_sink(Arc::new(JsonlTraceSink::new(trace_path)))

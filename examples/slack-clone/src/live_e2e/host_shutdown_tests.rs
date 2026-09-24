@@ -133,6 +133,7 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
         temp.path().join("trace.jsonl"),
         Some(witness),
     )
+    .await
     .expect("build core");
     let session = core
         .session("slack-live-e2e-full-channel")

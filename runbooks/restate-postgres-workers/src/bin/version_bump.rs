@@ -412,8 +412,13 @@ async fn commit_one_turn(
             .build(),
         Arc::new(storage.lashlang_artifact_store()),
     );
-    let core = lash::LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-        .with_native_queued_work()
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            attachments.path().to_path_buf(),
+        )),
+    ));
+    let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("version-bump-mock")
@@ -421,20 +426,8 @@ async fn commit_one_turn(
                 .build()
                 .map_err(anyhow::Error::msg)?,
         )
-        .store_factory(Arc::new(
-            storage.session_store_factory_with_shared_process_registry(),
-        ))
-        .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-            attachments.path().to_path_buf(),
-        )))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .process_env_store(Arc::new(storage.process_env_store()))
-        .process_registry(Arc::new(storage.process_registry()))
-        .trigger_store(Arc::new(storage.trigger_store()))
-        .effect_host(Arc::new(
-            lash::durability::NativeEffectHost::default().allow_process_lifetime_completion_keys(),
-        ))
         // A boot UUID, not the PID: the contract is that the incarnation changes
         // on every process boot, and PIDs are reused.
         .build(lash::persistence::LeaseOwnerIdentity::opaque(

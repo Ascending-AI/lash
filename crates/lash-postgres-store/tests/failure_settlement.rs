@@ -17,7 +17,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 use lash_core::llm::types::{LlmRequest, LlmResponse};
 use lash_core::runtime::effect::effect_replay_driver::EffectJournalFaultPoint;
 use lash_core::{LlmOutputPart, TurnInput};
-use lash_postgres_store::{PostgresEffectHost, PostgresEffectReplayOptions, PostgresStorage};
+use lash_postgres_store::{
+    PostgresBackend, PostgresBackendOptions, PostgresEffectHost, PostgresStorage,
+};
 use lash_sansio::sync::MutexExt;
 
 use crate::support::{SharedDatabaseLock, database_url, reset};
@@ -98,16 +100,16 @@ fn counting_text_provider(
         .into_handle()
 }
 
-struct PostgresBackend {
-    storage: PostgresStorage,
+/// A reset database, its backend, and the host the fault injection
+/// reaches: the same host the facade runs on.
+struct SettlementFixture {
+    backend: Arc<PostgresBackend>,
     effect_host: Arc<PostgresEffectHost>,
-    /// When set, every host timestamp and the store's lease timeline read this
-    /// clock instead of the wall clock and the database transaction clock.
-    clock: Option<Arc<dyn lash_core::Clock>>,
+    _attachments: tempfile::TempDir,
     _lock: SharedDatabaseLock,
 }
 
-impl PostgresBackend {
+impl SettlementFixture {
     async fn open() -> Option<Self> {
         Self::open_on(None).await
     }
@@ -119,18 +121,29 @@ impl PostgresBackend {
             .await
             .expect("connect Postgres");
         reset(storage.pool()).await;
-        let effect_host = Arc::new(match &clock {
-            Some(clock) => PostgresEffectHost::with_options_and_clock(
+        let attachments = tempfile::tempdir().expect("attachment root");
+        let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
+            attachments.path(),
+        ));
+        let backend = Arc::new(match clock {
+            // Every host timestamp and the store's lease timeline read the
+            // test clock instead of the wall clock and the database's.
+            Some(clock) => PostgresBackend::with_options_and_clock(
                 &storage,
-                PostgresEffectReplayOptions::default(),
-                Arc::clone(clock),
+                attachment_store,
+                PostgresBackendOptions {
+                    lease_time_from_clock_for_testing: true,
+                    ..PostgresBackendOptions::default()
+                },
+                clock,
             ),
-            None => storage.effect_host(),
+            None => PostgresBackend::new(&storage, attachment_store),
         });
+        let effect_host = backend.effect_host();
         Some(Self {
-            storage,
+            backend,
             effect_host,
-            clock,
+            _attachments: attachments,
             _lock: lock,
         })
     }
@@ -140,7 +153,10 @@ impl PostgresBackend {
         provider: lash::provider::ProviderHandle,
         protocol: Option<Arc<dyn lash_core::plugin::ProtocolSessionPlugin>>,
     ) -> lash::LashCore {
-        let builder = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded);
+        let builder = lash::LashCore::standard_builder(
+            Arc::clone(&self.backend) as Arc<dyn lash::Backend>,
+            lash::TurnBudget::Unbounded,
+        );
         let builder = match protocol {
             Some(protocol) => builder.protocol_plugin(
                 lash_core::testing::test_standard_protocol_factory_with_runtime_state(
@@ -148,20 +164,6 @@ impl PostgresBackend {
                 ),
             ),
             None => builder,
-        };
-        let store_factory = self
-            .storage
-            .session_store_factory_with_shared_process_registry();
-        let process_registry = self.storage.process_registry();
-        let (builder, store_factory, process_registry) = match &self.clock {
-            Some(clock) => (
-                builder.clock(Arc::clone(clock)),
-                store_factory
-                    .with_clock(Arc::clone(clock))
-                    .with_lease_clock_for_testing(Arc::clone(clock)),
-                process_registry.with_clock(Arc::clone(clock)),
-            ),
-            None => (builder, store_factory, process_registry),
         };
         builder
             .provider(provider)
@@ -171,11 +173,6 @@ impl PostgresBackend {
                     .build()
                     .expect("model spec"),
             )
-            .effect_host(Arc::clone(&self.effect_host) as Arc<dyn lash::durability::EffectHost>)
-            .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-            .process_env_store(Arc::new(self.storage.process_env_store()))
-            .store_factory(Arc::new(store_factory))
-            .process_registry(Arc::new(process_registry))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .without_queued_work()
@@ -216,7 +213,7 @@ fn assert_recorded_before_llm_failure(report: &lash::TurnReport) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_turn()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(backend) = PostgresBackend::open().await else {
+    let Some(backend) = SettlementFixture::open().await else {
         return Ok(());
     };
     let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -243,7 +240,7 @@ async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_attempt()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(backend) = PostgresBackend::open().await else {
+    let Some(backend) = SettlementFixture::open().await else {
         return Ok(());
     };
     let protocol = Arc::new(RefusingBeforeLlmCall::default());
@@ -284,7 +281,7 @@ async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_atte
 }
 
 async fn abort_direct_turn_with_live_fault(
-    backend: &PostgresBackend,
+    backend: &SettlementFixture,
     session: &lash::LashSession,
     session_id: &str,
     turn_id: &str,
@@ -326,7 +323,7 @@ async fn abort_direct_turn_with_live_fault(
 async fn live_fault_on_a_direct_turn_returns_its_receipt_to_withdraw_the_input()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-live-fault";
-    let Some(backend) = PostgresBackend::open().await else {
+    let Some(backend) = SettlementFixture::open().await else {
         return Ok(());
     };
     let requests = Arc::new(StdMutex::new(Vec::new()));
@@ -369,7 +366,7 @@ async fn live_fault_on_a_direct_turn_returns_its_receipt_to_withdraw_the_input()
 async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_retry()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-queued-journal-fault";
-    let Some(backend) = PostgresBackend::open().await else {
+    let Some(backend) = SettlementFixture::open().await else {
         return Ok(());
     };
     let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -410,7 +407,7 @@ async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_re
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancellation_still_settles_stopped_cancelled() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(backend) = PostgresBackend::open().await else {
+    let Some(backend) = SettlementFixture::open().await else {
         return Ok(());
     };
     let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
@@ -465,7 +462,7 @@ async fn cancellation_still_settles_stopped_cancelled() -> Result<(), Box<dyn st
 async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-live-fault-next-turn";
-    let Some(backend) = PostgresBackend::open().await else {
+    let Some(backend) = SettlementFixture::open().await else {
         return Ok(());
     };
     let requests = Arc::new(StdMutex::new(Vec::new()));
@@ -542,7 +539,7 @@ async fn a_new_direct_turn_never_folds_in_an_aborted_turns_input()
 async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-live-fault-redrive";
-    let Some(backend) = PostgresBackend::open().await else {
+    let Some(backend) = SettlementFixture::open().await else {
         return Ok(());
     };
     let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -595,7 +592,7 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation()
         lash_core::ClockWallTime::timestamp_ms(&lash_core::facade_support::SystemClock),
     ));
     let Some(backend) =
-        PostgresBackend::open_on(Some(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)).await
+        SettlementFixture::open_on(Some(Arc::clone(&clock) as Arc<dyn lash_core::Clock>)).await
     else {
         return Ok(());
     };
@@ -676,7 +673,7 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation()
 async fn a_drive_whose_outcome_was_lost_still_binds_its_input()
 -> Result<(), Box<dyn std::error::Error>> {
     const SESSION: &str = "pg-direct-drive-finalize-fault";
-    let Some(backend) = PostgresBackend::open().await else {
+    let Some(backend) = SettlementFixture::open().await else {
         return Ok(());
     };
     let requests = Arc::new(StdMutex::new(Vec::new()));
@@ -738,7 +735,7 @@ async fn a_drive_whose_outcome_was_lost_still_binds_its_input()
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn()
 -> Result<(), Box<dyn std::error::Error>> {
-    let Some(backend) = PostgresBackend::open().await else {
+    let Some(backend) = SettlementFixture::open().await else {
         return Ok(());
     };
     let provider_calls = Arc::new(AtomicUsize::new(0));

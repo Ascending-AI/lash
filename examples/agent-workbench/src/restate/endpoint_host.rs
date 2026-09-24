@@ -6,11 +6,11 @@ use super::*;
 pub(crate) fn spawn_restate_endpoint(
     addr: SocketAddr,
     state: AppState,
-    process_deployment: lash_restate::RestateProcessDeployment,
+    backend: Arc<lash_restate::RestateBackend>,
     process_worker: lash::durability::DurableProcessWorker,
 ) {
     tokio::spawn(async move {
-        let endpoint = endpoint(state, process_deployment, process_worker).await;
+        let endpoint = endpoint(state, backend, process_worker).await;
         restate_sdk::http_server::HttpServer::new(endpoint)
             .listen_and_serve(addr)
             .await;
@@ -27,12 +27,12 @@ pub(crate) fn spawn_restate_endpoint(
 pub(crate) fn spawn_owned_restate_endpoint(
     listener: tokio::net::TcpListener,
     state: AppState,
-    process_deployment: lash_restate::RestateProcessDeployment,
+    backend: Arc<lash_restate::RestateBackend>,
     process_worker: lash::durability::DurableProcessWorker,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let endpoint = endpoint(state, process_deployment, process_worker).await;
+        let endpoint = endpoint(state, backend, process_worker).await;
         restate_sdk::http_server::HttpServer::new(endpoint)
             .serve_with_cancel(listener, async move {
                 while !*shutdown.borrow() && shutdown.changed().await.is_ok() {}
@@ -43,7 +43,7 @@ pub(crate) fn spawn_owned_restate_endpoint(
 
 async fn endpoint(
     state: AppState,
-    process_deployment: lash_restate::RestateProcessDeployment,
+    backend: Arc<lash_restate::RestateBackend>,
     process_worker: lash::durability::DurableProcessWorker,
 ) -> Endpoint {
     let endpoint = Endpoint::builder()
@@ -54,7 +54,12 @@ async fn endpoint(
         .bind(WorkbenchSessionDeleteWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchProcessCancelWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchCronJobImpl::new(state).serve())
-        .bind(process_deployment.workflow(process_worker).serve())
+        .bind(
+            backend
+                .process_deployment()
+                .workflow(process_worker)
+                .serve(),
+        )
         .bind(LashDurableWaitWorkflowImpl.serve())
         .bind(LashDurableWaitIndexImpl.serve())
         .bind(LashProcessAttachImpl.serve())
@@ -62,7 +67,7 @@ async fn endpoint(
     // Wiring-time check: the deployment knows the lash service surface it
     // requires, and the built endpoint reports what it bound. A missing bind
     // fails startup here rather than the first call that would 404.
-    if let Err(error) = process_deployment.assert_endpoint_bound(&endpoint).await {
+    if let Err(error) = backend.assert_endpoint_bound(&endpoint).await {
         panic!("workbench Restate endpoint must bind the lash process service surface: {error}");
     }
     endpoint

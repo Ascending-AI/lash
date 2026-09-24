@@ -40,17 +40,19 @@ fn attachment_usage_gate_sqlite() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create SQLite gate data dir");
-        let sessions = data_dir.join("lash-sessions");
-        let first_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            sessions.clone(),
-        )) as Arc<dyn lash::persistence::SessionStoreFactory>;
-        let resumed_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(sessions))
-            as Arc<dyn lash::persistence::SessionStoreFactory>;
+        let first = test_file_backend(&data_dir);
+        let resumed = test_file_backend(&data_dir);
 
         Box::pin(run_attachment_usage_gate(
             &data_dir,
-            first_factory,
-            resumed_factory,
+            GateBackend {
+                artifact_store: first.process_env_store(),
+                backend: first,
+            },
+            GateBackend {
+                artifact_store: resumed.process_env_store(),
+                backend: resumed,
+            },
         ))
         .await;
         std::fs::remove_dir_all(&data_dir).expect("remove SQLite gate data dir");
@@ -72,20 +74,28 @@ fn attachment_usage_gate_postgres() {
             let resumed_storage = lash_postgres_store::PostgresStorage::connect(&database_url)
                 .await
                 .expect("connect resumed Postgres gate storage");
-            let first_factory = Arc::new(first_storage.session_store_factory())
-                as Arc<dyn lash::persistence::SessionStoreFactory>;
-            let resumed_factory = Arc::new(resumed_storage.session_store_factory())
-                as Arc<dyn lash::persistence::SessionStoreFactory>;
             let data_dir = std::env::temp_dir().join(format!(
                 "agent-workbench-attachment-usage-postgres-{}",
                 uuid::Uuid::new_v4()
             ));
             std::fs::create_dir_all(&data_dir).expect("create Postgres gate data dir");
+            let backend = |storage: &lash_postgres_store::PostgresStorage| {
+                let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+                    storage,
+                    Arc::new(lash::persistence::FileAttachmentStore::new(
+                        data_dir.join("attachments"),
+                    )),
+                ));
+                GateBackend {
+                    artifact_store: backend.process_env_store(),
+                    backend,
+                }
+            };
 
             Box::pin(run_attachment_usage_gate(
                 &data_dir,
-                first_factory,
-                resumed_factory,
+                backend(&first_storage),
+                backend(&resumed_storage),
             ))
             .await;
             std::fs::remove_dir_all(&data_dir).expect("remove Postgres gate data dir");
@@ -93,27 +103,26 @@ fn attachment_usage_gate_postgres() {
     );
 }
 
+/// One handle on the gate's backend: the backend a core runs on, and the
+/// Lashlang artifact store its RLM factory reads.
+struct GateBackend {
+    backend: Arc<dyn lash::Backend>,
+    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
+}
+
 async fn run_attachment_usage_gate(
     data_dir: &std::path::Path,
-    first_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    resumed_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    first: GateBackend,
+    resumed: GateBackend,
 ) {
     let trace_path = data_dir.join("trace.jsonl");
     let session_id_path = data_dir.join("session-id");
     let sessions =
         WorkbenchSessions::persistent(session_id_path.clone()).expect("create gate session id");
     let session_id = sessions.current();
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open gate process registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
-    let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
-        data_dir.join("attachments"),
-    )) as Arc<dyn lash::persistence::AttachmentStore>;
+    let first_factory = first.backend.session_store_factory();
+    let resumed_factory = resumed.backend.session_store_factory();
+    let attachment_store = first.backend.attachment_store();
     assert_eq!(
         attachment_store.persistence(),
         lash::persistence::AttachmentStorePersistence::Durable
@@ -151,21 +160,12 @@ async fn run_attachment_usage_gate(
         .into_handle();
     let system_clock = Arc::new(lash::runtime::SystemClock);
     let core = attachment_usage_gate_core(
-        data_dir,
-        Arc::clone(&first_factory),
-        Arc::clone(&process_registry),
-        Arc::clone(&attachment_store),
-        Arc::clone(&system_clock) as Arc<dyn lash::runtime::Clock>,
+        first,
         provider,
         Some(Arc::new(JsonlTraceSink::new(trace_path.clone())) as Arc<dyn TraceSink>),
     );
-    let state = attachment_usage_gate_state(
-        core,
-        Arc::clone(&attachment_store),
-        first_factory,
-        Arc::clone(&process_registry),
-        sessions,
-    );
+    let state =
+        attachment_usage_gate_state(core, Arc::clone(&attachment_store), first_factory, sessions);
     let png_bytes = base64::engine::general_purpose::STANDARD
         .decode(ATTACHMENT_USAGE_GATE_PNG_BASE64)
         .expect("decode gate PNG");
@@ -306,23 +306,13 @@ async fn run_attachment_usage_gate(
     drop(state);
     drop(attachment_store);
 
-    let resumed_attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
-        data_dir.join("attachments"),
-    )) as Arc<dyn lash::persistence::AttachmentStore>;
+    let resumed_attachment_store = resumed.backend.attachment_store();
     let resumed_provider = lash::testing::TestProvider::builder()
         .kind("workbench-attachment-usage-gate")
         .complete_error("restart verification must not call the provider")
         .build()
         .into_handle();
-    let resumed_core = attachment_usage_gate_core(
-        data_dir,
-        Arc::clone(&resumed_factory),
-        Arc::clone(&process_registry),
-        Arc::clone(&resumed_attachment_store),
-        Arc::new(lash::runtime::SystemClock),
-        resumed_provider,
-        None,
-    );
+    let resumed_core = attachment_usage_gate_core(resumed, resumed_provider, None);
     let resumed_session_ids =
         WorkbenchSessions::persistent(session_id_path).expect("reopen gate session id");
     assert_eq!(resumed_session_ids.current(), session_id);
@@ -330,7 +320,6 @@ async fn run_attachment_usage_gate(
         resumed_core,
         Arc::clone(&resumed_attachment_store),
         resumed_factory,
-        Arc::clone(&process_registry),
         resumed_session_ids,
     );
     assert_retrieved_attachment(&resumed_state, &attachment_id, &png_bytes).await;
@@ -373,11 +362,7 @@ fn assert_snapshot_attachment(
 }
 
 fn attachment_usage_gate_core(
-    data_dir: &std::path::Path,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    process_registry: Arc<dyn lash::process::ProcessRegistry>,
-    attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-    clock: Arc<dyn lash::runtime::Clock>,
+    backend: GateBackend,
     provider: ProviderHandle,
     trace_sink: Option<Arc<dyn TraceSink>>,
 ) -> LashCore {
@@ -387,13 +372,9 @@ fn attachment_usage_gate_core(
             .build()
             .expect("gate model spec"),
     );
-    let mut builder = explicit_durable_test_facets(data_dir)
+    let mut builder = explicit_durable_test_facets_on(backend.backend, backend.artifact_store)
         .provider(provider)
         .model(model)
-        .store_factory(store_factory)
-        .process_registry(process_registry)
-        .attachment_store(attachment_store)
-        .clock(clock)
         .without_queued_work();
     if let Some(trace_sink) = trace_sink {
         builder = builder
@@ -409,7 +390,6 @@ fn attachment_usage_gate_state(
     core: LashCore,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
     store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    _process_registry: Arc<dyn lash::process::ProcessRegistry>,
     sessions: WorkbenchSessions,
 ) -> AppState {
     let process_observer = core
@@ -420,7 +400,7 @@ fn attachment_usage_gate_state(
         core,
         attachment_store,
         session_store_factory: store_factory,
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         // Process work is resolved through the core.
         sessions,

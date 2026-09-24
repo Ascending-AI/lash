@@ -9185,7 +9185,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:conformance__test__fv_5941a7c2",
+      "label": "//crates/lash-postgres-store:conformance__test__fv_06bf03f3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9195,7 +9195,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_5941a7c2",
+      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_06bf03f3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9205,7 +9205,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_5941a7c2",
+      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_06bf03f3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9215,7 +9215,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:integration__test__fv_5941a7c2",
+      "label": "//crates/lash-postgres-store:integration__test__fv_06bf03f3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9457,7 +9457,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_5941a7c2",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_06bf03f3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9467,7 +9467,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_5941a7c2",
+      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_06bf03f3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9477,7 +9477,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_5941a7c2",
+      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_06bf03f3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9487,7 +9487,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_5941a7c2",
+      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_06bf03f3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -9497,7 +9497,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_drift__test__fv_5941a7c2",
+      "label": "//crates/lash-postgres-store:schema_drift__test__fv_06bf03f3",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -10378,7 +10378,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-google:block_identity__test__fv_59d84262",
+      "label": "//crates/lash-provider-google:block_identity__test__fv_287ddcdb",
       "package": "lash-internal-provider-google"
     },
     {
@@ -10387,7 +10387,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-google:charge_safety__test__fv_59d84262",
+      "label": "//crates/lash-provider-google:charge_safety__test__fv_287ddcdb",
       "package": "lash-internal-provider-google"
     },
     {
@@ -10443,7 +10443,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-provider-google:lash-provider-google__unit_test__fv_59d84262",
+      "label": "//crates/lash-provider-google:lash-provider-google__unit_test__fv_287ddcdb",
       "package": "lash-internal-provider-google"
     },
     {
@@ -10452,7 +10452,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-google:property__test__fv_59d84262",
+      "label": "//crates/lash-provider-google:property__test__fv_287ddcdb",
       "package": "lash-internal-provider-google"
     },
     {
@@ -10598,6 +10598,17 @@
       ],
       "kind": "test",
       "label": "//crates/lash-regress:integration__test__fv_7f10c809",
+      "package": "lash-regress"
+    },
+    {
+      "features": [
+        "backend-pikevm",
+        "default",
+        "std",
+        "utf16"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-regress:lash-regress",
       "package": "lash-regress"
     },
     {
@@ -13158,6 +13169,15 @@
     {
       "features": [
         "default",
+        "lashlang"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_2684bfb4",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "default",
         "lashlang",
         "perf-witness"
       ],
@@ -13441,6 +13461,16 @@
     {
       "features": [
         "default",
+        "lashlang",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_b3e1eb58",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "default",
         "lashlang"
       ],
       "kind": "lib",
@@ -13451,15 +13481,6 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_c784279d",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d5fc9688",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -13481,6 +13502,14 @@
       "kind": "test",
       "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_0054d240",
       "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-store-sql:lash-store-sql",
+      "package": "lash-internal-store-sql"
     },
     {
       "features": [
@@ -15783,6 +15812,14 @@
     },
     {
       "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_1ecb0f82",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
         "http-transport"
       ],
       "kind": "lib",
@@ -15835,6 +15872,15 @@
     },
     {
       "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_31ea85df",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
         "rlm"
       ],
       "kind": "lib",
@@ -15881,27 +15927,10 @@
     },
     {
       "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_7a9a4691",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
         "s3"
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_84bdb61e",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_8994ce9b",
       "package": "lash-runtime"
     },
     {
@@ -17154,6 +17183,12 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lashlang:lashlang__fv_138504b6",
+      "package": "lash-internal-lashlang"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lashlang:lashlang__fv_5a70e97d",
       "package": "lash-internal-lashlang"
     },
     {
@@ -19046,6 +19081,7 @@
         "lash-internal-provider-auth",
         "lash-internal-provider-google",
         "lash-internal-sansio",
+        "lash-internal-sqlite-store",
         "lash-runtime",
         "proptest",
         "reqwest",
@@ -20030,6 +20066,7 @@
       "resolved_features": [
         "default",
         "rlm",
+        "sqlite",
         "testing",
         "typescript"
       ],

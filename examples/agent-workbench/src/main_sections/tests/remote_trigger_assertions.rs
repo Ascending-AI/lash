@@ -10,9 +10,11 @@ pub(crate) async fn assert_remote_trigger_subscription_records_round_trip(
     data_dir: &std::path::Path,
     session_id: &SessionId,
 ) -> Vec<lash::triggers::TriggerSubscriptionRecord> {
-    let store = lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-        .await
-        .expect("open trigger store for remote DTO round trip");
+    let store = lash_sqlite_store::SqliteTriggerStore::open(
+        &crate::tests::sessions_root(data_dir).join("triggers.db"),
+    )
+    .await
+    .expect("open trigger store for remote DTO round trip");
     let filter = lash::triggers::TriggerSubscriptionFilter::for_session(session_id);
     let remote_filter = lash_remote_protocol::RemoteTriggerSubscriptionFilter::from(filter.clone());
     remote_filter

@@ -265,23 +265,21 @@ pub(crate) async fn fork_chat(
     if node_id.is_empty() {
         return Err(AppError::bad_request("branch point is required"));
     }
-    let observed_processes = if let Some(registry) = state.core().process_registry() {
-        registry
-            .list_observed_by(
-                &source_chat_id.clone().into(),
-                &lash::process::ProcessListFilter {
-                    status: lash::process::ProcessStatusFilter::Any,
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|error| AppError::internal(error.to_string()))?
-            .iter()
-            .map(lash::process::ProcessRef::from_record)
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let observed_processes = state
+        .core()
+        .process_registry()
+        .list_observed_by(
+            &source_chat_id.clone().into(),
+            &lash::process::ProcessListFilter {
+                status: lash::process::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|error| AppError::internal(error.to_string()))?
+        .iter()
+        .map(lash::process::ProcessRef::from_record)
+        .collect();
     let target_chat_id = uuid::Uuid::new_v4().to_string();
     state
         .with_db({
@@ -1409,6 +1407,7 @@ finish("done through route");
             })
             .build()
             .into_handle();
+        let backend = crate::state::test_support::test_backend(data_dir).await;
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
@@ -1416,14 +1415,9 @@ finish("done through route");
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(
-                lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-                    .await
-                    .expect("artifact store"),
-            ),
+            backend.process_env_store(),
         );
-        let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-            .with_native_queued_work()
+        let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("mock-model")
@@ -1431,36 +1425,14 @@ finish("done through route");
                     .build()
                     .expect("model spec"),
             )
-            .store_factory(Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-                data_dir.join("lash-sessions"),
-            )))
-            .effect_host(Arc::new(
-                lash::durability::NativeEffectHost::default()
-                    .allow_process_lifetime_completion_keys(),
-            ))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(Arc::new(
-                lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
-                    .await
-                    .expect("process env store"),
-            ))
-            .trigger_store(Arc::new(
-                lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-                    .await
-                    .expect("trigger store"),
-            ))
-            .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-                data_dir.join("attachments"),
-            )))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "agent-service-test",
                 "test",
             ))
             .expect("core");
-        let turn_work_driver = core
-            .turn_work_driver()
-            .expect("test core has a session catalog");
+        let turn_work_driver = core.turn_work_driver();
         let db = Arc::new(Mutex::new(
             AppDb::open(&data_dir.join("app.db")).expect("app db"),
         ));

@@ -9,6 +9,11 @@ help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`
    |
 10 | struct DelegatingFactory {
    | ^^^^^^^^^^^^^^^^^^^^^^^^
+help: the trait `AttachmentRootSet` is implemented for `SqliteSessionStoreFactory`
+  --> $WORKSPACE/crates/lash-sqlite-store/src/lib.rs
+   |
+   | impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 note: required by a bound in `SessionStoreFactory`
   --> $WORKSPACE/crates/lash-core-execution/src/runtime/vocabulary.rs
    |
@@ -28,6 +33,11 @@ help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`
    |
 10 | struct DelegatingFactory {
    | ^^^^^^^^^^^^^^^^^^^^^^^^
+help: the trait `AttachmentRootSet` is implemented for `SqliteSessionStoreFactory`
+  --> $WORKSPACE/crates/lash-sqlite-store/src/lib.rs
+   |
+   | impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 note: required by a bound in `reclaim_unreferenced_attachments`
   --> $WORKSPACE/crates/lash-core-store/src/attachments.rs
    |
@@ -55,6 +65,11 @@ help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`
    |
 10 | struct DelegatingFactory {
    | ^^^^^^^^^^^^^^^^^^^^^^^^
+help: the trait `AttachmentRootSet` is implemented for `SqliteSessionStoreFactory`
+  --> $WORKSPACE/crates/lash-sqlite-store/src/lib.rs
+   |
+   | impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 note: required by a bound in `reclaim_unreferenced_attachments`
   --> $WORKSPACE/crates/lash-core-store/src/attachments.rs
    |

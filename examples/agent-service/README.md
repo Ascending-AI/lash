@@ -80,8 +80,14 @@ AGENT_SERVICE_TRACE=.agent-service/trace.jsonl
 AGENT_SERVICE_DURABILITY=local
 ```
 
-The durability mode can also be passed as `--durability local`. Restate mode is
-feature-gated and uses these local defaults:
+The durability mode can also be passed as `--durability local`. Both modes keep
+their stores in one SQLite store set under `$AGENT_SERVICE_DATA_DIR/lash-sessions`.
+Local durability opens that root as a file `SqliteBackend`, its effect journal
+beside the stores. Restate durability opens the same root as a `SqliteStoreSet`
+and runs the `RestateBackend` host over it with `RestateQueuedWork::Disabled`:
+every turn runs in the foreground under a handler-scoped controller, so no
+queue pump races the Restate handlers. Restate mode is feature-gated and
+uses these local defaults:
 
 | Path | App | Restate endpoint | Ingress | Admin |
 | --- | --- | --- | --- | --- |
@@ -131,8 +137,8 @@ turns finish the app-specific `AgentServiceTurnWorkflow/{turn_id}/run/send`
 through `RESTATE_INGRESS_URL`. `RESTATE_AUTHORITY_ID` identifies the durable
 Restate state independently of that endpoint; preserve it across endpoint
 moves and choose a different value for every independent Restate state. The endpoint also binds Lash's generic
-`LashProcessWorkflow`, backed by `RestateCoreProcessRunner` and the same
-deployment-level `processes.db`, so background process starts from a turn are
+`LashProcessWorkflow`, backed by `RestateCoreProcessRunner` and the store set's
+process registry, so background process starts from a turn are
 reconstructed from the SQLite durable-core catalog instead of running in the route
 process. `AgentServiceTurnWorkflowRequest` carries only stable turn, chat, text,
 model, and model-variant data; board state stays in the app database. The
@@ -189,7 +195,7 @@ request the gate accepts owns the undelivered-input policy for the rest of the
 turn: a repeat asking for the same disposition is idempotent, and one asking
 for a different disposition gets `policy_conflict` naming both the requested
 and the accepted policy and changes nothing. In Restate mode the cancel
-request and terminal attachment use `RestateTurnDeployment` and
+request and terminal attachment use the `RestateBackend` turn driver and
 `LashDurableWaitWorkflow`, so the request survives an Axum/web-process restart
 and is observed by a replayed turn owner. Cancellation is cooperative and does
 not guarantee detached effects have stopped. Chat and turn ids are routing

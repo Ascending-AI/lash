@@ -36,7 +36,7 @@ mod host_shutdown_tests;
 #[path = "../../shared/shutdown_marker.rs"]
 mod shutdown_marker;
 
-use core_builders::{model_spec, provider, rlm_core, standard_core};
+use core_builders::{echo_tools, model_spec, provider, rlm_core, standard_core};
 
 pub const DEFAULT_RLM_MODEL: &str = "anthropic/claude-sonnet-5";
 pub const DEFAULT_STANDARD_MODEL: &str = "deepseek/deepseek-v4-flash-0731";
@@ -572,36 +572,6 @@ struct EchoOutput {
     value: String,
 }
 
-struct EchoTool;
-
-#[async_trait]
-impl StaticToolExecute for EchoTool {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
-        (async {
-            match serde_json::from_value::<EchoArgs>(call.args.clone()) {
-                Ok(args) if call.name() == "structural_echo" => {
-                    ToolOutcome::ok(json!(EchoOutput { value: args.value }))
-                }
-                Ok(_) => ToolOutcome::err(json!("unknown tool")),
-                Err(error) => ToolOutcome::err_fmt(format_args!("invalid arguments: {error}")),
-            }
-        })
-        .await
-        .into()
-    }
-}
-
-fn echo_tools() -> Arc<dyn ToolProvider> {
-    Arc::new(StaticToolProvider::new(
-        vec![ToolDefinition::typed::<EchoArgs, EchoOutput>(
-            "tool:slack_clone.structural_echo",
-            "structural_echo",
-            "Return the supplied value unchanged. You must call this when requested.",
-        )],
-        EchoTool,
-    ))
-}
-
 #[derive(Clone, Debug, Serialize)]
 struct SmokeProbe {
     name: &'static str,
@@ -726,6 +696,7 @@ async fn run_smoke_probes(
         smoke_dir.join("stream.trace.jsonl"),
         None,
     )
+    .await
     .map_err(FailureReason::harness)?;
     let stream_result = async {
         let stream_session = stream_core
@@ -756,6 +727,7 @@ async fn run_smoke_probes(
         smoke_dir.join("tool.trace.jsonl"),
         None,
     )
+    .await
     .map_err(FailureReason::harness)?;
     let tool_result = async {
         let tool_session = tool_core
@@ -1104,7 +1076,9 @@ async fn run_attempt(
         SWAP_INSTRUCTIONS,
         swap_tools("Agent A", &channel, Arc::clone(&api), Arc::clone(&state)),
         attempt_dir.join("rlm.trace.jsonl"),
-    ) {
+    )
+    .await
+    {
         Ok(core) => core,
         Err(error) => return failed_attempt(attempt, nonce_a, nonce_b, ledger, error),
     };
@@ -1122,7 +1096,9 @@ async fn run_attempt(
         )),
         attempt_dir.join("standard.trace.jsonl"),
         None,
-    ) {
+    )
+    .await
+    {
         Ok(core) => core,
         Err(error) => {
             if let Err(cleanup_error) = shutdown_live_core(&rlm, "attempt-rlm-partial-build").await

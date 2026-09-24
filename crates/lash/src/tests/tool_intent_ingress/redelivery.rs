@@ -22,60 +22,6 @@ use super::*;
 // from its submission ledger, so hosts see one vocabulary on both tiers.
 // ---------------------------------------------------------------------------
 
-/// A second invocation over the same durable process registry.
-///
-/// A fresh `KeyJournalController` is a fresh effect journal, which is exactly
-/// what a redelivered submission gets. Nothing in this core has seen the
-/// identity before, so a submission that still realizes only once can only have
-/// been fenced by the store.
-async fn second_invocation_on_registry(
-    registry: Arc<TestLocalProcessRegistry>,
-) -> Result<LashCore> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(KeyJournalController::default()))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .plugin(lash_core::testing::process_engine_plugin_fixture())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_env_store(Arc::new(
-            lash_core::facade_support::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .process_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
-        .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session(SESSION).open().await?;
-    Ok(core)
-}
-
-/// A second invocation over the same durable trigger store and registry.
-async fn second_invocation_on_trigger_store(
-    store: Arc<lash_core::facade_support::InMemoryTriggerStore>,
-    registry: Arc<TestLocalProcessRegistry>,
-) -> Result<LashCore> {
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("process-exec-env backend")
-            .process_env_store();
-    // The fixture environment every subscription draft here records.
-    lash_core::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(crate::TurnBudget::Unbounded))
-        .effect_host(Arc::new(KeyJournalController::default()))
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .plugin(lash_core::testing::process_engine_plugin_fixture())
-        .store_factory(Arc::new(
-            lash_core::facade_support::InMemorySessionStoreFactory::new(),
-        ))
-        .process_env_store(process_env_store)
-        .process_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
-        .trigger_store(store as Arc<dyn lash_core::TriggerStore>)
-        .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session(SESSION).open().await?;
-    Ok(core)
-}
-
 fn ingress_of(core: &LashCore) -> Result<crate::tools::ToolIntentIngress> {
     core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))
 }
@@ -148,7 +94,7 @@ async fn redelivered_start_realizes_one_process_and_refuses_a_changed_declaratio
         .expect("the start realizes a process")
         .created_at_ms;
 
-    let redelivery = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let redelivery = second_invocation_of(&core).await?;
     let replayed = ingress_of(&redelivery)?
         .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
         .await;
@@ -170,7 +116,7 @@ async fn redelivered_start_realizes_one_process_and_refuses_a_changed_declaratio
 
     // A changed declaration under the same identity is a different
     // registration for an id the registry has already bound.
-    let changed_invocation = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let changed_invocation = second_invocation_of(&core).await?;
     let mut changed = start_intent(&SessionId::from(SESSION));
     let lash_core::ToolIntent::StartProcess(intent) = &mut changed else {
         unreachable!("fixture is a start intent")
@@ -226,7 +172,7 @@ async fn a_coalesced_start_reports_replayed_and_a_fresh_start_does_not() -> Resu
     // A fresh invocation carries a fresh journal, so this one reaches the
     // registry, which coalesces it onto the row the first start created. The
     // durable key, not the journal, is what makes it a replay.
-    let redelivery = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let redelivery = second_invocation_of(&core).await?;
     let coalesced = ingress_of(&redelivery)?
         .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
         .await;
@@ -253,7 +199,7 @@ async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Resul
         .await;
     assert_admitted(&first, "the first emission");
 
-    let redelivery = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let redelivery = second_invocation_of(&core).await?;
     let replayed = ingress_of(&redelivery)?
         .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
         .await;
@@ -269,7 +215,7 @@ async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Resul
         "the event replay key coalesces the redelivery onto the first append"
     );
 
-    let changed_invocation = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let changed_invocation = second_invocation_of(&core).await?;
     let mut changed = emit_intent(&SessionId::from(SESSION));
     let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut changed else {
         unreachable!("fixture is an event intent")
@@ -296,7 +242,7 @@ async fn redelivered_signal_appends_once_and_refuses_a_changed_payload() -> Resu
         .await;
     assert_admitted(&first, "the first signal");
 
-    let redelivery = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let redelivery = second_invocation_of(&core).await?;
     let replayed = ingress_of(&redelivery)?
         .submit(key.clone(), signal_intent(&SessionId::from(SESSION)))
         .await;
@@ -312,7 +258,7 @@ async fn redelivered_signal_appends_once_and_refuses_a_changed_payload() -> Resu
         "the signal wait key coalesces the redelivery onto the first append"
     );
 
-    let changed_invocation = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let changed_invocation = second_invocation_of(&core).await?;
     let mut changed = signal_intent(&SessionId::from(SESSION));
     let lash_core::ToolIntent::SignalProcess(intent) = &mut changed else {
         unreachable!("fixture is a signal intent")
@@ -343,7 +289,7 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
         "the first cancel records a cancel request"
     );
 
-    let redelivery = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let redelivery = second_invocation_of(&core).await?;
     let replayed = ingress_of(&redelivery)?
         .submit(key.clone(), cancel_intent(&SessionId::from(SESSION)))
         .await;
@@ -388,7 +334,7 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
         .await?;
     assert!(other.cancel_request.is_none());
 
-    let changed_invocation = second_invocation_on_registry(Arc::clone(&registry)).await?;
+    let changed_invocation = second_invocation_of(&core).await?;
     let refused = ingress_of(&changed_invocation)?
         .submit(
             key,
@@ -412,9 +358,7 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
 
 #[tokio::test]
 async fn redelivered_trigger_ingests_once_and_refuses_a_changed_payload() -> Result<()> {
-    use lash_core::TriggerStore as _;
-
-    let (core, store, _subscription, registry) =
+    let (core, store, _subscription, _registry) =
         ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
     let key = ingress_of(&core)?.key("redelivered-trigger", 0);
 
@@ -423,8 +367,7 @@ async fn redelivered_trigger_ingests_once_and_refuses_a_changed_payload() -> Res
         .await;
     assert_admitted(&first, "the first emission");
 
-    let redelivery =
-        second_invocation_on_trigger_store(Arc::clone(&store), Arc::clone(&registry)).await?;
+    let redelivery = second_invocation_of(&core).await?;
     let replayed = ingress_of(&redelivery)?
         .submit(key.clone(), trigger_intent(&SessionId::from(SESSION)))
         .await;
@@ -443,8 +386,7 @@ async fn redelivered_trigger_ingests_once_and_refuses_a_changed_payload() -> Res
         "the occurrence idempotency key coalesces the redelivery onto the first ingest"
     );
 
-    let changed_invocation =
-        second_invocation_on_trigger_store(Arc::clone(&store), Arc::clone(&registry)).await?;
+    let changed_invocation = second_invocation_of(&core).await?;
     let mut changed = trigger_intent(&SessionId::from(SESSION));
     let lash_core::ToolIntent::EmitTrigger(intent) = &mut changed else {
         unreachable!("fixture is a trigger intent")
@@ -464,7 +406,7 @@ async fn redelivered_trigger_ingests_once_and_refuses_a_changed_payload() -> Res
 }
 
 async fn emitted_event_count(
-    registry: &Arc<TestLocalProcessRegistry>,
+    registry: &Arc<dyn ProcessRegistry>,
     event_type: &str,
 ) -> Result<usize> {
     Ok(registry
@@ -476,7 +418,7 @@ async fn emitted_event_count(
 }
 
 async fn cancel_request_snapshot(
-    registry: &Arc<TestLocalProcessRegistry>,
+    registry: &Arc<dyn ProcessRegistry>,
     process_id: &str,
 ) -> Result<Option<lash_core::CancelRequest>> {
     Ok(registry

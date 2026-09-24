@@ -8,19 +8,13 @@ use super::*;
 #[tokio::test]
 async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -> Result<()> {
     let dir = tempfile::tempdir().expect("stale cleanup tempdir");
-    let registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &dir.path().join("processes.db"),
-            dir.path().join("sessions"),
-        )
-        .await
-        .expect("open process registry"),
-    );
-    let artifact_store = Arc::new(
-        lash_sqlite_store::Store::open(&dir.path().join("artifacts.db"))
+    let backend = Arc::new(
+        lash_sqlite_store::SqliteBackend::open(dir.path())
             .await
-            .expect("open production artifact store"),
+            .expect("open the stale cleanup backend"),
     );
+    let registry = backend.process_registry();
+    let artifact_store = backend.process_env_store();
     let engine = Arc::new(FailOnceReleaseEngine {
         state: std::sync::Mutex::new(PruneEngineState::default()),
         release_failures: std::sync::atomic::AtomicUsize::new(1),
@@ -64,7 +58,7 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
         .await?;
 
     let core = prune_recovery_core(
-        registry.clone() as Arc<dyn lash_core::ProcessRegistry>,
+        backend.clone(),
         artifact_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
         Arc::clone(&engine),
     )?;
@@ -195,8 +189,15 @@ async fn postgres_process_cleanup_fault_reopens_retries_and_acknowledges_when_co
     .await
     .expect("reset PostgreSQL process change clock");
 
-    let registry = Arc::new(storage.process_registry());
-    let env_store = Arc::new(storage.process_env_store());
+    let attachments = tempfile::tempdir().expect("postgres prune attachments");
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        &storage,
+        Arc::new(crate::persistence::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    ));
+    let registry = backend.process_registry();
+    let env_store = backend.process_env_store();
     let engine = Arc::new(FailOnceReleaseEngine {
         state: std::sync::Mutex::new(PruneEngineState::default()),
         release_failures: std::sync::atomic::AtomicUsize::new(1),
@@ -243,7 +244,7 @@ async fn postgres_process_cleanup_fault_reopens_retries_and_acknowledges_when_co
         )
         .await?;
     let first_core = prune_recovery_core(
-        registry.clone() as Arc<dyn lash_core::ProcessRegistry>,
+        backend.clone(),
         env_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
         Arc::clone(&engine),
     )?;
@@ -255,13 +256,19 @@ async fn postgres_process_cleanup_fault_reopens_retries_and_acknowledges_when_co
             .is_err()
     );
     assert_eq!(registry.pending_process_artifact_cleanup().await?.len(), 1);
-    drop((first_core, registry, env_store, storage));
+    drop((first_core, registry, env_store, backend, storage));
 
     let reopened = lash_postgres_store::PostgresStorage::connect(&database_url).await?;
-    let reopened_registry = Arc::new(reopened.process_registry());
-    let reopened_env = Arc::new(reopened.process_env_store());
+    let reopened_backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        &reopened,
+        Arc::new(crate::persistence::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    ));
+    let reopened_registry = reopened_backend.process_registry();
+    let reopened_env = reopened_backend.process_env_store();
     let recovered_core = prune_recovery_core(
-        reopened_registry.clone() as Arc<dyn lash_core::ProcessRegistry>,
+        reopened_backend.clone(),
         reopened_env.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
         Arc::clone(&engine),
     )?;

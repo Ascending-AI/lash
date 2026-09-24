@@ -341,7 +341,7 @@ impl AppState {
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<TurnCancelReceipt>, AppError> {
-        let driver = self.core.turn_work_driver().map_err(AppError::internal)?;
+        let driver = self.core.turn_work_driver();
         self.cancel_turns_for_session_with_driver(
             session_id,
             &driver,

@@ -28,7 +28,7 @@ pub(crate) async fn recoverable_chat_test_state_with_provider(
         data_dir,
         channel_capacity,
         provider,
-        in_memory_trigger_store(),
+        detached_trigger_store(),
     )
     .await
 }
@@ -120,7 +120,7 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
 }
 
 struct RetiringSubscriptionListTriggerStore {
-    pub(super) inner: lash::triggers::InMemoryTriggerStore,
+    pub(super) inner: Arc<lash_sqlite_store::SqliteTriggerStore>,
     pub(super) store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
     pub(super) session_to_retire: Mutex<Option<String>>,
 }
@@ -128,7 +128,7 @@ struct RetiringSubscriptionListTriggerStore {
 impl RetiringSubscriptionListTriggerStore {
     pub(super) fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
         Self {
-            inner: lash::triggers::InMemoryTriggerStore::new(),
+            inner: crate::tests::memory_trigger_store(),
             store_factory,
             session_to_retire: Mutex::new(None),
         }
@@ -347,11 +347,7 @@ pub(crate) async fn retire_workbench_session(state: &AppState, session_id: &Sess
             .await
             .expect("open session before retirement"),
     );
-    let administration = state
-        .core
-        .session_administration()
-        .await
-        .expect("build session administration");
+    let administration = state.core.session_administration().await;
     let context = administration
         .delete_context(session_id)
         .expect("issue inline session deletion");
@@ -449,7 +445,7 @@ fn tool_catalog_refresh_close_preserves_a_concurrent_retirement_refusal() {
             data_dir.path(),
             16,
             provider,
-            in_memory_trigger_store(),
+            detached_trigger_store(),
             store_factory,
             Some(queued_work_driver),
         )

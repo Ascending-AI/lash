@@ -1,13 +1,13 @@
 use crate::support::{
-    Arc, AttachmentStore, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime,
-    LashSession, LiveReplayStore, NativeQueuedWork, NativeSubstrateConfig, NoQueuedWork,
-    ParkedSession, PluginFactory, PluginHost, PluginOptions, PluginSpec, PluginStack,
-    ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, PromptLayer, PromptLayerSink,
-    ProviderHandle, QueuedWorkSubstrate, Result, RuntimeEnvironment, RuntimeHandle,
-    RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy, SessionSpec,
-    SessionStoreFactory, SessionSummary, StaticPluginFactory, TerminationPolicy, ToolProvider,
-    WorkerSlotSupplier,
+    Arc, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime, LashSession,
+    LiveReplayStore, NativeQueuedWork, NativeSubstrateConfig, NoQueuedWork, ParkedSession,
+    PluginFactory, PluginHost, PluginOptions, PluginSpec, PluginStack, ProcessRegistry,
+    PromptLayer, PromptLayerSink, ProviderHandle, QueuedWorkSubstrate, Result, RuntimeEnvironment,
+    RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy,
+    SessionSpec, SessionStoreFactory, SessionSummary, StaticPluginFactory, TerminationPolicy,
+    ToolProvider, WorkerSlotSupplier,
 };
+use lash_core::Backend;
 use lash_core::facade_support;
 use lash_core::runtime::{
     ProcessCommand, ProcessEffectOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope,
@@ -39,7 +39,13 @@ pub struct LashCore {
     pub(crate) tool_registry: Arc<lash_core::ToolRegistry>,
     pub(crate) policy: SessionPolicy,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
-    pub(crate) store_factory: Option<Arc<dyn SessionStoreFactory>>,
+    /// The one substrate every port and the effect host come from.
+    pub(crate) backend: Arc<dyn Backend>,
+    /// The backend's session catalog.
+    pub(crate) store_factory: Arc<dyn SessionStoreFactory>,
+    /// The backend's process registry, as the core sees it (watched, and
+    /// on the core's clock).
+    pub(crate) process_registry: Arc<dyn ProcessRegistry>,
     pub(crate) plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     pub(crate) provider: Option<ProviderHandle>,
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
@@ -72,7 +78,7 @@ pub struct SessionDeleteReport {
     pub session_id: SessionId,
     /// Storage reclaimed while deleting the session.
     pub storage: lash_core::SessionBlobReclaimReport,
-    /// Process-state deletion report, when a process registry was configured.
+    /// Process-state deletion report.
     pub process: Option<lash_core::ProcessSessionDeleteReport>,
 }
 
@@ -87,39 +93,52 @@ impl Default for SessionDeleteReport {
 }
 
 impl LashCore {
-    pub fn builder(turn_budget: lash_core::TurnBudget) -> LashCoreBuilder {
-        LashCoreBuilder::new(turn_budget)
+    /// A [`LashCoreBuilder`] over `backend`, the one substrate every
+    /// persistence port and the effect host of this core come from (ADR 0102).
+    ///
+    /// The backend is the builder's only source of ports: there is no
+    /// setter for a store, a registry or an effect host, so a core cannot mix
+    /// substrates, and there is no in-memory default. The zero-infra
+    /// backend is `lash::sqlite::SqliteBackend::memory()` (feature
+    /// `sqlite`).
+    pub fn builder(
+        backend: Arc<dyn Backend>,
+        turn_budget: lash_core::TurnBudget,
+    ) -> LashCoreBuilder {
+        LashCoreBuilder::new(backend, turn_budget)
     }
 
-    /// Sugar entry point: a [`LashCoreBuilder`] pre-seeded with the standard
-    /// protocol plugin and the default runtime plugin stack.
-    pub fn standard_builder(turn_budget: lash_core::TurnBudget) -> LashCoreBuilder {
-        LashCore::builder(turn_budget)
+    /// Sugar entry point: a [`LashCoreBuilder`] over `backend` pre-seeded
+    /// with the standard protocol plugin and the default runtime plugin
+    /// stack.
+    pub fn standard_builder(
+        backend: Arc<dyn Backend>,
+        turn_budget: lash_core::TurnBudget,
+    ) -> LashCoreBuilder {
+        LashCore::builder(backend, turn_budget)
             .protocol_plugin(Arc::new(
                 lash_protocol_standard::StandardProtocolPluginFactory::new(),
             ))
             .plugins(default_runtime_stack())
     }
 
+    /// The backend this core takes every port and its effect host from.
+    pub fn backend(&self) -> &Arc<dyn Backend> {
+        &self.backend
+    }
+
     /// The host owns admission and must pass its current admission state. Lash
     /// reads the process registry and the session store on demand; it does
     /// not maintain a counter or orchestrate routing, deadlines, worker
-    /// shutdown, or retirement. A core without a process registry reports zero
-    /// remaining invocations, and one without a session store zero turns.
+    /// shutdown, or retirement.
     ///
     /// Turns are counted as well as processes (FIG-3586): a parked turn, or a
     /// turn whose claims a crashed driver still holds, is unfinished work, so
     /// the deployment is not drained until none remains. A store that cannot
     /// count its turns refuses rather than report zero.
     pub async fn drain_status(&self, accepting_new_work: bool) -> Result<DeploymentDrainStatus> {
-        let remaining_invocations = match self.process_registry() {
-            Some(registry) => registry.count_non_terminal_processes().await?,
-            None => 0,
-        };
-        let turns = match self.store_factory.as_ref() {
-            Some(factory) => factory.count_unsettled_turns().await?,
-            None => lash_core::store::UnsettledTurnCounts::default(),
-        };
+        let remaining_invocations = self.process_registry.count_non_terminal_processes().await?;
+        let turns = self.store_factory.count_unsettled_turns().await?;
         let checked_at = self.env.core.clock.timestamp_ms();
         Ok(DeploymentDrainStatus {
             accepting_new_work,
@@ -140,10 +159,11 @@ impl LashCore {
     /// it in.
     #[cfg(feature = "rlm")]
     pub fn rlm_builder(
+        backend: Arc<dyn Backend>,
         turn_budget: lash_core::TurnBudget,
         factory: crate::rlm::RlmProtocolPluginFactory,
     ) -> LashCoreBuilder {
-        LashCore::builder(turn_budget)
+        LashCore::builder(backend, turn_budget)
             .protocol_plugin(Arc::new(factory))
             .plugins(default_runtime_stack())
     }
@@ -154,7 +174,6 @@ impl LashCore {
             session_id: session_id.into(),
             spec: SessionSpec::inherit(),
             parent_session_id: None,
-            store: None,
             provider: None,
             plugin_factories: Vec::new(),
             plugin_options: PluginOptions::default(),
@@ -222,26 +241,20 @@ impl LashCore {
     /// The returned handle keeps the catalog, effect host, process services,
     /// and trigger store chosen by this core together. Provider, plugin,
     /// prompt, tracing, and other live turn policy are deliberately excluded.
-    pub async fn session_administration(&self) -> Result<lash_core::SessionAdministration> {
-        let store_factory =
-            self.store_factory
-                .as_ref()
-                .ok_or(EmbedError::SessionCatalogUnavailable {
-                    operation: "session_administration",
-                })?;
+    pub async fn session_administration(&self) -> lash_core::SessionAdministration {
         let ports = self.substrate_slot.ports().await;
         let resolved_env = self
             .env
             .clone()
-            .with_work_ports(ports.process.clone(), ports.queued_port());
-        Ok(lash_core::SessionAdministration::new(
-            Arc::clone(store_factory),
+            .with_work_ports(Some(ports.process.clone()), ports.queued_port());
+        lash_core::SessionAdministration::new(
+            Arc::clone(&self.store_factory),
             Arc::clone(&resolved_env.core.control.effect_host),
-            ports.process,
+            Some(ports.process),
             resolved_env.trigger_store.clone(),
             Arc::clone(&resolved_env.core.durability.process_env_store),
             self.host_process_engines.clone(),
-        ))
+        )
     }
 
     /// Rebuild a live session from a [`ParkedSession`](crate::ParkedSession)
@@ -326,17 +339,11 @@ impl LashCore {
     /// The returned driver is independently usable from any session handle.
     /// Session and turn ids are routing identity, not authorization; authorize
     /// requests in the host API before forwarding them to Lash.
-    pub fn turn_work_driver(&self) -> Result<facade_support::TurnWorkDriver> {
-        let catalog = self
-            .store_factory
-            .as_ref()
-            .ok_or(EmbedError::SessionCatalogUnavailable {
-                operation: "turn_work_driver",
-            })?;
-        Ok(facade_support::TurnWorkDriver::for_catalog(
+    pub fn turn_work_driver(&self) -> facade_support::TurnWorkDriver {
+        facade_support::TurnWorkDriver::for_catalog(
             self.effect_host(),
-            Arc::clone(catalog),
-        ))
+            Arc::clone(&self.store_factory),
+        )
     }
 
     /// Retain the current continuation checkpoint for a turn-boundary node.
@@ -345,10 +352,7 @@ impl LashCore {
     /// means it is the leaf of a live session. Pin before advancing the head if
     /// a host wants to make a past turn forkable later.
     pub async fn pin(&self, node_id: impl AsRef<str>) -> Result<lash_core::ForkPoint> {
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable { operation: "pin" });
-        };
-        store_factory
+        self.store_factory
             .pin(node_id.as_ref())
             .await
             .map_err(Into::into)
@@ -357,10 +361,7 @@ impl LashCore {
     /// Release an explicit continuation pin. A live tip at the same node
     /// remains forkable through its session-head checkpoint.
     pub async fn unpin(&self, node_id: impl AsRef<str>) -> Result<()> {
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable { operation: "unpin" });
-        };
-        store_factory
+        self.store_factory
             .unpin(node_id.as_ref())
             .await
             .map_err(Into::into)
@@ -368,12 +369,7 @@ impl LashCore {
 
     /// Enumerate pinned past turns and unpinned live tips that can be forked.
     pub async fn fork_points(&self) -> Result<Vec<lash_core::ForkPoint>> {
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable {
-                operation: "fork_points",
-            });
-        };
-        store_factory.fork_points().await.map_err(Into::into)
+        self.store_factory.fork_points().await.map_err(Into::into)
     }
 
     /// Create `session_id` at a retained turn boundary without writing graph
@@ -386,11 +382,7 @@ impl LashCore {
     /// forkable after its source session is deleted because the retained frame
     /// carries the provider and model needed to create the branch.
     pub async fn fork_at(&self, request: ForkRequest) -> Result<lash_core::ForkSessionReceipt> {
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable {
-                operation: "fork_at",
-            });
-        };
+        let store_factory = &self.store_factory;
         let ForkRequest {
             session_id,
             node_id,
@@ -457,7 +449,7 @@ impl LashCore {
                 ))
             })?;
         fork.observed_processes = lash_core::runtime::reconcile_session_process_observer_intents(
-            self.process_registry().as_deref(),
+            Some(self.process_registry.as_ref()),
             &fork.session_id,
             lash_core::runtime::SessionObserverIntentSource::Persisted(branch_store.as_ref()),
         )
@@ -653,8 +645,9 @@ impl LashCore {
         })
     }
 
-    pub fn process_registry(&self) -> Option<Arc<dyn ProcessRegistry>> {
-        self.env.process_registry().cloned()
+    /// The process registry of this core's backend.
+    pub fn process_registry(&self) -> Arc<dyn ProcessRegistry> {
+        Arc::clone(&self.process_registry)
     }
 
     /// Builds the durable process-worker configuration for this core.
@@ -667,17 +660,12 @@ impl LashCore {
         &self,
         extra_plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
     ) -> Result<DurableProcessWorkerConfig> {
-        if self.process_registry().is_none() {
-            return Err(EmbedError::MissingProcessRegistry);
-        }
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
             extra_plugin_factories.into_iter().collect(),
         )?;
-        let Some(process_work) = self.substrate_slot.configured_worker_process_work() else {
-            return Err(EmbedError::MissingProcessRegistry);
-        };
+        let process_work = self.substrate_slot.configured_worker_process_work();
         let queued_work: Arc<dyn QueuedWorkSubstrate> = match &self.substrate_slot.setup.queued {
             QueuedPortSetup::External { port } => Arc::clone(port),
             // The outer dispatcher owns the native queued-work lane; nested
@@ -689,6 +677,7 @@ impl LashCore {
         worker_config(
             &plugin_host,
             &self.env,
+            &self.store_factory,
             self.process_lifecycle_available,
             self.policy.clone(),
             self.process_execution_concurrency,
@@ -707,6 +696,7 @@ impl LashCore {
 struct NativeProcessWorkerSetup {
     worker_plugin_host: PluginHost,
     env: RuntimeEnvironment,
+    store_factory: Arc<dyn SessionStoreFactory>,
     process_lifecycle_available: bool,
     policy: SessionPolicy,
     process_execution_concurrency: usize,
@@ -726,6 +716,7 @@ impl NativeProcessWorkerSetup {
         worker_config(
             &self.worker_plugin_host,
             &self.env,
+            &self.store_factory,
             self.process_lifecycle_available,
             self.policy.clone(),
             self.process_execution_concurrency,
@@ -744,6 +735,7 @@ impl NativeProcessWorkerSetup {
 fn worker_config(
     worker_plugin_host: &PluginHost,
     env: &RuntimeEnvironment,
+    store_factory: &Arc<dyn SessionStoreFactory>,
     process_lifecycle_available: bool,
     policy: SessionPolicy,
     process_execution_concurrency: usize,
@@ -755,9 +747,6 @@ fn worker_config(
     turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
     native_substrate: NativeSubstrateConfig,
 ) -> Result<DurableProcessWorkerConfig> {
-    let Some(store_factory) = env.session_store_factory.as_ref() else {
-        return Err(EmbedError::MissingProcessWorkerStoreFactory);
-    };
     let runtime_host = worker_plugin_host
         .install_process_engine_contributions(env.core.clone(), process_lifecycle_available)?;
     let mut config = DurableProcessWorkerConfig::new(
@@ -788,24 +777,19 @@ fn default_runtime_stack() -> PluginStack {
     lash_plugin_tool_output_budget::tool_output_budget_stack()
 }
 
-/// Builder for configuring lash core.
+/// Builder for configuring lash core over one [`Backend`].
 pub struct LashCoreBuilder {
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     session_spec: SessionSpec,
     provider: Option<ProviderHandle>,
-    pub(crate) store_factory: Option<Arc<dyn SessionStoreFactory>>,
-    session_creation_store_factory: Option<Arc<dyn SessionStoreFactory>>,
-    // `RuntimeHostConfig` has no `Default`: the generic host-owned durability
-    // dependencies must be named. They are collected here and resolved in
-    // `build()`, which errors if any is unset.
-    deps: runtime_host_config::HostDependencies,
+    /// The one substrate every persistence port and the effect host come from.
+    backend: Arc<dyn Backend>,
+    commit_budget: Option<facade_support::CommitBudget>,
+    queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
     max_attachment_bytes: Option<Option<u64>>,
     process_wake_delivery_policy: Option<lash_core::DeliveryPolicy>,
     native_substrate: NativeSubstrateConfig,
-    trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
-    process_definitions: Option<Arc<dyn lash_core::process_registry::ProcessDefinitionRegistry>>,
-    // Core fields applied while constructing a config from individual builder
-    // setters. They conflict with a whole-config override when duplicated.
+    // Core fields applied over the config the backend's ports assemble.
     prompt: Option<PromptLayer>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_level: Option<lash_trace::TraceLevel>,
@@ -813,16 +797,10 @@ pub struct LashCoreBuilder {
     termination: Option<TerminationPolicy>,
     tool_source_policy: Option<lash_core::ToolSourcePolicy>,
     abort_drain_grace: Option<std::time::Duration>,
-    // Advanced full-config override; used as the base core when present.
-    runtime_host_config: Option<RuntimeHostConfig>,
     tool_providers: Vec<Arc<dyn ToolProvider>>,
     plugin_stack: PluginStack,
     plugin_host: Option<PluginHost>,
     lease_timings: Option<facade_support::LeaseTimings>,
-    clock: Option<Arc<dyn lash_core::Clock>>,
-    // Single source of truth for process lifecycle support and process-work
-    // consumption.
-    process_work_source: ProcessWorkSelection,
     // Per-worker bound for the default native process executor.
     process_execution_concurrency: Option<usize>,
     // Per-driver bound for the default native queued-work executor.
@@ -839,19 +817,17 @@ pub struct LashCoreBuilder {
 }
 
 impl LashCoreBuilder {
-    fn new(turn_budget: lash_core::TurnBudget) -> Self {
+    fn new(backend: Arc<dyn Backend>, turn_budget: lash_core::TurnBudget) -> Self {
         Self {
             protocol_factory: None,
             session_spec: SessionSpec::new().turn_budget(turn_budget),
             provider: None,
-            store_factory: None,
-            session_creation_store_factory: None,
-            deps: runtime_host_config::HostDependencies::default(),
+            backend,
+            commit_budget: None,
+            queued_work_batching: None,
             max_attachment_bytes: None,
             process_wake_delivery_policy: None,
             native_substrate: NativeSubstrateConfig::default(),
-            trigger_store: None,
-            process_definitions: None,
             prompt: None,
             trace_sink: None,
             trace_level: None,
@@ -859,19 +835,16 @@ impl LashCoreBuilder {
             termination: None,
             tool_source_policy: None,
             abort_drain_grace: None,
-            runtime_host_config: None,
             tool_providers: Vec::new(),
             plugin_stack: PluginStack::default(),
             plugin_host: None,
             lease_timings: None,
-            clock: None,
-            process_work_source: ProcessWorkSelection::default(),
             process_execution_concurrency: None,
             queued_work_execution_concurrency: None,
             worker_slot_supplier: None,
             process_event_sink: None,
             process_tool_visibility_filter: None,
-            queued_work_source: QueuedWorkSource::Unset,
+            queued_work_source: QueuedWorkSource::Backend,
             live_replay_store: None,
             process_observation_config: Default::default(),
         }
@@ -889,56 +862,11 @@ impl LashCoreBuilder {
         self
     }
 
-    /// The factory must honor `SessionStoreCreateRequest::session_id` and
-    /// return a store for that specific session. It is also the default catalog
-    /// for sessions created from a running session unless
-    /// [`Self::session_creation_store_factory`] selects another catalog. Do not
-    /// use this to wrap one pre-opened store; pass exact stores with
-    /// `LashCore::session(...).store(store)` instead.
-    ///
-    /// Durable attachment GC never guesses process-registry co-location. Hosts
-    /// using owner-aware GC must explicitly call
-    /// `SqliteSessionStoreFactory::new_with_process_registry(...)` or
-    /// `PostgresStorage::session_store_factory_with_shared_process_registry()`
-    /// on the concrete factory before erasing it behind this trait object.
-    pub fn store_factory(mut self, store_factory: Arc<dyn SessionStoreFactory>) -> Self {
-        self.store_factory = Some(store_factory);
-        self
-    }
-
-    /// The factory applies to every `SessionCreateRequest`, independent of its
-    /// relation or subagent configuration, and must return a distinct store
-    /// bound to the requested session id. Hosts that pass an exact opened store
-    /// with `SessionBuilder::store` should set this when that session can create
-    /// more sessions.
-    /// The same explicit process-registry wiring required by `store_factory`
-    /// applies when this factory participates in attachment GC.
-    pub fn session_creation_store_factory(
-        mut self,
-        store_factory: Arc<dyn SessionStoreFactory>,
-    ) -> Self {
-        self.session_creation_store_factory = Some(store_factory);
-        self
-    }
-
-    pub fn attachment_store(mut self, attachment_store: Arc<dyn AttachmentStore>) -> Self {
-        self.deps.attachment_store = Some(attachment_store);
-        self
-    }
-
-    pub fn process_env_store(
-        mut self,
-        process_env_store: Arc<dyn ProcessExecutionEnvStore>,
-    ) -> Self {
-        self.deps.process_env_store = Some(process_env_store);
-        self
-    }
-
     /// Configure the byte and graph-node limits for each atomic runtime
     /// commit. Hosts must choose bounded or unbounded behavior explicitly for
     /// both dimensions.
     pub fn commit_budget(mut self, commit_budget: facade_support::CommitBudget) -> Self {
-        self.deps.commit_budget = Some(commit_budget);
+        self.commit_budget = Some(commit_budget);
         self
     }
 
@@ -957,7 +885,7 @@ impl LashCoreBuilder {
         mut self,
         policy: facade_support::QueuedWorkBatchingConfig,
     ) -> Self {
-        self.deps.queued_work_batching = Some(policy);
+        self.queued_work_batching = Some(policy);
         self
     }
 
@@ -976,15 +904,6 @@ impl LashCoreBuilder {
         filter: Arc<dyn facade_support::ProcessToolVisibilityFilter>,
     ) -> Self {
         self.process_tool_visibility_filter = Some(filter);
-        self
-    }
-
-    /// Set the deployment effect host — the durability boundary every operation
-    /// crosses. Pass [`NativeEffectHost`](crate::durability::NativeEffectHost)
-    /// for in-process execution, or a workflow-backed host for durable
-    /// execution.
-    pub fn effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
-        self.deps.effect_host = Some(effect_host);
         self
     }
 
@@ -1080,12 +999,6 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Use one host clock for runtime sleeps and embedded-store time.
-    pub fn clock(mut self, clock: Arc<dyn lash_core::Clock>) -> Self {
-        self.clock = Some(clock);
-        self
-    }
-
     /// Configure the bounded live replay buffer used by session observation
     /// cursors. This is best-effort reconnect recovery only; durable state
     /// still comes from the session store and [`SessionReadView`].
@@ -1102,15 +1015,6 @@ impl LashCoreBuilder {
         mut self,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
     ) -> Result<LashCore> {
-        if matches!(self.queued_work_source, QueuedWorkSource::Unset) {
-            return Err(EmbedError::MissingQueuedWorkSource);
-        }
-        if matches!(self.queued_work_source, QueuedWorkSource::Native)
-            && self.session_creation_store_factory.is_none()
-            && self.store_factory.is_none()
-        {
-            return Err(EmbedError::NativeQueuedWorkRequiresStoreFactory);
-        }
         let process_execution_concurrency = self
             .process_execution_concurrency
             .unwrap_or(lash_core_worker::DEFAULT_PROCESS_EXECUTION_CONCURRENCY);
@@ -1154,21 +1058,35 @@ impl LashCoreBuilder {
         };
         let policy = self.session_spec.resolve_against(&base_policy);
 
+        let backend = Arc::clone(&self.backend);
+        // The backend's one identity keys every binding it writes; an effect
+        // host bound elsewhere would stamp records naming another substrate.
+        let effect_host_binding = backend.effect_host().turn_control_binding_id();
+        if effect_host_binding != backend.binding_identity() {
+            return Err(EmbedError::BackendBindingMismatch {
+                binding_identity: backend.binding_identity().to_string(),
+                effect_host_binding,
+            });
+        }
+        let store_factory = backend.session_store_factory();
         let core = self.resolve_runtime_host_config()?;
         let process_observation_hub = Arc::new(
             crate::process_observation::ProcessObservationHub::new(self.process_observation_config),
         );
         let observation_sink: Arc<dyn lash_trace::TraceSink> = process_observation_hub.clone();
         let core = core.with_process_observation_sink(observation_sink);
-        let live_replay_clock = Arc::clone(&core.clock);
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(InMemoryLiveReplayStore::with_clock(
                 facade_support::InMemoryLiveReplayStoreConfig::default(),
-                Arc::clone(&live_replay_clock),
+                Arc::clone(&core.clock),
             ))
         });
+        let process_work_selection = match backend.process_work() {
+            Some(wiring) => ProcessWorkSelection::External(wiring),
+            None => ProcessWorkSelection::Native(backend.process_registry()),
+        };
         let external_process_work =
-            matches!(&self.process_work_source, ProcessWorkSelection::External(_));
+            matches!(&process_work_selection, ProcessWorkSelection::External(_));
         let process_lifecycle_feed = Arc::new(crate::process_lifecycle::ProcessLifecycleFeed::new(
             Arc::clone(&live_replay_store),
             Arc::clone(&process_observation_hub),
@@ -1177,10 +1095,8 @@ impl LashCoreBuilder {
         ));
         let process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>> =
             Some(process_lifecycle_feed.clone());
-        let process_work_source = self
-            .process_work_source
-            .clone()
-            .resolve(Arc::clone(&core.clock), process_event_sink.clone());
+        let process_work_source =
+            process_work_selection.resolve(Arc::clone(&core.clock), process_event_sink.clone());
         let process_lifecycle_registration =
             if let ProcessWorkSource::External(wiring) = &process_work_source {
                 process_event_sink
@@ -1209,10 +1125,11 @@ impl LashCoreBuilder {
             &plugin_factories,
             Vec::new(),
         )?);
-        // Whether process lifecycle is available (a process registry is wired).
-        // Threaded to every plugin host so core installs the same
-        // plugin-contributed process engines wherever it rebuilds a runtime.
-        let process_lifecycle_available = process_work_source.has_registry();
+        // Every backend supplies a process registry, so process lifecycle
+        // is available on every core. Threaded to every plugin host so core
+        // installs the same plugin-contributed process engines wherever it
+        // rebuilds a runtime.
+        let process_lifecycle_available = true;
         // Session construction still installs onto a clean clone so session-scoped plugin
         // overlays remain isolated.
         let host_process_engines = default_plugin_host
@@ -1220,67 +1137,41 @@ impl LashCoreBuilder {
             .process_engines;
         let tool_registry =
             lash_core::facade_support::build_core_tool_registry(&default_plugin_host)?;
-        let native_process_registry = process_work_source.process_registry();
-        if let Some(registry) = native_process_registry.as_ref() {
-            process_lifecycle_feed.bind_registry(Arc::clone(registry));
-        } else if let Some(wiring) = process_work_source.external_wiring() {
-            process_lifecycle_feed.bind_registry(Arc::clone(wiring.registry()));
-        }
+        let process_registry = process_work_source.process_registry();
+        process_lifecycle_feed.bind_registry(Arc::clone(&process_registry));
         let mut env_builder = RuntimeEnvironment::builder(
             core.durability.commit_budget,
             core.durability.queued_work_batching.clone(),
         )
         .with_plugin_host(Arc::clone(&default_plugin_host))
         .with_runtime_host_config(core);
-        if let Some(process_registry) = native_process_registry.as_ref() {
-            env_builder = env_builder.with_process_registry(Arc::clone(process_registry));
-        } else if let Some(wiring) = process_work_source.external_wiring() {
-            env_builder = env_builder.with_process_work(wiring);
-        }
-        if let Some(session_creation_store_factory) = self
-            .session_creation_store_factory
-            .as_ref()
-            .or(self.store_factory.as_ref())
-        {
-            env_builder =
-                env_builder.with_session_store_factory(Arc::clone(session_creation_store_factory));
-        }
-        let trigger_store = self.trigger_store.as_ref().cloned().unwrap_or_else(|| {
-            Arc::new(facade_support::InMemoryTriggerStore::with_clock(
-                Arc::clone(&live_replay_clock),
-            ))
-        });
-        env_builder = env_builder.with_trigger_store(trigger_store);
-        env_builder = match self.process_definitions.clone() {
-            Some(registry) => env_builder.with_process_definition_registry(registry),
-            None => env_builder,
+        env_builder = match &process_work_source {
+            ProcessWorkSource::Native(_) => {
+                env_builder.with_process_registry(Arc::clone(&process_registry))
+            }
+            ProcessWorkSource::External(wiring) => env_builder.with_process_work(wiring.clone()),
         };
+        env_builder = env_builder
+            .with_session_store_factory(Arc::clone(&store_factory))
+            .with_trigger_store(backend.trigger_store())
+            .with_process_definition_registry(backend.process_definition_registry());
         let env = env_builder.build();
-        let process_registry = env.process_registry().cloned();
         // Registration owns the scope fence (ADR 0049): the registry lifts the
         // effect host's fence for a re-registered process id inside its own
         // registration write, on every registration path.
-        if let Some(process_registry) = process_registry.as_ref() {
-            process_registry.bind_effect_host(&env.core.control.effect_host);
-        }
+        process_registry.bind_effect_host(&env.core.control.effect_host);
         // The retained-evidence sweep owns deferred scope retirement (ADR
-        // 0067): a store whose journal lives in the host's own file learns
-        // where that file is here.
-        for store_factory in self
-            .store_factory
-            .iter()
-            .chain(self.session_creation_store_factory.iter())
-        {
-            store_factory.bind_effect_host(&env.core.control.effect_host);
-            store_factory.bind_artifact_stores(
-                Arc::clone(&env.core.durability.process_env_store),
-                host_process_engines.clone(),
-            );
-        }
+        // 0067): the catalog learns the host whose journal it sweeps.
+        store_factory.bind_effect_host(&env.core.control.effect_host);
+        store_factory.bind_artifact_stores(
+            Arc::clone(&env.core.durability.process_env_store),
+            host_process_engines.clone(),
+        );
         let process_port = Self::resolve_process_work(
             &process_work_source,
             default_plugin_host.as_ref(),
             &env,
+            &store_factory,
             process_lifecycle_available,
             &policy,
             process_execution_concurrency,
@@ -1290,38 +1181,29 @@ impl LashCoreBuilder {
             native_substrate.clone(),
         )?;
         let queued_port = Self::resolve_queued_work(
-            &self.queued_work_source,
+            self.queued_work_source,
+            backend.queued_work(),
             session_execution_owner.clone(),
             env.clone(),
             policy.clone(),
             protocol_factory.clone(),
             Arc::new(plugin_factories.clone()),
-            self.session_creation_store_factory
-                .as_ref()
-                .or(self.store_factory.as_ref()),
+            &store_factory,
             Arc::clone(&live_replay_store),
             process_lifecycle_available,
             worker_slot_supplier.clone(),
             queued_work_execution_concurrency,
-        )?;
+        );
         let substrate = NativeSubstrateSetup {
             config: native_substrate,
             process: process_port,
             queued: queued_port,
-            wake: process_registry
-                .clone()
-                .zip(
-                    self.session_creation_store_factory
-                        .as_ref()
-                        .or(self.store_factory.as_ref())
-                        .cloned(),
-                )
-                .map(|(registry, factory)| WakeDeliveryDriverSetup {
-                    registry,
-                    factory,
-                    clock: Arc::clone(&env.core.clock),
-                    delivery_policy: env.core.control.process_wake_delivery_policy,
-                }),
+            wake: WakeDeliveryDriverSetup {
+                registry: Arc::clone(&process_registry),
+                factory: Arc::clone(&store_factory),
+                clock: Arc::clone(&env.core.clock),
+                delivery_policy: env.core.control.process_wake_delivery_policy,
+            },
         };
 
         Ok(LashCore {
@@ -1329,7 +1211,9 @@ impl LashCoreBuilder {
             env,
             tool_registry,
             policy,
-            store_factory: self.store_factory,
+            backend,
+            store_factory,
+            process_registry,
             plugin_factories: Arc::new(plugin_factories),
             provider: self.provider,
             live_replay_store,
@@ -1347,17 +1231,19 @@ impl LashCoreBuilder {
         })
     }
 
-    /// - no registry => nothing to run ([`ProcessWorkSource::None`]);
-    /// - external wiring supplied => use it ([`ProcessPortSetup::External`]);
-    /// - native registry wired => lazily construct the native port on first open. Its
-    ///   [`DurableProcessWorkerConfig`] is built eagerly when a store factory is
-    ///   present; without one the native worker cannot rebuild session runtimes.
+    /// - the backend supplies its own process work => use it
+    ///   ([`ProcessPortSetup::External`]);
+    /// - otherwise the in-process worker drives the backend's registry,
+    ///   constructed lazily on first open ([`ProcessPortSetup::NativeDefault`]).
+    ///   Its [`DurableProcessWorkerConfig`] is built eagerly so a bad config
+    ///   fails the build.
     // Mirrors `resolve_queued_work`; inputs are the required driver state.
     #[allow(clippy::too_many_arguments)]
     fn resolve_process_work(
         process_work_source: &ProcessWorkSource,
         worker_plugin_host: &PluginHost,
         env: &RuntimeEnvironment,
+        store_factory: &Arc<dyn SessionStoreFactory>,
         process_lifecycle_available: bool,
         policy: &SessionPolicy,
         process_execution_concurrency: usize,
@@ -1367,7 +1253,6 @@ impl LashCoreBuilder {
         native_substrate: NativeSubstrateConfig,
     ) -> Result<ProcessPortSetup> {
         let watched = match process_work_source {
-            ProcessWorkSource::None => return Ok(ProcessPortSetup::None),
             ProcessWorkSource::External(wiring) => {
                 return Ok(ProcessPortSetup::External {
                     wiring: wiring.clone(),
@@ -1375,15 +1260,10 @@ impl LashCoreBuilder {
             }
             ProcessWorkSource::Native(watched) => watched.clone(),
         };
-        // The worker rebuilds a session runtime per process, so it needs a store
-        // factory; without one the default runner could not execute anything, so
-        // fail loudly rather than silently leave processes unexecuted.
-        if env.session_store_factory.is_none() {
-            return Err(EmbedError::ProcessRegistryRequiresStoreFactory);
-        }
         let config = Box::new(NativeProcessWorkerSetup {
             worker_plugin_host: worker_plugin_host.clone(),
             env: env.clone(),
+            store_factory: Arc::clone(store_factory),
             process_lifecycle_available,
             policy: policy.clone(),
             process_execution_concurrency,
@@ -1403,26 +1283,29 @@ impl LashCoreBuilder {
 
     #[allow(clippy::too_many_arguments)]
     fn resolve_queued_work(
-        queued_work_source: &QueuedWorkSource,
+        queued_work_source: QueuedWorkSource,
+        backend_driver: lash_core::BackendQueuedWork,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
         env: RuntimeEnvironment,
         policy: SessionPolicy,
         protocol_factory: Option<Arc<dyn PluginFactory>>,
         plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-        store_factory: Option<&Arc<dyn SessionStoreFactory>>,
+        store_factory: &Arc<dyn SessionStoreFactory>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         queued_work_execution_concurrency: usize,
-    ) -> Result<QueuedPortSetup> {
-        Ok(match queued_work_source {
-            QueuedWorkSource::Unset => return Err(EmbedError::MissingQueuedWorkSource),
-            QueuedWorkSource::Disabled => QueuedPortSetup::Disabled,
-            QueuedWorkSource::External(port) => QueuedPortSetup::External {
-                port: Arc::clone(port),
-            },
-            QueuedWorkSource::Native => match store_factory {
-                Some(store_factory) => QueuedPortSetup::Native {
+    ) -> QueuedPortSetup {
+        match (queued_work_source, backend_driver) {
+            (QueuedWorkSource::Disabled, _)
+            | (QueuedWorkSource::Backend, lash_core::BackendQueuedWork::Disabled) => {
+                QueuedPortSetup::Disabled
+            }
+            (QueuedWorkSource::Backend, lash_core::BackendQueuedWork::Engine(port)) => {
+                QueuedPortSetup::External { port }
+            }
+            (QueuedWorkSource::Backend, lash_core::BackendQueuedWork::InProcess) => {
+                QueuedPortSetup::Native {
                     config: Arc::new(NativeQueuedWorkRunConfig {
                         session_execution_owner,
                         env,
@@ -1435,19 +1318,13 @@ impl LashCoreBuilder {
                     }),
                     slot_supplier: worker_slot_supplier,
                     execution_concurrency: queued_work_execution_concurrency,
-                },
-                None => return Err(EmbedError::NativeQueuedWorkRequiresStoreFactory),
-            },
-        })
+                }
+            }
+        }
     }
 
     pub fn advanced(self) -> AdvancedLashCoreBuilder {
         AdvancedLashCoreBuilder { builder: self }
-    }
-
-    pub fn process_registry(mut self, process_registry: Arc<dyn ProcessRegistry>) -> Self {
-        self.process_work_source = ProcessWorkSelection::Native(process_registry);
-        self
     }
 
     /// Each appended process event is pushed to the sink after its durable
@@ -1456,17 +1333,16 @@ impl LashCoreBuilder {
     /// log. Observe completion via the await seam even though the terminal
     /// append is also emitted. See [`ProcessEventSink`] for the full contract.
     ///
-    /// Event emission applies to the native registry path
-    /// ([`Self::process_registry`]); a host that supplies its own
-    /// [`ProcessWorkWiring`] installs the
-    /// sink through the deployment's constructor for those.
+    /// Event emission applies to the in-process registry path; a backend
+    /// that supplies its own process work (the Restate backend) installs
+    /// the sink through its own constructor.
     ///
     /// Worker faults are not registry events and do not follow that split: the
     /// durable process worker this core configures reports every
     /// [`ProcessWorkerFault`](facade_support::ProcessWorkerFault) to the sink
-    /// installed here, whichever registry path the host chose. A host that
-    /// drives pending processes wants this installed, because the drive is an
-    /// admission call and a fault after admission has no other way home.
+    /// installed here, whichever process work the backend supplies. A host
+    /// that drives pending processes wants this installed, because the drive
+    /// is an admission call and a fault after admission has no other way home.
     ///
     /// [`ProcessWorkerFault`]: facade_support::ProcessWorkerFault
     ///
@@ -1486,38 +1362,11 @@ impl LashCoreBuilder {
         self
     }
 
-    pub fn trigger_store(mut self, store: Arc<dyn lash_core::TriggerStore>) -> Self {
-        self.trigger_store = Some(store);
-        self
-    }
-
-    pub fn process_definition_registry(
-        mut self,
-        registry: Arc<dyn lash_core::ProcessDefinitionRegistry>,
-    ) -> Self {
-        self.process_definitions = Some(registry);
-        self
-    }
-
-    /// Durable hosts construct [`ProcessWorkWiring`] from the same watched
-    /// registry and port used by their deployment runner, then pass it here.
-    /// The wiring's registry becomes the core's process registry and no native
-    /// runner is spawned.
-    pub fn process_work(mut self, wiring: ProcessWorkWiring) -> Self {
-        self.process_work_source = ProcessWorkSelection::External(wiring);
-        self
-    }
-
-    pub fn with_queued_work(mut self, port: Arc<dyn QueuedWorkSubstrate>) -> Self {
-        self.queued_work_source = QueuedWorkSource::External(port);
-        self
-    }
-
-    pub fn with_native_queued_work(mut self) -> Self {
-        self.queued_work_source = QueuedWorkSource::Native;
-        self
-    }
-
+    /// Run no queued-work driver: the host runs every queued turn itself.
+    ///
+    /// By default the core runs the backend's driver — the in-process driver
+    /// on SQLite and PostgreSQL, the engine's where the backend supplies one
+    /// ([`Backend::queued_work`](lash_core::Backend::queued_work)).
     pub fn without_queued_work(mut self) -> Self {
         self.queued_work_source = QueuedWorkSource::Disabled;
         self
@@ -1584,12 +1433,7 @@ impl LashCore {
         &self,
         filter: SessionListFilter,
     ) -> Result<Vec<SessionSummary>> {
-        let Some(store_factory) = self.store_factory.as_ref() else {
-            return Err(EmbedError::SessionCatalogUnavailable {
-                operation: "sessions_filtered",
-            });
-        };
-        store_factory
+        self.store_factory
             .list_sessions(&filter)
             .await
             .map_err(Into::into)

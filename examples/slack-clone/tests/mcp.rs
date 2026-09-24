@@ -180,14 +180,18 @@ impl Script {
                 let steps = Arc::clone(&steps);
                 let requests = Arc::clone(&requests);
                 async move {
-                    requests
-                        .lock_recover()
-                        .push(serde_json::to_string(&request).expect("serialize request"));
+                    // Every tool call gets its own id: a journaling host keys each
+                    // recorded call by it, so a reused id would replay the first.
+                    let request_index = {
+                        let mut requests = requests.lock_recover();
+                        requests.push(serde_json::to_string(&request).expect("serialize request"));
+                        requests.len()
+                    };
                     let step = steps.lock().await.pop_front().unwrap_or(Step::Text("done"));
                     let response = match step {
                         Step::Tool(name) => LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
-                                call_id: "mcp-call".to_string(),
+                                call_id: format!("mcp-call-{request_index}"),
                                 tool_name: name.to_string(),
                                 input_json: "{}".to_string(),
                                 replay: None,
@@ -196,7 +200,7 @@ impl Script {
                         },
                         Step::ToolWithInput(name, input_json) => LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
-                                call_id: "mcp-call".to_string(),
+                                call_id: format!("mcp-call-{request_index}"),
                                 tool_name: name.to_string(),
                                 input_json: input_json.to_string(),
                                 replay: None,
@@ -916,25 +920,6 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
 }
 
 /// Every file the host's attachment store holds, as raw bytes.
-fn stored_attachment_bytes(root: &std::path::Path) -> Vec<Vec<u8>> {
-    let mut found = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(directory) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if let Ok(bytes) = std::fs::read(&path) {
-                found.push(bytes);
-            }
-        }
-    }
-    found
-}
-
 #[tokio::test]
 async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in() {
     let scratch = tempfile::tempdir().expect("tempdir");
@@ -1005,13 +990,28 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
         attachment["source"]["attachment_ref"]["byte_len"],
         mcp_http_server::BADGE_BYTES.len()
     );
-    let files = stored_attachment_bytes(&scratch.path().join("attachments"));
-    assert!(
-        files
-            .iter()
-            .any(|bytes| bytes == mcp_http_server::BADGE_BYTES),
+    let attachment_id = lash::attachments::AttachmentId::parse(
+        attachment["source"]["attachment_ref"]["id"]
+            .as_str()
+            .expect("stored attachment id"),
+    )
+    .expect("valid stored attachment id");
+    let attachment_store = runtime.core.backend().attachment_store();
+    let stored_bytes = attachment_store
+        .get(&attachment_id)
+        .await
+        .expect("the backend's attachment store holds the stored attachment")
+        .bytes;
+    assert_eq!(
+        stored_bytes,
+        mcp_http_server::BADGE_BYTES,
         "the host's attachment store must hold the server's exact bytes"
     );
+    let stored_before = attachment_store
+        .list()
+        .await
+        .expect("list the backend's attachments")
+        .len();
 
     let inline = session
         .turn(TurnInput::text("@lashbot fetch the badge again"))
@@ -1029,8 +1029,12 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
         "the inline result must carry the resource itself: {inline_output}"
     );
     assert_eq!(
-        stored_attachment_bytes(&scratch.path().join("attachments")).len(),
-        files.len(),
+        attachment_store
+            .list()
+            .await
+            .expect("list the backend's attachments")
+            .len(),
+        stored_before,
         "the opted-out call must not write to the attachment store"
     );
 

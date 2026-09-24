@@ -420,7 +420,6 @@ mod restate_tests {
     use lash_restate::{
         LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessAttach, LashProcessAttachImpl,
         LashProcessWorkflow, RestateEffectGroupServices, RestateEffectHost,
-        RestateProcessDeployment,
     };
 
     const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
@@ -514,16 +513,17 @@ mod restate_tests {
             local_addr
         };
         let effect_groups = effect_group_services(
-            harness.effect_host.as_ref(),
+            harness.backend.effect_host().as_ref(),
             ingress_url.clone(),
-            harness.store_factory.clone(),
+            lash::Backend::session_store_factory(harness.backend.as_ref()),
         );
         let endpoint = restate_sdk::endpoint::Endpoint::builder()
             .bind(AgentServiceTurnWorkflowImpl::new(state.clone()).serve())
             .bind(AgentServiceEffectGroupWorkflowImpl.serve())
             .bind(
                 harness
-                    .process_deployment
+                    .backend
+                    .process_deployment()
                     .workflow(harness.process_worker.clone())
                     .serve(),
             )
@@ -534,7 +534,7 @@ mod restate_tests {
             .bind(effect_groups.wait.index.serve())
             .bind(LashProcessAttachImpl.serve())
             .build();
-        let mut required_services = RestateProcessDeployment::required_service_names();
+        let mut required_services = lash_restate::RestateBackend::required_service_names();
         required_services.extend(RestateEffectGroupServices::required_service_names());
         lash_restate::assert_services_bound(&endpoint, &required_services)
             .await
@@ -568,7 +568,8 @@ mod restate_tests {
                 .expect("serve agent-service E2E HTTP surface");
         });
         let _ = harness
-            .process_deployment
+            .backend
+            .process_deployment()
             .process_work()
             .admit_pending_processes("agent_service_e2e_startup")
             .await
@@ -855,9 +856,7 @@ mod restate_tests {
     struct LiveRestateTestHarness {
         state: AppStateData,
         process_worker: lash::durability::DurableProcessWorker,
-        process_deployment: lash_restate::RestateProcessDeployment,
-        effect_host: Arc<lash_restate::RestateEffectHost>,
-        store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
+        backend: Arc<lash_restate::RestateBackend>,
     }
 
     async fn live_restate_test_state(
@@ -867,18 +866,6 @@ mod restate_tests {
         let app_db = Arc::new(Mutex::new(
             AppDb::open(&data_dir.join("app.db")).expect("open app db"),
         ));
-        let process_registry_store = Arc::new(
-            lash_sqlite_store::SqliteProcessRegistry::open(
-                &data_dir.join("processes.db"),
-                data_dir.join("lash-sessions"),
-            )
-            .await
-            .expect("open process registry"),
-        );
-        let process_registry =
-            Arc::clone(&process_registry_store) as Arc<dyn lash::process::ProcessRegistry>;
-        let process_continuations =
-            process_registry_store as Arc<dyn lash::process::ProcessContinuationStore>;
         let provider = lash::testing::TestProvider::builder()
             .kind("mock-provider")
             .complete(|_request| async {
@@ -906,39 +893,23 @@ finish("done via Restate E2E");
             })
             .build()
             .into_handle();
-        let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            data_dir.join("lash-sessions"),
-        ));
-        let artifact_store = Arc::new(
-            lash_sqlite_store::Store::open(&data_dir.join("artifacts.db"))
-                .await
-                .expect("open artifact store"),
-        ) as Arc<dyn lash::persistence::LashlangArtifactStore>;
-        let process_env_store = Arc::new(
-            lash_sqlite_store::Store::open(&data_dir.join("process-env.db"))
-                .await
-                .expect("open process env store"),
-        );
-        let trigger_store = Arc::new(
-            lash_sqlite_store::SqliteTriggerStore::open(&data_dir.join("triggers.db"))
-                .await
-                .expect("open trigger store"),
-        );
-        let process_deployment = lash_restate::RestateProcessDeployment::new(
-            ingress_url.clone(),
-            lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
-            Arc::clone(&process_registry),
-            process_continuations,
-        );
-        let turn_deployment = lash_restate::RestateTurnDeployment::new(
+        let stores = lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash-sessions"))
+            .await
+            .expect("open the SQLite store set");
+        let artifact_store = stores.process_env_store();
+        let backend = Arc::new(lash_restate::RestateBackend::new(
             ingress_url,
             lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
-        );
-        let effect_host = turn_deployment.effect_host();
+            Arc::new(stores),
+            // Turns run in the foreground under a handler-scoped controller;
+            // an in-process queue pump would race the Restate handlers.
+            lash_restate::RestateQueuedWork::Disabled,
+        ));
         // The worked example keeps its Sleep-only resolver as the deployment's
-        // one answer, so `RuntimeHostConfig::new` installs no tool-child host
-        // here — the same shape the conformance suites use.
-        effect_host
+        // one answer, so no tool-child host is installed here — the same shape
+        // the conformance suites use.
+        backend
+            .effect_host()
             .register_group_executors(Arc::new(AgentServiceEffectGroupExecutors))
             .expect("register worked effect-group resolver");
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -950,8 +921,11 @@ finish("done via Restate E2E");
                 .build(),
             artifact_store,
         );
-        let core = LashCore::rlm_builder(lash::TurnBudget::Unbounded, factory)
-            .with_native_queued_work()
+        let core = LashCore::rlm_builder(
+            Arc::clone(&backend) as Arc<dyn lash::Backend>,
+            lash::TurnBudget::Unbounded,
+            factory,
+        )
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("mock-model")
@@ -959,21 +933,13 @@ finish("done via Restate E2E");
                     .build()
                     .expect("valid mock model spec"),
             )
-            .store_factory(store_factory.clone())
-            .attachment_store(Arc::new(lash::persistence::FileAttachmentStore::new(
-                data_dir.join("attachments"),
-            )))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .process_env_store(process_env_store)
-            .trigger_store(trigger_store)
-            .effect_host(effect_host.clone())
             // The `processes` module is catalogue presence, not an ability bit
             // (ADR 0095): the scripted cell below authors `processes.start`.
             .plugin(Arc::new(
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
             ))
-            .process_work(process_deployment.process_work())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "agent-service-test",
                 "test",
@@ -989,7 +955,7 @@ finish("done via Restate E2E");
         .expect("valid test native substrate config");
         let state = AppStateData::from_shared_db(
             core,
-            turn_deployment.turn_work_driver(store_factory.clone()),
+            backend.turn_work_driver(),
             app_db,
             "mock-model".to_string(),
             None,
@@ -1000,9 +966,7 @@ finish("done via Restate E2E");
         LiveRestateTestHarness {
             state,
             process_worker,
-            process_deployment,
-            effect_host,
-            store_factory,
+            backend,
         }
     }
 

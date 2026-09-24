@@ -8,7 +8,6 @@
     reason = "test-support fixtures: a broken setup assumption aborts the test"
 )]
 
-pub use lash_core::TestLocalProcessRegistry;
 /// Derives a durable frame-node identity through the runtime's canonical
 /// producer for integration fixtures that need to enqueue frame-scoped work.
 pub use lash_core::facade_support::frame_node_id;

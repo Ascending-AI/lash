@@ -43,14 +43,6 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("processes.sessions"),
-        )
-        .await
-        .expect("open registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
     let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
     );
@@ -67,8 +59,6 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
         )
         .model(test_model())
         .tools(Arc::new(SeedTools))
-        .store_factory(Arc::clone(&core_store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build the seeding core");
     let seeded = seeding_core
@@ -97,8 +87,6 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
                 .into_handle(),
         )
         .model(test_model())
-        .store_factory(Arc::clone(&core_store_factory))
-        .process_registry(Arc::clone(&process_registry))
         .build(crate::test_core_owner())
         .expect("build core");
     let process_observer = core
@@ -110,7 +98,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
         core,
         attachment_store: test_attachment_store(),
         session_store_factory: Arc::clone(&core_store_factory),
-        trigger_store: in_memory_trigger_store(),
+        trigger_store: detached_trigger_store(),
         process_observer,
         sessions: WorkbenchSessions::fresh(),
         messages: Arc::new(Mutex::new(Vec::new())),

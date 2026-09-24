@@ -1,22 +1,17 @@
-//! Foreground-turn attachment and deployment wiring.
+//! Foreground-turn attachment.
 //!
 //! One responsibility: let a process outside the turn's handler observe that
-//! turn — attach to its reserved terminal keyed promise and hand a host the
-//! bundled effect host plus turn work driver that make out-of-process
-//! cancellation and terminal attachment work.
-
-use std::sync::Arc;
+//! turn by attaching to its reserved terminal keyed promise.
 
 use lash_core::{
     AwaitEventWaitIdentity, Resolution, RuntimeError, facade_support::TurnAddress,
-    facade_support::TurnAttach, facade_support::TurnTerminal, facade_support::TurnWorkDriver,
+    facade_support::TurnAttach, facade_support::TurnTerminal,
 };
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest,
     restate_await_event_key_for_authority,
 };
-use crate::effect_host::RestateEffectHost;
 use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
 
 /// Restate ingress attachment to a turn's reserved terminal keyed promise.
@@ -111,54 +106,5 @@ impl TurnAttach for RestateTurnAttach {
                 ),
             )),
         }
-    }
-}
-
-/// Bundled Restate wiring for foreground-turn control.
-///
-/// Use the returned effect host to configure Lash turn execution and the returned driver for
-/// out-of-process cancellation/terminal attachment.
-pub struct RestateTurnDeployment {
-    effect_host: Arc<RestateEffectHost>,
-}
-
-impl RestateTurnDeployment {
-    pub fn new(connection: impl Into<RestateConnection>, authority_id: RestateAuthorityId) -> Self {
-        let effect_host = Arc::new(RestateEffectHost::new(connection, authority_id));
-        Self { effect_host }
-    }
-
-    /// Every service name this deployment's wiring addresses on the endpoint.
-    ///
-    /// The durable-wait pair carries turn terminal promises, await-event
-    /// waits, and cancellation gates. Assert the set at wiring time with
-    /// [`crate::assert_services_bound`] or
-    /// [`assert_endpoint_bound`](Self::assert_endpoint_bound).
-    pub fn required_service_names() -> Vec<&'static str> {
-        vec!["LashDurableWaitWorkflow", "LashDurableWaitIndex"]
-    }
-
-    /// Fail at wiring time when `endpoint` does not bind every service in
-    /// [`required_service_names`](Self::required_service_names).
-    pub async fn assert_endpoint_bound(
-        &self,
-        endpoint: &restate_sdk::endpoint::Endpoint,
-    ) -> Result<(), crate::RestateBindingCheckError> {
-        crate::assert_services_bound(endpoint, Self::required_service_names().as_slice()).await
-    }
-
-    pub fn effect_host(&self) -> Arc<RestateEffectHost> {
-        Arc::clone(&self.effect_host)
-    }
-
-    pub fn turn_work_driver(
-        &self,
-        catalog: Arc<dyn lash_core::SessionStoreFactory>,
-    ) -> TurnWorkDriver {
-        TurnWorkDriver::for_catalog(self.effect_host.clone(), catalog)
-    }
-
-    pub fn turn_attach(&self) -> Arc<RestateTurnAttach> {
-        self.effect_host.turn_attach_handle()
     }
 }

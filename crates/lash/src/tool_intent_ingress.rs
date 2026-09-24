@@ -1238,9 +1238,7 @@ impl ToolIntentIngress {
                 ))
             })?;
         let ports = self.core.substrate_slot.ports().await;
-        let process_work = ports
-            .process
-            .ok_or(crate::EmbedError::MissingProcessRegistry)?;
+        let process_work = ports.process;
         let router = lash_core::facade_support::TriggerRouter::new(store, process_work)
             .with_process_artifacts(
                 std::sync::Arc::clone(&self.core.env.core.durability.process_env_store),
@@ -1354,15 +1352,10 @@ impl ToolIntentIngress {
                     invocation,
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
-                lash_core::RuntimeEffectLocalExecutor::processes(registry, {
-                    let ports = self.core.substrate_slot.ports().await;
-                    self.core
-                        .env
-                        .clone()
-                        .with_work_ports(ports.process.clone(), ports.queued_port())
-                        .process_work()
-                        .ok_or(crate::EmbedError::MissingProcessRegistry)?
-                })
+                lash_core::RuntimeEffectLocalExecutor::processes(
+                    registry,
+                    std::sync::Arc::clone(self.core.substrate_slot.ports().await.process.port()),
+                )
                 .with_process_env_store(std::sync::Arc::clone(
                     &self.core.env.core.durability.process_env_store,
                 ))

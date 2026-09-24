@@ -11,28 +11,35 @@ use std::sync::{Arc, Mutex};
 const SESSION: &str = "intent-ingress-observability-session";
 const SCOPE: &str = "intent-ingress-observability-turn";
 const PROCESS: &str = "intent-ingress-observability-process";
+/// A second target, so an identity re-used for a different cancel is the
+/// changed payload the submission ledger refuses.
+const OTHER_PROCESS: &str = "intent-ingress-observability-other-process";
 
 async fn test_core() -> lash::Result<lash::LashCore> {
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    registry
-        .register_process_with_observers(
-            lash::process::ProcessRegistration::new(
-                PROCESS,
-                lash::process::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                lash::process::RecoveryContract::ExternallyOwned,
-                lash::process::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a memory backend");
+    let registry = backend.process_registry();
+    for process in [PROCESS, OTHER_PROCESS] {
+        registry
+            .register_process_with_observers(
+                lash::process::ProcessRegistration::new(
+                    process,
+                    lash::process::ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    lash::process::RecoveryContract::ExternallyOwned,
+                    lash::process::ProcessProvenance::host(),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
                 ),
-            ),
-            &[SessionId::from(SESSION.to_string())],
-        )
-        .await?;
-    let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-        .with_native_queued_work()
+                &[SessionId::from(SESSION.to_string())],
+            )
+            .await?;
+    }
+    let core = lash::LashCore::standard_builder(Arc::new(backend), lash::TurnBudget::Unbounded)
         .provider(lash::provider::ProviderHandle::unconfigured())
         .model(
             lash::ModelSpec::builder("intent-ingress-observability-model")
@@ -40,15 +47,6 @@ async fn test_core() -> lash::Result<lash::LashCore> {
                 .build()
                 .expect("valid model"),
         )
-        .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
-        .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
-        .process_env_store(Arc::new(
-            lash::persistence::InMemoryProcessExecutionEnvStore::new(),
-        ))
-        .store_factory(Arc::new(
-            lash::persistence::InMemorySessionStoreFactory::new(),
-        ))
-        .process_registry(registry)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -60,9 +58,13 @@ async fn test_core() -> lash::Result<lash::LashCore> {
 }
 
 fn cancel_intent(session_id: &SessionId) -> lash::tools::ToolIntent {
+    cancel_intent_for(session_id, PROCESS)
+}
+
+fn cancel_intent_for(session_id: &SessionId, process: &str) -> lash::tools::ToolIntent {
     lash::tools::ToolIntent::CancelProcess(lash::tools::CancelProcessIntent {
         session_id: SessionId::from(session_id.to_string()),
-        process_id: ProcessId::from(PROCESS.to_string()),
+        process_id: ProcessId::from(process.to_string()),
     })
 }
 
@@ -93,6 +95,14 @@ impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for Capture {
 
 #[test]
 fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
+    // With at most one dispatcher registered, `tracing` rebuilds interest
+    // from the calling thread's default, so a sibling test on a defaultless
+    // thread registering a new callsite can turn every callsite off while
+    // this capture is installed. One extra dispatcher kept alive for the
+    // process makes rebuilds consult the live dispatchers instead (the same
+    // pin `lash_core::testing`'s trace capture holds).
+    static PIN: std::sync::Once = std::sync::Once::new();
+    PIN.call_once(|| std::mem::forget(tracing::Dispatch::new(tracing_subscriber::registry())));
     let bytes = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -117,9 +127,15 @@ fn ingress_records_identity_and_every_decision_class() -> lash::Result<()> {
                     .await,
                 lash::tools::ToolIntentIngressOutcome::Admitted { .. }
             ));
+            // The backend's host journals the first submission: the same
+            // identity naming a different target is the changed payload the
+            // submission ledger refuses.
             assert!(matches!(
                 ingress
-                    .submit(key, cancel_intent(&SessionId::from(SESSION)))
+                    .submit(
+                        key,
+                        cancel_intent_for(&SessionId::from(SESSION), OTHER_PROCESS)
+                    )
                     .await,
                 lash::tools::ToolIntentIngressOutcome::Refused {
                     refusal: lash::tools::ToolIntentIngressRefusal::DuplicateIdentity { .. }

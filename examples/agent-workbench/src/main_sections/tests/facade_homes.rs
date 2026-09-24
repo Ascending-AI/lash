@@ -182,12 +182,9 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create config change data dir");
-        let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            data_dir.join("lash-sessions"),
-        )) as Arc<dyn lash::persistence::SessionStoreFactory>;
         let process_registry = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open(
-                &data_dir.join("processes.db"),
+                &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
                 data_dir.join("lash-sessions"),
             )
             .await
@@ -208,8 +205,6 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .provider(provider)
             .model(initial_model)
             .plugin(plugin)
-            .store_factory(store_factory)
-            .process_registry(Arc::clone(&process_registry))
             .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build config change workbench core");
@@ -260,12 +255,9 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create context transform data dir");
-        let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            data_dir.join("lash-sessions"),
-        )) as Arc<dyn lash::persistence::SessionStoreFactory>;
         let process_registry = Arc::new(
             lash_sqlite_store::SqliteProcessRegistry::open(
-                &data_dir.join("processes.db"),
+                &crate::tests::sessions_root(&data_dir).join("process-registry.db"),
                 data_dir.join("lash-sessions"),
             )
             .await
@@ -297,8 +289,6 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
                     .expect("context transform model"),
             )
             .plugin(plugin)
-            .store_factory(store_factory)
-            .process_registry(Arc::clone(&process_registry))
             .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build context transform workbench core");
@@ -435,14 +425,15 @@ fn workbench_standard_compaction_projects_the_prompt_under_its_session_window() 
             sessions: manager.clone(),
             session_lifecycle: manager.clone(),
             session_graph: manager,
-            scoped_effect_controller: lash::runtime::ScopedEffectController::shared(
-                Arc::new(lash::runtime::NativeRuntimeEffectController::default()),
+            scoped_effect_controller: lash::durability::EffectHost::scoped_static(
+                crate::tests::memory_effect_host().as_ref(),
                 lash::runtime::AdmittedScope::turn(
                     "workbench-standard-compaction-session",
                     "workbench-standard-compaction-turn",
                 ),
             )
-            .expect("build standard compaction turn scope"),
+            .expect("build standard compaction turn scope")
+            .expect("the SQLite host lends an owned controller"),
             direct_completions: lash::runtime::DirectCompletionClient::from_fn(|_, _| {
                 Err(lash::plugins::PluginError::Session(
                     "direct completions are unavailable in this test".to_string(),

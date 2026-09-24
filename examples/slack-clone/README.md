@@ -10,7 +10,7 @@ its own users and its own database, and your agent is one more app in it, reache
 only over HTTP.
 
 It is also the repository's **standard-mode reference host**. Turns here are plain
-chat turns driven by the native tool loop (`LashCore::standard_builder(TurnBudget::Unbounded)`).
+chat turns driven by the native tool loop (`LashCore::standard_builder(backend, TurnBudget::Unbounded)`).
 `agent-workbench` remains the RLM-mode reference; see
 [Modes](#modes-this-is-the-standard-mode-reference) below.
 
@@ -576,8 +576,9 @@ Two ignore rules are worth calling out, because both are real production bugs:
 
 What the bot uses today:
 
-- **SQLite session stores** (`SqliteSessionStoreFactory`). Committed transcripts
-  and undrained queued input survive a restart. This is the load-bearing choice.
+- **One SQLite file backend** (`SqliteBackend::open` on the sessions root).
+  Committed transcripts, undrained queued input and the effect journal share that
+  root and survive a restart together. This is the load-bearing choice.
 - **A durable event ledger** (its own SQLite database), recording both the text
   admitted to the session and the reply owed, so a new boot can replay either.
 - **A durable, transactional outbox on the platform side** — the message and the
@@ -586,7 +587,6 @@ What the bot uses today:
 - **Per-boot session-execution leases** (`LeaseOwnerIdentity::opaque` with a fresh
   incarnation), so a new boot reclaims what a crashed boot held instead of
   deadlocking against its own ghost.
-- **`NativeEffectHost`** — process-local effect journalling.
 
 ### What a crash costs, stage by stage
 
@@ -672,8 +672,8 @@ untouched by a failed attempt, so only the deadline ends the loop.
 
 ### The Restate upgrade, precisely
 
-Replacing `NativeEffectHost` with a Restate-backed effect host is **half** the
-change, and it is worth being exact about which half:
+Replacing the SQLite backend with a `RestateBackend` over the same SQLite
+store set is **half** the change, and it is worth being exact about which half:
 
 - **`bot/runtime.rs::build_core` — the drain.** The queued drain becomes a
   journalled, replayable effect: after a restart, re-running with the same
@@ -681,7 +681,7 @@ change, and it is worth being exact about which half:
   removes the "turn committed but its result is gone" case entirely, rather than
   recovering from it after the fact.
 - **`bot/channel.rs::post_reply` — the post.** This is *not* covered by the
-  builder swap. `chat_post_message` is a plain HTTP call outside any effect scope,
+  backend swap. `chat_post_message` is a plain HTTP call outside any effect scope,
   so the effect host cannot see it or replay it. Closing the
   crash-between-post-and-record window durably means wrapping the post as a
   journaled effect inside the same scope as the drain, so the journal records
@@ -699,7 +699,7 @@ double the reader's setup cost.
 
 ## Modes: this is the standard-mode reference
 
-The bot is built with `LashCore::standard_builder(TurnBudget::Unbounded)`. Turns are native tool-loop
+The bot is built with `LashCore::standard_builder(backend, TurnBudget::Unbounded)` over its SQLite backend. Turns are native tool-loop
 turns: the model answers in prose, or calls a host tool and then answers.
 
 Two native tools, both backed by real `conversations.*` calls, so the loop leaves
@@ -911,7 +911,7 @@ Tracked for follow-up rather than half-built:
   not. A DM is a different session-mapping question again (per user, not per
   channel).
 - **Socket Mode.** Only relevant once the bot runs somewhere Slack cannot reach.
-- **Restate effect host, both halves.** The `build_core` swap removes the
+- **Restate backend, both halves.** The `build_core` swap removes the
   `ReplyLost` case; journalling `post_reply` as an effect is the separate second
   half that makes the post durably at-most-once instead of relying on the metadata
   lookup. See [the upgrade path](#durability-and-the-upgrade-path).

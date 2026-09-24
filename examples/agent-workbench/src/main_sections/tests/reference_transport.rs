@@ -446,8 +446,9 @@ async fn drive_reference_turn(
 
 /// The recoverable-chat test state with its runtime facets overridable: an
 /// explicit live-replay store shrinks the replay window so a trimmed-gap
-/// recovery is deterministic, and an optional effect host lets a test journal
-/// and re-drive turn effects the way a durable workflow engine does.
+/// recovery is deterministic, and an optional effect layer over the
+/// backend's journaling host lets a test crash and re-drive turn effects the
+/// way a durable workflow engine does.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn recoverable_chat_test_state_with_replay_store(
     data_dir: &std::path::Path,
@@ -458,36 +459,31 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
     queued_work_driver: Option<Arc<dyn lash::runtime::QueuedWorkSubstrate>>,
     context_window_tokens: usize,
     live_replay_store: Option<Arc<dyn lash::observe::LiveReplayStore>>,
-    effect_host: Option<Arc<dyn lash::durability::EffectHost>>,
+    effect_layer: Option<Arc<dyn lash::testing::EffectLayer>>,
 ) -> AppState {
-    let process_registry = Arc::new(
-        lash_sqlite_store::SqliteProcessRegistry::open(
-            &data_dir.join("processes.db"),
-            data_dir.join("lash-sessions"),
-        )
-        .await
-        .expect("open process registry"),
-    ) as Arc<dyn lash::process::ProcessRegistry>;
+    let sqlite = test_file_backend(data_dir);
+    let artifact_store = sqlite.process_env_store();
+    let mut decorated = DecoratedBackend::over(sqlite)
+        .with_catalog(Arc::clone(&store_factory))
+        .with_trigger_store(Arc::clone(&trigger_store));
+    if let Some(layer) = effect_layer {
+        decorated = decorated.with_effect_layer(layer);
+    }
+    if let Some(driver) = queued_work_driver {
+        decorated = decorated.with_queued_work(driver);
+    }
+    let backend: Arc<dyn lash::Backend> = Arc::new(decorated);
     let model = with_workbench_model_capability(
         lash::ModelSpec::builder("test-model")
             .context_window_tokens(context_window_tokens)
             .build()
             .expect("model spec"),
     );
-    let mut core_builder = explicit_durable_test_facets(data_dir)
+    let mut core_builder = explicit_durable_test_facets_on(backend, artifact_store)
         .provider(provider)
-        .model(model)
-        .store_factory(Arc::clone(&store_factory))
-        .process_registry(Arc::clone(&process_registry))
-        .trigger_store(Arc::clone(&trigger_store));
-    if let Some(queued_work_driver) = queued_work_driver {
-        core_builder = core_builder.with_queued_work(queued_work_driver);
-    }
+        .model(model);
     if let Some(live_replay_store) = live_replay_store {
         core_builder = core_builder.live_replay_store(live_replay_store);
-    }
-    if let Some(effect_host) = effect_host {
-        core_builder = core_builder.effect_host(effect_host);
     }
     let core = core_builder
         .build(crate::test_core_owner())
@@ -819,7 +815,7 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
         data_dir.path(),
         16,
         prose_provider("reference-transport-trim", &[FIRST_ANSWER, SECOND_ANSWER]),
-        in_memory_trigger_store(),
+        detached_trigger_store(),
         Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             data_dir.path().join("lash-sessions"),
         )),
@@ -1021,32 +1017,24 @@ async fn a_redriven_turn_keeps_its_output_identity() {
     const REDRIVEN_ANSWER: &str = "answer from the recovery re-drive";
     const DRAINED_ANSWER: &str = "answer from the queued drain";
     let data_dir = tempfile::tempdir().expect("reference transport tempdir");
-    // The fixture's sessions and process registry are SQLite files under
-    // `data_dir`, so the journal is one too: the host fences process scopes in
-    // the registry file it attaches.
+    // The fixture is a file backend under `data_dir`: the crash layer sits
+    // over its journaling host, so the re-drive replays the journal the first
+    // drive wrote.
     let layer = Arc::new(RedriveCrashLayer::failing_on_llm_call(2));
-    let effect_host = Arc::new(lash::testing::LayeredEffectHost::new(
-        Arc::new(
-            lash_sqlite_store::SqliteEffectHost::open(&data_dir.path().join("effects.db"))
-                .await
-                .expect("open the durable effect host"),
-        ),
-        Arc::clone(&layer) as Arc<dyn lash::testing::EffectLayer>,
-    ));
     let (provider, provider_calls) =
         redrive_provider(CRASHED_PARTIAL, &[REDRIVEN_ANSWER, DRAINED_ANSWER]);
     let state = recoverable_chat_test_state_with_replay_store(
         data_dir.path(),
         16,
         provider,
-        in_memory_trigger_store(),
+        detached_trigger_store(),
         Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
             data_dir.path().join("lash-sessions"),
         )),
         None,
         4096,
         None,
-        Some(effect_host),
+        Some(Arc::clone(&layer) as Arc<dyn lash::testing::EffectLayer>),
     )
     .await;
     let session_id = state.current_session_id();

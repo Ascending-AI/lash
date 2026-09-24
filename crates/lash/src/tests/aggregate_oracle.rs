@@ -45,7 +45,6 @@
 
 use super::*;
 
-use lash_core::ProcessEventLog as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// How long a rendezvous may wait before the case fails as an assertion rather
@@ -67,35 +66,30 @@ const UNREGISTERED_EVENT: &str = "aggregate.oracle.unregistered";
 
 /// A journaled store tier one oracle case runs against.
 ///
-/// The cases never name the backend; they take this and hand its factory to
-/// the builder. SQLite is the floor because it is the cheapest tier that
-/// actually writes a checkpoint to a file — an in-memory factory would leave
-/// every aggregate fact unjournaled and prove nothing the VM-level suites do
-/// not already prove.
+/// The cases never name the backend; they take a fresh backend from this
+/// for each run and hand it to the builder. A SQLite memory backend is the
+/// floor: it journals every checkpoint and effect through the same SQLite
+/// stores a file backend runs, without paying a file sync per effect across
+/// the long race loops.
 struct JournaledTier {
     /// Names the tier in assertion messages, so a shared case body says which
     /// registration failed.
     name: &'static str,
-    /// Owns the database file for the lifetime of the case.
-    _dir: tempfile::TempDir,
-    factory: Arc<dyn SessionStoreFactory>,
 }
 
 impl JournaledTier {
     fn sqlite() -> Self {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            dir.path().join("aggregate-oracle.db"),
-        ));
-        Self {
-            name: "sqlite",
-            _dir: dir,
-            factory,
-        }
+        Self { name: "sqlite" }
     }
 
-    fn factory(&self) -> Arc<dyn SessionStoreFactory> {
-        Arc::clone(&self.factory)
+    /// A fresh backend for one run: its own sessions and its own process
+    /// registry.
+    async fn backend(&self) -> Arc<lash_sqlite_store::SqliteBackend> {
+        Arc::new(
+            lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .expect("open the aggregate-oracle backend"),
+        )
     }
 }
 
@@ -448,7 +442,7 @@ struct OracleRun {
     /// own refusals reach the model here and nowhere else.
     requests: Vec<String>,
     theatre: Arc<OracleTheatre>,
-    registry: Arc<TestLocalProcessRegistry>,
+    registry: Arc<dyn ProcessRegistry>,
     tool_calls: usize,
 }
 
@@ -461,26 +455,24 @@ impl OracleRun {
 }
 
 /// Builds a core whose provider replays `cells` and whose only leaf tool is
-/// the oracle's, on `tier`.
+/// the oracle's, over `backend`.
 fn oracle_core(
-    tier: &JournaledTier,
+    backend: Arc<dyn lash_core::Backend>,
     session_id: &str,
     cells: Vec<String>,
     theatre: Arc<OracleTheatre>,
-    registry: Arc<TestLocalProcessRegistry>,
     requests: Arc<StdMutex<Vec<String>>>,
 ) -> Result<LashCore> {
-    oracle_builder(tier, session_id, cells, theatre, registry, requests)
+    oracle_builder(backend, session_id, cells, theatre, requests)
         .build(crate::testing::runtime_lease_owner())
 }
 
 /// [`oracle_core`]'s builder, for a case that swaps one of its parts.
 fn oracle_builder(
-    tier: &JournaledTier,
+    backend: Arc<dyn lash_core::Backend>,
     session_id: &str,
     cells: Vec<String>,
     theatre: Arc<OracleTheatre>,
-    registry: Arc<TestLocalProcessRegistry>,
     requests: Arc<StdMutex<Vec<String>>>,
 ) -> crate::core::LashCoreBuilder {
     let scripted = Arc::new(TokioMutex::new(VecDeque::from(cells)));
@@ -503,7 +495,7 @@ fn oracle_builder(
         })
         .build()
         .into_handle();
-    explicit_ephemeral_facets(rlm_core_builder())
+    explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .provider(provider)
         .model(mock_model_spec())
         .plugins(lash_core::facade_support::PluginStack::from_factories([Arc::new(
@@ -523,14 +515,12 @@ fn oracle_builder(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
         ))
         .plugin(lash_core::testing::process_engine_plugin_fixture())
-        .store_factory(tier.factory())
-        .process_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
 }
 
 /// The process a declared intent is realized against. Registered up front with
 /// the event type the leaf emits, because an emission against an unregistered
 /// event type is refused and the case would pass for the wrong reason.
-async fn register_intent_target(registry: &TestLocalProcessRegistry, session_id: &str) {
+async fn register_intent_target(registry: &dyn ProcessRegistry, session_id: &str) {
     registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
@@ -563,7 +553,7 @@ async fn register_intent_target(registry: &TestLocalProcessRegistry, session_id:
 struct DrivenOracle {
     core: LashCore,
     theatre: Arc<OracleTheatre>,
-    registry: Arc<TestLocalProcessRegistry>,
+    registry: Arc<dyn ProcessRegistry>,
     requests: Arc<StdMutex<Vec<String>>>,
     turn: tokio::task::JoinHandle<Result<TurnReport>>,
 }
@@ -571,7 +561,14 @@ struct DrivenOracle {
 impl DrivenOracle {
     /// Awaits the turn and collects what the run observed.
     async fn finish(self) -> Result<OracleRun> {
-        let result = tokio::time::timeout(RENDEZVOUS_BUDGET, self.turn)
+        self.finish_within(RENDEZVOUS_BUDGET).await
+    }
+
+    /// [`Self::finish`] for a turn that legitimately runs longer than a
+    /// rendezvous, such as a loop of hundreds of journaled races. `budget`
+    /// is still only a deadlock budget.
+    async fn finish_within(self, budget: std::time::Duration) -> Result<OracleRun> {
+        let result = tokio::time::timeout(budget, self.turn)
             .await
             .expect("the driven turn must report")
             .expect("turn task")?;
@@ -593,15 +590,15 @@ async fn drive_cells(
     cells: Vec<String>,
 ) -> Result<DrivenOracle> {
     let theatre = Arc::new(OracleTheatre::default());
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let backend = tier.backend().await;
+    let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     register_intent_target(registry.as_ref(), session_id).await;
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let core = oracle_core(
-        tier,
+        backend,
         session_id,
         cells,
         Arc::clone(&theatre),
-        Arc::clone(&registry),
         Arc::clone(&requests),
     )?;
     let session = core.session(session_id).open().await?;
@@ -998,9 +995,12 @@ async fn a_preparation_failure_leads_the_settlement_order(tier: &JournaledTier) 
         tier.name,
         reason(&run)
     );
-    assert_eq!(
-        run.theatre.started(),
-        vec!["dispatched"],
+    // The dispatched sibling is admitted before the prefix answers (§11
+    // clause 3), but whether its attempt enters the host before the caught
+    // rejection finishes the turn is the journaled group's scheduling, not
+    // this law.
+    assert!(
+        !run.theatre.started().contains(&"refused".to_string()),
         "{}: a call refused in preparation never reaches the host",
         tier.name
     );

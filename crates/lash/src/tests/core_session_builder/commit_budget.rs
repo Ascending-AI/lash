@@ -8,8 +8,8 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .complete(|_request| async move { Ok(text_response("assistant response")) })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets_with_budget(
-        LashCore::standard_builder(crate::TurnBudget::Unbounded),
+    let core = backend_work_facets_with_budget(
+        LashCore::standard_builder(memory_backend().await, crate::TurnBudget::Unbounded),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::Unbounded,
             crate::CommitBudgetLimit::bounded(CONFIGURED_ROW_LIMIT),
@@ -17,10 +17,6 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
     )
     .provider(provider)
     .model(mock_model_spec())
-    .store_factory(Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
-    .with_native_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
 
     core.session("commit-graph-only-budget-surface")
