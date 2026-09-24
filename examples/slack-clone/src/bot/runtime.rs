@@ -156,6 +156,24 @@ pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque("slack-clone-bot", incarnation)
 }
 
+/// Entries directly under the bot's data directory that an earlier store
+/// layout wrote and this build no longer reads: the process environment and
+/// attachment bytes now live in the SQLite backend's session catalog.
+pub(crate) const PRIOR_STORE_LAYOUT: &[&str] = &["process-env.db", "attachments"];
+
+/// The directory under the bot's data directory that holds the SQLite
+/// backend's stores.
+pub(crate) const SESSIONS_ROOT: &str = "lash-sessions";
+
+/// Open the bot's one SQLite backend under `data_dir`, refusing a data
+/// directory an earlier store layout wrote.
+pub(crate) async fn open_backend(data_dir: &Path) -> Result<lash_sqlite_store::SqliteBackend> {
+    crate::prior_store_layout::refuse_prior_store_layout(data_dir, PRIOR_STORE_LAYOUT)?;
+    lash_sqlite_store::SqliteBackend::open(data_dir.join(SESSIONS_ROOT))
+        .await
+        .map_err(|error| anyhow::anyhow!("open the bot's SQLite backend: {error}"))
+}
+
 /// Durability choices, all of them deliberate for an example:
 ///
 /// * **One SQLite file backend** on the data directory's sessions root —
@@ -176,15 +194,7 @@ pub async fn build_core(
     std::fs::create_dir_all(data_dir)
         .with_context(|| format!("create bot data dir {}", data_dir.display()))?;
 
-    crate::prior_store_layout::refuse_prior_store_layout(
-        data_dir,
-        &["process-env.db", "attachments"],
-    )?;
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(data_dir.join("lash-sessions"))
-            .await
-            .map_err(|error| anyhow::anyhow!("open the bot's SQLite backend: {error}"))?,
-    );
+    let backend = Arc::new(open_backend(data_dir).await?);
 
     // The factory is built even with no configured servers: it carries this
     // host's sampling, elicitation and roots policy, and a server attached later

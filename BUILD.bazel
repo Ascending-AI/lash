@@ -164,7 +164,10 @@ filegroup(
 
 filegroup(
     name = "workspace_test_scripts",
-    srcs = ["scripts/slack-clone-live-model-ui.py"],
+    srcs = [
+        "scripts/slack-clone-full-host-e2e.py",
+        "scripts/slack-clone-live-model-ui.py",
+    ],
     testonly = True,
     visibility = ["//visibility:public"],
 )
