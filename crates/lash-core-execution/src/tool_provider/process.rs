@@ -172,7 +172,7 @@ pub struct InternalProcessAdmin<'run> {
     /// settlement's possession. `None` for every other caller — a start an
     /// orchestrating group child makes must reach its settlement, and this
     /// buffer is the only channel that crosses the no-attempt-frame boundary.
-    pub(super) orchestrating_starts: Option<crate::tool_dispatch::OrchestratingStartsBuffer>,
+    pub(super) orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
 }
 
 impl InternalProcessAdmin<'_> {
@@ -212,7 +212,7 @@ impl InternalProcessAdmin<'_> {
         // child's settlement possession must name every process the body
         // realized, and an orchestrating body has no attempt frame whose
         // intent outcomes would carry it.
-        if let Some(starts) = &self.orchestrating_starts {
+        if let Some(starts) = &self.orchestrating_sinks {
             starts.enqueue(view.process_id.clone());
         }
         Ok(view)
@@ -457,7 +457,7 @@ impl<'run> InternalProcessAdmin<'run> {
             parent_invocation: None,
             tool_call_id: None,
             execution_env_spec,
-            orchestrating_starts: None,
+            orchestrating_sinks: None,
         }
     }
 }

@@ -1157,9 +1157,14 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::testing::UnavailableEffectController,
-            )),
+            // The completion presents through the journaled boundary, so the
+            // context runs on the backend's own controller.
+            effect_controller: RuntimeEffectControllerHandle::shared(
+                crate::support::scoped_controller(
+                    &backend,
+                    crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
+                ),
+            ),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -1243,7 +1248,8 @@ mod tests {
                     triggers: Vec::new(),
                 },
             )
-            .await;
+            .await
+            .expect("the start call presents");
 
         assert!(
             context.started_process_ids().contains(&child),

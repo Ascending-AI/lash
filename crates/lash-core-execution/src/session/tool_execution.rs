@@ -8,7 +8,6 @@ use crate::{
     ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
     ToolFailure, ToolFailureClass, TurnActivityId, TurnEvent,
 };
-use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -664,12 +663,21 @@ impl RuntimeExecutionContext<'_> {
         .await
     }
 
+    /// Presents a settled call through its journaled `PresentToolResult`
+    /// effect and incorporates its settlement.
+    ///
+    /// # Errors
+    /// When the presentation effect itself fails — a replay divergence
+    /// against its recorded envelope, a journal fault — the call has no
+    /// presentation to show. The error is returned rather than turned into
+    /// the tool's model-facing result, so a divergence parks the turn like any
+    /// other recorded effect's (FIG-3587) and the model is shown nothing.
     pub async fn complete_tool_call(
         &self,
         call_id: String,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
-    ) -> CompletedProtocolToolCall {
+    ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
         let tool_correlation_id = tool_activity_id(&call_id);
         let attempts = outcome.attempts.clone();
         let mut output = outcome.record.output.clone();
@@ -685,7 +693,7 @@ impl RuntimeExecutionContext<'_> {
         // `ToolPresentation` and never re-runs a step.
         let presentation_replay_key = format!("{call_id}:present");
         let scoped = self.dispatch.effect_controller.scoped();
-        let presented = match crate::EffectAddress::new(
+        let presentation = match crate::EffectAddress::new(
             scoped.execution_scope().clone(),
             presentation_replay_key.clone(),
         ) {
@@ -715,15 +723,8 @@ impl RuntimeExecutionContext<'_> {
                 .await
                 .and_then(crate::RuntimeEffectOutcome::into_tool_presentation),
             Err(error) => Err(error.into()),
-        };
-        let mut model_return = match presented {
-            Ok(presentation) => presentation.model_return,
-            Err(error) => ModelToolReturn::text(
-                call_id.clone(),
-                outcome.record.tool.clone(),
-                error.to_string(),
-            ),
-        };
+        }?;
+        let mut model_return = presentation.model_return;
         // ADR 0099 §6/§13: the applicator owns possession, committed messages,
         // trigger receipts and usage charging, exactly once per source. A
         // refusal — an unreadable settlement or a spend with no charge sink —
@@ -769,7 +770,7 @@ impl RuntimeExecutionContext<'_> {
             duration_ms: outcome.record.duration_ms,
         };
         self.emit_tool_call_completed(&record, &attempts).await;
-        CompletedProtocolToolCall {
+        Ok(CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
                 tool_name: outcome.record.tool,
@@ -781,7 +782,7 @@ impl RuntimeExecutionContext<'_> {
                 replay,
             },
             record,
-        }
+        })
     }
 
     async fn emit_tool_call_completed(
@@ -810,7 +811,7 @@ impl RuntimeExecutionContext<'_> {
         call_id: String,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
-    ) -> CompletedProtocolToolCall {
+    ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
         self.emit_tool_call_started(
             &call_id,
             &outcome.record.tool,
@@ -819,6 +820,77 @@ impl RuntimeExecutionContext<'_> {
         )
         .await;
         self.complete_tool_call(call_id, replay, outcome).await
+    }
+
+    /// The completion a language runtime's call answers when a controller
+    /// refused it — its attempt or its presentation: the error is recorded as
+    /// the run's nested effect error, which stops the run at this command (a
+    /// replay divergence parks it), and the call settles a failure that was
+    /// never presented or journaled.
+    pub(crate) async fn refused_completion(
+        &self,
+        call_id: String,
+        tool: String,
+        args: serde_json::Value,
+        error: crate::RuntimeEffectControllerError,
+    ) -> CompletedProtocolToolCall {
+        self.record_nested_effect_error(error.clone());
+        let output = ToolCallOutput::failure(ToolFailure::runtime(
+            ToolFailureClass::Internal,
+            error.code.as_str(),
+            error.message,
+        ));
+        let record = ToolCallRecord {
+            call_id: Some(call_id.clone()),
+            tool: tool.clone(),
+            args: args.clone(),
+            output: output.clone(),
+            duration_ms: 0,
+        };
+        self.emit_tool_call_completed(&record, &[]).await;
+        CompletedProtocolToolCall {
+            completed: crate::sansio::CompletedToolCall {
+                model_return: ModelToolReturn::from_output(call_id.clone(), tool.clone(), &output),
+                call_id,
+                tool_name: tool,
+                args,
+                output,
+                duration_ms: 0,
+                intent_outcomes: Vec::new(),
+                replay: None,
+            },
+            record,
+        }
+    }
+
+    /// [`Self::complete_tool_call`] for a language runtime's call, whose
+    /// presentation failure stops the run instead of reaching its caller.
+    async fn complete_language_tool_call(
+        &self,
+        call_id: String,
+        replay: Option<crate::llm::types::ProviderReplayMeta>,
+        outcome: ToolDispatchOutcome,
+        undispatched: bool,
+    ) -> CompletedProtocolToolCall {
+        let (tool, args) = (outcome.record.tool.clone(), outcome.record.args.clone());
+        // A run that already recorded a nested effect error aborts: this call
+        // was settled from inside it — an orchestrating body whose nested call
+        // was refused, a sibling's divergence — so it presents and journals
+        // nothing of its own (FIG-3679).
+        if let Some(error) = self.peek_nested_effect_error() {
+            return self.refused_completion(call_id, tool, args, error).await;
+        }
+        // Boxed: the presentation future would otherwise inflate every
+        // language runtime's call future past clippy's large-future bound.
+        let completed = if undispatched {
+            Box::pin(self.complete_undispatched_tool_call(call_id.clone(), replay, outcome)).await
+        } else {
+            Box::pin(self.complete_tool_call(call_id.clone(), replay, outcome)).await
+        };
+        match completed {
+            Ok(completed) => completed,
+            Err(error) => Box::pin(self.refused_completion(call_id, tool, args, error)).await,
+        }
     }
 
     pub async fn report_undispatched_tool_call(
@@ -908,7 +980,7 @@ impl RuntimeExecutionContext<'_> {
         replay_suffix: String,
         pending: crate::tool_dispatch::PendingToolDispatchOutcome,
         cancellation: Option<tokio_util::sync::CancellationToken>,
-    ) -> ToolDispatchOutcome {
+    ) -> Result<ToolDispatchOutcome, crate::RuntimeEffectControllerError> {
         let fallback;
         let parent = if let Some(parent) = parent_invocation.as_ref() {
             parent
@@ -946,7 +1018,7 @@ impl RuntimeExecutionContext<'_> {
         )
         .await
         {
-            return Self::unarmed_pending_outcome(pending, err);
+            return Ok(Self::unarmed_pending_outcome(pending, err));
         }
         let cancellation = cancellation.unwrap_or_default();
         let resolver = pending.pending.resolved_by.clone();
@@ -973,17 +1045,17 @@ impl RuntimeExecutionContext<'_> {
         let resolution = match outcome.and_then(crate::RuntimeEffectOutcome::into_await_event) {
             Ok(resolution) => resolution,
             Err(err) => {
-                // An unrecorded `Err` from the journaled `AwaitEvent` is a
-                // live controller fault — the await's claim or finalize
-                // failed. Recording it aborts the enclosing effect like a
-                // crash, so the store diagnostic cannot commit as a tool
-                // result the tool did not produce (FIG-3528). A journaled
-                // error is the await's recorded `Failed` terminal replaying
-                // and stays on the result surface. The failure outcome below
-                // is still built for callers whose frame never observes the
-                // nested error.
+                // An unrecorded `Err` from the journaled `AwaitEvent` — a live
+                // controller fault (its claim or finalize failed) or a replay
+                // divergence against its record — is a refusal, not the
+                // tool's result: it returns to the caller, which aborts the
+                // enclosing run and presents nothing, so neither a store
+                // diagnostic nor a conflict commits or reaches the model as a
+                // tool result (FIG-3528, FIG-3679). A journaled error is the
+                // await's recorded `Failed` terminal replaying and stays on
+                // the result surface.
                 if !err.journaled {
-                    self.record_nested_effect_error(err.clone());
+                    return Err(err);
                 }
                 let record = ToolCallRecord {
                     call_id: None,
@@ -1006,28 +1078,29 @@ impl RuntimeExecutionContext<'_> {
                     &record,
                     None,
                 ));
-                return ToolDispatchOutcome {
+                return Ok(ToolDispatchOutcome {
                     record,
                     attempts,
                     intents: crate::ToolIntents::default(),
                     intent_outcomes: Vec::new(),
                     captures: pending.captures,
                     triggers: pending.triggers,
-                };
+                });
             }
         };
-        self.pending_completion_dispatch_outcome(
-            call_id,
-            pending.tool_name,
-            pending.args,
-            resolution,
-            resolver.as_ref(),
-            pending.duration_ms,
-            pending.attempts,
-            pending.captures,
-            pending.triggers,
-        )
-        .await
+        Ok(self
+            .pending_completion_dispatch_outcome(
+                call_id,
+                pending.tool_name,
+                pending.args,
+                resolution,
+                resolver.as_ref(),
+                pending.duration_ms,
+                pending.attempts,
+                pending.captures,
+                pending.triggers,
+            )
+            .await)
     }
 
     pub fn restore_tool_trigger_outcomes(
@@ -1191,7 +1264,7 @@ impl RuntimeExecutionContext<'_> {
                 triggers: Vec::new(),
             };
             return self
-                .complete_undispatched_tool_call(call_id, replay, outcome)
+                .complete_language_tool_call(call_id, replay, outcome, true)
                 .await;
         };
         self.emit_tool_call_started(
@@ -1298,40 +1371,41 @@ impl RuntimeExecutionContext<'_> {
         let mut outcome = match launch {
             ToolCallLaunch::Done(outcome) => *outcome,
             ToolCallLaunch::Pending(pending) => {
-                self.await_pending_tool_dispatch_outcome_with_suffix(
-                    &call_id,
-                    parent_invocation.clone(),
-                    "await".to_string(),
-                    *pending,
-                    self.cancellation_token.clone(),
-                )
-                .await
-            }
-            ToolCallLaunch::ControllerAborted(error) => {
-                self.record_nested_effect_error(error.clone());
-                crate::tool_dispatch::ToolDispatchOutcome {
-                    record: crate::ToolCallRecord {
-                        call_id: Some(call_id.clone()),
-                        tool: "runtime_effect_controller".to_string(),
-                        args: serde_json::Value::Null,
-                        output: crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                            crate::ToolFailureClass::Internal,
-                            error.code.as_str(),
-                            error.message,
-                        )),
-                        duration_ms: 0,
-                    },
-                    attempts: Vec::new(),
-                    intents: crate::ToolIntents::default(),
-                    intent_outcomes: Vec::new(),
-                    captures: Vec::new(),
-                    triggers: Vec::new(),
+                let (tool, args) = (pending.tool_name.clone(), pending.args.clone());
+                match self
+                    .await_pending_tool_dispatch_outcome_with_suffix(
+                        &call_id,
+                        parent_invocation.clone(),
+                        "await".to_string(),
+                        *pending,
+                        self.cancellation_token.clone(),
+                    )
+                    .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(error) => {
+                        return self.refused_completion(call_id, tool, args, error).await;
+                    }
                 }
+            }
+            // A refusal, not a settlement: the call has no recorded outcome to
+            // present, so it journals no presentation (a fabricated one would
+            // be replayed against the call's real result on the redrive).
+            ToolCallLaunch::ControllerAborted(error) => {
+                return self
+                    .refused_completion(
+                        call_id,
+                        "runtime_effect_controller".to_string(),
+                        serde_json::Value::Null,
+                        error,
+                    )
+                    .await;
             }
         };
         outcome.record.call_id = Some(call_id.clone());
 
-        self.complete_tool_call(call_id, replay, outcome).await
+        self.complete_language_tool_call(call_id, replay, outcome, false)
+            .await
     }
 
     /// Delivers a named signal and JSON payload to a deferred tool handle for code-executor

@@ -894,6 +894,11 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.nested_effect_error.lock_recover().is_some()
     }
 
+    /// The recorded nested effect error, left in place.
+    pub(crate) fn peek_nested_effect_error(&self) -> Option<crate::RuntimeEffectControllerError> {
+        self.nested_effect_error.lock_recover().clone()
+    }
+
     /// This context with `command`'s invocation as the parent every nested
     /// effect it issues descends from (FIG-3586): a process command journals
     /// at `{command}:{effect id}`, under the command's own key.

@@ -1,12 +1,12 @@
 {
   "scenario": "lashlang-effect-summary",
-  "recorded_at_git_sha": "363e4372489763fca76826236ea654152521b7af",
+  "recorded_at_git_sha": "f4303464b4916c75fc60fcd8f8d46466bf483576",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
     "lash:lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000:present": {
       "envelope": {
-        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"replay-corpus-effect-summary\"},\"replay_key\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000:present\"},\"effect_id\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}},\"duration_ms\":4}}",
-        "hash": "5dabe04a459ca9c82b86a9d130fd415af54e427ab7b44f3981572967227cacf6"
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"replay-corpus-effect-summary\"},\"replay_key\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000:present\"},\"effect_id\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}}}}",
+        "hash": "91996344a510aaeaaa5c302deb64ccb1103a1ff13c6fffc6eba09a69b463b08f"
       },
       "outcome": {
         "Ok": {

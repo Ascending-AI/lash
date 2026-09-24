@@ -46,7 +46,12 @@ Three properties of that boundary had drifted from the rest of the runtime:
   observation the steps read from the local executor and never part of the
   command: a redrive serves a journaled attempt at once and re-runs an
   orchestrating body, so a duration in the envelope would refuse a healthy
-  redrive with a replay hash conflict.
+  redrive with a replay hash conflict. A failure of the presentation effect
+  itself — a replay divergence against its record, a journal fault — is no
+  presentation: it never becomes the call's model-facing return. On the turn
+  path it aborts the turn, so a divergence parks it like any recorded
+  effect's (FIG-3587); in a code cell it stops the run at the call's command;
+  in a group child it refuses the child (FIG-3679).
 * **C. Retention is a journaled artifact, not a file.** `SpillPolicy` is
   deleted. A step that keeps full output calls
   `ToolPresentationInput::context.artifacts.retain_text(label, text)`, which the

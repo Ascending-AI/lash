@@ -62,11 +62,13 @@ async fn a_redriven_call_replays_its_presentation_whatever_its_duration() {
     // The live pass: the call took 46 ms.
     let live = turn_context(&backend)
         .complete_tool_call(CALL_ID.to_string(), None, settled(46))
-        .await;
+        .await
+        .expect("the live call presents");
     // The redrive: the journaled attempt is served at once.
     let redriven = turn_context(&backend)
         .complete_tool_call(CALL_ID.to_string(), None, settled(2))
-        .await;
+        .await
+        .expect("the redriven call is served its recorded presentation");
 
     assert_eq!(
         redriven.completed.model_return, live.completed.model_return,
