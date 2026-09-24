@@ -24,9 +24,6 @@ lashlang = ["dep:lashlang"]
 [dependencies]
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
-bytes = { workspace = true }
-http = "1"
-http-body-util = "0.1"
 lash-core = { workspace = true }
 lash-core-worker = { workspace = true }
 lash-trace = { workspace = true }
@@ -50,7 +47,9 @@ lash-conformance.workspace = true
 # its server (endpoint-agnostic) is used here, so the second copy of this
 # crate it links for its own backend never meets these tests' types.
 lash-restate-test.workspace = true
+bytes = { workspace = true }
 chrono = { workspace = true }
+http = "1"
 http-body = "1"
 http-body-util = { version = "0.1", features = ["channel"] }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }

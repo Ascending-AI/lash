@@ -21,10 +21,6 @@ use futures_util::FutureExt as _;
 use lash::TurnInput;
 use lash::rlm::RlmTurnBuilderExt as _;
 use lash::runtime::AwaitEventResolver as _;
-use lash_restate::{
-    LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
-    LashDurableWaitWorkflowImpl, LashProcessAttach, LashProcessAttachImpl, LashProcessWorkflow,
-};
 use restate_sdk::context::{
     ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, RunFuture,
 };

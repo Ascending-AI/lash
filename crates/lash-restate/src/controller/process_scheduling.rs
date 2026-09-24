@@ -124,7 +124,8 @@ where
             ProcessExternalRef {
                 backend: "restate".to_string(),
                 id: format!(
-                    "LashProcessWorkflow/{}",
+                    "{}/{}",
+                    crate::LashService::ProcessWorkflow.name(),
                     crate::process::process_segment_workflow_key(&process_id, 0)
                 ),
                 metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),

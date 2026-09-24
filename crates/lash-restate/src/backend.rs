@@ -12,8 +12,9 @@ use lash_core::facade_support::{ProcessEventSink, TurnWorkDriver};
 use lash_core::{BackendQueuedWork, EffectHost as _, QueuedWorkSubstrate, StoreSet};
 
 use crate::effect_host::RestateEffectHost;
-use crate::ingress::{RestateAuthorityId, RestateConnection};
-use crate::process::RestateProcessDeployment;
+use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
+use crate::process::{RestateProcessDeployment, RestateProcessServing};
+use crate::services::{LashServiceParts, bind_lash_services};
 use crate::turn::RestateTurnAttach;
 
 /// Who runs a [`RestateBackend`]'s queued session work: a required,
@@ -62,6 +63,7 @@ impl From<RestateQueuedWork> for BackendQueuedWork {
 /// an RLM host reads its artifacts from the substrate it journals beside.
 pub struct RestateBackend<S: ?Sized + StoreSet = dyn StoreSet> {
     stores: Arc<S>,
+    connection: RestateConnection,
     effect_host: Arc<RestateEffectHost>,
     process: Arc<RestateProcessDeployment>,
     queued_work: BackendQueuedWork,
@@ -72,23 +74,12 @@ impl<S: ?Sized + StoreSet> Clone for RestateBackend<S> {
     fn clone(&self) -> Self {
         Self {
             stores: Arc::clone(&self.stores),
+            connection: self.connection.clone(),
             effect_host: Arc::clone(&self.effect_host),
             process: Arc::clone(&self.process),
             queued_work: self.queued_work.clone(),
             identity: Arc::clone(&self.identity),
         }
-    }
-}
-
-impl RestateBackend {
-    /// Every service name this backend's wiring addresses on the endpoint:
-    /// the durable-wait pair that carries turn terminal promises, await-event
-    /// waits and cancellation gates, and the process workflow and attach
-    /// services. Assert the set at wiring time with
-    /// [`crate::assert_services_bound`] or
-    /// [`assert_endpoint_bound`](Self::assert_endpoint_bound).
-    pub fn required_service_names() -> Vec<&'static str> {
-        RestateProcessDeployment::required_service_names()
     }
 }
 
@@ -121,7 +112,7 @@ impl<S: ?Sized + StoreSet> RestateBackend<S> {
             authority_id.clone(),
         ));
         let process = Arc::new(RestateProcessDeployment::new_with_sink(
-            connection,
+            connection.clone(),
             authority_id,
             stores.process_registry(),
             stores.process_continuations(),
@@ -130,6 +121,7 @@ impl<S: ?Sized + StoreSet> RestateBackend<S> {
         let identity = Arc::from(effect_host.turn_control_binding_id());
         Self {
             stores,
+            connection,
             effect_host,
             process,
             queued_work: queued_work.into(),
@@ -137,17 +129,37 @@ impl<S: ?Sized + StoreSet> RestateBackend<S> {
         }
     }
 
-    /// Fail at wiring time when `endpoint` does not bind every service in
-    /// [`required_service_names`](Self::required_service_names).
-    pub async fn assert_endpoint_bound(
+    /// The endpoint builder a deployment that serves this backend's work
+    /// starts from, with every Restate service lash itself serves already
+    /// bound: the durable-wait workflow and index, process attach, the
+    /// process workflow over `processes` (a [`DurableProcessWorker`], or a
+    /// [`RestateProcessServing`] that also sets the segment policy), and the
+    /// effect-group index, payload and dispatcher. The host binds only its own services — its
+    /// turn workflows, triggers and cron — on the builder, then builds it.
+    ///
+    /// There is no other way to bind lash's services, so an endpoint cannot
+    /// serve a subset of them. A process that only submits work to Restate
+    /// and serves no handlers does not call this.
+    ///
+    /// Effect-group children route through the resolver registered on this
+    /// backend's effect host — the runtime's tool-child host once a core over
+    /// this backend installs it — and a session-scope child checks its
+    /// session's state generation in this backend's session catalog.
+    ///
+    /// [`DurableProcessWorker`]: lash_core_worker::DurableProcessWorker
+    pub fn endpoint_builder(
         &self,
-        endpoint: &restate_sdk::endpoint::Endpoint,
-    ) -> Result<(), crate::RestateBindingCheckError> {
-        crate::assert_services_bound(
-            endpoint,
-            RestateBackend::required_service_names().as_slice(),
+        processes: impl Into<RestateProcessServing>,
+    ) -> restate_sdk::endpoint::Builder {
+        bind_lash_services(
+            restate_sdk::endpoint::Endpoint::builder(),
+            LashServiceParts {
+                effect_host: &self.effect_host,
+                ingress: RestateIngressClient::new(self.connection.clone()),
+                sessions: self.stores.session_store_factory(),
+                process_workflow: self.process.workflow(processes.into()),
+            },
         )
-        .await
     }
 
     /// The Restate effect host every runtime of this backend runs on.
@@ -155,9 +167,8 @@ impl<S: ?Sized + StoreSet> RestateBackend<S> {
         Arc::clone(&self.effect_host)
     }
 
-    /// The Restate process work over this backend's registry: the
-    /// workflow an endpoint binds and the port a host awaits work items
-    /// through.
+    /// The Restate process work over this backend's registry: the port a
+    /// host admits pending processes and awaits work items through.
     pub fn process_deployment(&self) -> &RestateProcessDeployment {
         &self.process
     }

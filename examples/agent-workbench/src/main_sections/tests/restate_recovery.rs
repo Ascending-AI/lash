@@ -110,6 +110,90 @@ finish(await handle);
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
+/// A turn whose cell awaits two tool calls together opens a durable effect
+/// group, whose index, payload and dispatcher services the workbench endpoint
+/// serves because lash binds them: before the backend bound lash's services,
+/// the workbench bound none of the effect-group family and this turn hung on
+/// the group's first call.
+#[test]
+#[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
+fn live_restate_turn_tool_batch_runs_through_effect_group_services() {
+    run_async_test_on_stack_budget_multi_thread("workbench-tool-batch-e2e", 4, || {
+        live_restate_turn_tool_batch_runs_through_effect_group_services_inner()
+    });
+}
+
+async fn live_restate_turn_tool_batch_runs_through_effect_group_services_inner() {
+    let ingress_url = std::env::var("RESTATE_INGRESS_URL")
+        .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
+    let admin_url =
+        std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:19071".to_string());
+    let data_dir = std::env::temp_dir().join(format!(
+        "agent-workbench-tool-batch-e2e-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&data_dir).expect("create tool-batch E2E data dir");
+    let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let provider_calls_for_provider = Arc::clone(&provider_calls);
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-tool-batch-e2e")
+        .complete(move |_request| {
+            let call =
+                provider_calls_for_provider.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                match call {
+                    0 => Ok(text_response(
+                        r#"<typescript>
+const found = await Promise.all([
+  tools.search({ query: "text checksum", limit: 1 }),
+  tools.search({ query: "mail", limit: 1 }),
+]);
+finish(`tool batch settled: ${found.length}`);
+</typescript>"#,
+                    )),
+                    other => panic!("unexpected tool-batch provider call {other}"),
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let harness = live_workbench_restate_state_with_provider(
+        &data_dir,
+        ingress_url,
+        provider,
+        WorkbenchSessions::fresh(),
+        ActiveTurns::default(),
+    )
+    .await;
+    let mut endpoint = LiveRestateEndpoint::start(
+        &admin_url,
+        harness.state.clone(),
+        harness.backend,
+        harness.process_worker,
+    )
+    .await;
+
+    let invocation = run_workbench_turn_via_restate(&harness.state, "Search twice at once.").await;
+    wait_for_restate_invocation_success(&harness.state, &invocation, Duration::from_secs(30)).await;
+    wait_for_workbench_message(
+        &harness.state,
+        "tool batch settled: 2",
+        Duration::from_secs(30),
+    )
+    .await;
+    assert_eq!(
+        provider_calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "one model call issues the whole batch"
+    );
+    // Not a drained stop: each settled group child leaves its cancellation
+    // watch (a `LashDurableWaitWorkflow/await_resolution` ingress call the
+    // dispatcher dropped) open on the deployment until the group's CANCEL
+    // waits resolve, so the deployment does not drain after the turn.
+    endpoint.stop().await;
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable() {

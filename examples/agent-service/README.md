@@ -136,20 +136,21 @@ also serves a Restate endpoint on `AGENT_SERVICE_RESTATE_ADDR`, and browser
 turns finish the app-specific `AgentServiceTurnWorkflow/{turn_id}/run/send`
 through `RESTATE_INGRESS_URL`. `RESTATE_AUTHORITY_ID` identifies the durable
 Restate state independently of that endpoint; preserve it across endpoint
-moves and choose a different value for every independent Restate state. The endpoint also binds Lash's generic
-`LashProcessWorkflow`, backed by `RestateCoreProcessRunner` and the store set's
-process registry, so background process starts from a turn are
-reconstructed from the SQLite durable-core catalog instead of running in the route
-process. `AgentServiceTurnWorkflowRequest` carries only stable turn, chat, text,
+moves and choose a different value for every independent Restate state. The endpoint starts from
+`RestateBackend::endpoint_builder`, which binds every Lash-owned service,
+among them the generic `LashProcessWorkflow` over the service's process worker
+and the store set's process registry, so background process starts from a turn
+are reconstructed from the SQLite durable-core catalog instead of running in the
+route process. The service binds only its own workflows beside them. `AgentServiceTurnWorkflowRequest` carries only stable turn, chat, text,
 model, and model-variant data; board state stays in the app database. The
 workflow creates a `RestateRuntimeEffectController` and calls
 `session.turn(...).turn_id(...).stream_to_with_effects(..., &controller)`.
 The stable chat/session id and turn id keep Restate replay and Lash final
 commit addressed to the same operation.
 
-The Restate endpoint also binds the complete `RestateEffectGroupServices`
-bundle: `EffectGroupIndex`, `EffectGroupPayload`, `EffectGroupDispatch`,
-`LashDurableWaitWorkflow`, and `LashDurableWaitIndex`. The worked HTTP path
+Among the Lash-owned services are the effect-group ones: `EffectGroupIndex`,
+`EffectGroupPayload`, `EffectGroupDispatch`, `LashDurableWaitWorkflow`, and
+`LashDurableWaitIndex`. The worked HTTP path
 runs a three-child deadline group with one short sleep and two long sleeps. It
 returns the first completed settlement at rank 1, closes under `Cancel`, and
 then reads all durable ranks so the cancelled losers are visible without a

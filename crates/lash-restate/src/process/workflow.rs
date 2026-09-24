@@ -67,12 +67,12 @@ pub trait LashProcessWorkflow {
         request: Json<RestateProcessAwaitRequest>,
     ) -> HandlerResult<Json<RestateProcessCancelSignal>>;
 }
-pub struct LashProcessWorkflowImpl<R> {
+pub(crate) struct LashProcessWorkflowImpl<R> {
     runner: Arc<R>,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     segment_duration_cap: Option<Duration>,
-    segment_effect_budget: Arc<dyn Fn(&ProcessRegistration) -> u64 + Send + Sync>,
+    segment_effect_budget: super::SegmentEffectBudget,
     cancel_ingress: Option<RestateIngressClient>,
     authority_id: crate::RestateAuthorityId,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
@@ -137,14 +137,15 @@ impl<R> LashProcessWorkflowImpl<R> {
         }
     }
 
-    pub fn with_segment_duration_cap(mut self, cap: Duration) -> Self {
+    pub(crate) fn with_segment_duration_cap(mut self, cap: Duration) -> Self {
         self.segment_duration_cap = Some(cap);
         self
     }
 
     /// Attach the host's live trace observer to every process-segment
     /// controller created by this workflow.
-    pub fn with_trace_sink(
+    #[cfg(test)]
+    pub(crate) fn with_trace_sink(
         mut self,
         sink: Arc<dyn lash_trace::TraceSink>,
         context: lash_trace::TraceContext,
@@ -154,16 +155,20 @@ impl<R> LashProcessWorkflowImpl<R> {
         self
     }
 
-    /// Select a deterministic completed-effect budget from immutable process
-    /// registration data. This is primarily useful for conformance/e2e pairs
-    /// that run the same artifact with and without forced segmentation; the
-    /// production default remains 10,000 completed effects per incarnation.
-    pub fn with_segment_effect_budget_selector(
+    pub(crate) fn with_segment_effect_budget(
         mut self,
+        selector: super::SegmentEffectBudget,
+    ) -> Self {
+        self.segment_effect_budget = selector;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_segment_effect_budget_selector(
+        self,
         selector: impl Fn(&ProcessRegistration) -> u64 + Send + Sync + 'static,
     ) -> Self {
-        self.segment_effect_budget = Arc::new(selector);
-        self
+        self.with_segment_effect_budget(Arc::new(selector))
     }
 
     pub(crate) fn cancellation_signal(
@@ -182,7 +187,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             loop {
                 match ingress
                     .call_workflow_json::<_, RestateProcessCancelSignal>(
-                        "LashProcessWorkflow",
+                        crate::LashService::ProcessWorkflow.name(),
                         &workflow_key,
                         "await_cancel",
                         &request,
@@ -206,7 +211,7 @@ impl<R> LashProcessWorkflowImpl<R> {
                         // unregistered-handler shape FIG-1579 rules out. It
                         // leaves as the engine's own 404-class terminal instead.
                         return Err(crate::ingress::unregistered_service_terminal(
-                            "LashProcessWorkflow",
+                            crate::LashService::ProcessWorkflow.name(),
                             "await_cancel",
                             &error,
                         )
@@ -743,8 +748,13 @@ where
         }
         let controller =
             RestateRuntimeEffectController::with_options(ctx, self.authority_id.clone(), options);
-        let controller = if let Some(sink) = self.trace_sink.as_ref() {
-            controller.with_trace_sink_and_context(Arc::clone(sink), self.trace_context.clone())
+        let trace = self
+            .trace_sink
+            .as_ref()
+            .map(|sink| (Arc::clone(sink), self.trace_context.clone()))
+            .or_else(|| self.runner.trace());
+        let controller = if let Some((sink, context)) = trace {
+            controller.with_trace_sink_and_context(sink, context)
         } else {
             controller
         };
@@ -809,7 +819,10 @@ where
                         &process_id,
                         lash_core::ProcessExternalRef {
                             backend: "restate".to_string(),
-                            id: format!("LashProcessWorkflow/{successor_key}"),
+                            id: format!(
+                                "{}/{successor_key}",
+                                crate::LashService::ProcessWorkflow.name()
+                            ),
                             metadata: None,
                             segment_ordinal: Some(next_segment_ordinal),
                         },

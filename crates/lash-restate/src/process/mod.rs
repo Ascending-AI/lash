@@ -36,9 +36,8 @@ use serde::Serialize;
 use crate::durable_wait::restate_await_event_key_for_authority;
 use crate::ingress::{RestateConnection, RestateIngressClient};
 
-pub use workflow::{
+pub(crate) use workflow::{
     LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,
-    ServeLashProcessWorkflow,
 };
 
 pub(crate) const PROCESS_CANCEL_PROMISE_KEY: &str = "process_cancel_requested";
@@ -122,7 +121,11 @@ pub(crate) fn process_ingress_submit_error(
     if err.is_service_unregistered() {
         PluginError::Runtime(RuntimeError::new(
             RuntimeErrorCode::RestateServiceUnregistered,
-            crate::ingress::unregistered_service_message("LashProcessWorkflow", "run", &err),
+            crate::ingress::unregistered_service_message(
+                crate::LashService::ProcessWorkflow.name(),
+                "run",
+                &err,
+            ),
         ))
     } else {
         PluginError::Runtime(RuntimeError::new(
@@ -271,7 +274,7 @@ impl RestateProcessCancelRequest {
 }
 
 #[async_trait::async_trait]
-pub trait RestateProcessRunner: Send + Sync + 'static {
+pub(crate) trait RestateProcessRunner: Send + Sync + 'static {
     /// Run one admitted segment. `started` is the proof that the segment's
     /// start marker committed (FIG-3588); a runner cannot be driven without it.
     async fn run_process_segment(
@@ -295,27 +298,69 @@ pub trait RestateProcessRunner: Send + Sync + 'static {
     /// grammar the runner's engine requires before any body runs. A runner
     /// whose engine keys no journal by grammar answers `None`.
     fn replay_key_grammar(&self, registration: &ProcessRegistration) -> Option<u32>;
+
+    /// The live trace observer and context segment controllers report to,
+    /// when the runner's worker has one. A workflow given its own sink uses
+    /// that instead.
+    fn trace(&self) -> Option<(Arc<dyn lash_trace::TraceSink>, lash_trace::TraceContext)> {
+        None
+    }
+}
+
+/// Runs process segments on a deployment's [`DurableProcessWorker`]: one
+/// given up front, or one installed in a [`RestateProcessWorkerSlot`] after
+/// the endpoint exists.
+#[derive(Clone)]
+pub(crate) struct RestateCoreProcessRunner {
+    worker: ProcessWorkerSource,
 }
 
 #[derive(Clone)]
-pub struct RestateCoreProcessRunner {
-    worker: DurableProcessWorker,
+enum ProcessWorkerSource {
+    Ready(DurableProcessWorker),
+    Slot(RestateProcessWorkerSlot),
 }
 
 impl RestateCoreProcessRunner {
-    pub fn new(worker: DurableProcessWorker) -> Self {
-        Self { worker }
+    #[cfg(test)]
+    pub(crate) fn new(worker: DurableProcessWorker) -> Self {
+        Self {
+            worker: ProcessWorkerSource::Ready(worker),
+        }
     }
 
-    pub fn worker(&self) -> &DurableProcessWorker {
-        &self.worker
+    /// The worker segments run on. A slot nothing is installed in yet refuses:
+    /// the endpoint was bound before its core existed, and the host has not
+    /// installed the core's worker.
+    fn worker(&self) -> Result<DurableProcessWorker, PluginError> {
+        match &self.worker {
+            ProcessWorkerSource::Ready(worker) => Ok(worker.clone()),
+            ProcessWorkerSource::Slot(slot) => slot.installed().ok_or_else(|| {
+                PluginError::Invoke(
+                    "no process worker is installed in this deployment's \
+                     RestateProcessWorkerSlot yet"
+                        .to_owned(),
+                )
+            }),
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl RestateProcessRunner for RestateCoreProcessRunner {
     fn replay_key_grammar(&self, registration: &ProcessRegistration) -> Option<u32> {
-        self.worker.replay_key_grammar(registration)
+        self.worker()
+            .ok()
+            .and_then(|worker| worker.replay_key_grammar(registration))
+    }
+
+    fn trace(&self) -> Option<(Arc<dyn lash_trace::TraceSink>, lash_trace::TraceContext)> {
+        let worker = self.worker().ok()?;
+        let tracing = &worker.config().runtime_host.tracing;
+        tracing
+            .trace_sink
+            .clone()
+            .map(|sink| (sink, tracing.trace_context.clone()))
     }
 
     async fn run_process_segment(
@@ -327,18 +372,16 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
         handover: Option<lash_core::SegmentHandover>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, PluginError> {
+        let worker = self.worker()?;
         let execution_write_authority = started.write_authority().clone();
-        Box::pin(
-            self.worker
-                .run_process_segment_with_scoped_effect_controller(
-                    registration,
-                    execution_context,
-                    execution_write_authority,
-                    scoped_effect_controller,
-                    cancellation,
-                    handover,
-                ),
-        )
+        Box::pin(worker.run_process_segment_with_scoped_effect_controller(
+            registration,
+            execution_context,
+            execution_write_authority,
+            scoped_effect_controller,
+            cancellation,
+            handover,
+        ))
         .await
     }
 
@@ -346,11 +389,12 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
         &self,
         request: RestateProcessCancelRequest,
     ) -> Result<(), PluginError> {
-        self.worker
+        self.worker()?
             .request_process_cancel(&request.process_ref, &request.request)
             .await
     }
 }
+
 /// [`ProcessWorkSubstrate`] that drives pending processes by submitting their
 /// `LashProcessWorkflow` through the Restate ingress instead of running them
 /// in-process.
@@ -480,7 +524,7 @@ impl RestateProcessIngressRunner {
         let invocation_id = self
             .ingress
             .send_workflow_json(
-                "LashProcessWorkflow",
+                crate::LashService::ProcessWorkflow.name(),
                 &workflow_key,
                 "run",
                 &RestateProcessWorkflowInput {
@@ -499,7 +543,10 @@ impl RestateProcessIngressRunner {
                 &process_id,
                 ProcessExternalRef {
                     backend: "restate".to_string(),
-                    id: format!("LashProcessWorkflow/{workflow_key}"),
+                    id: format!(
+                        "{}/{workflow_key}",
+                        crate::LashService::ProcessWorkflow.name()
+                    ),
                     metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),
                     segment_ordinal: Some(segment_ordinal),
                 },
@@ -685,7 +732,7 @@ impl RestateProcessIngressRunner {
         let outcome = self
             .ingress
             .call_workflow_json::<_, ProcessAwaitOutput>(
-                "LashProcessWorkflow",
+                crate::LashService::ProcessWorkflow.name(),
                 &process_ref.process_id,
                 "await_terminal",
                 &RestateProcessAwaitRequest {
@@ -703,7 +750,7 @@ impl RestateProcessIngressRunner {
                 Err(PluginError::Runtime(RuntimeError::new(
                     RuntimeErrorCode::RestateProcessAwait,
                     crate::ingress::unresolvable_call_target_message(
-                        "LashProcessWorkflow",
+                        crate::LashService::ProcessWorkflow.name(),
                         "await_terminal",
                         &err,
                     ),
@@ -839,39 +886,6 @@ impl RestateProcessDeployment {
         self.wiring.clone()
     }
 
-    /// Every service name this deployment's wiring addresses on the endpoint.
-    ///
-    /// `LashProcessWorkflow` is the segment runner the ingress side submits to
-    /// and awaits; `LashProcessAttach` holds process-terminal waits armed for
-    /// parked callers; the durable-wait pair carries the waits and
-    /// cancellation gates the workflow's handlers register. An endpoint
-    /// missing any of them compiles and deploys clean, then fails the first
-    /// call that needs it — assert the set at wiring time with
-    /// [`crate::assert_services_bound`] or
-    /// [`assert_endpoint_bound`](Self::assert_endpoint_bound).
-    pub fn required_service_names() -> Vec<&'static str> {
-        vec![
-            "LashProcessWorkflow",
-            "LashProcessAttach",
-            "LashDurableWaitWorkflow",
-            "LashDurableWaitIndex",
-        ]
-    }
-
-    /// Fail at wiring time when `endpoint` does not bind every service in
-    /// [`required_service_names`](Self::required_service_names).
-    ///
-    /// The check asks the built endpoint for its own discovery document, so a
-    /// [`crate::RestateBindingCheckError::Discovery`] means the endpoint would
-    /// not
-    /// report its surface — not that anything is unbound.
-    pub async fn assert_endpoint_bound(
-        &self,
-        endpoint: &restate_sdk::endpoint::Endpoint,
-    ) -> Result<(), crate::RestateBindingCheckError> {
-        crate::assert_services_bound(endpoint, Self::required_service_names().as_slice()).await
-    }
-
     #[cfg(test)]
     pub(crate) fn test_registry(&self) -> Arc<dyn ProcessRegistry> {
         Arc::clone(&self.registry)
@@ -882,26 +896,155 @@ impl RestateProcessDeployment {
         Arc::clone(&self.process_work)
     }
 
-    pub fn workflow(
+    /// The process workflow over `serving`'s worker, under its segment
+    /// policy. Only [`crate::services::bind_lash_services`] binds it.
+    pub(crate) fn workflow(
         &self,
-        worker: DurableProcessWorker,
+        serving: RestateProcessServing,
     ) -> LashProcessWorkflowImpl<RestateCoreProcessRunner> {
-        let trace_sink = worker.config().runtime_host.tracing.trace_sink.clone();
-        let trace_context = worker.config().runtime_host.tracing.trace_context.clone();
-        let workflow = LashProcessWorkflowImpl::new(
-            Arc::new(RestateCoreProcessRunner::new(worker)),
+        let RestateProcessServing {
+            worker,
+            segment_duration_cap,
+            segment_effect_budget,
+        } = serving;
+        let mut workflow = LashProcessWorkflowImpl::new(
+            Arc::new(RestateCoreProcessRunner { worker }),
             Arc::clone(&self.registry),
             Arc::clone(&self.continuations),
             self.ingress.clone(),
             self.authority_id.clone(),
         );
-        if let Some(sink) = trace_sink {
-            workflow.with_trace_sink(sink, trace_context)
-        } else {
-            workflow
+        if let Some(cap) = segment_duration_cap {
+            workflow = workflow.with_segment_duration_cap(cap);
         }
+        if let Some(selector) = segment_effect_budget {
+            workflow = workflow.with_segment_effect_budget(selector);
+        }
+        workflow
     }
 }
+
+/// How a Restate deployment serves lash processes: the worker that runs their
+/// segments and the policy that bounds each segment. A host hands it to
+/// [`RestateBackend::endpoint_builder`](crate::RestateBackend::endpoint_builder);
+/// a bare [`DurableProcessWorker`] or a [`RestateProcessWorkerSlot`] converts
+/// into one with the default policy.
+pub struct RestateProcessServing {
+    worker: ProcessWorkerSource,
+    segment_duration_cap: Option<Duration>,
+    segment_effect_budget: Option<SegmentEffectBudget>,
+}
+
+/// Picks a process's completed-effect budget per segment from its
+/// registration.
+pub(crate) type SegmentEffectBudget = Arc<dyn Fn(&ProcessRegistration) -> u64 + Send + Sync>;
+
+impl RestateProcessServing {
+    /// Serve processes on `worker` under the default segment policy: no
+    /// wall-clock cap, and 10,000 completed effects per incarnation.
+    pub fn new(worker: DurableProcessWorker) -> Self {
+        Self::from_source(ProcessWorkerSource::Ready(worker))
+    }
+
+    /// Serve processes on whatever worker `slot` holds when a segment runs,
+    /// under the default segment policy.
+    pub fn from_slot(slot: RestateProcessWorkerSlot) -> Self {
+        Self::from_source(ProcessWorkerSource::Slot(slot))
+    }
+
+    fn from_source(worker: ProcessWorkerSource) -> Self {
+        Self {
+            worker,
+            segment_duration_cap: None,
+            segment_effect_budget: None,
+        }
+    }
+
+    /// End a segment once it has run for `cap`.
+    pub fn with_segment_duration_cap(mut self, cap: Duration) -> Self {
+        self.segment_duration_cap = Some(cap);
+        self
+    }
+
+    /// Select a deterministic completed-effect budget from immutable process
+    /// registration data. This is primarily useful for conformance/e2e pairs
+    /// that run the same artifact with and without forced segmentation; the
+    /// production default remains 10,000 completed effects per incarnation.
+    pub fn with_segment_effect_budget_selector(
+        mut self,
+        selector: impl Fn(&ProcessRegistration) -> u64 + Send + Sync + 'static,
+    ) -> Self {
+        self.segment_effect_budget = Some(Arc::new(selector));
+        self
+    }
+}
+
+impl From<DurableProcessWorker> for RestateProcessServing {
+    fn from(worker: DurableProcessWorker) -> Self {
+        Self::new(worker)
+    }
+}
+
+impl From<RestateProcessWorkerSlot> for RestateProcessServing {
+    fn from(slot: RestateProcessWorkerSlot) -> Self {
+        Self::from_slot(slot)
+    }
+}
+
+/// The process worker of a deployment whose endpoint must exist before the
+/// core that makes the worker does: bind the endpoint over the slot, build the
+/// core, then [`install`](Self::install) its worker. A segment that runs
+/// before the install fails, naming the empty slot. Clones share one slot.
+#[derive(Clone, Default)]
+pub struct RestateProcessWorkerSlot {
+    worker: Arc<std::sync::RwLock<Option<DurableProcessWorker>>>,
+}
+
+impl RestateProcessWorkerSlot {
+    /// An empty slot.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Serve every later segment on `worker`, replacing any worker installed
+    /// before.
+    pub fn install(&self, worker: DurableProcessWorker) {
+        *self
+            .worker
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(worker);
+    }
+
+    fn installed(&self) -> Option<DurableProcessWorker> {
+        self.worker
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl std::fmt::Debug for RestateProcessWorkerSlot {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RestateProcessWorkerSlot")
+            .field("installed", &self.installed().is_some())
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for RestateProcessServing {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RestateProcessServing")
+            .field("segment_duration_cap", &self.segment_duration_cap)
+            .field(
+                "segment_effect_budget",
+                &self.segment_effect_budget.as_ref().map(|_| "selector"),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateProcessWorkflowInput {
     pub registration: ProcessRegistration,

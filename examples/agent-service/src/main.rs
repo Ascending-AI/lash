@@ -83,10 +83,7 @@ use crate::state::{AgentServiceDurability, AppStateData, anyhow_like};
 #[cfg(feature = "restate")]
 use lash::durability::DurableProcessWorker;
 #[cfg(feature = "restate")]
-use lash_restate::{
-    LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessAttach, LashProcessAttachImpl,
-    LashProcessWorkflow, RestateBackend, RestateEffectGroupServices,
-};
+use lash_restate::RestateBackend;
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 
@@ -448,42 +445,18 @@ async fn async_main() -> anyhow_like::Result<()> {
 
         #[cfg(feature = "restate")]
         let restate_endpoint = if let Some(restate_backend) = restate_backend {
-            let process_deployment = restate_backend.process_deployment();
-            let effect_groups = crate::effect_groups::effect_group_services(
-                restate_backend.effect_host().as_ref(),
-                state
-                    .restate_ingress_url()
-                    .expect("Restate durability configures ingress"),
-                Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>,
-            );
-            let endpoint = restate_sdk::endpoint::Endpoint::builder()
+            // Lash's own services come from the backend; the service binds
+            // only its turn and effect-group demo workflows beside them.
+            let endpoint = restate_backend
+                .endpoint_builder(process_worker.expect("process worker configured for Restate"))
                 .bind(lash_restate::turn_service(
                     AgentServiceTurnWorkflowImpl::new(state.clone()).serve(),
                     "run",
                 ))
                 .bind(AgentServiceEffectGroupWorkflowImpl.serve())
-                .bind(
-                    process_deployment
-                        .workflow(process_worker.expect("process worker configured for Restate"))
-                        .serve(),
-                )
-                .bind(effect_groups.index)
-                .bind(effect_groups.payload)
-                .bind(effect_groups.dispatch)
-                .bind(effect_groups.wait.workflow.serve())
-                .bind(effect_groups.wait.index.serve())
-                .bind(LashProcessAttachImpl.serve())
                 .build();
-            // Wiring-time check: the deployments know the lash service surface
-            // they require, and the built endpoint reports what it bound. A
-            // missing bind fails startup here rather than the first call that
-            // would 404.
-            let mut required_services = RestateBackend::required_service_names();
-            required_services.extend(RestateEffectGroupServices::required_service_names());
-            lash_restate::assert_services_bound(&endpoint, &required_services)
-                .await
-                .map_err(|err| format!("agent-service Restate endpoint binding check: {err}"))?;
-            let _ = process_deployment
+            let _ = restate_backend
+                .process_deployment()
                 .process_work()
                 .admit_pending_processes("agent_service_startup")
                 .await
