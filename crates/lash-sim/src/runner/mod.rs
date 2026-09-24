@@ -191,6 +191,8 @@ mod generated_profiles;
 mod generated_world;
 mod harness;
 mod provider_proofs;
+#[cfg(test)]
+mod restate_double_tests;
 mod rlm_contracts;
 mod runtime_completion;
 mod runtime_proofs;

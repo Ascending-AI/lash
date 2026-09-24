@@ -3,6 +3,7 @@
 //! (cancel, kill, resume, the `sys_invocation` query), served in process.
 
 use std::sync::{Arc, Weak};
+use std::task::Poll;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -54,12 +55,55 @@ impl HttpTransport for IngressTransport {
         let Some(shared) = self.shared.upgrade() else {
             return Ok(error(503, "the Restate test server has shut down"));
         };
-        let routes = Routes { shared };
+        // Serial scheduling: a request a handler issues frees the turn for
+        // the invocations it may wait on, and the handler resumes only once
+        // its attempt holds the turn again.
+        let turn = shared.current_turn();
+        if turn.is_some() {
+            // The SDK writes a `ctx.run`'s command before it polls the
+            // closure, but the attempt task applies it only once the handler
+            // yields: yield once, so the run this request is issued from is
+            // on the journal when the request is attributed to it.
+            tokio::task::yield_now().await;
+        }
+        let waiting = turn.map(|turn| (turn, shared.ingress_began(turn)));
+        let routes = Routes {
+            shared: Arc::clone(&shared),
+        };
         let message = request
             .response_start_timeout_message
             .clone()
             .unwrap_or_else(|| format!("{} timed out", request.url));
-        run_with_timeout(async { Ok(routes.route(request).await) }, timeout, &message).await
+        let outside = shared.config.scheduling == super::Scheduling::Serial && turn.is_none();
+        let response = run_with_timeout(
+            async {
+                if !outside {
+                    return Ok(routes.route(request).await);
+                }
+                // Serial scheduling: land between turns. A route reaches the
+                // server in its first poll — it submits, signals or reads
+                // under the lock before it first waits — so the request has
+                // landed once that poll returns.
+                routes
+                    .shared
+                    .wait_to_land(&request.url, &request.body)
+                    .await;
+                let mut route = std::pin::pin!(routes.route(request));
+                let first = std::future::poll_fn(|cx| Poll::Ready(route.as_mut().poll(cx))).await;
+                routes.shared.landed();
+                Ok(match first {
+                    Poll::Ready(response) => response,
+                    Poll::Pending => route.await,
+                })
+            },
+            timeout,
+            &message,
+        )
+        .await;
+        if let Some((turn, ticket)) = waiting {
+            shared.ingress_ended(turn, ticket).await;
+        }
+        response
     }
 }
 

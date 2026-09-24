@@ -17,6 +17,7 @@ mod ingress;
 mod model;
 mod processor;
 mod query;
+mod serial;
 mod timers;
 
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
@@ -72,6 +73,20 @@ impl TimeMode {
     }
 }
 
+/// How the server runs attempts that are live at the same time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Scheduling {
+    /// Every live attempt runs whenever Tokio polls it, as against a real
+    /// server: lash's concurrent handlers race.
+    #[default]
+    Concurrent,
+    /// One attempt runs at a time and the turn passes in a seeded order, so
+    /// a scenario's attempts interleave the same way on every run of one
+    /// seed. See the `serial` module docs for what it orders and what it
+    /// cannot.
+    Serial,
+}
+
 /// The server's configuration. [`Default`] is what production runs:
 /// protocol V6, streaming attempts, Restate 1.7's default retry policy.
 #[derive(Clone, Debug)]
@@ -84,6 +99,7 @@ pub struct ServerConfig {
     /// step replays — the `INACTIVITY_TIMEOUT=0s` mode.
     pub always_replay: bool,
     pub time: TimeMode,
+    pub scheduling: Scheduling,
     /// Virtual epoch milliseconds the server starts at.
     pub start_time_ms: u64,
     /// Virtual idle time after which the invoker closes a starved stream.
@@ -102,6 +118,7 @@ impl Default for ServerConfig {
             protocol: ProtocolVersion::V6,
             always_replay: false,
             time: TimeMode::auto(),
+            scheduling: Scheduling::Concurrent,
             start_time_ms: 1_800_000_000_000,
             inactivity_timeout: Duration::from_secs(60),
             retry: RetryPolicy {
@@ -129,6 +146,11 @@ impl ServerConfig {
 
     pub fn time(mut self, time: TimeMode) -> Self {
         self.time = time;
+        self
+    }
+
+    pub fn scheduling(mut self, scheduling: Scheduling) -> Self {
+        self.scheduling = scheduling;
         self
     }
 
@@ -220,11 +242,71 @@ impl Shared {
         frame: Frame,
         received_us: u128,
     ) -> Flow {
-        self.lock().on_frame(self, key, number, frame, received_us)
+        let mut state = self.lock();
+        let flow = state.on_frame(self, key, number, frame, received_us);
+        let granted = state.schedule();
+        drop(state);
+        if granted {
+            self.activity.notify_waiters();
+        }
+        flow
     }
 
     fn stream_ended(self: &Arc<Self>, key: InvKey, number: u32, detail: String) {
-        self.lock().stream_ended(self, key, number, detail);
+        let mut state = self.lock();
+        state.stream_ended(self, key, number, detail);
+        let granted = state.schedule();
+        drop(state);
+        if granted {
+            self.activity.notify_waiters();
+        }
+    }
+
+    /// Serial scheduling: an ingress request issued by the handler of
+    /// `turn` is in flight; the turn may move on.
+    fn ingress_began(&self, turn: serial::Turn) -> u64 {
+        let ticket = self.lock().ingress_began(turn);
+        self.activity.notify_waiters();
+        ticket
+    }
+
+    /// Serial scheduling: the request answered. Returns once `turn` holds
+    /// the turn again (or is no longer live), so its handler resumes alone.
+    async fn ingress_ended(&self, turn: serial::Turn, ticket: u64) {
+        self.lock().ingress_ended(ticket);
+        self.activity.notify_waiters();
+        loop {
+            let notified = self.activity.notified();
+            if self.lock().may_run(turn) {
+                return;
+            }
+            let _ = tokio::time::timeout(Duration::from_millis(2), notified).await;
+        }
+    }
+
+    /// Serial scheduling: wait until an ingress request from outside every
+    /// attempt may land. [`landed`](Self::landed) must follow once it has
+    /// reached the server.
+    async fn wait_to_land(&self, url: &str, body: &bytes::Bytes) {
+        let (admit, admitted) = tokio::sync::oneshot::channel();
+        self.lock()
+            .wait_to_land(url.to_owned(), body.clone(), admit);
+        self.activity.notify_waiters();
+        let _ = admitted.await;
+    }
+
+    fn landed(&self) {
+        self.lock().landed();
+        self.activity.notify_waiters();
+    }
+
+    /// Serial scheduling: the turn of the attempt whose task is running
+    /// this code, when that attempt is one of this server's.
+    fn current_turn(self: &Arc<Self>) -> Option<serial::Turn> {
+        if self.config.scheduling != Scheduling::Serial {
+            return None;
+        }
+        attempt::current_turn(self)
     }
 }
 
@@ -249,7 +331,7 @@ impl Drop for Shutdown {
         let mut state = shared.lock();
         for invocation in &mut state.invocations {
             if let Status::Running(attempt) = &mut invocation.status {
-                attempt.input = None;
+                attempt.close();
                 if let Some(abort) = attempt.abort.take() {
                     abort.abort();
                 }
@@ -315,7 +397,7 @@ impl RestateTestServer {
     /// [`register`](Self::register)ed. Must run inside a Tokio runtime.
     pub fn new(config: ServerConfig) -> Result<Self, StartError> {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| StartError::NoRuntime)?;
-        let state = State::new(config.seed, config.start_time_ms);
+        let state = State::new(config.seed, config.start_time_ms, config.scheduling);
         let shared = Arc::new(Shared {
             deployment: OnceLock::new(),
             config,
@@ -328,6 +410,9 @@ impl RestateTestServer {
             shared
                 .runtime
                 .spawn(auto_advance(Arc::downgrade(&shared), idle, horizon));
+        }
+        if shared.config.scheduling == Scheduling::Serial {
+            shared.runtime.spawn(serial::drive(Arc::downgrade(&shared)));
         }
         let shutdown = Arc::new(Shutdown {
             shared: Arc::downgrade(&shared),
@@ -515,6 +600,21 @@ impl RestateTestServer {
                     .map(|failure| (failure.code, failure.message.clone())),
             })
             .collect()
+    }
+
+    /// Under [`Scheduling::Serial`], every grant of the turn so far, in
+    /// order: the invocation id and attempt number that ran. Equal across
+    /// two runs of one seed exactly when their attempts interleaved the
+    /// same way. Empty under [`Scheduling::Concurrent`].
+    pub fn schedule_trace(&self) -> Vec<(String, u32)> {
+        let state = self.shared.lock();
+        state.serial.as_ref().map_or_else(Vec::new, |serial| {
+            serial
+                .trace()
+                .iter()
+                .map(|&(key, number)| (state.invocations[key.0].id.as_str().to_owned(), number))
+                .collect()
+        })
     }
 
     /// `invocation`'s journal, commands and notifications in stored order.
