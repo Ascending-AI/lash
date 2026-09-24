@@ -183,6 +183,19 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         self.journal_faults.clone()
     }
 
+    /// Testing seam (FIG-3598): the row store's §5 barrier read, whether a
+    /// committed sibling below `commit_seq` in `group_key` still owes its
+    /// drain. The controller surface only waits the barrier out; a
+    /// differential that compares the barrier's answer across backends reads
+    /// it here.
+    pub async fn drain_blocked_for_testing(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        self.row_store.drain_blocked(group_key, commit_seq).await
+    }
+
     /// The error an armed journal fault substitutes for the `point` call on
     /// `replay_key`, when one is armed.
     pub(crate) fn take_journal_fault(

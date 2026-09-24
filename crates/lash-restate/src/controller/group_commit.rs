@@ -1,9 +1,11 @@
-//! The §4 boundary for one group child's final record, routed through the
-//! durable index objects.
+//! The §4 boundary for one group child's final record, and the §5 barrier its
+//! drain waits at, routed through the durable index objects.
 //!
 //! Split out of `mod.rs` only for the production file-size budget: this is
 //! the routing half of
 //! [`RuntimeEffectController::commit_group_child_final`](lash_core::RuntimeEffectController::commit_group_child_final)
+//! and
+//! [`RuntimeEffectController::await_group_child_drain_admission`](lash_core::RuntimeEffectController::await_group_child_drain_admission)
 //! for the Restate tier. The child's own scope index answers which group owns
 //! its replay key, and that group's index takes the commit. The serialized
 //! object handler — not any state the controller holds — is the linearization
@@ -18,7 +20,8 @@ use lash_core::facade_support::effect_replay_driver::{
 use lash_core::{ExecutionScope, RuntimeEffectControllerError};
 
 use crate::effect_group::{
-    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse, group_shape_error,
+    EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
+    EffectGroupDrainBlockersResponse, drained_wait_lifted, drained_wait_request, group_shape_error,
 };
 
 use super::{RestateControllerContext, effect_group_engine_error};
@@ -88,4 +91,55 @@ where
             )));
         }
     })
+}
+
+/// The §5 barrier on the engine's own wake: the index names the lower-commit
+/// siblings still owed a seat, and the drain parks on each one's durable
+/// drained wake — the same wake the dispatch workflow's settlement parks on —
+/// rather than polling the index. The set was fixed when this child's commit
+/// position was allocated, so waiting out each member once lifts the barrier.
+pub(super) async fn await_group_child_drain_admission<'ctx, C>(
+    context: &C,
+    group_key: &str,
+    commit_seq: u64,
+) -> Result<(), RuntimeEffectControllerError>
+where
+    C: RestateControllerContext<'ctx>,
+{
+    let (wait_scope, positions) = match context
+        .effect_group_drain_blockers(group_key.to_string(), commit_seq)
+        .await
+        .map_err(|error| effect_group_engine_error("EffectGroupIndex/drain_blockers", error))?
+    {
+        EffectGroupDrainBlockersResponse::Admitted => return Ok(()),
+        EffectGroupDrainBlockersResponse::Blocked {
+            wait_scope,
+            positions,
+        } => (wait_scope, positions),
+    };
+    for position in positions {
+        let request = drained_wait_request(&wait_scope, group_key, position)?;
+        let replay_key = request.key.key_id.clone();
+        let resolution = context
+            .await_effect_group_wait(
+                request,
+                replay_key,
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .map_err(|error| {
+                effect_group_engine_error(
+                    "LashDurableWaitWorkflow/await_resolution(DRAINED)",
+                    error,
+                )
+            })?
+            .ok_or_else(|| {
+                group_shape_error(format!(
+                    "effect group {group_key} drained wake for child {position} ended without \
+                     a resolution under a token nothing cancels"
+                ))
+            })?;
+        drained_wait_lifted(group_key, position, resolution)?;
+    }
+    Ok(())
 }

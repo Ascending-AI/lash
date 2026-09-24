@@ -699,13 +699,13 @@ impl RuntimeEffectController for FencedNativeController {
         self.host.commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
+    ) -> Result<(), RuntimeEffectControllerError> {
         self.host
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 }
@@ -790,13 +790,13 @@ impl RuntimeEffectController for NativeEffectHost {
         self.controller.commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
+    ) -> Result<(), RuntimeEffectControllerError> {
         self.controller
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 }

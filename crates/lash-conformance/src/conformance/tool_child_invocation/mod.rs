@@ -967,9 +967,9 @@ fn law_orchestrating_tool() -> crate::tool_provider::orchestration::Orchestratin
 }
 
 /// Optional wiring an opener's lent dispatch can carry beyond the law's
-/// defaults (FIG-3420): presentation-step plugin factories, and a session
-/// attachment store the law built itself so it can observe and re-read what
-/// a step retains.
+/// defaults: presentation-step plugin factories, a session attachment store
+/// the law built itself so it can observe and re-read what a step retains
+/// (FIG-3420), and the clock the dispatch runs on (FIG-3598).
 #[derive(Default)]
 struct OpenerExtras {
     /// Added on top of the code-protocol factories the context defaults to.
@@ -977,6 +977,8 @@ struct OpenerExtras {
     /// The session attachment store the dispatch binds; `None` binds no
     /// attachment port, so a put is refused.
     attachment_store: Option<Arc<crate::SessionAttachmentStore>>,
+    /// The clock the lent dispatch runs on; `None` keeps the builder's.
+    clock: Option<Arc<dyn crate::Clock>>,
 }
 
 /// The dispatch context one opener lends its children on one host view.
@@ -1041,6 +1043,9 @@ fn build_opener_dispatch(
     .borrowed_effect_controller(controller);
     if let Some(attachment_store) = extras.attachment_store {
         builder = builder.attachment_store(attachment_store);
+    }
+    if let Some(clock) = extras.clock {
+        builder = builder.clock(clock);
     }
     if !extras.plugin_factories.is_empty() {
         // A conformance context must keep the code protocol the builder

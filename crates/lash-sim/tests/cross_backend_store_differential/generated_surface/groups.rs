@@ -154,6 +154,18 @@ impl GroupHost {
         }
     }
 
+    /// The backend's §5 barrier read, straight from its row store.
+    pub(super) async fn drain_blocked(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+        match self {
+            Self::Sqlite(host) => host.drain_blocked_for_testing(group_key, commit_seq).await,
+            Self::Postgres(host) => host.drain_blocked_for_testing(group_key, commit_seq).await,
+        }
+    }
+
     pub(super) fn group_controller(&self) -> Result<Arc<dyn RuntimeEffectController>, String> {
         let admitted = AdmittedScope::unpinned(group_scope()).map_err(|error| error.to_string())?;
         let scoped = match self {
@@ -269,9 +281,9 @@ impl GroupOpener {
                     let setup = async {
                         let host = group_opener_host(&backend, &executors).await?;
                         let controller = host.group_controller()?;
-                        Ok::<_, String>((host, controller))
+                        Ok::<_, String>(OpenerSide { host, controller })
                     };
-                    let (_host, controller) = match setup.await {
+                    let opener = match setup.await {
                         Ok(parts) => parts,
                         Err(error) => {
                             let _ = ready.send(Err(error));
@@ -282,7 +294,7 @@ impl GroupOpener {
                     let mut handle: Option<EffectGroupHandle> = None;
                     while let Some((command, reply)) = inbox.recv().await {
                         let outcome = dispatch_group_command(
-                            &controller,
+                            &opener,
                             &executors,
                             &group_key,
                             &scope_id,
@@ -416,10 +428,17 @@ pub(super) fn neutral_error_code(error: &lash_core::RuntimeEffectControllerError
         .to_string()
 }
 
+/// What an opener thread holds: its host, for the row-store reads a probe
+/// makes, and the host's scoped group controller every other command drives.
+pub(super) struct OpenerSide {
+    host: GroupHost,
+    controller: Arc<dyn RuntimeEffectController>,
+}
+
 /// Run one opener-bound command on the opener thread. `handle` is the
 /// group's open cursor, owned by the opener so the caller cannot touch it.
 pub(super) async fn dispatch_group_command(
-    controller: &Arc<dyn RuntimeEffectController>,
+    opener: &OpenerSide,
     executors: &Arc<DifferentialGroupExecutors>,
     group_key: &str,
     scope_id: &str,
@@ -427,6 +446,7 @@ pub(super) async fn dispatch_group_command(
     handle: &mut Option<EffectGroupHandle>,
     command: GroupOpCommand,
 ) -> GroupOpReply {
+    let OpenerSide { host, controller } = opener;
     let none = Vec::new();
     match command {
         GroupOpCommand::Open { group } => match controller.open_effect_group(*group).await {
@@ -542,10 +562,9 @@ pub(super) async fn dispatch_group_command(
             }
         }
         GroupOpCommand::DrainBlocked { commit_seq } => {
-            let outcome = match controller
-                .group_child_drain_blocked(group_key, commit_seq)
-                .await
-            {
+            // The controller only waits the barrier out, so the probe reads
+            // each backend's row-store answer directly.
+            let outcome = match host.drain_blocked(group_key, commit_seq).await {
                 Ok(blocked) => serde_json::json!({
                     "commit_seq": commit_seq,
                     "blocked": blocked,

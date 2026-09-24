@@ -738,3 +738,158 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
         .await
         .expect("the group closes");
 }
+
+/// How many times a drain held at the barrier may sleep the frozen dispatch
+/// clock over [`ABSENCE_BUDGET`]. A wait on the host's own wake sleeps it not
+/// at all; a poll on it, whose sleeps return at once, sleeps it without end.
+const FROZEN_DISPATCH_SLEEP_BOUND: u64 = 16;
+
+/// A dispatch clock whose faces never move and whose sleeps return at once,
+/// counting every sleep: the clock a poll on the dispatch clock turns into a
+/// hot loop, and a wait for its faces to move turns into a stall.
+#[derive(Debug)]
+struct FrozenDispatchClock {
+    instant: std::time::Instant,
+    sleeps: std::sync::atomic::AtomicU64,
+}
+
+impl FrozenDispatchClock {
+    fn sleeps(&self) -> u64 {
+        self.sleeps.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::Clock for FrozenDispatchClock {
+    fn now(&self) -> std::time::Instant {
+        self.instant
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from(std::time::UNIX_EPOCH + Duration::from_millis(1_700_000_000_000))
+    }
+
+    async fn sleep(&self, _duration: Duration) {
+        self.sleeps
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    async fn sleep_until(&self, _deadline: std::time::Instant) {
+        self.sleeps
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// FIG-3598: a drain held at the §5 barrier waits on its host's own wake for
+/// the group, never on a poll of the dispatch clock. The live commit-order
+/// scenario runs with its lent dispatch on a frozen clock: A holds at the
+/// barrier behind B's owed drain without sleeping that clock — a poll on it,
+/// whose sleeps return at once, would be a hot loop — and resumes as soon as
+/// B's drain finishes, although the clock never moves.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_drain_held_at_the_barrier_parks_under_a_frozen_dispatch_clock(
+    fixture: &ToolChildLawFixture,
+    prefix: &str,
+) {
+    let session_id = crate::SessionId::from(format!("{prefix}-frozen-barrier"));
+    let turn_id = crate::TurnId::from(format!("{prefix}-frozen-barrier-turn"));
+    let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
+    let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
+        .expect("a turn scope derives an opener");
+    let group_key = format!("{prefix}-frozen-barrier");
+    let call_a = format!("{group_key}-call-0");
+    let call_b = format!("{group_key}-call-1");
+
+    let host = (fixture.make_world)(ToolChildWorldSpec {
+        lease_ttl_ms: LIVE_LEASE_MS,
+    })
+    .await
+    .host;
+    let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
+    let sink = Arc::new(IntentSink::default());
+    scenario.observation.hold(&call_a);
+    sink.hold(&call_b);
+    let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
+        inner: crate::testing::effect_backed_process_service(
+            Arc::clone(&scenario.registry),
+            Arc::clone(&scenario.process_env_store),
+        ),
+        sink: Arc::clone(&sink),
+    });
+    let clock = Arc::new(FrozenDispatchClock {
+        instant: std::time::Instant::now(),
+        sleeps: std::sync::atomic::AtomicU64::new(0),
+    });
+    let _guard = register_opener_inner(
+        &host,
+        &scope,
+        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
+        Some(processes),
+        None,
+        Arc::clone(&scenario.process_env_store),
+        opener,
+        tokio_util::sync::CancellationToken::new(),
+        OpenerExtras {
+            clock: Some(Arc::clone(&clock) as Arc<dyn crate::Clock>),
+            ..OpenerExtras::default()
+        },
+    );
+    let scoped = host
+        .scoped(crate::admit(scope.clone()))
+        .expect("the group scope binds");
+    let handle = scoped
+        .controller()
+        .open_effect_group(commit_group(
+            &scope,
+            &session_id,
+            &group_key,
+            &scenario.env_ref,
+            2,
+            crate::LoserPolicy::RunToCompletion,
+            deferrable_routing(fixture.deferrable_routing, &host),
+            recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
+        ))
+        .await
+        .expect("the group opens under the live opener");
+    // B commits first and parks at its first intent write; A's body is
+    // released, and A commits second and holds at the barrier behind B.
+    sink.await_blocked(&call_b).await;
+    scenario.observation.release(&call_a);
+    tokio::time::timeout(SETTLE_BUDGET, async {
+        while scenario.observation.executions_of("law_commit").len() < 2 {
+            tokio::time::sleep(POLL).await;
+        }
+    })
+    .await
+    .expect("A's leaf body ran once released");
+    let sleeps_before = clock.sleeps();
+    assert_nothing_landed(&sink, "A committed behind B's owed drain").await;
+    let sleeps = clock.sleeps() - sleeps_before;
+    assert!(
+        sleeps <= FROZEN_DISPATCH_SLEEP_BOUND,
+        "a drain held at the barrier must wait on its host's wake, not poll the dispatch \
+         clock: it slept the frozen clock {sleeps} times in {ABSENCE_BUDGET:?}"
+    );
+    // B's drain finishing is what lifts the barrier; the frozen clock never
+    // moves, so a wait that needed it to would stall here.
+    sink.release(&call_b);
+    sink.await_landed_len(4).await;
+    assert_eq!(
+        sink.landed(),
+        vec![
+            (call_b.clone(), "start"),
+            (call_b, "event"),
+            (call_a.clone(), "start"),
+            (call_a, "event"),
+        ],
+        "the held drain resumed behind B's, in commit order"
+    );
+    scoped
+        .controller()
+        .close_effect_group(handle, crate::LoserPolicy::RunToCompletion)
+        .await
+        .expect("the group closes");
+}

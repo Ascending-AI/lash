@@ -684,6 +684,16 @@ impl EffectGroupDispatch {
                 EffectGroupWaitKind::Admit(position),
                 EffectGroupWaitResolution::Retired,
             )
+        }))
+        // A committed child that retirement cancelled before it seated never
+        // resolves its own drained wake; every sibling parked behind it at
+        // the §5 barrier — a dispatch workflow's settlement or a tool child's
+        // intent drain — is released here instead of stranding.
+        .chain((0..cleanup.children()).map(|position| {
+            (
+                EffectGroupWaitKind::Drained(position),
+                EffectGroupWaitResolution::Retired,
+            )
         })) {
             let key = group_wait_key(&cleanup.wait_scope, &group_key, kind)?;
             let replay_key = key.key_id.clone();

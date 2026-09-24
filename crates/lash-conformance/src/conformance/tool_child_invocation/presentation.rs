@@ -209,6 +209,7 @@ pub async fn two_presentation_steps_compose_deterministically_on_first_run_and_r
             OpenerExtras {
                 plugin_factories: factories,
                 attachment_store: None,
+                clock: None,
             },
         );
         let group = presentation_group(
@@ -282,6 +283,7 @@ pub async fn two_presentation_steps_compose_deterministically_on_first_run_and_r
                     OpenerExtras {
                         plugin_factories: crash_factories,
                         attachment_store: None,
+                        clock: None,
                     },
                 );
                 let group = presentation_group(
@@ -335,6 +337,7 @@ pub async fn two_presentation_steps_compose_deterministically_on_first_run_and_r
                 marker_step("b", Arc::clone(&b_runs)),
             ])],
             attachment_store: None,
+            clock: None,
         },
     );
     let group = presentation_group(
@@ -407,6 +410,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
             OpenerExtras {
                 plugin_factories: factories,
                 attachment_store: None,
+                clock: None,
             },
         );
         let group = presentation_group(
@@ -445,6 +449,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
             OpenerExtras {
                 plugin_factories: changed_factories,
                 attachment_store: None,
+                clock: None,
             },
         );
         let (scoped, handle, replayed) = settle_rank_zero(&host, &scope, group).await;
@@ -516,6 +521,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
                     OpenerExtras {
                         plugin_factories: factories,
                         attachment_store: None,
+                        clock: None,
                     },
                 );
                 let scoped = world
@@ -579,6 +585,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
         OpenerExtras {
             plugin_factories: changed_factories,
             attachment_store: None,
+            clock: None,
         },
     );
     let (scoped, handle, replayed) = settle_rank_zero(
@@ -660,6 +667,7 @@ pub async fn the_oracle_and_the_budget_plugin_coexist(fixture: &ToolChildLawFixt
                 steps_factory(vec![marker_step("oracle", Arc::clone(&oracle_runs))]),
             ],
             attachment_store: None,
+            clock: None,
         },
     );
     let (scoped, handle, settlement) = settle_rank_zero(
@@ -798,6 +806,7 @@ pub async fn a_retained_full_output_is_a_durable_artifact_not_a_path(
                 .expect("valid tool output budget config"),
             )],
             attachment_store: Some(attachment_store),
+            clock: None,
         },
     );
     let group = presentation_group(

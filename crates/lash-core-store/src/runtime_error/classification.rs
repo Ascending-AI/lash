@@ -282,6 +282,9 @@ impl RuntimeErrorCode {
             Self::RestateProcessJournalIdentityDrift => Terminal,
             // the journal entry does not decode in this build.
             Self::RestateProcessJournalPayloadIncompatible => Terminal,
+            // the index state was written under another protocol version; a
+            // redrive meets the same state.
+            Self::RestateEffectGroupProtocolRetired => Terminal,
             // engine interaction failed; the engine redrives the invocation.
             Self::RestateProcessIngressSubmit => Retryable,
             // a deployment fact: the service is not bound.

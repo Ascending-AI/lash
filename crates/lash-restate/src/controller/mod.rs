@@ -1016,15 +1016,12 @@ where
         group_commit::commit_group_child_final(&self.context, commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
-        self.context
-            .effect_group_drain_blocked(group_key.to_string(), commit_seq)
-            .await
-            .map_err(|error| effect_group_engine_error("EffectGroupIndex/drain_blocked", error))
+    ) -> Result<(), RuntimeEffectControllerError> {
+        group_commit::await_group_child_drain_admission(&self.context, group_key, commit_seq).await
     }
 
     /// Restate replays the invocation journal by position and compares each
@@ -1432,6 +1429,9 @@ fn effect_group_engine_error(
     operation: &str,
     error: TerminalError,
 ) -> RuntimeEffectControllerError {
+    if let Some(refusal) = crate::effect_group::protocol_refusal_in(error.message()) {
+        return refusal;
+    }
     group_shape_error(format!(
         "Restate effect-group operation {operation} failed (verify the required services are registered): {error}"
     ))

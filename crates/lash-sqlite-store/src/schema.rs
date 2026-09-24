@@ -837,7 +837,10 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `lashlang_cell_replay_divergence`, `lashlang_cell_replay_key_format_cutover`
 /// and `recorded_journal_read_unsupported`. A pre-81 database is rejected at
 /// open and recreated.
-pub(crate) const SCHEMA_VERSION: i32 = 81;
+/// Bumped to 82 for FIG-3598: the durable `RuntimeErrorCode` vocabulary gains
+/// `restate_effect_group_protocol_retired`. No relation changes; a pre-82
+/// database is rejected at open and recreated.
+pub(crate) const SCHEMA_VERSION: i32 = 82;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

@@ -169,6 +169,7 @@ async fn deferred_close_while_held(fixture: &ToolChildLawFixture, prefix: &str, 
                 Arc::clone(&after_tool),
             )],
             attachment_store: None,
+            clock: None,
         },
     );
     // Only the gate the law holds at stays shut; the other is open.

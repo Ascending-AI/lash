@@ -257,6 +257,48 @@ async fn a_claim_queued_behind_a_live_lease_parks_under_a_frozen_clock() {
     assert_eq!(encoded(&replayed), encoded(&held));
 }
 
+/// Under a frozen clock every sleep returns at once and neither face moves.
+/// The holder of a claim renews its lease on the clock's sleep, and must not
+/// turn that into a hot loop of renewals: a sleep that returns with the face
+/// unmoved waits out the renew interval in real time instead (FIG-3598). The
+/// lease is still held — the effect finalizes when released.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lease_renewal_does_not_spin_under_a_frozen_clock() {
+    let clock = FrozenClock::new();
+    let backend = crate::SqliteBackend::memory_with_clock(clock.clone())
+        .await
+        .expect("open the memory backend");
+    let scope = ExecutionScope::turn("renewal-session", "renewal-turn");
+    let holder = backend
+        .open_effect_controller(scope.clone())
+        .await
+        .expect("open the holder's controller");
+
+    let (started, release, holding) =
+        hold_claim(holder, envelope(&scope, "renewal-effect"), value("held"));
+    started.await.expect("the holder claims the row");
+    let reads_before = clock.reads();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let reads = clock.reads() - reads_before;
+    assert!(
+        !holding.is_finished(),
+        "the effect runs until released, renewing beside it"
+    );
+    assert!(
+        reads <= 64,
+        "lease renewal must wait, not spin on a clock whose sleeps return at once; \
+         it read or slept on the clock {reads} times in 300ms"
+    );
+
+    release.send(()).expect("release the holder");
+    let held = tokio::time::timeout(Duration::from_secs(5), holding)
+        .await
+        .expect("the released effect finalizes")
+        .expect("holder task")
+        .expect("the holder still holds its lease and finalizes");
+    assert_eq!(encoded(&held), encoded(&value("held")));
+}
+
 /// A grouped child whose discharge the commit-order barrier holds behind a
 /// lower-committed sibling resumes when that sibling drains — on the drain's
 /// notification, with the clock never moving. The old fixed poll slept on the

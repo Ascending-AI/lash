@@ -614,10 +614,6 @@ struct SealedGroupChildDrainInput {
     recorded_call_id: Option<String>,
 }
 
-/// How long a drain waits on the §5 barrier before re-reading whether a
-/// lower-commit sibling finished — the durable driver's own poll cadence.
-const GROUP_DRAIN_BARRIER_POLL: std::time::Duration = std::time::Duration::from_millis(10);
-
 async fn settle_terminal_attempt(
     context: &ToolDispatchContext<'_>,
     settlement: TerminalAttemptSettlement<'_>,
@@ -645,14 +641,12 @@ async fn settle_terminal_attempt(
     .await?;
     // The §5 barrier: admitted drains emit their nested semantic commands in
     // final-commit order, so a committed sibling below this child that still
-    // owes its drain holds this drain back until it finishes.
+    // owes its drain holds this drain back until it finishes. The host waits
+    // on its own wake for that drain; the dispatch clock plays no part.
     if let Some((group_key, commit_seq)) = &drain_admission {
-        while controller
-            .group_child_drain_blocked(group_key, *commit_seq)
-            .await?
-        {
-            context.clock.sleep(GROUP_DRAIN_BARRIER_POLL).await;
-        }
+        controller
+            .await_group_child_drain_admission(group_key, *commit_seq)
+            .await?;
     }
     let mut intent_context = context.clone();
     intent_context.parent_invocation = Some(minting_emission.clone().into_runtime_invocation());

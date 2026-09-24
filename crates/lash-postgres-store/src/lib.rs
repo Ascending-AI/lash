@@ -481,7 +481,10 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // durable error-code vocabulary gains the lashlang replay refusals. A
 // collation change is not creation-only, so component-120 catalogs are
 // rejected and recreated.
-const SCHEMA_VERSION: i32 = 121;
+// Version 122 (FIG-3598) adds `restate_effect_group_protocol_retired` to the
+// durable `RuntimeErrorCode` vocabulary. No relation changes. Component-121
+// catalogs are rejected and recreated.
+const SCHEMA_VERSION: i32 = 122;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

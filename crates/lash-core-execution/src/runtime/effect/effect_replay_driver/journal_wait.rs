@@ -1,11 +1,11 @@
 //! How the driver waits: on the journal's change notifications, raced against
-//! the driver clock's deadline (FIG-3579).
+//! the driver clock's deadline (FIG-3579, FIG-3598).
 //!
 //! Every place the driver waits for another writer — a claim queued behind a
-//! live lease, a discharge held by the commit-order barrier, a reader waiting
-//! for a group's next settlement — arms the row store's
-//! [`EffectJournalWake`] for the subject *before* the read that decides to
-//! wait, then parks until one of:
+//! live lease, a discharge or a tool child's intent drain held by the
+//! commit-order barrier, a reader waiting for a group's next settlement —
+//! arms the row store's [`EffectJournalWake`] for the subject *before* the
+//! read that decides to wait, then parks until one of:
 //!
 //! - the notifier fires: a writer the notifier reaches committed a change;
 //! - the clock reaches the deadline the read reported (a lease expiry);
@@ -16,10 +16,13 @@
 //! is in this process, has no poll at all.
 //!
 //! The clock is the injected [`Clock`](crate::Clock), and its sleeps are the
-//! timer; a lease expiry counts as reached only once the clock's wall face
-//! says so. The face is also re-read on a real-time backoff, so a queued claim
-//! neither spins on a frozen clock whose sleeps return at once nor misses an
-//! expiry a test clock was advanced past by hand.
+//! timer; a deadline — a lease expiry, a renewal budget — counts as reached
+//! only once the clock's face says so. The face is also re-read on a
+//! real-time backoff, so a wait neither spins on a frozen clock whose sleeps
+//! return at once nor misses a deadline a test clock was advanced past by
+//! hand. The renewal cadence is the one wait whose sleep is authoritative on
+//! its own, and it too paces itself in real time when a sleep returns with
+//! the face unmoved ([`cadence_sleep`]).
 
 use super::*;
 use std::pin::Pin;
@@ -65,37 +68,72 @@ impl ClockDeadline {
 
     /// Resolve once the clock's wall face reaches this deadline, and not
     /// before.
-    ///
-    /// The clock's sleep is the timer, and the face is what confirms it. The
-    /// face is also watched on a real-time backoff capped at
-    /// [`CLOCK_RECHECK_MAX`], because two kinds of test clock break the
-    /// sleep's promise: a frozen clock's sleep returns at once with the face
-    /// unmoved (sleeping again would be the hot loop), and a hand-advanced
-    /// clock's face can pass the deadline while its sleep still runs in real
-    /// time. The watch reads the clock only, never the journal.
     async fn reached(self, clock: &dyn crate::Clock) {
         let Some(remaining) = self.remaining(clock) else {
             return;
         };
-        tokio::select! {
-            () = clock.sleep(remaining) => {}
-            () = self.face_reached(clock) => return,
-        }
-        // The sleep is done: the face is short of the deadline only by a
-        // step or a frozen clock, so the watch starts over at its first
-        // pause rather than resuming a backoff already grown to a second —
-        // an NTP step must not delay a lease takeover by that much.
-        self.face_reached(clock).await;
+        clock_confirms(clock.sleep(remaining), || self.remaining(clock).is_none()).await;
     }
+}
 
-    /// Re-read the clock's wall face on a real-time backoff until it reaches
-    /// this deadline.
-    async fn face_reached(self, clock: &dyn crate::Clock) {
-        let mut pause = CLOCK_RECHECK_FIRST;
-        while self.remaining(clock).is_some() {
-            tokio::time::sleep(pause).await;
-            pause = (pause * 2).min(CLOCK_RECHECK_MAX);
-        }
+/// Resolve once the clock's monotonic face reaches `deadline`, and not
+/// before: [`ClockDeadline::reached`] on the face [`Clock::now`] reads.
+///
+/// [`Clock::now`]: crate::Clock::now
+pub(super) async fn monotonic_deadline_reached(clock: &dyn crate::Clock, deadline: Instant) {
+    clock_confirms(clock.sleep_until(deadline), || clock.now() >= deadline).await;
+}
+
+/// Resolve once `reached` holds, timed by the clock's own `sleep`.
+///
+/// The clock's sleep is the timer, and its face is what confirms it. The
+/// face is also watched on a real-time backoff capped at
+/// [`CLOCK_RECHECK_MAX`], because two kinds of test clock break the sleep's
+/// promise: a frozen clock's sleep returns at once with the face unmoved
+/// (sleeping again would be the hot loop), and a hand-advanced clock's face
+/// can pass the deadline while its sleep still runs in real time. The watch
+/// reads the clock only, never the journal.
+async fn clock_confirms(sleep: impl Future<Output = ()>, reached: impl Fn() -> bool) {
+    if reached() {
+        return;
+    }
+    tokio::select! {
+        () = sleep => {}
+        () = face_watch(&reached) => return,
+    }
+    // The sleep is done: the face is short of the deadline only by a step or
+    // a frozen clock, so the watch starts over at its first pause rather than
+    // resuming a backoff already grown to a second — an NTP step must not
+    // delay a lease takeover by that much.
+    face_watch(&reached).await;
+}
+
+/// Re-read a clock face on a real-time backoff until `reached` holds.
+async fn face_watch(reached: &impl Fn() -> bool) {
+    let mut pause = CLOCK_RECHECK_FIRST;
+    while !reached() {
+        tokio::time::sleep(pause).await;
+        pause = (pause * 2).min(CLOCK_RECHECK_MAX);
+    }
+}
+
+/// One renewal-cadence sleep of `wait` on the driver clock.
+///
+/// Here the clock's sleep is authoritative on its own: a sleep that returns
+/// is a renewal due, whatever the face says, so a test clock that gates its
+/// sleeps paces renewals exactly. A sleep that returns with the monotonic
+/// face not moved at all is a frozen clock's, though, and renewing at once
+/// would turn the cadence into a hot loop of store writes. The cadence then
+/// also waits for the face to move, or until `wait` of real time has passed
+/// since the sleep began — the pace a moving clock would have kept.
+pub(super) async fn cadence_sleep(clock: &dyn crate::Clock, wait: Duration) {
+    let slept_from = clock.now();
+    let paced_until = tokio::time::Instant::now() + wait;
+    clock.sleep(wait).await;
+    let face_moved = || clock.now() != slept_from;
+    tokio::select! {
+        () = tokio::time::sleep_until(paced_until) => {}
+        () = face_watch(&face_moved) => {}
     }
 }
 
@@ -216,6 +254,40 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             }
         };
         JournalWatch { wake }
+    }
+
+    /// Wait at the §5 barrier until no committed sibling below `commit_seq`
+    /// in `group_key` still owes its drain.
+    ///
+    /// The barrier is lifted by a sibling's drain, never by time, so the wait
+    /// parks on the group's wake with no clock deadline. It subscribes on the
+    /// first blocked answer and re-reads at once, so a drain the barrier
+    /// never held touches no notifier; after that each read listens from
+    /// before it. Once the answer is unblocked it stays so: the commit
+    /// positions below `commit_seq` were fixed when it was allocated.
+    pub(super) async fn await_drain_admission(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let mut watch = None;
+        loop {
+            let armed = watch.as_ref().map(JournalWatch::arm);
+            if !self.row_store.drain_blocked(group_key, commit_seq).await? {
+                return Ok(());
+            }
+            match armed {
+                Some(armed) => {
+                    armed.park(&*self.clock, None).await;
+                }
+                None => {
+                    watch = Some(
+                        self.watch_journal(EffectJournalSubject::Group { group_key })
+                            .await,
+                    );
+                }
+            }
+        }
     }
 
     /// Wait for the claim of `replay_key` under `scope` to become claimable

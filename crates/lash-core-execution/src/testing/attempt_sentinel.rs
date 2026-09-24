@@ -335,13 +335,13 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, crate::RuntimeEffectControllerError> {
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
         self.inner
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 

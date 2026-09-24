@@ -29,8 +29,8 @@ impl lash_core::EffectHost for RecordingEffectController {
 
     // Group children minted under this host run through the recorder itself:
     // the substrate-facing group calls (`commit_group_child_final`,
-    // `group_child_drain_blocked`, the group driver) forward to the embedded
-    // native controller where the opens landed.
+    // `await_group_child_drain_admission`, the group driver) forward to the
+    // embedded native controller where the opens landed.
     fn scoped_for_group_child(
         &self,
         scope: lash_core::AdmittedScope,
