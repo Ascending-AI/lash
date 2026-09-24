@@ -307,6 +307,10 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "2.220446049250313e-16|-9007199254740991|3.141592653589793",
         ),
         (
+            "finish(String(Number.MIN_VALUE)+'|'+String(Number.POSITIVE_INFINITY)+'|'+String(Number.NEGATIVE_INFINITY));",
+            "5e-324|Infinity|-Infinity",
+        ),
+        (
             "finish([Math.atan2(1,1),Math.clz32(1),Math.imul(0xffffffff,5),Math.hypot(3,4)].join(','));",
             "0.7853981633974483,31,-5,5",
         ),
