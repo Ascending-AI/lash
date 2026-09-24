@@ -729,3 +729,144 @@ fn a_journal_key_this_build_cannot_read_is_refused() {
         );
     }
 }
+
+/// A host future that parks by waking its own task and must not be polled
+/// again until that task is polled afresh from the top: the shape the Restate
+/// SDK's error interception takes when it records a suspension. The fresh
+/// top-level poll is what hands the recorded state to the enclosing handler,
+/// so a second poll inside the same task poll resumes a completed SDK future.
+struct ParksForTheNextTaskPoll {
+    task_polls: Arc<std::sync::atomic::AtomicUsize>,
+    parked_at: Option<usize>,
+}
+
+impl std::future::Future for ParksForTheNextTaskPoll {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        let task_poll = self.task_polls.load(std::sync::atomic::Ordering::SeqCst);
+        match self.parked_at {
+            None => {
+                self.parked_at = Some(task_poll);
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+            Some(parked_at) => {
+                assert_ne!(
+                    parked_at, task_poll,
+                    "a self-parked request was polled again inside the task poll that parked it"
+                );
+                std::task::Poll::Ready(())
+            }
+        }
+    }
+}
+
+struct SelfParkingKeyProbe {
+    task_polls: Arc<std::sync::atomic::AtomicUsize>,
+    key_served: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl AwaitEventResolver for SelfParkingKeyProbe {
+    async fn await_event_key(
+        &self,
+        _scope: &ExecutionScope,
+        _wait: AwaitEventWaitIdentity,
+    ) -> Result<AwaitEventKey, RuntimeError> {
+        ParksForTheNextTaskPoll {
+            task_polls: Arc::clone(&self.task_polls),
+            parked_at: None,
+        }
+        .await;
+        self.key_served.notify_one();
+        Err(RuntimeError::new(
+            RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
+            "the probe serves no key",
+        ))
+    }
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectController for SelfParkingKeyProbe {
+    async fn execute_effect(
+        &self,
+        _envelope: RuntimeEffectEnvelope,
+        _local_executor: RuntimeEffectLocalExecutor<'_>,
+    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        self.key_served.notified().await;
+        Ok(RuntimeEffectOutcome::Sleep)
+    }
+
+    async fn open_effect_group(
+        &self,
+        _group: crate::RuntimeEffectGroup,
+    ) -> Result<crate::EffectGroupHandle, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("SelfParkingKeyProbe"))
+    }
+
+    async fn await_next_settlement(
+        &self,
+        _handle: &mut crate::EffectGroupHandle,
+        _cancel: crate::CancellationToken,
+    ) -> Result<crate::GroupSettlement, crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("SelfParkingKeyProbe"))
+    }
+
+    async fn close_effect_group(
+        &self,
+        _handle: crate::EffectGroupHandle,
+        _disposition: crate::LoserPolicy,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        Err(crate::effect_groups_unsupported("SelfParkingKeyProbe"))
+    }
+}
+
+/// The drive loop polls each in-flight request at most once per task poll,
+/// so a request that parks for the next task poll is next polled from the
+/// top, beside a root that is still running (FIG-3630).
+#[test]
+fn the_drive_loop_polls_each_request_once_per_task_poll() {
+    let task_polls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let probe = SelfParkingKeyProbe {
+        task_polls: Arc::clone(&task_polls),
+        key_served: tokio::sync::Notify::new(),
+    };
+    let scope = ExecutionScope::runtime_operation("drive-loop-poll-discipline");
+    let (requests, request_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (key_tx, _key_rx) = tokio::sync::oneshot::channel();
+    requests
+        .send(EffectControllerTaskRequest::AwaitEventKey {
+            scope: scope.clone(),
+            wait: AwaitEventWaitIdentity::process_signal(
+                crate::ProcessId::from("drive-loop-process"),
+                "exit",
+                1,
+            ),
+            response: key_tx,
+        })
+        .expect("the request queues");
+    let drive = crate::runtime::effect::drive_effect_controller_task(
+        &probe,
+        scope.clone(),
+        sleep_envelope(scope, "drive-loop-root"),
+        RuntimeEffectLocalExecutor::testing(
+            |_envelope| async move { Ok(RuntimeEffectOutcome::Sleep) },
+        ),
+        request_rx,
+    );
+    let mut drive = std::pin::pin!(drive);
+    let waker = std::task::Waker::noop();
+    let mut cx = std::task::Context::from_waker(waker);
+    for _ in 0..8 {
+        task_polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let std::task::Poll::Ready(outcome) = drive.as_mut().poll(&mut cx) {
+            assert!(matches!(outcome, Ok(RuntimeEffectOutcome::Sleep)));
+            return;
+        }
+    }
+    panic!("the root never settled after the parked request finished");
+}
