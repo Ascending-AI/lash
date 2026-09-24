@@ -1230,7 +1230,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                             .replay
                             .select_settlement_by_rank
                             .sql(),
-                        params![group_key.as_str(), offset as i64],
+                        params![group_key.as_str(), crate::clamp_sequence_bound(offset)],
                         |row| {
                             let state = effect_replay_driver::EffectRowState::from_columns(
                                 row.get(2)?,

@@ -514,6 +514,18 @@ fn clamp_epoch_ms(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
+/// Clamps a caller-supplied sequence, rank, or offset bound to the `i64` range
+/// of the SQL sequence columns.
+///
+/// Every stored sequence is a signed 64-bit integer, so a bound at or above
+/// `i64::MAX` already means "through every stored row". Saturating keeps that
+/// meaning for the rest of the unsigned range; a raw `as i64` cast wraps
+/// (`u64::MAX as i64 == -1`), so a "through the end" count counted nothing and
+/// an offset past the end read the first row (FIG-3601).
+fn clamp_sequence_bound(value: impl TryInto<i64>) -> i64 {
+    value.try_into().unwrap_or(i64::MAX)
+}
+
 fn process_sqlite_error(err: rusqlite::Error) -> lash_core_execution::PluginError {
     lash_core_execution::PluginError::Session(err.to_string())
 }

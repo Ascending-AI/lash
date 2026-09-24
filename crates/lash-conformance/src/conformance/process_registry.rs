@@ -3,6 +3,7 @@
 use lash_sansio::ProcessId;
 mod caller_departure;
 mod cancellation;
+mod event_count;
 mod event_paging;
 mod event_replay;
 mod external_ref;
@@ -74,6 +75,12 @@ pub async fn process_registry_cancellation_reopen_contract(handles: ReopenablePr
 
 pub async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
     event_replay::canonical_process_event_payload_replay(registry).await;
+}
+
+pub async fn count_events_through_counts_every_event_at_any_top_bound(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    event_count::count_events_through_counts_every_event_at_any_top_bound(registry).await;
 }
 
 pub async fn long_cancellation_requester_replay_is_backend_safe(

@@ -948,7 +948,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         let row = sqlx::query(process_sql().event.count_by_type_through_sequence.sql())
             .bind(process_id.as_str())
             .bind(event_type)
-            .bind(up_to_sequence as i64)
+            .bind(clamp_sequence_bound(up_to_sequence))
             .fetch_one(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -973,7 +973,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         .bind(process_ref.process_id.as_str())
         .bind(process_ref.incarnation.registration_sequence() as i64)
         .bind(event_type)
-        .bind(up_to_sequence as i64)
+        .bind(clamp_sequence_bound(up_to_sequence))
         .fetch_one(&mut *tx)
         .await
         .map_err(plugin_sqlx_error)?;

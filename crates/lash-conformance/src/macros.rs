@@ -449,6 +449,7 @@ macro_rules! process_registry_tests {
                 (observer_events_are_auditable_and_transfer_is_atomic, "observer-audit-transfer"),
                 (generic_append_rejects_reserved_edge_audit_events, "reserved-edge-events"),
                 (canonical_process_event_payload_replay, "canonical-event-replay"),
+                (count_events_through_counts_every_event_at_any_top_bound, "count-events-through-top-bound"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
                 (wake_subscription_is_indexed_and_retargetable, "wake-subscription"),
                 (lifecycle_status_and_outcome_fold, "lifecycle-fold"),
