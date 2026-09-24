@@ -171,6 +171,10 @@ impl PossessionWorld {
     /// (`ProcessId::from_intent_identity`), the intent's own execution lands
     /// the registry row, and the settled `Executed { StartProcess }` outcome
     /// carries the realized handle home to the run's possession set.
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture: a call that fails to present aborts the law"
+    )]
     async fn realize_intent_start(&mut self, opener_name: &'static str, child: &str) {
         let (call_id, identity, child_id) = {
             let opener = self.opener(opener_name);
@@ -195,10 +199,11 @@ impl PossessionWorld {
                 result: handle,
             }],
         );
-        let _ = opener
+        opener
             .context
             .complete_tool_call(call_id, None, outcome)
-            .await;
+            .await
+            .expect("the call presents");
         self.realized.insert(child_id, opener_name);
         self.assert_conservation(&format!("{opener_name} intent-start {child}"))
             .await;
@@ -207,6 +212,10 @@ impl PossessionWorld {
     /// A refused start intent: nothing was realized, so nothing may be
     /// possessed. `child` is never registered — possession of it would be
     /// phantom on top of phantom.
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture: a call that fails to present aborts the law"
+    )]
     async fn settle_refused_start(&mut self, opener_name: &'static str, child: &str) {
         let opener = self.opener(opener_name);
         let (call_id, identity) = opener.next_intent_identity(child);
@@ -221,15 +230,20 @@ impl PossessionWorld {
                 refusal: ToolIntentRefusalReason::MissingToolCallId,
             }],
         );
-        let _ = opener
+        opener
             .context
             .complete_tool_call(call_id, None, outcome)
-            .await;
+            .await
+            .expect("the call presents");
         self.assert_conservation(&format!("{opener_name} refused-start {child}"))
             .await;
     }
 
     /// A batch-level protocol refusal carries no declaration at all.
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture: a call that fails to present aborts the law"
+    )]
     async fn settle_protocol_refused(&mut self, opener_name: &'static str) {
         let opener = self.opener(opener_name);
         opener.next_call += 1;
@@ -241,10 +255,11 @@ impl PossessionWorld {
                 refusal: ToolIntentRefusalReason::MissingToolCallId,
             }],
         );
-        let _ = opener
+        opener
             .context
             .complete_tool_call(call_id, None, outcome)
-            .await;
+            .await
+            .expect("the call presents");
         self.assert_conservation(&format!("{opener_name} protocol-refused"))
             .await;
     }
@@ -278,10 +293,11 @@ impl PossessionWorld {
                 result: echoed,
             }],
         );
-        let _ = opener
+        opener
             .context
             .complete_tool_call(call_id, None, outcome)
-            .await;
+            .await
+            .expect("the call presents");
         self.assert_conservation(&format!("{opener_name} signal-echo on {victim}"))
             .await;
     }

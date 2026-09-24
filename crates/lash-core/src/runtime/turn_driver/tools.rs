@@ -103,7 +103,7 @@ impl RuntimeTurnDriver<'_> {
                 crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
                     let completed = prepare_context
                         .complete_undispatched_tool_call(call_id.clone(), replay, *outcome)
-                        .await
+                        .await?
                         .completed;
                     results[index] = Some(completed);
                 }

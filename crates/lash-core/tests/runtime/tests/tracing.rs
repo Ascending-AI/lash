@@ -665,6 +665,15 @@ impl lash_core::testing::EffectLayer for PendingToolResolutionController {
                 resolution: inner.peek_await_event(key).await?,
             });
         }
+        // The deferred call's await parks on the backend's own journal, which
+        // the out-of-band resolve lands in; a local executor cannot run an
+        // await by itself.
+        if matches!(
+            envelope.command,
+            lash_core::RuntimeEffectCommand::AwaitEvent { .. }
+        ) {
+            return inner.execute_effect(envelope, local_executor).await;
+        }
         local_executor.execute(envelope).await
     }
 }

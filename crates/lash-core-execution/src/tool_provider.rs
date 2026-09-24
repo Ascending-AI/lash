@@ -452,7 +452,7 @@ pub struct ToolContext<'run> {
     /// the mark that this context was admitted under a group child's rebound
     /// dispatch; an ordinary orchestrating run's starts still ride its
     /// `ToolIntent` records.
-    pub(crate) orchestrating_starts: Option<crate::tool_dispatch::OrchestratingStartsBuffer>,
+    pub(crate) orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
     /// The cancellation trio the child was validated to wait under, carried
     /// whole from its driver. `None` for every caller that is not a group
     /// child; a nested call must inherit exactly this wait — deriving one
@@ -531,7 +531,7 @@ pub struct ToolContextBuilder<'run> {
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
-    orchestrating_starts: Option<crate::tool_dispatch::OrchestratingStartsBuffer>,
+    orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
     turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
 }
 
@@ -562,7 +562,7 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: dispatch.parent_invocation.clone(),
             execution_env_spec: dispatch.execution_env_spec.clone(),
             child_execution_trace_hook: None,
-            orchestrating_starts: None,
+            orchestrating_sinks: None,
             turn_cancel_wait: None,
         }
     }
@@ -656,15 +656,16 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
-    /// Installs the realized-start sink an orchestrating group child drains
-    /// into its settlement's possession. Internal: only the tool-child driver
+    /// Installs the sinks an orchestrating group child's driver drains: the
+    /// realized starts its settlement possesses and the refusal a nested call
+    /// met. Internal: only the tool-child driver
     /// sets one, which is also what marks the context as admitted under a
     /// group child's rebound dispatch.
-    pub(crate) fn orchestrating_starts(
+    pub(crate) fn orchestrating_sinks(
         mut self,
-        buffer: crate::tool_dispatch::OrchestratingStartsBuffer,
+        buffer: crate::tool_dispatch::OrchestratingChildSinks,
     ) -> Self {
-        self.orchestrating_starts = Some(buffer);
+        self.orchestrating_sinks = Some(buffer);
         self
     }
 
@@ -703,7 +704,7 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: self.parent_invocation,
             execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
-            orchestrating_starts: self.orchestrating_starts,
+            orchestrating_sinks: self.orchestrating_sinks,
             turn_cancel_wait: self.turn_cancel_wait,
         }
     }
@@ -753,7 +754,7 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
-            orchestrating_starts: self.orchestrating_starts.clone(),
+            orchestrating_sinks: self.orchestrating_sinks.clone(),
             turn_cancel_wait: self.turn_cancel_wait.clone(),
         })
     }
@@ -804,7 +805,7 @@ impl<'run> ToolContext<'run> {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             child_execution_trace_hook: None,
-            orchestrating_starts: None,
+            orchestrating_sinks: None,
             turn_cancel_wait: None,
         }
     }
@@ -872,7 +873,7 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             tool_call_id: self.tool_call_id.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
-            orchestrating_starts: self.orchestrating_starts.clone(),
+            orchestrating_sinks: self.orchestrating_sinks.clone(),
         }
     }
 

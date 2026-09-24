@@ -423,7 +423,7 @@ fn a_childs_tool_context_holds_no_runtime_execution_context() {
         &rebound,
         &request(),
         crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
-        crate::tool_dispatch::OrchestratingStartsBuffer::default(),
+        crate::tool_dispatch::OrchestratingChildSinks::default(),
     );
     assert!(
         context.runtime_execution_context.is_none(),
@@ -986,7 +986,7 @@ async fn a_nested_retry_sleep_observes_no_host_turn_gate() {
         &dispatch,
         &request,
         wait,
-        crate::tool_dispatch::OrchestratingStartsBuffer::default(),
+        crate::tool_dispatch::OrchestratingChildSinks::default(),
     );
 
     let replies = crate::OrchestrationContext::new(body_context)
@@ -1138,4 +1138,35 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
         crate::TurnFailureCause::Outcome
     );
     assert!(missing.message.contains("missing process execution env"));
+}
+
+/// A child whose presentation effect a controller refused — a replay
+/// divergence against its record, a live journal fault — has no presentation:
+/// the refusal is returned, and the child is refused with it, never settled
+/// with the refusal's text as its model-facing return (FIG-3679).
+#[tokio::test]
+async fn a_refused_presentation_refuses_the_child_rather_than_settling_as_its_return() {
+    let request = request();
+    let dispatch = rebound(&request);
+    let outcome = ToolDispatchOutcome {
+        record: crate::ToolCallRecord {
+            call_id: Some(request.call.call_id.clone()),
+            tool: "tool".to_string(),
+            args: serde_json::json!({}),
+            output: crate::ToolCallOutput::success(serde_json::json!("settled")),
+            duration_ms: 0,
+        },
+        attempts: Vec::new(),
+        intents: crate::ToolIntents::default(),
+        intent_outcomes: Vec::new(),
+        captures: Vec::new(),
+        triggers: Vec::new(),
+    };
+    let refused = resolve_model_return(&dispatch, &request, &outcome, &[])
+        .await
+        .expect_err("the child's controller refuses the presentation effect");
+    assert!(
+        !refused.message.is_empty(),
+        "the refusal carries the controller's own error: {refused:?}"
+    );
 }

@@ -17,7 +17,7 @@ pub(crate) use attempt_coordinator::commit_group_child_boundary;
 pub use attempt_coordinator::{
     GroupChildCoordination, ToolAttemptEffectIdentity, coordinate_tool_invocation,
 };
-pub use context::OrchestratingStartsBuffer;
+pub use context::OrchestratingChildSinks;
 #[cfg(feature = "testing")]
 pub use context::{CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(not(feature = "testing"))]
