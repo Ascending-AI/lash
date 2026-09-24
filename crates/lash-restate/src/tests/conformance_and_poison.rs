@@ -229,12 +229,11 @@ lash_conformance::effect_controller_replay_mismatch_tests!({
     )
 });
 
-// FIG-3587's model-call drift law on the in-process endpoint invoker. The
-// drifted redrive parks the turn and fails its attempt retryably, so the
-// invocation keeps its journal; a retry under the restored surface replays it
-// and finishes the turn once, and the commit clears the park.
-lash_conformance::model_call_drift_park_tests!({
-    let rlm: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
+/// The RLM protocol factory the FIG-3587 drift laws redrive cells with, its
+/// Lashlang artifacts in [`RECOVERY_ARTIFACT_BACKEND`]. The laws' turns start
+/// no process: there is no process substrate.
+pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -244,21 +243,9 @@ lash_conformance::model_call_drift_park_tests!({
                 .build(),
             &*RECOVERY_ARTIFACT_BACKEND,
         )
-        // The law's turn starts no process: there is no process substrate.
         .with_process_lifecycle(false),
-    );
-    // The turn's effects journal on the handler's controller; the host is
-    // never reached (a closed port).
-    let host =
-        Arc::new(RestateEffectHost::new_for_test("http://127.0.0.1:9")) as Arc<dyn EffectHost>;
-    (
-        (),
-        "restate",
-        host,
-        super::endpoint_turn_runner::EndpointTurnRunner::shared(),
-        vec![rlm],
     )
-});
+}
 
 lash_conformance::durable_queued_drain_wait_resolver_tests!({
     (
@@ -683,6 +670,26 @@ mod on_the_server_double {
                     verify_transport.assert_reattached_to(&target);
                 }
             },
+        )
+    });
+
+    // FIG-3587's model-call drift law: the drifted redrive parks the turn and
+    // fails its attempt retryably, so the invocation keeps its journal; a
+    // retry under the restored surface replays it and finishes the turn once,
+    // and the commit clears the park.
+    lash_conformance::model_call_drift_park_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let host = harness.endpoint_host();
+        let runner = harness.turn_runner();
+        let prefix: &'static str =
+            Box::leak(format!("restate-model-drift-{}", harness.run_nonce()).into_boxed_str());
+        (
+            harness,
+            prefix,
+            host,
+            runner,
+            vec![super::drift_law_rlm_factory()],
         )
     });
 
