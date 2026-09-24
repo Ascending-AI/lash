@@ -619,14 +619,14 @@ impl RestateIngressClient {
 
     pub(crate) async fn call_object_empty_json<R>(
         &self,
-        object: &str,
+        object: crate::LashService,
         object_key: &str,
         handler: &str,
     ) -> Result<R, RestateHttpError>
     where
         R: DeserializeOwned,
     {
-        let object = restate_path_component(object);
+        let object = restate_path_component(object.name());
         let object_key = restate_path_component(object_key);
         let handler = restate_path_component(handler);
         let path = format!("{object}/{object_key}/{handler}");

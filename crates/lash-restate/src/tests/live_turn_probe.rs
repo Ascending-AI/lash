@@ -339,6 +339,10 @@ impl LiveTurnRunner {
         let mut crashed = false;
         loop {
             tokio::select! {
+                // The handler reports its attempt's end before it returns, so
+                // when both are ready the report is read first; an unbiased
+                // pick could take the finished call and miss the report.
+                biased;
                 end = ended.recv() => match end {
                     Some(AttemptEnd::Crashed) => crashed = true,
                     Some(AttemptEnd::Settled) => {

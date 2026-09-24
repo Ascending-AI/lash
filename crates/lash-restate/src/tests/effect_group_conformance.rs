@@ -711,7 +711,7 @@ impl LiveConformanceHarness {
         );
         let probe = ingress
             .call_object_empty_json::<crate::EffectGroupProbeResponse>(
-                "EffectGroupIndex",
+                crate::LashService::EffectGroupIndex,
                 &operation,
                 "probe",
             )
@@ -862,7 +862,7 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json("EffectGroupIndex", &group_key, "retire")
+            .call_object_empty_json(crate::LashService::EffectGroupIndex, &group_key, "retire")
             .await
             .expect("the wait group tombstones");
         println!("EFFECT_GROUP_WITNESS unstarted-wait-child-release PASS");
@@ -994,7 +994,7 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json("EffectGroupIndex", &group_key, "retire")
+            .call_object_empty_json(crate::LashService::EffectGroupIndex, &group_key, "retire")
             .await
             .expect("the admitting group tombstones");
         println!("EFFECT_GROUP_WITNESS admitting-wait-child-release PASS");
@@ -1675,7 +1675,11 @@ async fn run_design_witnesses(
         "the crash-before-record child executes exactly once"
     );
     let retired: EffectGroupRetireResponse = ingress
-        .call_object_empty_json("EffectGroupIndex", &admission_group, "retire")
+        .call_object_empty_json(
+            crate::LashService::EffectGroupIndex,
+            &admission_group,
+            "retire",
+        )
         .await
         .expect("admission witness tombstones");
     let cleanup = match retired {
@@ -1707,7 +1711,7 @@ async fn run_design_witnesses(
         .await
         .expect("send-record-gap witness opens");
     let _: EffectGroupRetireResponse = ingress
-        .call_object_empty_json("EffectGroupIndex", &gap_group, "retire")
+        .call_object_empty_json(crate::LashService::EffectGroupIndex, &gap_group, "retire")
         .await
         .expect("send-record-gap witness tombstones");
     let executions_before_child = gap_executions.load(Ordering::SeqCst);
