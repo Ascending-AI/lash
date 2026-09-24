@@ -134,6 +134,22 @@ pub trait GroupExecutors: Send + Sync {
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>>;
 
+    /// Whether this host runs `envelope`'s child at all, wherever the child's
+    /// opener is live.
+    ///
+    /// [`executor_for`](Self::executor_for) answers for *this process*: a tool
+    /// child whose opener is live in another worker is `None` here and runs
+    /// there. A first open's preflight asks this instead, because a durable
+    /// host may answer it from any worker of the deployment — Restate routes a
+    /// group's preflight and dispatcher to whichever endpoint takes the call —
+    /// and reading "the opener is live elsewhere" as "no executor" would refuse
+    /// a group the opener's own worker runs (FIG-3630). The default is
+    /// `executor_for`'s answer, which is right for every resolver whose routing
+    /// does not depend on which process asks.
+    fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
+        self.executor_for(envelope).is_some()
+    }
+
     /// The generation of `opener`'s live registration, when this host tracks
     /// opener registrations at all.
     ///

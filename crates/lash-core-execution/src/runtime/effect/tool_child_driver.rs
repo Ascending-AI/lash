@@ -267,6 +267,16 @@ impl std::fmt::Debug for ToolChildHost {
 }
 
 impl super::group_drain::GroupExecutors for ToolChildHost {
+    /// Every tool child is this resolver's, whether or not its opener is live
+    /// in this process: the process whose opener is live runs it. Every other
+    /// command routes exactly when [`executor_for`](Self::executor_for) answers.
+    fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
+        matches!(
+            envelope.command,
+            RuntimeEffectCommand::ToolInvocation { .. }
+        ) || super::group_drain::GroupExecutors::executor_for(self, envelope).is_some()
+    }
+
     /// Routes a tool child to this host's driver, and answers `None` for
     /// everything else.
     ///
