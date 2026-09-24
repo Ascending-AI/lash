@@ -774,7 +774,7 @@ end
 session sibling-block-binding-types
 about sibling blocks may declare one name with values of different types (FIG-3631)
 probe label
-cell defect sibling-block-binding-types
+cell
 if (true) {
   let label = 1;
 } else {
@@ -784,7 +784,16 @@ if (true) {
   let label = 'x';
   console.log(label);
 }
-lash {"outcome":"rejected","diagnostic":"TS_LINK_ERROR","prints":[],"probes":{"label":"unbound"}}
+end
+
+session rebinding-starts-a-type-over
+about a name bound two ways by a branch takes a value of a third type (FIG-3631)
+probe flag value
+cell
+const flag = [1].length > 0;
+let value = flag ? 1 : true;
+value = 'x';
+console.log(value);
 end
 
 session projected-value-shared-across-a-reload

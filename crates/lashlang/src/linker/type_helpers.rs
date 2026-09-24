@@ -6,6 +6,10 @@ pub(super) struct Scope {
     pub(super) process_body: bool,
     pub(super) expected_return: Option<TypeExpr>,
     pub(super) span: Option<Span>,
+    /// Names bound with a declared type (a parameter), whose type still
+    /// constrains a literal assigned to them. Every other plain assignment
+    /// starts its name's type over, as a declaration does (FIG-3631).
+    pub(super) declared: BTreeSet<String>,
 }
 
 impl Scope {
@@ -15,7 +19,18 @@ impl Scope {
             process_body,
             expected_return: None,
             span,
+            declared: BTreeSet::new(),
         }
+    }
+
+    /// Binds a name with a declared type: see [`Scope::declared`].
+    pub(super) fn declare(&mut self, name: &str, binding: Binding) -> PreviousBinding {
+        self.declared.insert(name.to_string());
+        self.bind(name, binding)
+    }
+
+    pub(super) fn is_declared(&self, name: &str) -> bool {
+        self.declared.contains(name)
     }
 
     pub(super) fn bind(&mut self, name: &str, binding: Binding) -> PreviousBinding {
@@ -44,6 +59,8 @@ impl Scope {
     }
 
     pub(super) fn join_branches(&mut self, left: Scope, right: Scope) {
+        self.declared.extend(left.declared.iter().cloned());
+        self.declared.extend(right.declared.iter().cloned());
         let names = left
             .bindings
             .keys()

@@ -525,11 +525,6 @@ is silent while its fix is owed.
   `const same = items; for (const item of items) { same.push(item); }` visits
   the items the loop started with, where Node also visits the appended ones
   (and, unbounded, never ends).
-- `sibling-block-binding-types` (FIG-3631): block declarations of one name in
-  sibling blocks are separate bindings, but share one slot the linker types as
-  one variable, so after a branch binds it two ways a later block's
-  string-literal initializer is refused as an incompatible literal
-  (`TS_LINK_ERROR`).
 - `builtin-call-spread` (FIG-3627): a spread argument to a builtin is not
   passed as the array's items. A static function (`Math.max(...items)`,
   `String.fromCharCode(...codes)`) is refused as `TS_METHOD_UNSUPPORTED`,

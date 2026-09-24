@@ -144,6 +144,53 @@ fn expected_enum_slots_reject_wrong_literals_but_admit_members_and_broad_strings
     ));
 }
 
+/// A plain assignment rebinds its name, so a type the linker only inferred
+/// (branches joined, or sibling blocks' declarations of one name) does not
+/// constrain the value; a declared parameter type still does (FIG-3631).
+#[test]
+fn a_plain_rebinding_starts_an_inferred_type_over_but_a_declared_one_holds() {
+    // process choose(flag: bool) {
+    //   value = 1
+    //   if flag { value = 1 } else { value = true }
+    //   value = "x"
+    // }
+    let inferred = builders::module(
+        vec![builders::process(
+            "choose",
+            vec![builders::param("flag", TypeExpr::Bool)],
+            builders::block(vec![
+                builders::assign("value", builders::num(1.0)),
+                builders::if_else(
+                    builders::var("flag"),
+                    builders::block(vec![builders::assign("value", builders::num(1.0))]),
+                    builders::block(vec![builders::assign("value", builders::bool_lit(true))]),
+                ),
+                builders::assign("value", builders::string("x")),
+            ]),
+        )],
+        Vec::new(),
+    );
+    LinkedModule::link(inferred, full_host_environment())
+        .expect("a rebinding of an inferred int | bool takes a string");
+
+    // process mutate(mode: enum["default"]) { mode = "nope" }
+    let declared = builders::module(
+        vec![builders::process(
+            "mutate",
+            vec![builders::param(
+                "mode",
+                TypeExpr::Enum(vec!["default".into()]),
+            )],
+            builders::block(vec![builders::assign("mode", builders::string("nope"))]),
+        )],
+        Vec::new(),
+    );
+    assert!(matches!(
+        LinkedModule::link(declared, full_host_environment()),
+        Err(LinkError::IncompatibleExpectedLiteral { .. })
+    ));
+}
+
 #[test]
 fn branch_assignments_join_to_a_union_instead_of_first_wins() {
     // process choose(flag: bool) {

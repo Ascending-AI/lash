@@ -904,7 +904,7 @@ impl<'module> Linker<'module> {
                             span,
                         });
                     }
-                    scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
+                    scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
                 }
                 let mut seen_signals = BTreeSet::new();
                 for signal in &process.signals {
@@ -915,8 +915,8 @@ impl<'module> Linker<'module> {
                         });
                     }
                 }
-                scope.bind("input", Binding::Value(process_input_type(process)));
-                scope.bind("inputs", Binding::Value(process_input_record_type(process)));
+                scope.declare("input", Binding::Value(process_input_type(process)));
+                scope.declare("inputs", Binding::Value(process_input_record_type(process)));
                 let body = self.lower_expr(&process.body, path, &mut scope)?.0;
                 let return_ty = self
                     .process_types
@@ -972,7 +972,7 @@ impl<'module> Linker<'module> {
                 });
             }
             self.reject_function_name_binding(param.name.as_str(), span)?;
-            scope.bind(param.name.as_str(), self.binding_for_type(&param.ty));
+            scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
         }
         // A function body's *variable* scope holds its parameters and nothing
         // else. Host globals are turn state: letting a body read them would

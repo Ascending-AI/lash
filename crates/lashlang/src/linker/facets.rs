@@ -26,10 +26,10 @@ pub fn analyze_workflow_program(
         let mut scope = Scope::new(true, declaration_span(program, index));
         scope.expected_return = process.return_ty.clone();
         for param in &process.params {
-            scope.bind(param.name.as_str(), linker.binding_for_type(&param.ty));
+            scope.declare(param.name.as_str(), linker.binding_for_type(&param.ty));
         }
-        scope.bind("input", Binding::Value(process_input_type(process)));
-        scope.bind("inputs", Binding::Value(process_input_record_type(process)));
+        scope.declare("input", Binding::Value(process_input_type(process)));
+        scope.declare("inputs", Binding::Value(process_input_record_type(process)));
         if let Err(error) = linker.lower_expr(&process.body, &body_path, &mut scope) {
             linker.record_workflow_error(&process.body, &body_path, error);
         }

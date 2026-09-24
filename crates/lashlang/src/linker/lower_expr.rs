@@ -517,6 +517,16 @@ impl<'module> Linker<'module> {
             {
                 Some(process_unknown_type())
             }
+            // A plain assignment rebinds its name, so an inferred type (sibling
+            // blocks' declarations of one name joined, FIG-3631) is no
+            // constraint on the value; only a declared one is.
+            (Some(ty), _)
+                if lowered_target.steps.is_empty()
+                    && !scope.is_declared(target.root.as_str())
+                    && !matches!(ty, TypeExpr::Process(_)) =>
+            {
+                None
+            }
             (expected, _) => expected.clone(),
         };
         let (lowered, binding) = self.lower_expr_expected(
