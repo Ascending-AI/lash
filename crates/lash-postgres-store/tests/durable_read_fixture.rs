@@ -1137,6 +1137,12 @@ fn assert_fixture_version() {
     );
 }
 
+/// PostgreSQL runs process leases on the database clock, so the seed claims a
+/// term a slow runner cannot outlive while it writes under the lease; the row
+/// is normalized to the pinned term afterwards
+/// (`normalize_server_authoritative_fixture_rows`).
+const WALL_CLOCK_PROCESS_LEASE_TTL_MS: u64 = 600_000;
+
 fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::FixtureHandles {
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
     let runtime = Arc::new(
@@ -1170,6 +1176,7 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
     );
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+        process_lease_ttl_ms: WALL_CLOCK_PROCESS_LEASE_TTL_MS,
         runtime: runtime as Arc<dyn RuntimePersistence>,
         session_factory: session_factory as Arc<dyn SessionStoreFactory>,
         processes: Arc::clone(&processes)
