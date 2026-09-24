@@ -575,8 +575,9 @@ pub(crate) fn run_all(paths: &[String]) -> Vec<Observed> {
         .collect()
 }
 
-/// The counts `expected-counts.tsv` pins, derived from `outcomes`: the
-/// selection size, then each class, then each class and qualifier.
+/// The record's tallies, derived from `outcomes`: the selection size, then
+/// each class, then each class and qualifier. Nothing pins them; the tests
+/// print them so a change of outcome still shows in the totals.
 pub(crate) fn tally(outcomes: &BTreeMap<String, Outcome>) -> BTreeMap<(String, String), usize> {
     let mut counts = BTreeMap::new();
     *counts
@@ -595,16 +596,13 @@ pub(crate) fn tally(outcomes: &BTreeMap<String, Outcome>) -> BTreeMap<(String, S
     counts
 }
 
-pub(crate) fn pinned_counts() -> BTreeMap<(String, String), usize> {
-    data_lines("expected-counts.tsv", 3)
-        .into_iter()
-        .map(|fields| {
-            (
-                (fields[0].clone(), fields[1].clone()),
-                fields[2].parse::<usize>().expect("pinned count is numeric"),
-            )
-        })
-        .collect()
+/// The tallies as `class\tqualifier\tcount` lines, for the tests' output.
+pub(crate) fn tally_lines(outcomes: &BTreeMap<String, Outcome>) -> String {
+    tally(outcomes)
+        .iter()
+        .map(|((class, detail), count)| format!("{class}\t{detail}\t{count}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The comparison of `observed` with the record, and the rewritten record
@@ -628,8 +626,8 @@ pub(crate) fn compare(
         .collect()
 }
 
-/// Rewrites `outcomes.tsv` and `expected-counts.tsv` in the source tree from
-/// a full run, when `TEST262_BLESS` is set under `kiln run` (which exports
+/// Rewrites `outcomes.tsv` in the source tree from a full run, when
+/// `TEST262_BLESS` is set under `kiln run` (which exports
 /// `BUILD_WORKSPACE_DIRECTORY`). A divergence keeps its recorded owner or
 /// becomes `UNTRIAGED`, which the data checks refuse until a ticket owns it.
 /// Returns whether it blessed.
@@ -658,12 +656,7 @@ pub(crate) fn bless(
         ));
     }
     std::fs::write(directory.join("outcomes.tsv"), text).expect("write outcomes.tsv");
-    let mut counts = String::from("# class\tqualifier\tcount\n");
-    for ((class, detail), count) in tally(&outcomes) {
-        counts.push_str(&format!("{class}\t{detail}\t{count}\n"));
-    }
-    std::fs::write(directory.join("expected-counts.tsv"), counts)
-        .expect("write expected-counts.tsv");
+    eprintln!("{}", tally_lines(&outcomes));
     if let Ok(evidence_path) = std::env::var("TEST262_EVIDENCE") {
         let mut text = String::new();
         for (path, observed) in paths.iter().zip(observed) {

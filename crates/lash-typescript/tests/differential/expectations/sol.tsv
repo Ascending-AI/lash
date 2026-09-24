@@ -1,0 +1,125 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+sol	1	accept	"typeof undefined"	"undefined"	-
+sol	2	accept	"typeof null"	"object"	-
+sol	3	accept	"typeof 1"	"number"	-
+sol	4	accept	"typeof 'a'"	"string"	-
+sol	5	accept	"typeof true"	"boolean"	-
+sol	6	accept	"typeof {}"	"object"	-
+sol	7	accept	"typeof []"	"object"	-
+sol	8	accept	"typeof (function f(){})"	"function"	-
+sol	9	accept	"null == undefined"	"true"	-
+sol	10	accept	"null === undefined"	"false"	-
+sol	11	accept	"NaN == NaN"	"false"	-
+sol	12	accept	"-0 === 0"	"true"	-
+sol	13	accept	"'' == 0"	"true"	-
+sol	14	accept	"'0' == false"	"true"	-
+sol	15	accept	"[] == false"	"true"	-
+sol	16	accept	"[] == ''"	"true"	-
+sol	17	accept	"[] == 0"	"true"	-
+sol	18	accept	"[1] == 1"	"true"	-
+sol	19	accept	"[1,2] == '1,2'"	"true"	-
+sol	20	accept	"({}) == '[object Object]'"	"true"	-
+sol	21	accept	"'abc' < 'abd'"	"true"	-
+sol	22	accept	"'10' < '9'"	"true"	-
+sol	23	accept	"10 < 9"	"false"	-
+sol	24	accept	"'10' < 9"	"false"	-
+sol	25	accept	"null >= 0"	"true"	-
+sol	26	accept	"null > 0"	"false"	-
+sol	27	accept	"undefined == 0"	"false"	-
+sol	28	accept	"true + true"	"2"	-
+sol	29	accept	"1 + '2'"	"12"	-
+sol	30	accept	"'2' + 1"	"21"	-
+sol	31	accept	"1 - '2'"	"-1"	-
+sol	32	accept	"'3' * '4'"	"12"	-
+sol	33	accept	"[] + []"	""	-
+sol	34	runtime-reject	"[] + {}"	"[object Object]"	TS_OBJECT_STRING_COERCION
+sol	35	accept	"1 + []"	"1"	-
+sol	36	runtime-reject	"1 + {}"	"1[object Object]"	TS_OBJECT_STRING_COERCION
+sol	37	runtime-reject	"`${{}}`"	"[object Object]"	TS_OBJECT_STRING_COERCION
+sol	38	accept	"[1,2] + 3"	"1,23"	-
+sol	39	accept	"'a' + undefined"	"aundefined"	-
+sol	40	accept	"'a' + null"	"anull"	-
+sol	41	accept	"`${undefined}`"	"undefined"	-
+sol	42	accept	"`${null}`"	"null"	-
+sol	43	accept	"`${[1,2]}`"	"1,2"	-
+sol	44	accept	"`${[1,[2,3]]}`"	"1,2,3"	-
+sol	45	accept	"`${[null,undefined,1]}`"	",,1"	-
+sol	46	runtime-reject	"`${{a:1}}`"	"[object Object]"	TS_OBJECT_STRING_COERCION
+sol	47	accept	"`${-0}`"	"0"	-
+sol	48	accept	"`${0}`"	"0"	-
+sol	49	accept	"`${1/0}`"	"Infinity"	-
+sol	50	accept	"`${-1/0}`"	"-Infinity"	-
+sol	51	accept	"`${0/0}`"	"NaN"	-
+sol	52	accept	"`${1e21}`"	"1e+21"	-
+sol	53	accept	"`${1e20}`"	"100000000000000000000"	-
+sol	54	accept	"`${1e-6}`"	"0.000001"	-
+sol	55	accept	"`${1e-7}`"	"1e-7"	-
+sol	56	accept	"`${1e100}`"	"1e+100"	-
+sol	57	accept	"`${5e-324}`"	"5e-324"	-
+sol	58	accept	"`${0.1+0.2}`"	"0.30000000000000004"	-
+sol	59	accept	"`${123456789012345678901234567890}`"	"1.2345678901234568e+29"	-
+sol	60	accept	"`${-1e21}`"	"-1e+21"	-
+sol	61	accept	"`${1.5e-10}`"	"1.5e-10"	-
+sol	62	accept	"`${100000000000000000000}`"	"100000000000000000000"	-
+sol	63	accept	"1e21"	"1e+21"	-
+sol	64	accept	"1e-7"	"1e-7"	-
+sol	65	accept	"0.1+0.2"	"0.30000000000000004"	-
+sol	66	accept	"+'inf'"	"NaN"	-
+sol	67	accept	"+'infinity'"	"NaN"	-
+sol	68	accept	"+'Infinity'"	"Infinity"	-
+sol	69	accept	"+'+Infinity'"	"Infinity"	-
+sol	70	accept	"+'-Infinity'"	"-Infinity"	-
+sol	71	accept	"+'+0x10'"	"NaN"	-
+sol	72	accept	"+'0x10'"	"16"	-
+sol	73	accept	"+'0b101'"	"5"	-
+sol	74	accept	"+'0o17'"	"15"	-
+sol	75	accept	"+' 12 '"	"12"	-
+sol	76	accept	"+''"	"0"	-
+sol	77	accept	"+'  '"	"0"	-
+sol	78	accept	"+'12abc'"	"NaN"	-
+sol	79	accept	"+'1_0'"	"NaN"	-
+sol	80	accept	"+'0xFFFFFFFFFFFFFFFFF'"	"295147905179352830000"	-
+sol	81	accept	"+null"	"0"	-
+sol	82	accept	"+undefined"	"NaN"	-
+sol	83	accept	"+true"	"1"	-
+sol	84	accept	"+[]"	"0"	-
+sol	85	accept	"+[5]"	"5"	-
+sol	86	accept	"+[1,2]"	"NaN"	-
+sol	87	accept	"+{}"	"NaN"	-
+sol	88	accept	"-'5'"	"-5"	-
+sol	89	accept	"!''"	"true"	-
+sol	90	accept	"!0"	"true"	-
+sol	91	accept	"!-0"	"true"	-
+sol	92	accept	"!NaN"	"true"	-
+sol	93	accept	"![]"	"false"	-
+sol	94	accept	"!({})"	"false"	-
+sol	95	accept	"!'0'"	"false"	-
+sol	96	accept	"0 || 'x'"	"x"	-
+sol	97	accept	"'' || 'x'"	"x"	-
+sol	98	accept	"1 && 2"	"2"	-
+sol	99	accept	"0 && 2"	"0"	-
+sol	100	accept	"null ?? 'd'"	"d"	-
+sol	101	accept	"undefined ?? 'd'"	"d"	-
+sol	102	accept	"0 ?? 'd'"	"0"	-
+sol	103	accept	"'' ?? 'd'"	""	-
+sol	104	accept	"false ?? 'd'"	"false"	-
+sol	105	accept	"'abc'.toUpperCase()"	"ABC"	-
+sol	106	accept	"'ABC'.toLowerCase()"	"abc"	-
+sol	107	accept	"'  a  '.trim()"	"a"	-
+sol	108	accept	"'abc'.startsWith('a')"	"true"	-
+sol	109	accept	"'abc'.endsWith('c')"	"true"	-
+sol	110	accept	"'abc'.includes('')"	"true"	-
+sol	111	accept	"'abc'.includes('b')"	"true"	-
+sol	112	accept	"'abc'.split('')"	"a,b,c"	-
+sol	113	accept	"'a,b'.split(',')"	"a,b"	-
+sol	114	accept	"''.split(',')"	""	-
+sol	115	accept	"'abc'.split('b')"	"a,c"	-
+sol	116	accept	"[1,2,3].join('-')"	"1-2-3"	-
+sol	117	accept	"[1,null,2].join(',')"	"1,,2"	-
+sol	118	accept	"[].join(',')"	""	-
+sol	119	accept	"[[1,2],3].join(',')"	"1,2,3"	-
+sol	120	accept	"[1,2].includes(1)"	"true"	-
+sol	121	accept	"'abc' === 'abc'"	"true"	-
+sol	122	accept	"1 === 1.0"	"true"	-
+sol	123	accept	"'5' == 5"	"true"	-
+sol	124	accept	"' \\t\\n 5 ' == 5"	"true"	-

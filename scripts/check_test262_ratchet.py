@@ -45,6 +45,16 @@ def parse(text: str) -> dict[str, tuple[str, str]]:
     return outcomes
 
 
+def tallies(outcomes: dict[str, tuple[str, str]]) -> dict[tuple[str, str], int]:
+    """The record's own tallies: the selection size, each class, each class and qualifier."""
+    counts: dict[tuple[str, str], int] = {("selected", "-"): len(outcomes)}
+    for outcome_class, qualifier in outcomes.values():
+        counts[(outcome_class, "*")] = counts.get((outcome_class, "*"), 0) + 1
+        if outcome_class != "pass":
+            counts[(outcome_class, qualifier)] = counts.get((outcome_class, qualifier), 0) + 1
+    return counts
+
+
 def rejected_rows(text: str) -> dict[tuple[str, str], str]:
     """`census.tsv`'s rejection rows: (kind, name) -> the diagnostic code."""
     rows = {}
@@ -119,9 +129,9 @@ def main() -> int:
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
-    passes = sum(1 for outcome in head.values() if outcome[0] == "pass")
-    fails = sum(1 for outcome in head.values() if outcome[0] == "fail")
-    print(f"check_test262_ratchet: no regression ({passes} pass, {fails} fail)")
+    print("check_test262_ratchet: no regression; the record's tallies:")
+    for (outcome_class, qualifier), count in sorted(tallies(head).items()):
+        print(f"  {outcome_class}\t{qualifier}\t{count}")
     return 0
 
 

@@ -8,28 +8,17 @@ the network (ADR 0062).
 
 ## Figures
 
-At the pinned commit, 18,970 of the 53,578 upstream tests are selected. Each has
-exactly one recorded outcome:
+Each selected test has exactly one recorded outcome in `outcomes.tsv`. The
+figures — the selection size, the per-class counts, the pass rate and the
+per-code/owner tallies — are derived from that record, not pinned, so they
+cannot conflict in the merge queue. To print them, run:
 
-| outcome | tests |
-|---|---:|
-| `pass` | 4,062 |
-| `refused <TS_* code>` | 14,124 |
-| `fail <ticket>` | 763 |
-| `harness <capability>` | 21 |
+```sh
+python3 scripts/check_test262_ratchet.py --base origin/main
+```
 
-The pass rate is **21.4% of the selection** and **84.2% of the executable
-tests** (the 4,825 that run: pass plus fail). `expected-counts.tsv` pins the
-count for each class, each refusal code and each owning ticket. The largest
-entries are:
-
-- **Refusals:** `TS_PROTOTYPE_MUTATION_UNSUPPORTED` 3,672, `TS_METHOD_UNSUPPORTED` 2,877,
-  `TS_ASSIGN_CONST` 1,864, `TS_CLASS_UNSUPPORTED` 1,174, `TS_NEW_UNSUPPORTED` 1,120,
-  `TS_UNKNOWN_BINDING` 721 and `TS_FOR_UNSUPPORTED` 651.
-- **Failures:** FIG-3653 (runtime faults instead of `TypeError`) 153, FIG-3650 (early
-  errors accepted) 141, FIG-3651 (valid programs rejected with early-error
-  diagnostics) 139, FIG-3652 (ToPrimitive ignores guest `valueOf`/`toString`)
-  105 and FIG-3656 (built-in values answer `typeof`/`in` wrongly) 77.
+The `test262` and `test262_full` test binaries print the same tallies in their
+output.
 
 ## Selection
 
@@ -44,7 +33,7 @@ checks, in order (the first one that is not accepted names the exclusion in
    has one.** Upstream feature tags are incomplete: untagged tests under
    `built-ins/Promise`, `DataView`, `WeakMap`, `WeakSet`, `ArrayBuffer` and
    `Proxy` exercise those features all the same. So a built-in directory
-   inherits its feature's ruling, as 778 such tests would otherwise be
+   inherits its feature's ruling, since those tests would otherwise be
    selected against a skipped feature.
 3. **Each of its flags.** A `flag` census row rules on every flag
    INTERPRETING.md defines:
@@ -59,10 +48,10 @@ checks, in order (the first one that is not accepted names the exclusion in
 4. **Each of its feature tags.** An untagged test is eligible, which covers
    most of ES5.
 
-`sample.tsv` is the PR lane's stratified sample of 515 tests. Each second-level
-directory contributes `round(count × 500 / selected)` tests, at least one,
-chosen in SHA-256 order of the path. The sample is stable across runs and
-changes only when the selection does.
+`sample.tsv` is the PR lane's stratified sample of the selection. Each
+second-level directory contributes `round(count × 500 / selected)` tests, at
+least one, chosen in SHA-256 order of the path. The sample is stable across
+runs and changes only when the selection does.
 
 ## Outcomes and the ratchet
 
@@ -102,9 +91,9 @@ a deterministic instruction budget. The ratchet has three layers:
   - a pass that is not promoted;
   - a refusal whose code changed.
 
-  A recorded failure matches any divergence; its evidence is not pinned.
-- **The counts.** `expected-counts.tsv` must equal the tallies of
-  `outcomes.tsv`, so every change shows in the reviewed totals as well.
+  A recorded failure matches any divergence; its evidence is not pinned. The
+  record's tallies are derived — both binaries print them rather than pinning
+  a second copy.
 - **Across commits.** `scripts/check_test262_ratchet.py --base <base>` (CI)
   holds the record to its base: a test that passed keeps passing, and a
   failure is new only where the base could not run the test (refused or
@@ -117,8 +106,8 @@ TEST262_BLESS=1 TEST262_EVIDENCE=/tmp/test262-evidence.tsv \
   kiln run //crates/lash-typescript:test262_full__test
 ```
 
-This rewrites both files from a full run, and writes each divergence's and
-refusal's evidence to the evidence file:
+This rewrites `outcomes.tsv` from a full run and prints its tallies, and
+writes each divergence's and refusal's evidence to the evidence file:
 
 - a divergence keeps its recorded owner;
 - a new one is recorded as `UNTRIAGED`, which the record checks refuse until a

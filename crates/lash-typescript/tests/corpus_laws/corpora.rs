@@ -101,12 +101,28 @@ pub(crate) fn all() -> Vec<CorpusProgram> {
 }
 
 /// The Node differential table's rows a cell admits, as the oracle compiles
-/// them. A row refused at parse or link has no program.
+/// them: every `expectations/<shard>.tsv` in sorted order, so a new shard
+/// joins the corpus without an edit here. A row refused at parse or link has
+/// no program.
 fn differential() -> Vec<CorpusProgram> {
-    let table = include_str!("../differential/expectations.tsv");
-    table
-        .lines()
-        .skip(1)
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/differential/expectations");
+    let mut shards = std::fs::read_dir(&directory)
+        .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+        .map(|entry| entry.expect("an expectations entry").path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "tsv"))
+        .collect::<Vec<_>>();
+    shards.sort();
+    shards
+        .into_iter()
+        .flat_map(|path| {
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+                .lines()
+                .skip(1)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
         .filter_map(|line| {
             let columns = line.split('\t').collect::<Vec<_>>();
             let [lane, index, disposition, expression, ..] = columns.as_slice() else {
