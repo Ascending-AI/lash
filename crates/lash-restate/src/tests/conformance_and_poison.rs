@@ -625,60 +625,47 @@ mod on_the_server_double {
         (harness, "restate", fixture)
     });
 
-    // `turn_runner_tests!` minus `a_diverged_tool_presentation_parks_the_turn`:
-    // its redrive parks mid-replay and returns from the handler, which Restate
+    // Parked on the double (scripts/deferred-law-invocations.toml): the
+    // catalogue's FIG-3679 law `a_diverged_tool_presentation_parks_the_turn`
+    // redrives, parks mid-replay and returns from the handler, which Restate
     // refuses as a journal mismatch (570 at command 9, the same on
-    // restate-server 1.7.12), so the invocation retries until it pauses
-    // (FIG-3697).
-    macro_rules! turn_runner_law_on_the_double {
-        ($law:ident, $label:literal) => {
-            lash_conformance::__turn_runner_register!([] {
-                let harness = LiveConformanceHarness::start_for_tool_children_on(
-                    HarnessServer::in_process(),
-                )
-                .await;
-                let effect_host = harness.endpoint_host();
-                let turn_runner = harness.turn_runner();
-                let registry = Arc::new(lash_core::TestLocalProcessRegistry::default())
-                    as Arc<dyn ProcessRegistry>;
-                let terminal = ProcessAwaitOutput::from_tool_output(
-                    lash_core::ToolCallOutput::success(serde_json::json!({"signal": "observed"})),
-                );
-                let (process_work, wait_transport) =
-                    conformance_restate_process_work(Arc::clone(&registry), terminal);
-                let verify_transport = Arc::clone(&wait_transport);
-                let prefix: &'static str = Box::leak(
-                    format!("restate-public-signal-intent-{}", harness.run_nonce())
-                        .into_boxed_str(),
-                );
-                let target = ProcessId::from(format!("{prefix}-target"));
-                (
-                    (harness, wait_transport),
-                    prefix,
-                    effect_host,
-                    registry,
-                    process_work,
-                    turn_runner,
-                    move |law: &'static str| async move {
-                        if law == "public_signal_intent_wakes_parked_process" {
-                            verify_transport.assert_reattached_to(&target);
-                        }
-                    },
-                )
-            }; ($law, $label));
-        };
-    }
-    turn_runner_law_on_the_double!(
-        public_signal_intent_wakes_parked_process,
-        "public-signal-intent-wake"
-    );
-    turn_runner_law_on_the_double!(
-        an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration,
-        "tool-child-after-step-retry-sleep"
-    );
-    turn_runner_law_on_the_double!(
-        a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate,
-        "tool-child-follow-on-cancel-gate"
+    // restate-server 1.7.12); the invocation retries until it pauses
+    // (FIG-3697). The census parks whole invocations, so the suite's other
+    // laws run on the live server until FIG-3697 lands.
+    lash_conformance::turn_runner_tests!(
+        #[ignore = "parked on the server double until FIG-3697"]
+        {
+            let harness =
+                LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process())
+                    .await;
+            let effect_host = harness.endpoint_host();
+            let turn_runner = harness.turn_runner();
+            let registry = Arc::new(lash_core::TestLocalProcessRegistry::default())
+                as Arc<dyn ProcessRegistry>;
+            let terminal = ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success(serde_json::json!({"signal": "observed"})),
+            );
+            let (process_work, wait_transport) =
+                conformance_restate_process_work(Arc::clone(&registry), terminal);
+            let verify_transport = Arc::clone(&wait_transport);
+            let prefix: &'static str = Box::leak(
+                format!("restate-public-signal-intent-{}", harness.run_nonce()).into_boxed_str(),
+            );
+            let target = ProcessId::from(format!("{prefix}-target"));
+            (
+                (harness, wait_transport),
+                prefix,
+                effect_host,
+                registry,
+                process_work,
+                turn_runner,
+                move |law: &'static str| async move {
+                    if law == "public_signal_intent_wakes_parked_process" {
+                        verify_transport.assert_reattached_to(&target);
+                    }
+                },
+            )
+        }
     );
 
     // `migrated_tools_redrive_tests` stays off the double for now: in about
