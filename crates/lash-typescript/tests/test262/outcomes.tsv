@@ -11045,7 +11045,7 @@ test/language/computed-property-names/object/method/generator.js	refused	TS_GENE
 test/language/computed-property-names/object/method/number.js	refused	TS_METHOD_UNSUPPORTED
 test/language/computed-property-names/object/method/string.js	refused	TS_METHOD_UNSUPPORTED
 test/language/computed-property-names/object/method/super.js	refused	TS_SUPER_UNSUPPORTED
-test/language/computed-property-names/object/property/number-duplicates.js	fail	FIG-3662
+test/language/computed-property-names/object/property/number-duplicates.js	pass	-
 test/language/computed-property-names/to-name-side-effects/class.js	refused	TS_CLASS_UNSUPPORTED
 test/language/computed-property-names/to-name-side-effects/numbers-class.js	refused	TS_CLASS_UNSUPPORTED
 test/language/computed-property-names/to-name-side-effects/numbers-object.js	refused	TS_ASSIGN_CONST

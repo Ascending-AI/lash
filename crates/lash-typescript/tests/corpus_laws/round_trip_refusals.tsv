@@ -276,6 +276,8 @@ differential:findings:388	generated binding `__typescript_stdlib` has no authore
 differential:findings:389	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:390	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:391	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:findings:392	cannot render a block in expression position as TypeScript	an object literal with a spread or a computed key lowers to a statement sequence (its copies), which has no expression spelling
+differential:findings:393	cannot render a block in expression position as TypeScript	an object literal with a spread or a computed key lowers to a statement sequence (its copies), which has no expression spelling
 differential:findings:32	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:33	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:findings:34	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar

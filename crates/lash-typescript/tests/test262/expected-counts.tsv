@@ -1,5 +1,5 @@
 # class	qualifier	count
-fail	*	700
+fail	*	699
 fail	FIG-3650	141
 fail	FIG-3651	139
 fail	FIG-3652	98
@@ -7,11 +7,11 @@ fail	FIG-3653	141
 fail	FIG-3654	52
 fail	FIG-3655	34
 fail	FIG-3656	77
-fail	FIG-3662	18
+fail	FIG-3662	17
 harness	*	21
 harness	nativeFunctionMatcher.js	15
 harness	program-size	6
-pass	*	4114
+pass	*	4115
 refused	*	14135
 refused	TS_ACCESSOR_UNSUPPORTED	191
 refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED	6

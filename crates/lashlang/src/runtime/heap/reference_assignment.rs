@@ -167,7 +167,7 @@ impl Heap {
                 _ => Ok(true),
             };
         };
-        let key = coerce_string(key)?;
+        let key = self.javascript_to_string(key)?;
         let old_object = self
             .entries
             .get(target_id)
@@ -178,21 +178,21 @@ impl Heap {
             .clone();
         let mut new_object = old_object.clone();
         let deleted = match &mut new_object {
-            HeapObject::Record(record) => record.remove(key.as_ref()).is_some(),
+            HeapObject::Record(record) => record.remove(key.as_str()).is_some(),
             // An error's own data properties are all configurable, so `delete`
             // removes the slot. Any other name is not an own property, and
             // deleting a name an object does not own answers `true`.
-            HeapObject::Error(error) => match key.as_ref() {
+            HeapObject::Error(error) => match key.as_str() {
                 "message" => error.message.take().is_some(),
                 "cause" => error.cause.take().is_some(),
                 "errors" => error.errors.take().is_some(),
                 _ => false,
             },
             HeapObject::List(values) => {
-                if key.as_ref() == "length" {
+                if key == "length" {
                     return Ok(false);
                 }
-                if let Some(index) = javascript_array_index_key(key.as_ref())
+                if let Some(index) = javascript_array_index_key(&key)
                     && index < values.len()
                 {
                     return Err(RuntimeError::ValidationFailed {
@@ -295,13 +295,12 @@ impl Heap {
                     lookup_regexp_match_index(&result, &key)?
                 }
                 (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
-                    let index = Self::assignment_index(indexes, &mut index_cursor)?;
-                    let key = coerce_string(index)?;
-                    record.get(key.as_ref()).cloned().ok_or_else(|| {
-                        RuntimeError::MissingAssignmentField {
-                            field: key.into_owned(),
-                        }
-                    })?
+                    let key =
+                        self.next_javascript_assignment_index_key(indexes, &mut index_cursor)?;
+                    record
+                        .get(key.as_str())
+                        .cloned()
+                        .ok_or_else(|| RuntimeError::MissingAssignmentField { field: key })?
                 }
                 (object, CompiledAssignPathStep::Field(field)) => {
                     return Err(RuntimeError::CannotAssignField {
@@ -486,11 +485,10 @@ impl Heap {
                 self.assign_error_member(error, &key, imported)?;
             }
             (HeapObject::Record(record), CompiledAssignPathStep::Index) => {
-                let index = indexes
-                    .get(index_cursor)
+                let key = leaf_key
+                    .as_deref()
                     .ok_or(RuntimeError::MissingAssignmentIndex)?;
-                let key = coerce_string(index)?;
-                record.insert_str(key.as_ref(), imported);
+                record.insert_str(key, imported);
             }
             (HeapObject::Tuple(_), CompiledAssignPathStep::Index) => {
                 return Err(RuntimeError::ImmutableTupleIndexes);

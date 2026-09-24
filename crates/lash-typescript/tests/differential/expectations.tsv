@@ -677,3 +677,5 @@ findings	388	accept	"parseFloat('5.e3')"	"5000"	-
 findings	389	accept	"(25).toExponential(0)"	"3e+1"	-
 findings	390	accept	"(12345).toExponential(3)"	"1.235e+4"	-
 findings	391	accept	"(123.456).toExponential(20)"	"1.23456000000000003070e+2"	-
+findings	392	accept	"({[1e55]:1})['1e+55']"	"1"	-
+findings	393	accept	"({[1e55]:'a',[1e55]:'b'})['1e+55']"	"b"	-

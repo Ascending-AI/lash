@@ -1441,3 +1441,14 @@ fn fig3662_to_exponential_rounds_exactly() {
         assert_eq!(finished(source), Value::String(expected.into()), "{source}");
     }
 }
+
+#[test]
+fn fig3662_computed_record_keys_use_ecma_to_string() {
+    assert_eq!(
+        finished(
+            "var ok={[1e55]:'B',[1.2]:'A',[-0]:'D',[NaN]:'G',[Infinity]:'E'};\
+             finish(ok['1e+55']+'|'+ok['1.2']+'|'+ok[0]+'|'+ok.NaN+'|'+ok.Infinity);"
+        ),
+        Value::String("B|A|D|G|E".into())
+    );
+}

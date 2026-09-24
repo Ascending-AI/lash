@@ -389,3 +389,5 @@ parseFloat('5.e3')
 (25).toExponential(0)
 (12345).toExponential(3)
 (123.456).toExponential(20)
+({[1e55]:1})['1e+55']
+({[1e55]:'a',[1e55]:'b'})['1e+55']
