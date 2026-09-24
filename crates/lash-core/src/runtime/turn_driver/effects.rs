@@ -452,13 +452,8 @@ impl RuntimeTurnDriver<'_> {
         id: crate::sansio::EffectId,
         event_tx: &TurnObserver,
         cancel: &CancellationToken,
-    ) -> Result<
-        (
-            Result<Option<crate::sansio::ExecutionEnvironmentSync>, String>,
-            Option<u32>,
-        ),
-        RuntimeEffectControllerError,
-    > {
+    ) -> Result<crate::runtime::effect::ServedExecutionEnvironmentSync, RuntimeEffectControllerError>
+    {
         let invocation =
             self.turn_effect_invocation(machine, id, RuntimeEffectKind::SyncExecutionEnvironment)?;
         self.execute_typed_turn_effect(

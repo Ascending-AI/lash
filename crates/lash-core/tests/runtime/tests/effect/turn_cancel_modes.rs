@@ -43,9 +43,15 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
                 RuntimeEffectKind::PeekAwaitEvent,
                 "turn_cancel.start_gate".to_string()
             ),
+            // The protocol-start sync builds the environment the model call
+            // is made from (FIG-3672 P7b).
+            (
+                RuntimeEffectKind::SyncExecutionEnvironment,
+                "root:llm-cancel-boundary:1:0:sync_execution_environment:1".to_string()
+            ),
             (
                 RuntimeEffectKind::LlmCall,
-                "root:llm-cancel-boundary:1:0:llm_call:1".to_string()
+                "root:llm-cancel-boundary:1:0:llm_call:2".to_string()
             ),
             (
                 RuntimeEffectKind::PeekAwaitEvent,
@@ -130,7 +136,7 @@ async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_che
             ),
             (
                 RuntimeEffectKind::LlmCall,
-                "root:after-step-boundary:1:0:llm_call:1".to_string()
+                "root:after-step-boundary:1:0:llm_call:2".to_string()
             ),
             (
                 RuntimeEffectKind::PeekAwaitEvent,
@@ -198,7 +204,7 @@ async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_com
             ),
             (
                 RuntimeEffectKind::LlmCall,
-                "root:escalated-after-llm:1:0:llm_call:1".to_string()
+                "root:escalated-after-llm:1:0:llm_call:2".to_string()
             ),
             (
                 RuntimeEffectKind::PeekAwaitEvent,

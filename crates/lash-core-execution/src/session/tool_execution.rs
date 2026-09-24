@@ -600,6 +600,38 @@ impl RuntimeExecutionContext<'_> {
         prepare_tool_call_with_context(self.dispatch.as_ref(), pending, call_id).await
     }
 
+    /// Prepares a call on a tool of the turn's recorded surface whose live
+    /// definition drifted (FIG-3672 P7b): under `binding`, the recorded
+    /// definition, with identity preparation, so the call's envelope is the
+    /// one the journal recorded and the live tool is not consulted.
+    pub async fn prepare_recorded_tool_call(
+        &self,
+        binding: &crate::ToolExecutionGrant,
+        pending: crate::sansio::PendingToolCall,
+    ) -> ToolPreparationOutcome {
+        let call_id = Some(pending.call_id.clone());
+        crate::tool_dispatch::prepare_recorded_tool_call_with_context(
+            self.dispatch.as_ref(),
+            binding,
+            pending,
+            call_id,
+        )
+        .await
+    }
+
+    /// The catalog entry a model-issued call names, if the catalog holds it.
+    pub fn callable_tool_id_by_name(&self, tool_name: &str) -> Option<crate::ToolId> {
+        self.dispatch
+            .tool_catalog
+            .tools
+            .iter()
+            .find(|tool| {
+                tool.manifest.name == tool_name
+                    && tool.manifest.activation != crate::ToolActivation::Internal
+            })
+            .map(|tool| tool.manifest.id.clone())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_prepared_tool_attempt_effect(
         &self,

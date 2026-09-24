@@ -585,3 +585,253 @@ async fn a_completed_spawn_whose_capabilities_changed_replays() -> Result<()> {
     assert!(backend.park_of(SESSION).await.is_none());
     Ok(())
 }
+
+/// The model's native call on `probe`, then its answer once the result is in.
+fn native_probe_response(request: &LlmRequest) -> LlmResponse {
+    let answered = request.messages.iter().any(|message| {
+        message
+            .blocks
+            .iter()
+            .any(|block| matches!(block, LlmContentBlock::ToolResult { .. }))
+    });
+    if answered {
+        return text_response("probed");
+    }
+    LlmResponse {
+        parts: vec![LlmOutputPart::ToolCall {
+            call_id: "native-probe-1".to_string(),
+            tool_name: "probe".to_string(),
+            input_json: "{}".to_string(),
+            replay: None,
+        }],
+        response_metadata: Default::default(),
+        ..LlmResponse::default()
+    }
+}
+
+impl Backend {
+    /// A standard-protocol core of the build that registers `probe`: the
+    /// model calls it natively, so the call is a turn tool call, not a cell's.
+    fn native_core_for(&self, probe: Probe) -> LashCore {
+        let calls = Arc::clone(&self.provider_calls);
+        let provider = crate::testing::TestProvider::builder()
+            .kind("replay-park")
+            .complete(move |request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let response = native_probe_response(&request);
+                async move { Ok(response) }
+            })
+            .build()
+            .into_handle();
+        explicit_ephemeral_facets(LashCore::standard_builder(
+            self.backend.clone(),
+            crate::TurnBudget::Unbounded,
+        ))
+        .provider(provider)
+        .model(mock_model_spec())
+        .tools(Arc::new(ProbeTool {
+            probe,
+            executions: Arc::clone(&self.executions),
+        }))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("file-backed SQLite standard backend")
+    }
+
+    /// The journal key in `session_id`'s turn matching `pick`, found by
+    /// running the same turn to completion in a same-length probe session
+    /// first (see [`Self::first_attempt_key`]).
+    async fn native_key(
+        &self,
+        probe: &str,
+        session_id: &str,
+        pick: impl Fn(&str) -> bool,
+    ) -> String {
+        assert_eq!(probe.len(), session_id.len(), "same-length session ids");
+        let core = self.native_core_for(Probe::Id("probe"));
+        let output = core
+            .session(probe)
+            .open()
+            .await
+            .expect("open the probe")
+            .turn(TurnInput::text("call the probe"))
+            .turn_id(TURN)
+            .run()
+            .await
+            .expect("the probe turn completes");
+        assert!(output.is_success(), "{:?}", output.result.errors);
+        let keys = self.keys_of(probe);
+        keys.iter()
+            .find(|key| pick(key))
+            .unwrap_or_else(|| panic!("no probe key matched: {keys:#?}"))
+            .replace(probe, session_id)
+    }
+
+    /// Runs `session_id`'s native turn with a journal fault at `point` on
+    /// `key`, under the build that registers `probe` as first deployed.
+    async fn native_abort_at(&self, session_id: &str, point: EffectJournalFaultPoint, key: &str) {
+        let faults = self.backend.effect_host().effect_journal_faults();
+        faults.fail_next(point, key);
+        let error = self
+            .native_core_for(Probe::Id("probe"))
+            .session(session_id)
+            .open()
+            .await
+            .expect("open the session")
+            .turn(TurnInput::text("call the probe"))
+            .turn_id(TURN)
+            .run()
+            .await
+            .expect_err("the journal fault aborts the turn");
+        assert!(faults.fired(), "the armed fault fired: {error:?}");
+    }
+
+    /// Redrives `session_id`'s native turn under the build registering
+    /// `probe` and returns its outcome.
+    async fn native_redrive(
+        &self,
+        probe: Probe,
+        session_id: &str,
+    ) -> std::result::Result<crate::TurnOutput, EmbedError> {
+        self.native_core_for(probe)
+            .session(session_id)
+            .open()
+            .await
+            .expect("open the session")
+            .turn(TurnInput::text("call the probe"))
+            .turn_id(TURN)
+            .run()
+            .await
+    }
+}
+
+/// The turn's first model call: a fault on its finalize aborts the turn after
+/// its execution-environment sync recorded the tool surface and before the
+/// model's call on `probe` exists, so the redrive needs that call live.
+fn is_first_model_call(key: &str) -> bool {
+    key.contains(":0:llm_call:")
+}
+
+/// A native tool call whose tool was only reworded since the turn recorded
+/// its tool surface never parks (FIG-3672 P7b): drift is judged per tool on
+/// what decides how a call links and dispatches, and the description only
+/// reaches the prompt, which the redrive serves from the journal. The call
+/// whose result the journal does not hold runs live, and the turn completes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_native_call_on_a_reworded_tool_never_parks() -> Result<()> {
+    const SESSION: &str = "native-dsc1";
+    let backend = Backend::open().await;
+    let model_key = backend
+        .native_key("native-prb1", SESSION, is_first_model_call)
+        .await;
+    backend
+        .native_abort_at(SESSION, EffectJournalFaultPoint::Finalize, &model_key)
+        .await;
+    let dispatched = backend.executions.load(Ordering::SeqCst);
+
+    let output = backend
+        .native_redrive(Probe::Described("Reworded at length."), SESSION)
+        .await
+        .expect("the reworded redrive completes");
+    assert!(output.is_success(), "{:?}", output.result.errors);
+    assert_eq!(
+        backend.executions.load(Ordering::SeqCst),
+        dispatched + 1,
+        "the unrecorded call runs once, live"
+    );
+    assert!(backend.park_of(SESSION).await.is_none());
+    Ok(())
+}
+
+/// A native tool call on a tool whose dispatch changed (its retry policy)
+/// or which is gone, whose result the journal does not hold, would reach the
+/// drifted tool live: every redrive parks with the binding-drift refusal
+/// naming the call and dispatches nothing (FIG-3672 P7b).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_native_call_on_a_drifted_tool_needed_live_parks() -> Result<()> {
+    for (session_id, probe_id, drift, word) in [
+        ("native-ret1", "native-prb2", Probe::Retried, "changed in"),
+        ("native-rem1", "native-prb3", Probe::Removed, "missing from"),
+    ] {
+        let backend = Backend::open().await;
+        let model_key = backend
+            .native_key(probe_id, session_id, is_first_model_call)
+            .await;
+        backend
+            .native_abort_at(session_id, EffectJournalFaultPoint::Finalize, &model_key)
+            .await;
+        let dispatched = backend.executions.load(Ordering::SeqCst);
+
+        for _ in 0..2 {
+            let error = backend
+                .native_redrive(drift, session_id)
+                .await
+                .expect_err("a call on a drifted tool needed live parks");
+            let EmbedError::Runtime(runtime_error) = &error else {
+                panic!("the abort is the typed runtime error: {error:?}");
+            };
+            assert_eq!(
+                runtime_error.code,
+                lash_core::RuntimeErrorCode::LashlangCellBindingDrift,
+                "{drift:?}: {error:?}"
+            );
+            let park = backend.park_of(session_id).await.expect("parked");
+            assert!(
+                matches!(
+                    park.reason,
+                    lash_core::store::TurnParkReason::BindingDrift { .. }
+                ),
+                "{drift:?}: {park:?}"
+            );
+            let message = park.reason.message();
+            assert!(
+                message.contains("native-probe-1")
+                    && message.contains("tool:probe")
+                    && message.contains(word),
+                "the park names the call, its tool and how it drifted: {message}"
+            );
+            assert_eq!(
+                backend.executions.load(Ordering::SeqCst),
+                dispatched,
+                "{drift:?}: a parked redrive dispatches nothing"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// A native tool call whose result the journal holds is served whatever
+/// happened to its tool since (FIG-3672 P7b): reworded, retried, or removed,
+/// the turn completes with nothing dispatched.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_native_call_whose_result_is_recorded_is_served_whatever_its_tool_became() -> Result<()> {
+    for (session_id, probe_id, drift) in [
+        ("native-don1", "native-prb4", Probe::Described("Reworded.")),
+        ("native-don2", "native-prb5", Probe::Retried),
+        ("native-don3", "native-prb6", Probe::Removed),
+    ] {
+        let backend = Backend::open().await;
+        // The second model call, after the tool's result is in.
+        let answer_key = backend
+            .native_key(probe_id, session_id, |key| {
+                key.contains(":llm_call:") && !key.contains(":0:llm_call:")
+            })
+            .await;
+        backend
+            .native_abort_at(session_id, EffectJournalFaultPoint::Claim, &answer_key)
+            .await;
+        let dispatched = backend.executions.load(Ordering::SeqCst);
+
+        let output = backend
+            .native_redrive(drift, session_id)
+            .await
+            .unwrap_or_else(|error| panic!("{drift:?}: the redrive completes: {error:?}"));
+        assert!(output.is_success(), "{drift:?}: {:?}", output.result.errors);
+        assert_eq!(
+            backend.executions.load(Ordering::SeqCst),
+            dispatched,
+            "{drift:?}: the recorded result is served"
+        );
+        assert!(backend.park_of(session_id).await.is_none(), "{drift:?}");
+    }
+    Ok(())
+}

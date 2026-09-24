@@ -358,6 +358,13 @@ REGISTRATION_BASELINES = {
 # and burns the answer here. Entries stay after the change lands as
 # dead-but-honest history.
 IDENTIFIER_RENAME_BASELINES = {
+    # FIG-3672 P7b: the cell binding set's drift judgement moved to
+    # `lash_core::tool_dispatch_surface`, shared with the turn's recorded tool
+    # surface, and is now guarded there. The journaled binding record and the
+    # fields drift is judged on are byte-for-byte what they were.
+    "crates/lash-lashlang-runtime/src/replay_run.rs:LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION": (
+        "sha256:08718e57d0f21a6fc0f3b2e1d6011b1f44b51373bf27a195d1a60e0ca9e0055f"
+    ),
     # FIG-3521: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION widened from pub(crate) to
     # pub (and gained a doc comment) so the format manifest re-exports the one
     # definition instead of copying the integer. Its type (u32) and value (1)

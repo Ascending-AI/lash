@@ -180,6 +180,34 @@ impl RuntimeExecutionContext<'_> {
         }
     }
 
+    /// The positions of `batch_id`'s tool-group children whose outcome the
+    /// journal holds: what a replay serves without running anything live.
+    /// `None` when the host replays its journal by position and cannot say
+    /// ahead of the replay (Restate).
+    pub async fn settled_tool_group_children(
+        &self,
+        batch_id: &str,
+    ) -> Result<Option<std::collections::BTreeSet<usize>>, crate::RuntimeEffectControllerError>
+    {
+        let prefix = format!("{}:child:", self.tool_child_group_key(batch_id));
+        let recorded = self
+            .read_recorded_journal(&crate::RecordedKeyRange {
+                lower: prefix.clone(),
+                upper: format!("{prefix}~"),
+                group_key_prefix: String::new(),
+            })
+            .await?;
+        let crate::RecordedJournal::Keys(keys) = recorded else {
+            return Ok(None);
+        };
+        Ok(Some(
+            keys.settled_keys
+                .iter()
+                .filter_map(|key| key.strip_prefix(&prefix)?.parse::<usize>().ok())
+                .collect(),
+        ))
+    }
+
     /// Opens one durable effect group of tool children and returns its
     /// consumption handle (ADR 0099 §3).
     ///

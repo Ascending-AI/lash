@@ -103,13 +103,18 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // fault) is not the sync's outcome: the claim is released
                 // unsealed and the turn aborts, so a redrive rebuilds it
                 // rather than replaying the fault as a failed turn.
-                let result = match runner
+                let (result, tool_surface) = match runner
                     .driver
-                    .refresh_execution_environment(runner.messages.clone())
+                    .refresh_execution_environment(
+                        runner.messages.clone(),
+                        runner.protocol_iteration,
+                    )
                     .await
                 {
-                    Ok(sync) => Ok(sync),
-                    Err(super::tool_catalog::SyncFailure::Recorded(message)) => Err(message),
+                    Ok((sync, tool_surface)) => (Ok(Some(sync)), tool_surface),
+                    Err(super::tool_catalog::SyncFailure::Recorded(message)) => {
+                        (Err(message), Vec::new())
+                    }
                     Err(super::tool_catalog::SyncFailure::Live(error)) => {
                         return Err(RuntimeEffectControllerError::from(error)
                             .retryable_uncommitted_derivation());
@@ -129,6 +134,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
                     result,
                     cell_replay_grammar: cell_replay_grammar.flatten(),
+                    tool_surface,
                 })
             }
             RuntimeEffectCommand::Sleep { spec } => {

@@ -46,8 +46,103 @@ struct ToolCatalogDerived {
 struct ToolCatalogArtifact {
     tool_registry: Arc<crate::ToolRegistry>,
     tool_catalog: Arc<crate::ToolCatalog>,
+    /// The catalog the live registry resolves to now. It is `tool_catalog`
+    /// for a live surface; for a recorded surface it is what the recorded
+    /// definitions are judged against, tool by tool.
+    live_tool_catalog: Arc<crate::ToolCatalog>,
     preamble: Arc<crate::TurnDriverPreamble>,
+    /// The recorded tools whose live definition is missing or dispatches
+    /// differently; empty for a live surface.
+    drift: std::collections::BTreeMap<crate::ToolId, ToolSurfaceDrift>,
     derived: ToolCatalogDerived,
+}
+
+/// How a tool of a turn's recorded surface differs from the live registry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolSurfaceDriftKind {
+    /// The live registry holds no tool with the recorded tool's id.
+    Missing,
+    /// The live tool with the recorded id links or dispatches differently.
+    Changed,
+}
+
+impl ToolSurfaceDriftKind {
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Missing => "missing from",
+            Self::Changed => "changed in",
+        }
+    }
+}
+
+/// One tool of a turn's recorded surface whose live definition drifted.
+///
+/// Drift is judged per tool on what decides how a call links and dispatches
+/// ([`tool_dispatch_surface`]); a reworded description or new examples are
+/// not drift, since the prompt is served from the journaled sync.
+#[derive(Clone, Debug)]
+pub struct ToolSurfaceDrift {
+    pub kind: ToolSurfaceDriftKind,
+    pub recorded: crate::ToolDefinition,
+}
+
+impl ToolSurfaceDrift {
+    /// The grant a call on the drifted tool is authorized under: the recorded
+    /// definition, so its envelope is the one the journal recorded.
+    pub fn recorded_binding(&self) -> crate::ToolExecutionGrant {
+        crate::ToolExecutionGrant::from_definition(self.recorded.clone())
+    }
+
+    /// The refusal a call on the drifted tool meets when the journal does not
+    /// hold its result. It is the binding-drift refusal a code cell's drifted
+    /// binding meets (FIG-3587), so the turn parks the same way.
+    pub fn refusal(&self, call_id: &str) -> crate::RuntimeEffectControllerError {
+        crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::LashlangCellBindingDrift,
+            format!(
+                "tool call `{call_id}` (tool `{}`) names a tool {} the live tool registry since \
+                 the turn's tool surface was recorded; its journal serves only recorded \
+                 results, and this call would reach the tool live, so nothing was dispatched",
+                self.recorded.manifest.id,
+                self.kind.describe(),
+            ),
+        )
+    }
+}
+
+/// The part of a tool definition that decides how a call links and
+/// dispatches: its identity, binding, activation, argument projection, retry
+/// policy and schemas. The description and examples reach only the model's
+/// prompt, which a redrive serves from the journaled environment sync.
+#[derive(serde::Serialize, PartialEq)]
+pub struct ToolDispatchSurface<'a> {
+    id: &'a crate::ToolId,
+    name: &'a str,
+    bindings: &'a std::collections::BTreeMap<String, serde_json::Value>,
+    activation: &'a crate::ToolActivation,
+    argument_projection: &'a crate::ToolArgumentProjectionPolicy,
+    retry_policy: &'a crate::ToolRetryPolicy,
+    input_schema: &'a crate::SchemaContract,
+    output_schema: &'a crate::SchemaContract,
+    output_contract: &'a crate::ToolOutputContract,
+}
+
+/// The dispatch surface of `manifest` under `contract`.
+pub fn tool_dispatch_surface<'a>(
+    manifest: &'a crate::ToolManifest,
+    contract: &'a crate::ToolContract,
+) -> ToolDispatchSurface<'a> {
+    ToolDispatchSurface {
+        id: &manifest.id,
+        name: &manifest.name,
+        bindings: &manifest.bindings,
+        activation: &manifest.activation,
+        argument_projection: &manifest.argument_projection,
+        retry_policy: &manifest.retry_policy,
+        input_schema: &contract.input_schema,
+        output_schema: &contract.output_schema,
+        output_contract: &contract.output_contract,
+    }
 }
 
 #[cfg(feature = "testing")]
@@ -82,6 +177,31 @@ impl ToolCatalogHandle {
 
     pub fn preamble(&self) -> Arc<crate::TurnDriverPreamble> {
         Arc::clone(&self.0.preamble)
+    }
+
+    /// The catalog the live registry resolves to now; see
+    /// [`ToolCatalogArtifact::live_tool_catalog`].
+    pub fn live_tool_catalog(&self) -> Arc<crate::ToolCatalog> {
+        Arc::clone(&self.0.live_tool_catalog)
+    }
+
+    /// The catalog's tools as definitions: what an execution-environment
+    /// sync records as the turn's tool surface.
+    pub fn definitions(&self) -> Vec<crate::ToolDefinition> {
+        self.0
+            .tool_catalog
+            .tools
+            .iter()
+            .map(|entry| crate::ToolDefinition {
+                manifest: entry.manifest.clone(),
+                contract: (*entry.contract).clone(),
+            })
+            .collect()
+    }
+
+    /// How `tool_id`'s live definition drifted from the recorded surface.
+    pub fn drift_for(&self, tool_id: &crate::ToolId) -> Option<&ToolSurfaceDrift> {
+        self.0.drift.get(tool_id)
     }
 
     fn catalog(&self) -> Arc<Vec<serde_json::Value>> {
@@ -380,10 +500,115 @@ impl Session {
         let preamble = driver.build_preamble(input);
         Ok(ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
             tool_registry,
+            live_tool_catalog: Arc::clone(&tool_catalog),
             tool_catalog,
             preamble: Arc::new(preamble),
+            drift: std::collections::BTreeMap::new(),
             derived: ToolCatalogDerived::default(),
         })))
+    }
+
+    /// Installs the tool surface a turn's execution-environment sync
+    /// recorded as the surface its drive reads (FIG-3672 P7b).
+    ///
+    /// The recorded definitions are the catalog: membership, manifests and
+    /// contracts are what the pass that wrote the journal saw, whichever
+    /// worker replays it. The live registry supplies only the executors, and
+    /// each recorded tool is judged against it on its own
+    /// ([`ToolSurfaceDrift`]): a call on a drifted tool is served only from
+    /// its recorded result.
+    pub fn install_recorded_tool_surface(
+        &self,
+        session_id: &SessionId,
+        tool_access: &crate::SessionToolAccess,
+        subagent: Option<&crate::SubagentSessionContext>,
+        recorded: &[crate::ToolDefinition],
+    ) -> Result<(), crate::PluginError> {
+        let tool_registry = self.pin_live_tool_registry()?;
+        let key = self.tool_catalog_cache_key(tool_access, tool_registry.generation());
+        let live = self.build_tool_catalog_entry(
+            session_id,
+            Arc::clone(&tool_registry),
+            tool_access.clone(),
+            subagent.cloned(),
+        )?;
+        let live_tool_catalog = live.tool_catalog();
+        let live_by_id = live_tool_catalog
+            .tools
+            .iter()
+            .map(|entry| (&entry.manifest.id, entry))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut drift = std::collections::BTreeMap::new();
+        for definition in recorded {
+            let kind = match live_by_id.get(&definition.manifest.id) {
+                None => Some(ToolSurfaceDriftKind::Missing),
+                Some(entry) => (tool_dispatch_surface(&entry.manifest, &entry.contract)
+                    != tool_dispatch_surface(&definition.manifest, &definition.contract))
+                .then_some(ToolSurfaceDriftKind::Changed),
+            };
+            if let Some(kind) = kind {
+                drift.insert(
+                    definition.manifest.id.clone(),
+                    ToolSurfaceDrift {
+                        kind,
+                        recorded: definition.clone(),
+                    },
+                );
+            }
+        }
+        let tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(recorded.to_vec()));
+        let preamble = self
+            .plugins()
+            .protocol_driver()
+            .build_preamble(crate::ProtocolBuildInput {
+                tool_catalog: Arc::clone(&tool_catalog),
+                plugin_extensions: self.plugins().extensions().clone(),
+                trigger_events: self.plugins().triggers().clone(),
+                extra_prompt_contributions: self.protocol_extra_prompt_contributions(),
+            });
+        let handle = ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
+            tool_registry,
+            tool_catalog,
+            live_tool_catalog,
+            preamble: Arc::new(preamble),
+            drift,
+            derived: ToolCatalogDerived::default(),
+        }));
+        *self.tool_catalog_cache.lock_recover() = Some((key, handle));
+        Ok(())
+    }
+
+    /// The protocol driver's preamble for a turn machine whose environment its
+    /// protocol-start sync supplies. It is built over an empty catalog: the
+    /// driver's configuration is host configuration and does not depend on the
+    /// tools, and the prompt and tool specs it would render are replaced by
+    /// the recorded sync. The machine always syncs, since that sync is the
+    /// only way the environment reaches it.
+    pub fn protocol_driver_preamble(&self) -> Arc<crate::TurnDriverPreamble> {
+        let mut preamble =
+            self.plugins()
+                .protocol_driver()
+                .build_preamble(crate::ProtocolBuildInput {
+                    tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
+                    plugin_extensions: self.plugins().extensions().clone(),
+                    trigger_events: self.plugins().triggers().clone(),
+                    extra_prompt_contributions: self.protocol_extra_prompt_contributions(),
+                });
+        preamble.config.sync_execution_environment = true;
+        Arc::new(preamble)
+    }
+
+    /// How `tool_id` drifted from the turn's installed recorded surface, if it
+    /// did; `None` for an undrifted tool or a live surface.
+    pub fn tool_surface_drift(
+        &self,
+        session_id: &SessionId,
+        tool_id: &crate::ToolId,
+    ) -> Result<Option<ToolSurfaceDrift>, crate::PluginError> {
+        Ok(self
+            .active_tool_surface_entry(session_id)?
+            .drift_for(tool_id)
+            .cloned())
     }
 
     fn tool_catalog_cache_entry(
@@ -422,6 +647,10 @@ impl Session {
     /// authority and plugin contributions then filter the model-facing names.
     /// The returned handle owns both the catalog and the registry dispatch will
     /// use for calls from that request.
+    ///
+    /// Building a surface installs nothing: an execution-environment sync
+    /// records the surface it built, and the drive installs what the sync
+    /// recorded ([`Self::install_recorded_tool_surface`]).
     // `ToolCatalogHandle` is only `pub` under the `testing` feature, so this
     // accessor's visibility tracks it exactly (`private_interfaces`).
     #[cfg(feature = "testing")]
@@ -451,15 +680,12 @@ impl Session {
         subagent: Option<&crate::SubagentSessionContext>,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
         let tool_registry = self.pin_live_tool_registry()?;
-        let key = self.tool_catalog_cache_key(tool_access, tool_registry.generation());
-        let entry = self.build_tool_catalog_entry(
+        self.build_tool_catalog_entry(
             session_id,
             tool_registry,
             tool_access.clone(),
             subagent.cloned(),
-        )?;
-        *self.tool_catalog_cache.lock_recover() = Some((key, entry.clone()));
-        Ok(entry)
+        )
     }
 
     fn pin_live_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, crate::PluginError> {
@@ -579,7 +805,11 @@ impl Session {
             protocol_extension,
             turn_context,
         ))
-        .map(|context| context.with_execution_env_spec(execution_env_spec))
+        .map(|context| {
+            context
+                .with_execution_env_spec(execution_env_spec)
+                .with_live_tool_catalog(tool_surface.live_tool_catalog())
+        })
     }
 
     pub fn invalidate_runtime_caches(&self) {
@@ -948,12 +1178,22 @@ mod tool_catalog_cache_tests {
             .pin_tool_surface(&SessionId::from("pinned-surface"), &hidden_access, None)
             .expect("authority-hidden request surface");
         assert!(!hidden.tool_catalog().has_callable_tool("alpha"));
+        // Building a surface installs nothing; consumers read the surface a
+        // sync recorded, once the drive installs it.
+        session
+            .install_recorded_tool_surface(
+                &SessionId::from("pinned-surface"),
+                &hidden_access,
+                None,
+                &hidden.definitions(),
+            )
+            .expect("install the recorded hidden surface");
         assert!(
             !session
                 .resolved_tool_catalog(&SessionId::from("pinned-surface"))
                 .expect("active hidden request surface")
                 .has_callable_tool("alpha"),
-            "consumers retain the exact request pin even when session-construction authority differs"
+            "consumers retain the exact recorded surface even when session-construction authority differs"
         );
         assert!(
             hidden
@@ -978,8 +1218,8 @@ mod tool_catalog_cache_tests {
         );
         assert_eq!(
             manifest_reads.load(Ordering::SeqCst),
-            reads_before_pin + 4,
-            "each of four request pins enumerated the live source exactly once"
+            reads_before_pin + 5,
+            "each of four request pins and the install enumerated the live source exactly once"
         );
     }
 

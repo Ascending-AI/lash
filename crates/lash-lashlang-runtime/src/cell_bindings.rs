@@ -185,41 +185,6 @@ fn resolve_ambient_bindings(
     Ok(serde_json::Value::Object(record))
 }
 
-/// The part of a tool definition that decides how a call links and
-/// dispatches: its identity, binding, activation, argument projection, retry
-/// policy and schemas. The description and examples only reach the model's
-/// prompt, which a redrive serves from the journaled environment sync, so a
-/// reworded descriptor is not drift.
-#[derive(serde::Serialize)]
-struct DispatchSurface<'a> {
-    id: &'a lash_core::ToolId,
-    name: &'a str,
-    bindings: &'a BTreeMap<String, serde_json::Value>,
-    activation: &'a lash_core::ToolActivation,
-    argument_projection: &'a lash_core::ToolArgumentProjectionPolicy,
-    retry_policy: &'a lash_core::ToolRetryPolicy,
-    input_schema: &'a lash_core::SchemaContract,
-    output_schema: &'a lash_core::SchemaContract,
-    output_contract: &'a lash_core::ToolOutputContract,
-}
-
-fn dispatch_surface(
-    manifest: &lash_core::ToolManifest,
-    contract: &lash_core::ToolContract,
-) -> Result<serde_json::Value, serde_json::Error> {
-    serde_json::to_value(DispatchSurface {
-        id: &manifest.id,
-        name: &manifest.name,
-        bindings: &manifest.bindings,
-        activation: &manifest.activation,
-        argument_projection: &manifest.argument_projection,
-        retry_policy: &manifest.retry_policy,
-        input_schema: &contract.input_schema,
-        output_schema: &contract.output_schema,
-        output_contract: &contract.output_contract,
-    })
-}
-
 /// Compares a served binding record against the live registry.
 fn compare(
     record: serde_json::Value,
@@ -249,13 +214,12 @@ fn compare(
             serde_json::from_value(value.clone()).map_err(|error| invalid(error.to_string()))?;
         let kind = match live_by_id.get(&recorded.manifest.id) {
             None => Some(CellBindingDriftKind::Missing),
-            Some(entry) => {
-                let current = dispatch_surface(&entry.manifest, &entry.contract)
-                    .map_err(|error| invalid(error.to_string()))?;
-                let recorded_surface = dispatch_surface(&recorded.manifest, &recorded.contract)
-                    .map_err(|error| invalid(error.to_string()))?;
-                (current != recorded_surface).then_some(CellBindingDriftKind::Changed)
-            }
+            // Drift is judged on what decides linking and dispatch; a reworded
+            // descriptor is not drift, since the prompt is served from the
+            // journaled environment sync.
+            Some(entry) => (lash_core::tool_dispatch_surface(&entry.manifest, &entry.contract)
+                != lash_core::tool_dispatch_surface(&recorded.manifest, &recorded.contract))
+            .then_some(CellBindingDriftKind::Changed),
         };
         if let Some(kind) = kind {
             bindings.drifted.insert(
@@ -272,16 +236,17 @@ fn compare(
     Ok(bindings)
 }
 
-/// Journals the binding set a cell resolved from the live catalog, before its
-/// first effect, under the exec effect at `exec_replay_key`; a redrive is
-/// served the recorded set, compared here against the live catalog.
+/// Journals the binding set a cell resolved from `catalog`, the turn's
+/// recorded tool surface, before its first effect, under the exec effect at
+/// `exec_replay_key`; a redrive is served the recorded set, and each binding
+/// is judged against the catalog the live registry resolves to now.
 #[expect(
     clippy::expect_used,
     reason = "the referenced call paths are strings, so they encode as canonical JSON, as the site's own message states"
 )]
 pub async fn journal_cell_tool_bindings(
     referenced: &BTreeSet<String>,
-    live: &lash_core::ToolCatalog,
+    catalog: &lash_core::ToolCatalog,
     excluded: &BTreeSet<String>,
     exec_replay_key: &str,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
@@ -291,7 +256,7 @@ pub async fn journal_cell_tool_bindings(
         "{CELL_TOOL_BINDINGS_OPERATION}:{}",
         serde_json::to_string(referenced).expect("call-path strings encode as canonical JSON")
     );
-    let resolved = resolve_ambient_bindings(referenced, live, excluded).map_err(|error| {
+    let resolved = resolve_ambient_bindings(referenced, catalog, excluded).map_err(|error| {
         lash_core::RuntimeEffectControllerError::new(
             lash_core::RuntimeErrorCode::RecordEncodingFailed,
             format!("failed to encode the cell tool binding set: {error}"),
@@ -302,7 +267,7 @@ pub async fn journal_cell_tool_bindings(
             Ok(resolved)
         })
         .await?;
-    compare(record, live)
+    compare(record, ctx.live_tool_catalog().as_ref())
 }
 
 #[cfg(test)]

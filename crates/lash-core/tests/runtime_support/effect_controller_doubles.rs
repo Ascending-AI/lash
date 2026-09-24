@@ -598,13 +598,10 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                 result: Ok(lash_core::CheckpointDelivery::default()),
                 claims: Box::default(),
             }),
-            RuntimeEffectCommand::SyncExecutionEnvironment => {
-                Ok(RuntimeEffectOutcome::SyncExecutionEnvironment {
-                    result: Ok(None),
-                    cell_replay_grammar: None,
-                })
-            }
-            command @ (RuntimeEffectCommand::AcceptTurnInput { .. }
+            // The sync is the only way a turn machine gets its environment
+            // and its tool surface, so the double runs it as the host does.
+            command @ (RuntimeEffectCommand::SyncExecutionEnvironment
+            | RuntimeEffectCommand::AcceptTurnInput { .. }
             | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }) => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))

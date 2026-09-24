@@ -93,11 +93,26 @@ impl RuntimeTurnDriver<'_> {
         let call_count = calls.len();
         let mut results = vec![None; call_count];
         let mut prepared_entries = Vec::new();
+        // The calls on tools whose live definition drifted from the turn's
+        // recorded surface, by their position among the group's children.
+        let mut drifted = Vec::new();
         for (index, call) in calls.into_iter().enumerate() {
             let call_id = call.call_id.clone();
             let replay = call.replay.clone();
-            match prepare_context.prepare_tool_call(call).await {
+            let drift = self.recorded_surface_drift(&prepare_context, &call.tool_name)?;
+            let preparation = match &drift {
+                Some(drift) => {
+                    prepare_context
+                        .prepare_recorded_tool_call(&drift.recorded_binding(), call)
+                        .await
+                }
+                None => prepare_context.prepare_tool_call(call).await,
+            };
+            match preparation {
                 crate::tool_dispatch::ToolPreparationOutcome::Prepared(prepared) => {
+                    if let Some(drift) = drift {
+                        drifted.push((prepared_entries.len(), call_id.clone(), drift));
+                    }
                     prepared_entries.push((index, *prepared));
                 }
                 crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
@@ -128,6 +143,21 @@ impl RuntimeTurnDriver<'_> {
             // frame's first tool call would otherwise name the root frame's
             // group and reopen its settlements.
             let batch_id = group_invocation.replay_key().to_string();
+            // A call on a drifted tool is served only from its recorded
+            // result: one the journal does not hold would reach the drifted
+            // tool live, so the turn parks before anything is dispatched.
+            if !drifted.is_empty() {
+                let settled = prepare_context
+                    .settled_tool_group_children(&batch_id)
+                    .await?;
+                if let Some((_, call_id, drift)) = drifted.iter().find(|(position, _, _)| {
+                    !settled
+                        .as_ref()
+                        .is_some_and(|settled| settled.contains(position))
+                }) {
+                    return Err(drift.refusal(call_id));
+                }
+            }
             let completions = prepare_context
                 .execute_prepared_tool_group(&batch_id, group_invocation, prepared_entries)
                 .await?;
@@ -152,5 +182,27 @@ impl RuntimeTurnDriver<'_> {
                 })
             })
             .collect()
+    }
+}
+
+impl RuntimeTurnDriver<'_> {
+    /// How the tool a model-issued call names drifted from the turn's
+    /// recorded surface, judged on what decides how it links and dispatches.
+    fn recorded_surface_drift(
+        &self,
+        context: &crate::RuntimeExecutionContext<'_>,
+        tool_name: &str,
+    ) -> Result<Option<crate::ToolSurfaceDrift>, RuntimeEffectControllerError> {
+        let Some(tool_id) = context.callable_tool_id_by_name(tool_name) else {
+            return Ok(None);
+        };
+        self.session
+            .tool_surface_drift(&self.session_id, &tool_id)
+            .map_err(|error| {
+                RuntimeEffectControllerError::new(
+                    crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
+                    error.to_string(),
+                )
+            })
     }
 }
