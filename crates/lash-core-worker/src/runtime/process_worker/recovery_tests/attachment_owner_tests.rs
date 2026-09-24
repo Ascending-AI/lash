@@ -62,13 +62,10 @@ impl SessionStoreFactory for ParentBoundSessionStoreFactory {
         self.inner.delete_session(session_id).await
     }
 
-    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
     async fn count_unsettled_turns(
         &self,
     ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::count_unsettled_turns",
-        })
+        self.inner.count_unsettled_turns().await
     }
 }
 

@@ -395,28 +395,18 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
             .await
     }
 
-    async fn event_page(
-        &self,
-        process_id: &ProcessId,
-        limit: std::num::NonZeroUsize,
-        mode: crate::ProcessEventQueryMode,
-        continuation: Option<crate::ProcessEventPageToken>,
-    ) -> Result<crate::ProcessEventReadOutcome<crate::ProcessEventPage>, crate::PluginError> {
-        self.take_events_read_fault()?;
-        self.inner
-            .event_page(process_id, limit, mode, continuation)
-            .await
-    }
-
+    // `event_page` keeps the trait's provided body, which reads through
+    // `event_page_ref`: a by-id read sees the same fault.
     async fn event_page_ref(
         &self,
         process_ref: &crate::ProcessRef,
+        after_sequence: u64,
         limit: std::num::NonZeroUsize,
         mode: crate::ProcessEventQueryMode,
-        continuation: Option<crate::ProcessEventPageToken>,
     ) -> Result<crate::ProcessEventReadOutcome<crate::ProcessEventPage>, crate::PluginError> {
+        self.take_events_read_fault()?;
         self.inner
-            .event_page_ref(process_ref, limit, mode, continuation)
+            .event_page_ref(process_ref, after_sequence, limit, mode)
             .await
     }
 

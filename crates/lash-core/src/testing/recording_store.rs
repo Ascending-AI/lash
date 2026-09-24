@@ -745,6 +745,10 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
         self.inner.reclaim_retained_evidence(bound).await
     }
 
+    async fn count_unsettled_turns(&self) -> Result<crate::store::UnsettledTurnCounts, StoreError> {
+        self.inner.count_unsettled_turns().await
+    }
+
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,

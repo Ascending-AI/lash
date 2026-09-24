@@ -77,4 +77,10 @@ impl SessionStoreFactory for NoByIdLookupSessionStoreFactory {
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
+
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+        self.inner.count_unsettled_turns().await
+    }
 }
