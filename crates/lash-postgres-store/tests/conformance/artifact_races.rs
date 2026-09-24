@@ -31,15 +31,19 @@ async fn lock_artifact_mutations<'a>(
     tx
 }
 
-async fn wait_until_release_reaches_its_serialization_point(storage: &PostgresStorage) {
-    for _ in 0..200 {
+/// Block until another backend is parked on a heavyweight lock inside an
+/// artifact mutation, which is the only observable proof that the spawned task
+/// has already taken every uncontended lock ahead of that point.
+async fn wait_until_a_mutation_waits_at_its_serialization_point(storage: &PostgresStorage) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
         let waiting: bool = sqlx::query_scalar(
             "SELECT EXISTS (
                  SELECT 1 FROM pg_stat_activity
                  WHERE pid <> pg_backend_pid()
                    AND datname = current_database()
                    AND state = 'active'
-                   AND wait_event IS NOT NULL
+                   AND wait_event_type = 'Lock'
                    AND (
                        query LIKE '%pg_advisory_xact_lock%'
                        OR query LIKE '%DELETE FROM lash_lashlang_artifacts AS artifact%'
@@ -48,13 +52,16 @@ async fn wait_until_release_reaches_its_serialization_point(storage: &PostgresSt
         )
         .fetch_one(storage.pool())
         .await
-        .expect("inspect release wait state");
+        .expect("inspect mutation lock wait state");
         if waiting {
             return;
         }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "mutation did not reach its artifact serialization point"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    panic!("release did not reach its artifact serialization point");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -91,7 +98,7 @@ async fn postgres_artifact_release_observes_owner_that_commits_ahead_of_it() {
             .release_module_artifact(&owner_a, &module_ref)
             .await
     });
-    wait_until_release_reaches_its_serialization_point(&storage).await;
+    wait_until_a_mutation_waits_at_its_serialization_point(&storage).await;
     assert!(
         !release.is_finished(),
         "release must wait behind the mutation lock"
@@ -188,7 +195,12 @@ async fn postgres_artifact_retirement_fences_a_late_publisher() {
             .retire_module_artifact_owner(&retiring_owner)
             .await
     });
-    tokio::task::yield_now().await;
+    // Retirement takes the owner lock before the exact artifact key the
+    // blocker holds. Once it is parked on that key it owns the owner lock, so
+    // the publisher below queues behind a retirement that commits first. A
+    // publisher that took the owner lock first would be an earlier,
+    // legitimately successful publication that retirement then severs.
+    wait_until_a_mutation_waits_at_its_serialization_point(&storage).await;
     assert!(
         !retirement.is_finished(),
         "retirement must wait at the exact artifact serialization key"
