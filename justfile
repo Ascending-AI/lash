@@ -224,7 +224,7 @@ process-operations-e2e:
 version-bump-recreation-e2e:
   bash "{{repo}}/scripts/version-bump-recreation-e2e.sh"
 
-# Fast live proof of the shared Postgres/MinIO/Restate gate isolation contract.
+# Fast live proof of the shared Postgres/S3/Restate gate isolation contract.
 gate-container-smoke:
   bash "{{repo}}/scripts/gate-container-smoke.sh"
 

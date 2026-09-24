@@ -31,7 +31,7 @@ name: CI
 # Manual-only gates run on `workflow_dispatch` alone, the full profile
 # release.yml certifies against, and why each stays there:
 #
-# * Test heavy suites, Test S3 store against MinIO, Functional E2E, the
+# * Test heavy suites, Test S3 store against Garage, Functional E2E, the
 #   stack budget and the PostgreSQL pool-wait, simulator-backend-fault and
 #   cross-backend-differential steps of Test Postgres store: deferred by the
 #   2026-08-25 CI-scope ruling for their runner cost, until the FIG-2169
@@ -42,7 +42,7 @@ name: CI
 #   Bazel partition.
 # * Lashlang Git consumer: a compile configuration no other job resolves,
 #   carried by the release dispatch (FIG-2854).
-# * Worker release artifacts and the Restate + Postgres + MinIO workers E2E:
+# * Worker release artifacts and the Restate + Postgres + S3 workers E2E:
 #   release builds and multi-service harnesses. A pull request opts in with
 #   the `ci:workers` label.
 # * The PG14/PG18 compatibility legs on a non-schema diff: they compare
@@ -1614,7 +1614,7 @@ jobs:
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
   s3-store:
-    name: Test S3 store against MinIO
+    name: Test S3 store against Garage
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     needs: plan
@@ -1622,15 +1622,16 @@ jobs:
     # ruling; reassess after the FIG-2169 test-prune sweep.
     if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.stores == 'true'
     # Trusted events build these binaries from the shared cache and execute
-    # them uncached against the MinIO `scripts/ci/with-service.sh s3` starts for
-    # each step -- the same wrapper, image and bucket setup a developer runs on
-    # their own box. See scripts/ci/store-tests.sh.
+    # them uncached against the Garage `scripts/ci/with-service.sh s3` starts for
+    # each step (the S3 server figments runs in production) -- the same
+    # wrapper, image and bucket a developer runs on their own box. See
+    # scripts/ci/store-tests.sh and scripts/ci/s3-service.sh.
     environment: build-cache
     # The require flag stays at job level so no step can lose it on its own; the
     # endpoint cannot, because the port is chosen per step by `with-service.sh`.
     env:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
-      LASH_REQUIRE_MINIO: "1"
+      LASH_REQUIRE_S3: "1"
 
     steps:
       - *checkout
@@ -2183,7 +2184,7 @@ jobs:
           if-no-files-found: warn
 
   restate-postgres-workers:
-    name: Restate + Postgres + MinIO Workers (segment ${{ matrix.segment }})
+    name: Restate + Postgres + S3 Workers (segment ${{ matrix.segment }})
     runs-on: ubuntu-24.04
     if: >-
       github.event_name == 'workflow_dispatch'

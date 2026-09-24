@@ -38,7 +38,7 @@ host side, where a rebooting bot must simply wait out the TTL before its
 lease-fenced admissions succeed.
 
 The visible residual is failover latency. The
-`Restate + Postgres + MinIO Workers` runbook records it twice — in the
+`Restate + Postgres + S3 Workers` runbook records it twice — in the
 owner-crash-recovery turn-control gate and in the failover convergence gate in
 `runbooks/restate-postgres-workers/src/bin/runner.rs` — as roughly one lease TTL
 (~38s observed against the 30s default `LeaseTimings` TTL, plus the engine's

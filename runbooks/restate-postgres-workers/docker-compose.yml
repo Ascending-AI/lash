@@ -1,4 +1,4 @@
-# Distributed-backend e2e harness: Restate + Postgres + MinIO with two
+# Distributed-backend e2e harness: Restate + Postgres + S3 (Garage) with two
 # workers behind a round-robin proxy.
 #
 # The e2e binaries are built on the host by scripts/restate-postgres-workers-e2e.sh
@@ -24,25 +24,28 @@ services:
       timeout: 2s
       retries: 30
 
-  minio:
+  # lash's S3 test service: Garage, as figments runs it. The image, the
+  # credentials and the bucket come from scripts/ci/s3-service.sh, which the
+  # e2e script sources; `--default-bucket` creates the key and the bucket at
+  # startup, so there is no init container.
+  s3:
     labels: *gate-labels
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: server /data --console-address ":9001"
+    image: ${LASH_S3_IMAGE:?run via the e2e script}
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      GARAGE_RPC_SECRET: ${LASH_S3_RPC_SECRET:?run via the e2e script}
+      GARAGE_DEFAULT_ACCESS_KEY: ${LASH_S3_ACCESS_KEY:?run via the e2e script}
+      GARAGE_DEFAULT_SECRET_KEY: ${LASH_S3_SECRET_KEY:?run via the e2e script}
+      GARAGE_DEFAULT_BUCKET: ${LASH_S3_BUCKET:?run via the e2e script}
+    volumes:
+      - ${LASH_S3_CONFIG:?run via the e2e script}:/etc/garage.toml:ro
     ports:
-      - "127.0.0.1:${LASH_E2E_MINIO_PORT:?run via the e2e script}:9000"
-  minio-init:
-    labels: *gate-labels
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done &&
-      mc mb --ignore-existing local/lash-attachments
-      "
+      - "127.0.0.1:${LASH_E2E_S3_PORT:?run via the e2e script}:3900"
+    healthcheck:
+      test: ["CMD", "/garage", "bucket", "info", "${LASH_S3_BUCKET}"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
 
   restate:
     labels: *gate-labels
@@ -74,8 +77,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
+      s3:
+        condition: service_healthy
       restate:
         condition: service_started
     environment:
@@ -86,12 +89,12 @@ services:
       DATABASE_URL: postgres://lash:lash@postgres:5432/lash
       RESTATE_INGRESS_URL: http://restate:8080
       RESTATE_AUTHORITY_ID: "${RESTATE_AUTHORITY_ID:?set a stable unique Restate authority id}"
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_BUCKET: lash-attachments
-      MINIO_REGION: us-east-1
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_PREFIX: runbooks/restate-postgres-workers
+      S3_ENDPOINT: http://s3:3900
+      S3_BUCKET: ${LASH_S3_BUCKET:?run via the e2e script}
+      S3_REGION: ${LASH_S3_REGION:?run via the e2e script}
+      S3_ACCESS_KEY: ${LASH_S3_ACCESS_KEY:?run via the e2e script}
+      S3_SECRET_KEY: ${LASH_S3_SECRET_KEY:?run via the e2e script}
+      S3_PREFIX: runbooks/restate-postgres-workers
       MOCK_PROVIDER_BASE_URL: http://mock-provider:18001
       LASH_E2E_TRACE_DIR: /e2e-traces
     volumes:
@@ -107,8 +110,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
+      s3:
+        condition: service_healthy
       restate:
         condition: service_started
     environment:
@@ -119,12 +122,12 @@ services:
       DATABASE_URL: postgres://lash:lash@postgres:5432/lash
       RESTATE_INGRESS_URL: http://restate:8080
       RESTATE_AUTHORITY_ID: "${RESTATE_AUTHORITY_ID:?set a stable unique Restate authority id}"
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_BUCKET: lash-attachments
-      MINIO_REGION: us-east-1
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_PREFIX: runbooks/restate-postgres-workers
+      S3_ENDPOINT: http://s3:3900
+      S3_BUCKET: ${LASH_S3_BUCKET:?run via the e2e script}
+      S3_REGION: ${LASH_S3_REGION:?run via the e2e script}
+      S3_ACCESS_KEY: ${LASH_S3_ACCESS_KEY:?run via the e2e script}
+      S3_SECRET_KEY: ${LASH_S3_SECRET_KEY:?run via the e2e script}
+      S3_PREFIX: runbooks/restate-postgres-workers
       MOCK_PROVIDER_BASE_URL: http://mock-provider:18001
       LASH_E2E_TRACE_DIR: /e2e-traces
     volumes:
@@ -148,8 +151,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
+      s3:
+        condition: service_healthy
       restate:
         condition: service_started
       worker-proxy:
@@ -162,12 +165,12 @@ services:
       RESTATE_INGRESS_URL: http://restate:8080
       RESTATE_AUTHORITY_ID: "${RESTATE_AUTHORITY_ID:?set a stable unique Restate authority id}"
       WORKER_DEPLOYMENT_URL: http://worker-proxy:18100
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_BUCKET: lash-attachments
-      MINIO_REGION: us-east-1
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_PREFIX: runbooks/restate-postgres-workers
+      S3_ENDPOINT: http://s3:3900
+      S3_BUCKET: ${LASH_S3_BUCKET:?run via the e2e script}
+      S3_REGION: ${LASH_S3_REGION:?run via the e2e script}
+      S3_ACCESS_KEY: ${LASH_S3_ACCESS_KEY:?run via the e2e script}
+      S3_SECRET_KEY: ${LASH_S3_SECRET_KEY:?run via the e2e script}
+      S3_PREFIX: runbooks/restate-postgres-workers
       MOCK_PROVIDER_BASE_URL: http://mock-provider:18001
       LASH_E2E_TRACE_DIR: /e2e-traces
       LASH_E2E_STALL_TIMEOUT_SECS: "${LASH_E2E_STALL_TIMEOUT_SECS:-240}"

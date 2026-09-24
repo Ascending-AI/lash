@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 
 #[derive(Clone, Copy)]
 enum MissingKeyAnswer {
-    /// AWS S3 and MinIO: the missing key is reported deleted.
+    /// AWS S3: the missing key is reported deleted.
     Deleted,
     /// Garage: the missing key is a per-key `NoSuchKey` error.
     NoSuchKey,
@@ -123,7 +123,7 @@ async fn a_missing_key_reported_deleted_is_a_no_op() {
     store
         .delete(&never_written())
         .await
-        .expect("the AWS S3 / MinIO answer is a no-op");
+        .expect("the AWS S3 answer is a no-op");
 }
 
 #[tokio::test]

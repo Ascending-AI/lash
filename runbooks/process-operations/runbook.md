@@ -14,7 +14,7 @@
 > never substitute the destructive `agent-workbench-reset`.
 
 **Purpose.** Prove that an operator can inspect and act on the process-operations surface on
-real Restate, PostgreSQL, and MinIO geometry: typed wake failures, redrive, retargeting,
+real Restate, PostgreSQL, and S3 (Garage) geometry: typed wake failures, redrive, retargeting,
 visibility policy, wake-turn policy, crash recovery, process-id reuse, and retention all remain
 truthful in durable state.
 
@@ -24,7 +24,7 @@ truthful in durable state.
 LASH_PROCESS_OPERATIONS_ARTIFACT_DIR=<fresh-dir> just process-operations-e2e
 ```
 
-The companion owns isolated Restate, PostgreSQL, and MinIO ports derived from the worktree slug,
+The companion owns isolated Restate, PostgreSQL, and S3 ports derived from the worktree slug,
 kills a real worker container at the named crash checkpoint, and removes every container and
 volume it owns on exit. PostgreSQL uses the worktree block's `+46` offset unless
 `LASH_PROCESS_OPERATIONS_POSTGRES_PORT` overrides it.
@@ -150,15 +150,15 @@ success; that is the index of the last scenario, and nine scenarios (0 through 8
 require one `scenario <n> evidence:` line for every index 0-8, not eight lines. Require all of
 these before judging later phases:
 
-- `00-live-services.json` contains running Restate, PostgreSQL and MinIO services;
+- `00-live-services.json` contains running Restate, PostgreSQL and S3 (Garage) services;
 - `00-postgres-service.json` identifies the service publishing the assigned port;
 - `00-postgres.json` reports that same assigned port;
 - `restate-deployments.json` is a successful Restate Admin response. The companion registers no
   service deployment of its own, so `{"deployments": []}` is the expected passing body; gate the
   successful response, never a non-empty list; and
-- `00-minio-conformance.log` reports a passing S3-store conformance run.
+- `00-s3-conformance.log` reports a passing S3-store conformance run.
 
-**Fail if:** any service is absent, PostgreSQL is exposed on another host port, MinIO object
+**Fail if:** any service is absent, PostgreSQL is exposed on another host port, S3 object
 round-tripping fails, or the script leaves its compose project running after exit.
 
 ## Phase 1 — Typed discard outcomes and redrive
@@ -307,7 +307,7 @@ a match on the gate's own output; require that too.
 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
-| Durable geometry | Restate/PostgreSQL/MinIO live on assigned ports; S3 conformance green | | `00-*`, `restate-deployments.json`, `00-minio-conformance.log` |
+| Durable geometry | Restate/PostgreSQL/S3 live on assigned ports; S3 conformance green | | `00-*`, `restate-deployments.json`, `00-s3-conformance.log` |
 | Typed discard + redrive | exact `TargetGone`/`Expired`; named block clears | | `01-wake-delivery.log` |
 | Retarget | old pending `Retargeted`; audit; next wake reaches new target | | `02-retarget.jsonl` |
 | Visibility lens | model narrowed; host list/signal/cancel complete | | `03-tool-visibility.log` |

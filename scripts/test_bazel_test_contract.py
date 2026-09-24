@@ -1052,7 +1052,7 @@ class BazelTestContractTests(unittest.TestCase):
         """
         bazel_labels = set(generated_list("WORKSPACE_BAZEL_TEST_TARGETS"))
         service_labels = set()
-        for service in ("postgres", "minio"):
+        for service in ("postgres", "s3"):
             labels = (
                 ROOT / f"tools/bazel/{service}_test_labels.txt"
             ).read_text(encoding="utf-8").split()

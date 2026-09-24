@@ -123,12 +123,12 @@ fn e2e_tokio_thread_stack_bytes_from_raw(raw: Option<String>) -> Result<usize> {
 
 pub fn s3_store_from_env() -> Result<S3AttachmentStore> {
     S3AttachmentStore::from_config(S3AttachmentStoreConfig {
-        endpoint_url: Some(env("MINIO_ENDPOINT", "http://minio:9000")),
-        region: env("MINIO_REGION", "us-east-1"),
-        bucket: env("MINIO_BUCKET", "lash-attachments"),
-        prefix: Some(env("MINIO_PREFIX", "runbooks/restate-postgres-workers")),
-        access_key_id: Some(env("MINIO_ACCESS_KEY", "minioadmin")),
-        secret_access_key: Some(env("MINIO_SECRET_KEY", "minioadmin").into()),
+        endpoint_url: Some(required_env("S3_ENDPOINT")?),
+        region: env("S3_REGION", "us-east-1"),
+        bucket: env("S3_BUCKET", "lash-attachments"),
+        prefix: Some(env("S3_PREFIX", "runbooks/restate-postgres-workers")),
+        access_key_id: Some(required_env("S3_ACCESS_KEY")?),
+        secret_access_key: Some(required_env("S3_SECRET_KEY")?.into()),
         path_style: true,
     })
     .context("build S3 attachment store")

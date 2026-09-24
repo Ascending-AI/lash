@@ -22,8 +22,11 @@ source "$repo/scripts/worktree-gate-env.sh"
 compose_project="${LASH_RESTATE_WORKERS_COMPOSE_PROJECT:-lash-restate-workers-${LASH_GATE_WORKTREE_SLUG}}"
 export RESTATE_AUTHORITY_ID="${RESTATE_AUTHORITY_ID:-restate-workers:${compose_project}}"
 compose=(docker compose -p "$compose_project" -f "$repo/runbooks/restate-postgres-workers/docker-compose.yml")
-minio_port="${LASH_E2E_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
-export LASH_E2E_MINIO_PORT="$minio_port"
+# The S3 service's image, credentials and bucket, which the compose file reads.
+# shellcheck source=scripts/ci/s3-service.sh
+source "$repo/scripts/ci/s3-service.sh"
+s3_port="${LASH_E2E_S3_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
+export LASH_E2E_S3_PORT="$s3_port"
 trace_volume="${compose_project}_trace-output"
 workflow_segment="${LASH_E2E_WORKFLOW_SEGMENT:-}"
 case "$workflow_segment" in
@@ -117,35 +120,16 @@ trap cleanup EXIT
 # Several services share the host-binary runtime image. Pull it once with
 # retries so a transient Docker Hub HEAD error doesn't fail compose startup.
 for image in $("${compose[@]}" config --images); do bash scripts/docker-pull-with-retry.sh "$image"; done
-"${compose[@]}" up -d postgres minio minio-init restate mock-provider worker-a worker-b worker-proxy
-deadline=$((SECONDS + 60))
-while true; do
-  minio_init_id="$("${compose[@]}" ps -a -q minio-init)"
-  if [ -n "$minio_init_id" ]; then
-    minio_init_status="$(docker inspect -f '{{.State.Status}}' "$minio_init_id")"
-    if [ "$minio_init_status" = "exited" ]; then
-      minio_init_exit="$(docker inspect -f '{{.State.ExitCode}}' "$minio_init_id")"
-      if [ "$minio_init_exit" != "0" ]; then
-        echo "minio-init exited with status $minio_init_exit" >&2
-        exit 1
-      fi
-      break
-    fi
-  fi
-  if ((SECONDS >= deadline)); then
-    echo "minio-init did not complete before timeout" >&2
-    exit 1
-  fi
-  sleep 1
-done
+# The workers start once the S3 service's health check sees its bucket; the
+# conformance run below needs the same, so wait for it here too.
+"${compose[@]}" up -d postgres s3 restate mock-provider worker-a worker-b worker-proxy
+lash_s3_wait "$("${compose[@]}" ps -q s3)" 60
 
 if [ "$workflow_segment" != "2" ] && [ "${LASH_E2E_TURN_CONTROL_ONLY:-0}" != "1" ]; then
-  LASH_MINIO_ENDPOINT="http://127.0.0.1:$minio_port" \
-  LASH_MINIO_BUCKET="lash-attachments" \
-  LASH_MINIO_REGION="us-east-1" \
-  LASH_MINIO_ACCESS_KEY="minioadmin" \
-  LASH_MINIO_SECRET_KEY="minioadmin" \
-  LASH_MINIO_PREFIX="conformance/restate-postgres-workers-${LASH_GATE_WORKTREE_SLUG}-$$" \
+  # LASH_REQUIRE_S3 makes the live S3 laws run rather than skip.
+  mapfile -t s3_test_env < <(lash_s3_test_env "$s3_port")
+  env "${s3_test_env[@]}" \
+    LASH_S3_PREFIX="conformance/restate-postgres-workers-${LASH_GATE_WORKTREE_SLUG}-$$" \
     cargo test --locked -p lash-internal-s3-store -- --nocapture \
     2>&1 | tee "$test_output"
 fi
