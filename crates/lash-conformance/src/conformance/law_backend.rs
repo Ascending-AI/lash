@@ -137,4 +137,13 @@ impl crate::Backend for LawBackend {
     fn attachment_store(&self) -> Arc<dyn crate::AttachmentStore> {
         Arc::clone(&self.attachment_store)
     }
+
+    /// The in-process worker drives the law's registry.
+    fn process_work(&self) -> Option<crate::ProcessWorkWiring> {
+        None
+    }
+
+    fn queued_work(&self) -> crate::BackendQueuedWork {
+        crate::BackendQueuedWork::InProcess
+    }
 }

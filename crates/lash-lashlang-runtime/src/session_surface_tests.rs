@@ -624,8 +624,16 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
     };
     let process_identity = process_input.process_identity();
     let process_id = lash_sansio::ProcessId::from("fig3586-diverged-body");
-    let env_store: Arc<dyn ProcessExecutionEnvStore> =
-        Arc::new(InMemoryProcessExecutionEnvStore::new());
+    // A file backend: the law rewrites a row of its effect journal on disk.
+    let backend_dir = tempfile::tempdir().expect("backend directory");
+    let journal_path = backend_dir
+        .path()
+        .join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name());
+    let sqlite_backend = lash_sqlite_store::SqliteBackend::open(backend_dir.path())
+        .await
+        .expect("open a SQLite file backend");
+    let backend: Arc<dyn lash_core::Backend> = Arc::new(sqlite_backend.clone());
+    let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
         &ArtifactOwner::host("fig3463-recovery-env"),
@@ -633,8 +641,7 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
     )
     .await
     .expect("publish process env");
-    let registry: Arc<dyn ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
     let crash_sink = Arc::new(CrashAfterFirstNodeCompleted {
         graphs: Arc::clone(&graphs),
@@ -642,17 +649,13 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         notified: tokio::sync::Notify::new(),
     });
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let journal_dir = tempfile::tempdir().expect("effect journal directory");
-    let journal_path = journal_dir.path().join("effects.sqlite");
-    let effect_host_a: Arc<dyn lash_core::EffectHost> = Arc::new(
-        lash_sqlite_store::SqliteEffectHost::open(&journal_path)
+    // The retry is a second worker over the same backend: a fresh handle on
+    // the crashed worker's databases.
+    let backend_b: Arc<dyn lash_core::Backend> = Arc::new(
+        sqlite_backend
+            .reopen()
             .await
-            .expect("open first effect journal"),
-    );
-    let effect_host_b: Arc<dyn lash_core::EffectHost> = Arc::new(
-        lash_sqlite_store::SqliteEffectHost::open(&journal_path)
-            .await
-            .expect("reopen effect journal for retry"),
+            .expect("reopen the backend for the retry"),
     );
     let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
@@ -661,15 +664,12 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
                 executions: Arc::clone(&executions),
             })),
         ));
-    let worker = |sink: Arc<dyn lash_trace::TraceSink>,
-                  effect_host: Arc<dyn lash_core::EffectHost>| {
+    let worker = |sink: Arc<dyn lash_trace::TraceSink>, backend: Arc<dyn lash_core::Backend>| {
         let engine =
             LashlangProcessEngine::new(Arc::clone(&artifact_store), LashlangSurface::default())
                 .with_execution_trace(Some(sink), lash_trace::TraceContext::default());
         let runtime_host = RuntimeHostConfig::new(
-            effect_host,
-            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
-            Arc::clone(&env_store),
+            backend,
             CommitBudget::bounded(1024 * 1024, 512),
             QueuedWorkBatchingConfig::new(1),
         )
@@ -686,7 +686,6 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
             DurableProcessWorkerConfig::new(
                 Arc::new(PluginHost::new(factories)),
                 runtime_host,
-                Arc::new(InMemorySessionStoreFactory::new()),
                 WorkerProcessWork::SelfNative(watch_process_registry(Arc::clone(&registry))),
                 Arc::new(NoQueuedWork::new()),
                 lash_core::testing::runtime_lease_owner(),
@@ -712,7 +711,7 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         )
         .await
         .expect("register recovery process");
-    let worker_a = worker(crash_sink.clone(), effect_host_a);
+    let worker_a = worker(crash_sink.clone(), Arc::clone(&backend));
     let first_report = worker_a
         .drive_pending_processes()
         .await
@@ -753,7 +752,7 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         "the crashed attempt journaled its tool attempt"
     );
     drop(journal);
-    let worker_b = worker(graphs.clone(), effect_host_b);
+    let worker_b = worker(graphs.clone(), backend_b);
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
     while std::time::Instant::now() < deadline {
         let _ = worker_b.drive_pending_processes().await;
