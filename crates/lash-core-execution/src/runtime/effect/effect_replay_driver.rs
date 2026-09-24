@@ -851,6 +851,15 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         replay_key: &str,
     ) -> Result<bool, RuntimeEffectControllerError>;
 
+    /// Whether the exact replay row holds its outcome (completed or failed),
+    /// without claiming or mutating it: the point read that admits a
+    /// served-only effect (FIG-3719).
+    async fn replay_row_settled(
+        &self,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Result<bool, RuntimeEffectControllerError>;
+
     /// Every replay key and every group key recorded under `scope_id` inside
     /// the closed range `[range.lower, range.upper]`, each list in ascending
     /// byte order, and the outcome of the completed replay row at
@@ -1856,14 +1865,12 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         if envelope.command.replays_by_reexecution() {
             return self.reexecute_effect(scope, envelope, local_executor).await;
         }
+        served_only::refuse(self, scope, &envelope, local_executor.served_only()).await?;
         let reconstructed_envelope = envelope.canonical_form()?;
         let replay_trace = local_executor.replay_validation_trace().cloned();
-        // Kept before the claim loop, while the envelope still names the group
-        // this child belongs to — the terminal a cancellation writes has to say
-        // which group's disposition ended the child, and the claim consumes the
-        // envelope. Only a cancellable call clones it, so an ordinary effect
-        // pays nothing: every effect this driver runs passes through here, and
-        // the overwhelming majority can never be cancelled.
+        // Kept before the claim loop (which consumes the envelope): a
+        // cancellation's terminal names the group whose disposition ended the
+        // child. Only a cancellable call clones it; most effects never are.
         let cancel_membership = cancel.and_then(|_| envelope.group.clone());
         let mut queue = journal_wait::ClaimQueue::default();
         loop {
@@ -2199,15 +2206,10 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         }
         match self.row_store.finalize(fence, &terminal).await? {
             EffectFinalizeOutcome::Written { commit_seq: _ } => {
-                // A `pending` grouped row reaching finalize never crossed a
-                // tool child's terminal commit — a non-tool child, or a tool
-                // child that failed before its terminal — so it has no drain to
-                // owe: finalize is its §4 point and its discharge is
-                // immediate (§5: a child with no remaining intent admission
-                // is admitted and discharged at once). The barrier still
-                // holds it behind lower-commit siblings; a sibling whose
-                // host died mid-drain is finished by the next drain pass,
-                // whose discharge wakes this one's parked wait.
+                // A `pending` grouped row here never crossed a tool child's
+                // terminal commit, so it owes no drain: finalize is its §4
+                // point and it discharges at once (§5). The barrier still holds
+                // it behind lower-commit siblings, which the next drain finishes.
                 let Some(group_key) = &claim.group_key else {
                     return Ok(Finalized::Seated);
                 };
@@ -2449,6 +2451,7 @@ mod journal_wait;
 mod journal_wake;
 mod lease_renewal;
 mod reexecution;
+mod served_only;
 #[cfg(feature = "testing")]
 pub use journal_faults::{EffectJournalFaultPoint, EffectJournalFaults};
 pub use journal_wake::{

@@ -18,6 +18,8 @@ mod process_local;
 mod language_runtime;
 pub use language_runtime::RUN_SEAL_OPERATION;
 mod scoped;
+mod served_only;
+pub use served_only::ServedOnly;
 mod task_panic;
 mod trigger;
 mod turn_control_authority;
@@ -31,7 +33,7 @@ pub use control::{
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, IndependentEffectWork,
     QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
     RecordedJournal, RecordedKeyFence, Resolution, ResolveOutcome, RuntimeEffectController,
-    ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnlyFence,
+    ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnlyRange,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
     TurnCancelClosureOwnerBinding,
 };
@@ -490,6 +492,9 @@ enum RuntimeEffectLocalExecutorState<'run> {
 pub struct RuntimeEffectLocalExecutor<'run> {
     state: RuntimeEffectLocalExecutorState<'run>,
     replay_trace: Option<super::RuntimeEffectReplayTrace>,
+    /// Set when the effect belongs to a replayed command that must be served
+    /// only from the journal (FIG-3587, FIG-3719).
+    served_only: Option<ServedOnly>,
 }
 
 struct AbortEffectTaskOnDrop {
@@ -524,6 +529,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Unavailable),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -544,6 +550,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 clock,
             }),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -571,6 +578,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 clock,
             }),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -583,6 +591,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 clock,
             }),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -600,6 +609,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 clock,
             }),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -734,6 +744,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 },
             )),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -747,6 +758,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 ProcessDefinitionLocalExecution { registry },
             )),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -760,6 +772,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store)),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -785,6 +798,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 },
             )),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -804,6 +818,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 },
             )),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -813,6 +828,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 TriggerLocalExecution { store },
             )),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -830,6 +846,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 },
             )),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -852,6 +869,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)),
             replay_trace,
+            served_only: None,
         }
     }
 
@@ -870,6 +888,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 },
             ))),
             replay_trace,
+            served_only: None,
         }
     }
 
@@ -889,6 +908,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     },
                 ))),
                 replay_trace,
+                served_only: None,
             };
         }
         Self {
@@ -900,6 +920,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 },
             )),
             replay_trace,
+            served_only: None,
         }
     }
 
@@ -921,6 +942,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     },
                 ))),
                 replay_trace,
+                served_only: None,
             };
         }
         Self {
@@ -932,11 +954,45 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 },
             )),
             replay_trace,
+            served_only: None,
         }
     }
 
     /// Exposes structured replay-comparison evidence to effect-host and conformance implementors,
     /// returning `None` when the runtime has no configured trace sink.
+    /// Marks this executor's effect as served only from the journal: it
+    /// belongs to a replayed command whose tool binding drifted, and running
+    /// it live would reach the drifted tool (FIG-3587, FIG-3719).
+    pub(crate) fn serving_only_from_journal(
+        mut self,
+        refusal: RuntimeEffectControllerError,
+        guard: Arc<CommandJournalGuard>,
+    ) -> Self {
+        self.served_only = Some(ServedOnly { refusal, guard });
+        self
+    }
+
+    /// The engine-neutral served-only contract (FIG-3719).
+    ///
+    /// An engine that serves this effect's recorded outcome never asks. An
+    /// engine about to run this executor live — its journal holds no outcome
+    /// for the effect's replay key — asks first, and on `Some` returns that
+    /// refusal instead, running nothing and recording nothing: neither a
+    /// claim, nor a failure row, nor a run result. Asking trips the command's
+    /// guard, so the run stops on the refusal however the effect's caller
+    /// shapes the error. `None` means the effect may run live.
+    pub fn served_only_refusal(&self) -> Option<RuntimeEffectControllerError> {
+        self.served_only.as_ref().map(ServedOnly::refuse)
+    }
+
+    /// Whether this effect is served only from the journal, without refusing
+    /// it: for an engine that can ask its journal before it starts the
+    /// effect, and one that must keep the refusal for later
+    /// ([`ServedOnly::refuse`]).
+    pub fn served_only(&self) -> Option<ServedOnly> {
+        self.served_only.clone()
+    }
+
     pub fn replay_validation_trace(&self) -> Option<&super::RuntimeEffectReplayTrace> {
         self.replay_trace.as_ref()
     }
@@ -965,6 +1021,11 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self,
         envelope: RuntimeEffectEnvelope,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
+        // An engine that reaches a served-only effect's live execution
+        // without asking still dispatches nothing (FIG-3719).
+        if let Some(refusal) = self.served_only_refusal() {
+            return Err(refusal);
+        }
         match self.state {
             RuntimeEffectLocalExecutorState::Runner(runner) => runner.execute(envelope).await,
             RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
@@ -1124,6 +1185,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         let RuntimeEffectLocalExecutor {
             state,
             replay_trace,
+            served_only,
         } = self;
         match state {
             RuntimeEffectLocalExecutorState::Runner(runner) => {
@@ -1134,11 +1196,13 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                             Box::new(RemoteEffectRunner { requests }),
                         )),
                         replay_trace: replay_trace.clone(),
+                        served_only: served_only.clone(),
                     },
                     Some((
                         RuntimeEffectLocalExecutor {
                             state: RuntimeEffectLocalExecutorState::Runner(runner),
                             replay_trace,
+                            served_only: None,
                         },
                         request_rx,
                     )),
@@ -1152,6 +1216,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                             Box::new(RemoteEffectRunner { requests }),
                         )),
                         replay_trace: replay_trace.clone(),
+                        served_only: served_only.clone(),
                     },
                     Some((
                         RuntimeEffectLocalExecutor {
@@ -1159,6 +1224,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                                 LocalTarget::OwnedRunner(runner),
                             ),
                             replay_trace,
+                            served_only: None,
                         },
                         request_rx,
                     )),
@@ -1168,6 +1234,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 RuntimeEffectLocalExecutor {
                     state: RuntimeEffectLocalExecutorState::Target(target),
                     replay_trace,
+                    served_only,
                 },
                 None,
             ),
@@ -1576,6 +1643,9 @@ pub async fn sleep_with_cancellation(
 }
 
 #[cfg(test)]
+mod served_only_tests;
+
+#[cfg(test)]
 mod task_boundary_tests {
     use super::*;
     use crate::RuntimeEffectInvocation;
@@ -1610,6 +1680,7 @@ mod task_boundary_tests {
                 },
             ))),
             replay_trace: None,
+            served_only: None,
         };
         let parent = crate::task::spawn(async move {
             let parent_id = tokio::task::id();

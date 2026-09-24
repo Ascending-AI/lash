@@ -61,6 +61,7 @@ where
         &'run self,
         metadata: &RuntimeEffectInvocation,
         envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
+        live: Option<super::LiveFrontier>,
     ) -> Option<Result<RecordedRuntimeEffect, RestateEffectError>>
     where
         'ctx: 'run,
@@ -75,7 +76,12 @@ where
             self.journal_effect_entry(
                 effect_name,
                 envelope,
-                Box::pin(async move { gave_up_over_budget_entry(budget) }),
+                Box::pin(async move {
+                    if let Some(live) = &live {
+                        return live.reached().await;
+                    }
+                    gave_up_over_budget_entry(budget)
+                }),
             )
             .await,
         )
@@ -200,6 +206,10 @@ where
         &'run self,
         metadata: &RuntimeEffectInvocation,
         envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
+        // A served-only effect's live-frontier signal (FIG-3719): its budget
+        // give-up entry is the frontier as much as its effect is, so a
+        // give-up that would be journaled live refuses with the drift.
+        live: Option<super::LiveFrontier>,
         // Keep the full journaled-effect executor behind one allocation. The
         // Restate SDK stores this future in its ctx.run state machine, so
         // accepting it inline here makes every composed turn carry the whole
@@ -209,7 +219,10 @@ where
     where
         'ctx: 'run,
     {
-        if let Some(give_up) = self.journaled_effect_give_up(metadata, envelope).await {
+        if let Some(give_up) = self
+            .journaled_effect_give_up(metadata, envelope, live)
+            .await
+        {
             return give_up;
         }
         let effect_name = restate_effect_name(metadata);
@@ -240,43 +253,61 @@ where
     {
         let effect_kind = envelope.command.kind();
         let journaled_envelope = Arc::clone(recorded_envelope);
-        let body = execute_restate_journaled_effect(envelope, local_executor);
-        match engine_faults {
-            EngineFaults::Recorded => {
-                self.record_effect(
-                    invocation,
-                    recorded_envelope,
-                    Box::pin(async move {
-                        RecordedRuntimeEffect {
-                            envelope: journaled_envelope,
-                            outcome: body.await,
-                        }
-                    }),
-                )
-                .await
+        // A served-only effect (FIG-3719) refuses at the live frontier
+        // instead of running: see `live_frontier`.
+        let live = local_executor.served_only().map(super::LiveFrontier::new);
+        let live_body = live.clone();
+        let live_give_up = live.clone();
+        let body = async move {
+            if let Some(live) = &live_body {
+                return live.reached().await;
             }
-            EngineFaults::Retried => {
-                self.record_effect_or_retry(
-                    invocation,
-                    recorded_envelope,
-                    Box::pin(async move {
-                        match body.await {
-                            Err(fault)
-                                if fault
-                                    .journal_disposition(effect_kind)
-                                    .is_retryable_derivation() =>
-                            {
-                                Err(fault.to_string())
-                            }
-                            outcome => Ok(RecordedRuntimeEffect {
+            execute_restate_journaled_effect(envelope, local_executor).await
+        };
+        let run = async move {
+            match engine_faults {
+                EngineFaults::Recorded => {
+                    self.record_effect(
+                        invocation,
+                        recorded_envelope,
+                        live_give_up,
+                        Box::pin(async move {
+                            RecordedRuntimeEffect {
                                 envelope: journaled_envelope,
-                                outcome,
-                            }),
-                        }
-                    }),
-                )
-                .await
+                                outcome: body.await,
+                            }
+                        }),
+                    )
+                    .await
+                }
+                EngineFaults::Retried => {
+                    self.record_effect_or_retry(
+                        invocation,
+                        recorded_envelope,
+                        live_give_up,
+                        Box::pin(async move {
+                            match body.await {
+                                Err(fault)
+                                    if fault
+                                        .journal_disposition(effect_kind)
+                                        .is_retryable_derivation() =>
+                                {
+                                    Err(fault.to_string())
+                                }
+                                outcome => Ok(RecordedRuntimeEffect {
+                                    envelope: journaled_envelope,
+                                    outcome,
+                                }),
+                            }
+                        }),
+                    )
+                    .await
+                }
             }
+        };
+        match live {
+            None => run.await,
+            Some(live) => live.serve(run).await.map_err(RestateEffectError::Refused)?,
         }
     }
 
@@ -288,13 +319,17 @@ where
         &'run self,
         metadata: &RuntimeEffectInvocation,
         envelope: &Arc<CanonicalRuntimeEffectEnvelope>,
+        live: Option<super::LiveFrontier>,
         future: F,
     ) -> Result<RecordedRuntimeEffect, RestateEffectError>
     where
         'ctx: 'run,
         F: Future<Output = Result<RecordedRuntimeEffect, String>> + Send + 'run,
     {
-        if let Some(give_up) = self.journaled_effect_give_up(metadata, envelope).await {
+        if let Some(give_up) = self
+            .journaled_effect_give_up(metadata, envelope, live)
+            .await
+        {
             return give_up;
         }
         let effect_name = restate_effect_name(metadata);
@@ -348,6 +383,7 @@ where
                 self.record_effect(
                     &invocation,
                     &recorded_envelope,
+                    None,
                     Box::pin(async move {
                         RecordedRuntimeEffect {
                             envelope: journaled_envelope,

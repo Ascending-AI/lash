@@ -61,9 +61,11 @@ impl<'run> ReplayCommands<'_, 'run> {
     /// drifted since the pass that wrote the journal (FIG-3587): `drift` is
     /// the refusal naming it. Such a command is served only from the
     /// journal: one the journal does not hold refuses before anything is
-    /// dispatched, and one it holds may touch only the keys whose outcome it
-    /// holds — an attempt that would run the tool live refuses with `drift`
-    /// before its claim.
+    /// dispatched, and every dispatching effect of one it holds carries
+    /// `drift` to its engine, which serves the recorded outcome and refuses —
+    /// running and recording nothing — an effect it would run live
+    /// (FIG-3719). The engine answers, not the frontier read, so this holds
+    /// on a positional journal as on a keyed one.
     pub async fn enter_bound(
         &self,
         command: IssuedCommand,
@@ -74,16 +76,7 @@ impl<'run> ReplayCommands<'_, 'run> {
             return Err(self.abort(error));
         }
         if let Some(drift) = drift {
-            let Some(settled) = self.run.settled_keys() else {
-                return Err(self.stop(drift));
-            };
             let range = self.run.namespace().range();
-            let served_only = lash_core::ServedOnlyFence {
-                settled,
-                lower: range.lower.clone(),
-                upper: range.upper.clone(),
-                refusal: drift.clone(),
-            };
             // A drifted binding's command replays only what the journal
             // settled; a command the journal does not hold as issued is the
             // run's divergence first, reported as such (FIG-3587).
@@ -100,9 +93,20 @@ impl<'run> ReplayCommands<'_, 'run> {
                 Ok(CommandAdmission::RefuseWrites(divergence)) | Err(divergence) => {
                     return Err(self.stop(divergence.into_error(&self.attribution())));
                 }
+                // A positional host answers as the replay reaches each
+                // effect; a keyed one holds nothing here, so the command
+                // would reach the drifted tool live.
+                Ok(CommandAdmission::Live) if self.run.is_positional() => {
+                    CommandJournalGuard::open()
+                }
                 Ok(CommandAdmission::Live) => return Err(self.stop(drift)),
             };
-            let guard = Arc::new(guard.served_only(served_only));
+            let range = self.run.namespace().range();
+            let guard = Arc::new(guard.served_only(lash_core::ServedOnlyRange {
+                lower: range.lower,
+                upper: range.upper,
+                refusal: drift,
+            }));
             return Ok(CommandInFlight {
                 ctx: self.ctx.with_command_journal_guard(Arc::clone(&guard)),
                 command,

@@ -112,6 +112,14 @@ crate::statements! {
                  WHERE scope_id = ?1 AND replay_key = ?2
              )";
 
+        /// Whether the replay row for `?1` (scope) / `?2` (replay key) holds
+        /// its outcome, completed or failed: the point read a served-only
+        /// effect is admitted by (FIG-3719).
+        settled_by_key = "SELECT EXISTS(
+                 SELECT 1 FROM runtime_effect_replay
+                 WHERE scope_id = ?1 AND replay_key = ?2 AND status <> 'in_progress'
+             )";
+
         /// Every replay key recorded under `?1` (scope) in the closed range
         /// `[?2, ?3]`, in ascending byte order.
         ///

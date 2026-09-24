@@ -26,6 +26,7 @@ impl RuntimeEffectLocalExecutor<'_> {
                 RunSealRunner { value },
             ))),
             replay_trace: None,
+            served_only: None,
         }
     }
 
@@ -38,6 +39,7 @@ impl RuntimeEffectLocalExecutor<'_> {
                 LanguageRuntimeValueRunner { clock },
             ))),
             replay_trace: None,
+            served_only: None,
         }
     }
 }
