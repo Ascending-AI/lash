@@ -107,3 +107,23 @@ fn opaque_statements_reject_globals_the_program_cannot_see() {
         .expect_err("a name in neither the node nor the session refuses");
     assert_eq!(error.code(), "invalid_opaque_source");
 }
+
+#[test]
+fn classic_for_prints_back_in_every_head_condition_and_update_form() {
+    // FIG-3706: a classic `for` lowers to its head's statements and a
+    // `while` whose body ends with the update; the lens prints that shape
+    // back as the loop, and a `continue` (the update, then the jump) as the
+    // bare `continue`.
+    let cases = [
+        "for (let i = 0, j = 10; (i < j); i++) {\n  j = (j - 1);\n  if ((i === 2)) {\n    continue;\n  }\n}\nfinish(1);\n",
+        "let k = 0;\nfor (k = 3; (k > 0); k--) {}\nfinish(k);\n",
+        "var v;\nfor (var v = 7;;) {\n  break;\n}\nfinish(v);\n",
+        "for (;;) {\n  break;\n}\nfinish(1);\n",
+        "for (let i = 0; (i < 9); i = (i * 2)) {}\nfinish(1);\n",
+        "for (let i = 0, f = () => (i); (i < 3); i++) {\n  for (let n = 0;; n++) {\n    if ((n > i)) {\n      break;\n    }\n    continue;\n  }\n}\nfinish(1);\n",
+    ];
+    for source in cases {
+        assert_eq!(canonical(source), source, "the loop prints back as itself");
+        assert_lens_laws(source);
+    }
+}

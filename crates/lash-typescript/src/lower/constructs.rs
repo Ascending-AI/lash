@@ -39,87 +39,6 @@ pub(super) fn single_pattern_name(pattern: &Pattern) -> Option<&str> {
     }
 }
 
-pub(super) fn function_var_names(statements: &[Stmt]) -> Vec<String> {
-    fn visit(statement: &Stmt, names: &mut Vec<String>) {
-        match statement {
-            Stmt::Spanned(_, stmt) | Stmt::Labeled { stmt, .. } => visit(stmt, names),
-            Stmt::Enum { name, .. } => names.push(name.clone()),
-            Stmt::Var {
-                kind: VarKind::Var,
-                declarations,
-            } => {
-                for declaration in declarations {
-                    pattern_names(&declaration.pattern, names);
-                }
-            }
-            Stmt::Block(statements) => statements.iter().for_each(|stmt| visit(stmt, names)),
-            Stmt::If {
-                consequent,
-                alternate,
-                ..
-            } => {
-                visit(consequent, names);
-                if let Some(alternate) = alternate {
-                    visit(alternate, names);
-                }
-            }
-            // A `var` loop head declares the enclosing function's (or the
-            // script's) one binding, which every iteration assigns.
-            Stmt::ForOf {
-                pattern,
-                kind: Some(VarKind::Var),
-                body,
-                ..
-            }
-            | Stmt::ForIn {
-                pattern,
-                kind: Some(VarKind::Var),
-                body,
-                ..
-            } => {
-                pattern_names(pattern, names);
-                visit(body, names);
-            }
-            Stmt::While { body, .. }
-            | Stmt::DoWhile { body, .. }
-            | Stmt::For { body, .. }
-            | Stmt::ForOf { body, .. }
-            | Stmt::ForIn { body, .. } => visit(body, names),
-            Stmt::Switch { cases, .. } => {
-                for case in cases {
-                    case.consequent.iter().for_each(|stmt| visit(stmt, names));
-                }
-            }
-            Stmt::Try {
-                body,
-                catch,
-                finally,
-            } => {
-                body.iter().for_each(|stmt| visit(stmt, names));
-                if let Some(catch) = catch {
-                    catch.body.iter().for_each(|stmt| visit(stmt, names));
-                }
-                if let Some(finally) = finally {
-                    finally.iter().for_each(|stmt| visit(stmt, names));
-                }
-            }
-            Stmt::Function { .. }
-            | Stmt::Empty
-            | Stmt::Expr(_)
-            | Stmt::Return(_)
-            | Stmt::Break
-            | Stmt::Continue
-            | Stmt::Throw(_)
-            | Stmt::Var { .. } => {}
-        }
-    }
-    let mut names = Vec::new();
-    statements.iter().for_each(|stmt| visit(stmt, &mut names));
-    names.sort();
-    names.dedup();
-    names
-}
-
 impl Lowerer {
     /// A process body runs apart from the cell that starts it and sees only
     /// the values it was started with, so it has no session slot to read or
@@ -840,6 +759,7 @@ impl Lowerer {
             let result = LashExpr::Variable(target.root.clone());
             // NamedEvaluation: `f = function() {}` takes the assigned name.
             let value = self.lower_named_expr(value, Some(name.as_str()))?;
+            self.record_store(name)?;
             self.clear_process_handle_role(name)?;
             // The assignment statement, closed by the value an assignment
             // expression evaluates to.
@@ -968,6 +888,7 @@ impl Lowerer {
             }
         }
         if let Some(name) = assigned_name {
+            self.record_store(name)?;
             self.clear_process_handle_role(name)?;
         }
         Ok(LashExpr::Block(output))

@@ -142,7 +142,7 @@ const typescriptNames = [
   "async-calls-unawaited",
   "binding-reassignment",
   "builtin-arity",
-  "classic-for-forms",
+  "classic-for-continue-across-finally",
   "closed-shape-field-guard",
   "date-mutation",
   "date-string-coercion",

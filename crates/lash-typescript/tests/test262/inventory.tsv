@@ -222,7 +222,7 @@ typescript	async-array-callbacks
 typescript	async-calls-unawaited
 typescript	binding-reassignment
 typescript	builtin-arity
-typescript	classic-for-forms
+typescript	classic-for-continue-across-finally
 typescript	closed-shape-field-guard
 typescript	comma-operator
 typescript	cyclic-heap-value

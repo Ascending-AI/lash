@@ -664,9 +664,12 @@ impl Lowerer {
                 test,
                 update,
                 body,
-            } => vec![self.in_loop_statement(|lowerer| {
-                lowerer.lower_classic_for(init.as_deref(), test.as_ref(), update.as_ref(), body)
-            })?],
+            } => vec![self.lower_classic_for(
+                init.as_deref(),
+                test.as_ref(),
+                update.as_ref(),
+                body,
+            )?],
             Stmt::ForOf {
                 pattern,
                 kind,

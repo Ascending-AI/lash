@@ -12,8 +12,8 @@ no second surface to be at parity with.
 
 The accepted v1 surface is deliberately bounded, but includes ordinary model-authored
 constructs: `let`/`const`/`var` (including multiple declarations), functions and
-async helpers, blocks, `if`, `while`, `do...while`, the canonical
-`for (let i = start; i < end; i++)` form, `for...of`, `for...in`, `switch`,
+async helpers, blocks, `if`, `while`, `do...while`, classic `for` in every
+head, condition and update form, `for...of`, `for...in`, `switch`,
 `break`, `continue`, `try`/`catch`/`finally`, `throw`, `return`, destructuring in
 every binding and assignment position, defaults/rest, optional chains, array/call/object
 spread, compound/logical assignment, update operators, arrays, records, and calls.
@@ -180,7 +180,7 @@ diagnostic. Most rejection is static; the deviation register names every
 shape-dependent runtime rejection. The executable inventories in
 `tests/rejections.rs`, `tests/structural_contract.rs`, and the checked-in Node
 differential suite under `tests/differential/` are the source of truth. In
-particular, v1 excludes classes, generators, non-canonical classic `for` forms,
+particular, v1 excludes classes, generators,
 modules/imports, JSX, namespaces, decorators, `eval`/`Function`, prototype
 access, accessors, BigInt, sequence expressions, labels, `for await`,
 and arbitrary constructors or `instanceof` right-hand sides. Identifiers beginning
@@ -190,9 +190,13 @@ Mutually recursive function declarations reject with
 `TS_MUTUAL_RECURSION_UNSUPPORTED`; a function *expression* may still be named
 and call itself by that name, and self-recursive declarations are unaffected.
 
-The canonical classic `for` lowering rejects a `continue` that crosses a
-`finally` with `TS_FOR_UNSUPPORTED`, because the current loop epilogue would
-otherwise run before the `finally`. `for...of` follows its iterable live, as
+Classic `for` is ECMA-262's ForStatement in every form (FIG-3706): a `let`,
+`const`, `var`, expression or empty head, and any condition and update,
+either of which may be absent. A head `let` is copied per iteration, as
+CreatePerIterationEnvironment copies it, so a closure keeps its iteration's
+value. A `continue` that crosses a `finally` in a loop with an update rejects
+with `TS_FOR_UNSUPPORTED`, because the update would otherwise run before the
+`finally`. `for...of` follows its iterable live, as
 ECMA-262 does (FIG-3625): an array or a `URLSearchParams` is read at the
 iterator's index on every step, so a body that appends to, removes from or
 rewrites the iterable (through any name, a function, or a pattern default)

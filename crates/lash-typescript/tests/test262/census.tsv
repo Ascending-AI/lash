@@ -223,7 +223,7 @@ typescript	async-array-callbacks	skip	registered-deviation:TS_ASYNC_MAP_SEQUENTI
 typescript	async-calls-unawaited	rejected	TS_AWAIT_REQUIRED	async function f() { return 1; } f();
 typescript	binding-reassignment	rejected	TS_ASSIGN_CONST	var v = 1; v = 2;
 typescript	builtin-arity	rejected	TS_EXPRESSION_UNSUPPORTED	isNaN(1, 2);
-typescript	classic-for-forms	rejected	TS_FOR_UNSUPPORTED	for (let i = 0; i < 3; i += 2) { }
+typescript	classic-for-continue-across-finally	rejected	TS_FOR_UNSUPPORTED	for (let i = 0; i < 2; i++) { try { continue; } finally { } }
 typescript	closed-shape-field-guard	rejected	TS_LINK_ERROR	const o = { a: 1 }; const c = o.c;
 typescript	comma-operator	rejected	TS_SEQUENCE_UNSUPPORTED	const x = (1, 2);
 typescript	cyclic-heap-value	rejected	TS_CYCLIC_VALUE_UNSUPPORTED	const a = []; a.push(a);

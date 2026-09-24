@@ -42,6 +42,14 @@ entry that promises a refusal now carries an executable probe that must fire
 it, checked against the text of this register. See entry 5 and "Conformance
 evidence" below.
 
+Amended 2026-09-24 (FIG-3706, decision 43): classic `for` is ECMA-262's
+ForStatement in every form. The head may be `let`, `const`, `var`, an
+expression or empty; the condition and the update may be any expression or
+absent. A head `let` is copied per iteration exactly as
+CreatePerIterationEnvironment copies it, so a closure keeps its iteration's
+binding. The "non-canonical classic `for` forms" rejection class below is
+overruled: `TS_FOR_UNSUPPORTED` now names only register entry 23.
+
 ## Context
 
 Lash accepts model-authored code, and a model's prior on TypeScript is far
@@ -77,8 +85,8 @@ remains. The register is small and closed — outside it, no semantic deviation 
 intentionally accepted for an operation in the accepted surface.
 
 The accepted v1 surface is `let`/`const`, functions and arrows with immutable
-captures, blocks, `if`, `while`, the canonical `for (let i = start; i < end; i++)`
-form, `for...of`, `break`, `continue`, `try`/`catch`/`finally`, `throw`,
+captures, blocks, `if`, `while`, classic `for` in every head, condition and
+update form (amended by FIG-3706), `for...of`, `break`, `continue`, `try`/`catch`/`finally`, `throw`,
 `return`, arrays, records, field and index access and assignment, calls, the
 primitive unary, arithmetic, comparison, equality and logical operators,
 conditionals, templates, `.length`, a fixed standard-library inventory, and free
@@ -96,8 +104,8 @@ let the register understate the surface by nine methods for a full round.
 ### The v1 rejection classes
 
 Rejected with a stable code, statically: classes, generators, `var`,
-destructuring, `for...in` and non-canonical classic `for` forms,
-modules and imports, JSX, enums, namespaces, decorators, `eval` and `Function`,
+destructuring, `for...in`, non-canonical classic `for` forms (overruled
+by FIG-3706: every form is accepted), modules and imports, JSX, enums, namespaces, decorators, `eval` and `Function`,
 prototype access, accessors, object methods, regular expressions, BigInt,
 spread, optional chaining, `switch`, `do`/`while`, labels, `this`, `super`,
 `new`, `delete`, `in`, `instanceof`, exponentiation, bitwise operators, sequence
@@ -707,9 +715,11 @@ that each entry is a limit taken knowingly.
     a host schema declares closed (`additionalProperties: false`) is guarded
     the same way.
 23. **Classic-loop `continue` across `finally`.** A `continue` in a classic
-    `for` loop that crosses a `finally` rejects with `TS_FOR_UNSUPPORTED`
-    rather than running the loop's update expression before the `finally`
-    body, which is the order the lowering would otherwise produce.
+    `for` loop with an update expression that crosses a `finally` rejects with
+    `TS_FOR_UNSUPPORTED` rather than running the update before the `finally`
+    body, which is the order the lowering would otherwise produce. A loop
+    with no update has nothing to run before the `finally`, so its `continue`
+    is accepted.
 
 ## Consequences
 
