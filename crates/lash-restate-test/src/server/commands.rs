@@ -105,7 +105,8 @@ impl State {
                 }
             }
             _ => Ok(()),
-        }
+        }?;
+        decodes(frame)
     }
 
     pub(super) fn apply_command(
@@ -261,7 +262,9 @@ impl State {
             }
             MessageType::SleepCommand => {
                 let sleep = frame.decode::<SleepCommandMessage>().map_err(error)?;
-                let fire_at = self.now_ms + wall_delay_ms(sleep.wake_up_time);
+                let fire_at = self
+                    .now_ms
+                    .saturating_add(wall_delay_ms(sleep.wake_up_time, self.frame_received_us));
                 self.add_timer(
                     fire_at,
                     TimerAction::Sleep {
@@ -318,8 +321,10 @@ impl State {
             }
             MessageType::OneWayCallCommand => {
                 let send = frame.decode::<OneWayCallCommandMessage>().map_err(error)?;
-                let start_at_ms =
-                    (send.invoke_time > 0).then(|| self.now_ms + wall_delay_ms(send.invoke_time));
+                let start_at_ms = (send.invoke_time > 0).then(|| {
+                    self.now_ms
+                        .saturating_add(wall_delay_ms(send.invoke_time, self.frame_received_us))
+                });
                 let submission = Submission {
                     target: Target {
                         service: send.service_name.clone(),
@@ -546,5 +551,46 @@ impl State {
                 .get(&(service, key, handler, idempotency_key))
                 .copied(),
         }
+    }
+}
+
+/// Whether `frame` decodes as the command its type names, with the parts
+/// the server acts on present. A command that does not is refused before it
+/// is journaled: stored, it would fail every replay the same way.
+fn decodes(frame: &Frame) -> Result<(), String> {
+    fn check<M: prost::Message + Default>(frame: &Frame) -> Result<M, String> {
+        frame.decode::<M>().map_err(|error| error.to_string())
+    }
+    match frame.ty {
+        MessageType::OutputCommand => check::<OutputCommandMessage>(frame).map(drop),
+        MessageType::GetLazyStateCommand => check::<GetLazyStateCommandMessage>(frame).map(drop),
+        MessageType::GetLazyStateKeysCommand => {
+            check::<pb::GetLazyStateKeysCommandMessage>(frame).map(drop)
+        }
+        MessageType::SetStateCommand => check::<SetStateCommandMessage>(frame).map(drop),
+        MessageType::ClearStateCommand => check::<ClearStateCommandMessage>(frame).map(drop),
+        MessageType::GetPromiseCommand => check::<GetPromiseCommandMessage>(frame).map(drop),
+        MessageType::PeekPromiseCommand => check::<PeekPromiseCommandMessage>(frame).map(drop),
+        MessageType::CompletePromiseCommand => {
+            match check::<CompletePromiseCommandMessage>(frame)?.completion {
+                Some(_) => Ok(()),
+                None => Err("a promise completion carried no value".into()),
+            }
+        }
+        MessageType::SleepCommand => check::<SleepCommandMessage>(frame).map(drop),
+        MessageType::SendSignalCommand => check::<SendSignalCommandMessage>(frame).map(drop),
+        MessageType::AttachInvocationCommand => {
+            check::<AttachInvocationCommandMessage>(frame).map(drop)
+        }
+        MessageType::GetInvocationOutputCommand => {
+            check::<GetInvocationOutputCommandMessage>(frame).map(drop)
+        }
+        MessageType::CompleteAwakeableCommand => {
+            match check::<CompleteAwakeableCommandMessage>(frame)?.result {
+                Some(_) => Ok(()),
+                None => Err("an awakeable completion carried no value".into()),
+            }
+        }
+        _ => Ok(()),
     }
 }

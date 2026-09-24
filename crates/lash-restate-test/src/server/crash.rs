@@ -6,7 +6,6 @@
 //! [`CrashPoint::BeforeRunResult`] — the `ctx.run` closure already ran, its
 //! result never became durable, and the replay runs it again.
 
-use super::ids::SeededIds;
 use crate::protocol::MessageType;
 
 /// Where in an attempt a crash strikes.
@@ -141,7 +140,7 @@ impl CrashPlan {
 
     /// Whether the attempt dies before the server applies `site`'s frame.
     /// Terminal frames never crash: the SDK has already let go.
-    pub fn should_crash(&mut self, site: &CrashSite, ids: &mut SeededIds) -> bool {
+    pub fn should_crash(&mut self, site: &CrashSite, draw: u64) -> bool {
         if matches!(
             site.ty,
             MessageType::End | MessageType::Suspension | MessageType::Error
@@ -154,7 +153,7 @@ impl CrashPlan {
         }
         if let Some(random) = &mut self.random
             && random.budget > 0
-            && ids.below(1000) < u64::from(random.per_mille)
+            && draw % 1000 < u64::from(random.per_mille)
         {
             random.budget -= 1;
             return true;

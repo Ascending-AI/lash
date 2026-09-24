@@ -213,8 +213,14 @@ impl Shared {
         self.lock().invocations[key.0].id.as_str().to_owned()
     }
 
-    fn on_frame(self: &Arc<Self>, key: InvKey, number: u32, frame: Frame) -> Flow {
-        self.lock().on_frame(self, key, number, frame)
+    fn on_frame(
+        self: &Arc<Self>,
+        key: InvKey,
+        number: u32,
+        frame: Frame,
+        received_us: u128,
+    ) -> Flow {
+        self.lock().on_frame(self, key, number, frame, received_us)
     }
 
     fn stream_ended(self: &Arc<Self>, key: InvKey, number: u32, detail: String) {
@@ -226,6 +232,31 @@ impl Shared {
 #[derive(Clone)]
 pub struct RestateTestServer {
     shared: Arc<Shared>,
+    _shutdown: Arc<Shutdown>,
+}
+
+/// Held by every handle of one server; the last one dropped stops the
+/// server's live attempts, whose tasks would otherwise hold it forever.
+struct Shutdown {
+    shared: Weak<Shared>,
+}
+
+impl Drop for Shutdown {
+    fn drop(&mut self) {
+        let Some(shared) = self.shared.upgrade() else {
+            return;
+        };
+        let mut state = shared.lock();
+        for invocation in &mut state.invocations {
+            if let Status::Running(attempt) = &mut invocation.status {
+                attempt.input = None;
+                if let Some(abort) = attempt.abort.take() {
+                    abort.abort();
+                }
+            }
+        }
+        state.timers.clear();
+    }
 }
 
 impl std::fmt::Debug for RestateTestServer {
@@ -260,6 +291,10 @@ pub struct InvocationView {
     /// The `retry_count` restate reports: failed attempts in this loop.
     pub retry_count: u32,
     pub last_failure: Option<(u32, String)>,
+    /// For a running attempt: whether it is blocked on the server (its SDK
+    /// waits on input and everything it wrote is applied) rather than on
+    /// its own work.
+    pub blocked_on_server: Option<bool>,
 }
 
 /// One journal entry as introspection reports it.
@@ -294,7 +329,13 @@ impl RestateTestServer {
                 .runtime
                 .spawn(auto_advance(Arc::downgrade(&shared), idle, horizon));
         }
-        Ok(Self { shared })
+        let shutdown = Arc::new(Shutdown {
+            shared: Arc::downgrade(&shared),
+        });
+        Ok(Self {
+            shared,
+            _shutdown: shutdown,
+        })
     }
 
     /// Register `endpoint` as the server's one deployment, reading its
@@ -328,7 +369,7 @@ impl RestateTestServer {
     /// The server's ingress and admin APIs as an HTTP transport: hand it to
     /// a Restate connection in place of a network client.
     pub fn transport(&self) -> Arc<dyn HttpTransport> {
-        Arc::new(ingress::IngressTransport::new(Arc::clone(&self.shared)))
+        Arc::new(ingress::IngressTransport::new(&self.shared))
     }
 
     /// The service names the registered endpoint serves.
@@ -463,6 +504,10 @@ impl RestateTestServer {
                 suspensions: invocation.suspensions,
                 journal_len: invocation.journal.len(),
                 retry_count: invocation.retry.failures_in_loop,
+                blocked_on_server: match &invocation.status {
+                    Status::Running(attempt) => Some(attempt.probe.is_idle()),
+                    _ => None,
+                },
                 last_failure: invocation
                     .retry
                     .last_failure
@@ -483,7 +528,7 @@ impl RestateTestServer {
                 .map(|entry| JournalEntryView {
                     ty: entry.frame.ty,
                     name: command_name(&entry.frame),
-                    digest: fnv1a(&entry.frame.payload),
+                    digest: fnv1a(&stable_payload(&entry.frame)),
                     payload: entry.frame.payload.clone(),
                 })
                 .collect(),
@@ -504,7 +549,7 @@ impl RestateTestServer {
             digest = fnv1a_extend(digest, invocation.target.display().as_bytes());
             for entry in &invocation.journal {
                 digest = fnv1a_extend(digest, &entry.frame.ty.code().to_be_bytes());
-                digest = fnv1a_extend(digest, &entry.frame.payload);
+                digest = fnv1a_extend(digest, &stable_payload(&entry.frame));
             }
         }
         digest
@@ -598,6 +643,31 @@ fn command_name(frame: &Frame) -> Option<String> {
         .ok()
         .map(|named| named.name)
         .filter(|name| !name.is_empty())
+}
+
+/// An entry's payload with the SDK's wall-clock stamps (a sleep's wake-up
+/// time, a delayed send's invoke time) zeroed: the bytes a digest compares
+/// across runs.
+fn stable_payload(frame: &Frame) -> bytes::Bytes {
+    use crate::protocol::generated::{OneWayCallCommandMessage, SleepCommandMessage};
+    use prost::Message as _;
+    match frame.ty {
+        MessageType::SleepCommand => frame
+            .decode::<SleepCommandMessage>()
+            .map(|mut sleep| {
+                sleep.wake_up_time = 0;
+                bytes::Bytes::from(sleep.encode_to_vec())
+            })
+            .unwrap_or_else(|_| frame.payload.clone()),
+        MessageType::OneWayCallCommand => frame
+            .decode::<OneWayCallCommandMessage>()
+            .map(|mut send| {
+                send.invoke_time = 0;
+                bytes::Bytes::from(send.encode_to_vec())
+            })
+            .unwrap_or_else(|_| frame.payload.clone()),
+        _ => frame.payload.clone(),
+    }
 }
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;

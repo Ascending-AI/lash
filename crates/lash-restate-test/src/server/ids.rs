@@ -150,15 +150,6 @@ impl SeededIds {
         }
         (InvocationId::from_bytes(bytes), expand.next_u64())
     }
-
-    /// A draw in `0..bound` (`bound > 0`).
-    pub fn below(&mut self, bound: u64) -> u64 {
-        if bound == 0 {
-            0
-        } else {
-            self.next_u64() % bound
-        }
-    }
 }
 
 #[cfg(test)]

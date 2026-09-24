@@ -15,6 +15,22 @@
 //!
 //! Engine-agnostic laws must not depend on this crate's internals; they run
 //! against lash's effect interface over a backend this crate builds.
+//!
+//! # Determinism contract
+//!
+//! The double's own decisions are fully seeded; lash's concurrent handlers
+//! race exactly as on a real server.
+//!
+//! Every choice the double makes derives from the seed and from what an
+//! invocation *is* (the command that created it, its workflow or idempotency
+//! key), never from creation order: invocation ids, random seeds, timer
+//! tie-breaks and random crash points. Handlers run concurrently on Tokio,
+//! with SQLite completing on its own threads, so when two invocations race —
+//! a durable-wait registration and an index read, say — lash may take a
+//! different path from one run to the next, as it would against
+//! `restate-server`. Tests assert outcomes, not journal bytes. (lash also
+//! journals some wall-clock values and fresh ids inside `ctx.run` results,
+//! FIG-3672.)
 
 mod backend;
 pub mod protocol;

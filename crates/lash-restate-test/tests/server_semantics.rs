@@ -177,10 +177,14 @@ async fn server(config: ServerConfig) -> RestateTestServer {
     RestateTestServer::start(endpoint(), config).await.unwrap()
 }
 
-fn modes() -> [ServerConfig; 2] {
+fn modes() -> [ServerConfig; 4] {
     [
         ServerConfig::default(),
         ServerConfig::default().always_replay(true),
+        ServerConfig::default().protocol(lash_restate_test::ProtocolVersion::V7),
+        ServerConfig::default()
+            .protocol(lash_restate_test::ProtocolVersion::V7)
+            .always_replay(true),
     ]
 }
 

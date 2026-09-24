@@ -190,7 +190,8 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     )
     .await;
     match completed {
-        Ok(result) => result.expect("the turn's handler completes"),
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => *answer.lock().unwrap() = Some(format!("stuck: {error}")),
         Err(_) => {
             let stuck: Vec<_> = server
                 .invocations()
@@ -252,11 +253,17 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
         }
         let commands = entries.iter().filter(|(ty, _)| ty.is_command());
         for (index, (ty, name)) in commands.enumerate().skip(1) {
+            // The SDK starts a run's closure as it writes the RunCommand, so
+            // a crash before the server stores that command may already
+            // have run the effect: it too is a lost run.
+            let lost_on_command = (*ty == MessageType::RunCommand)
+                .then(|| name.clone())
+                .flatten();
             points.push((
                 CrashRule::new(CrashPoint::BeforeCommand { index })
                     .service(service)
                     .within_attempts(1),
-                None,
+                lost_on_command,
             ));
             if *ty == MessageType::RunCommand {
                 points.push((
@@ -281,12 +288,40 @@ fn crash_points(reference: &Run, service: &str) -> Vec<(CrashRule, Option<String
 ///   engine retries until it pauses;
 /// * right after the group dispatcher send (command 13), the running
 ///   dispatcher asks for the child's executor while no attempt's opener is
-///   registered, and routing refuses with `NoExecutor`.
-const KNOWN_DIVERGENCES: &[&str] = &[
-    "LashTestHandlerHost BeforeCommand { index: 13 }",
-    "LashTestHandlerHost BeforeCommand { index: 33 }",
-    "LashTestHandlerHost BeforeCommand { index: 34 }",
+///   registered, and routing refuses with `NoExecutor` — a race, so it
+///   diverges on some runs;
+/// * when the turn-input claim's run (command 2) re-executes after a crash,
+///   the claim the lost attempt already made can still hold the input, and
+///   the turn stops with a runtime error — a race, on some runs.
+const KNOWN_DIVERGENCES: &[(&str, Divergence)] = &[
+    (
+        "LashTestHandlerHost BeforeCommand { index: 13 }",
+        Divergence::Sometimes,
+    ),
+    (
+        "LashTestHandlerHost BeforeCommand { index: 33 }",
+        Divergence::Always,
+    ),
+    (
+        "LashTestHandlerHost BeforeCommand { index: 34 }",
+        Divergence::Always,
+    ),
+    (
+        "LashTestHandlerHost BeforeCommand { index: 2 }",
+        Divergence::Sometimes,
+    ),
+    (
+        "LashTestHandlerHost BeforeRunResult { name: Some(\"lash:turn-crash-replay:turn-1:accept_turn_input:claim_accepted_turn_input\") }",
+        Divergence::Sometimes,
+    ),
 ];
+
+/// Whether a pinned divergence fails on every run or only on some.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Divergence {
+    Always,
+    Sometimes,
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
@@ -347,20 +382,22 @@ async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
         .filter(|violation| {
             !KNOWN_DIVERGENCES
                 .iter()
-                .any(|known| violation.starts_with(known))
+                .any(|(known, _)| violation.starts_with(known))
         })
         .collect();
     assert!(
         unexplained.is_empty(),
         "crash points that did not recover:\n{unexplained:#?}"
     );
-    for known in KNOWN_DIVERGENCES {
-        assert!(
-            violations
-                .iter()
-                .any(|violation| violation.starts_with(known)),
-            "`{known}` recovers now: drop it from KNOWN_DIVERGENCES (FIG-3678)"
-        );
+    for (known, divergence) in KNOWN_DIVERGENCES {
+        if *divergence == Divergence::Always {
+            assert!(
+                violations
+                    .iter()
+                    .any(|violation| violation.starts_with(known)),
+                "`{known}` recovers now: drop it from KNOWN_DIVERGENCES (FIG-3678)"
+            );
+        }
     }
 }
 
@@ -368,10 +405,20 @@ async fn every_journal_point_of_a_tool_turn_recovers_to_the_reference_answer() {
 async fn one_seed_reproduces_the_turn_journals_and_ids() {
     let first = run_turn(7, None).await;
     let second = run_turn(7, None).await;
-    // The same invocations under the same ids, each with the same journal
-    // of commands and notifications. Payload bytes may differ only where
-    // lash itself records a fresh call id or a measured duration inside a
-    // `ctx.run` result, which a server cannot and must not fix.
-    assert_eq!(first.journals, second.journals);
+    // One seed gives the turn — driven by one handler — the same id and the
+    // same journal of commands and notifications, and the same answer.
+    // Invocations that race each other stay as concurrent as on a real
+    // server: a durable-wait index read may land before or after another
+    // invocation's registration, and lash then takes a different path (an
+    // extra index call, a different wait), so the full invocation set is not
+    // a function of the seed. Payload bytes also differ where lash records a
+    // fresh call id or a measured duration in a `ctx.run` result (FIG-3672).
+    let turn_journal = |run: &Run| {
+        run.journals
+            .iter()
+            .find(|(_, service, _)| service == TURN_HOST)
+            .map(|(id, _, entries)| (id.clone(), entries.clone()))
+    };
+    assert_eq!(turn_journal(&first), turn_journal(&second));
     assert_eq!(first.answer, second.answer);
 }

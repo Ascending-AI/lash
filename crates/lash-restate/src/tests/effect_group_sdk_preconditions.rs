@@ -301,6 +301,8 @@ struct Witness {
     transport: Arc<dyn lash_http_transport::HttpTransport>,
     ingress_url: String,
     admin_url: String,
+    /// The in-process server, kept alive for the transport's sake.
+    _server: Option<lash_restate_test::RestateTestServer>,
 }
 
 impl Witness {
@@ -358,6 +360,7 @@ async fn run_witnesses(target: WitnessServer) {
                     transport: Arc::new(lash_http_transport::ReqwestHttpTransport::new()),
                     ingress_url,
                     admin_url,
+                    _server: None,
                 },
                 Some((shutdown_tx, server)),
             )
@@ -375,6 +378,7 @@ async fn run_witnesses(target: WitnessServer) {
                     transport: server.transport(),
                     ingress_url: url.clone(),
                     admin_url: url,
+                    _server: Some(server),
                 },
                 None,
             )

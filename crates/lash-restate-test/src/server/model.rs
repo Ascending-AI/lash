@@ -106,7 +106,8 @@ pub struct LiveAttempt {
 
 impl LiveAttempt {
     /// Push `frame` down the attempt's open input. Returns whether it went.
-    pub fn push(&self, frame: Bytes) -> bool {
+    pub fn push(&mut self, frame: Bytes) -> bool {
+        self.starved_since_ms = None;
         let pushed = self
             .input
             .as_ref()
@@ -208,6 +209,9 @@ pub struct Invocation {
     pub parent: Option<InvKey>,
     /// Invocations this one's journal called or sent, for kill's cascade.
     pub children: Vec<InvKey>,
+    /// Completion ids of journaled `ctx.run`s whose result is not stored yet:
+    /// closures in flight (or to re-run on the next attempt).
+    pub pending_runs: BTreeSet<u32>,
 }
 
 /// A durable promise of a workflow key.

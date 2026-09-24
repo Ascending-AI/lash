@@ -657,36 +657,10 @@ mod on_the_server_double {
         )
     });
 
-    // The crash is a handler attempt that dies mid-turn; the server double
-    // redelivers it and the redrive replays the crashed attempt's journal.
-    lash_conformance::migrated_tools_redrive_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let effect_host = harness.endpoint_host();
-        let turn_runner = harness.turn_runner();
-        let registry = harness.process_registry();
-        let prefix: &'static str =
-            Box::leak(format!("restate-migrated-tools-{}", harness.run_nonce()).into_boxed_str());
-        let orchestration: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
-            Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
-            Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
-                lash_subagents::CapabilityRegistry::new().with(Arc::new(
-                    lash_subagents::StaticCapability::new(
-                        "default",
-                        lash_core::facade_support::SessionSpec::inherit(),
-                    ),
-                )),
-            ))),
-        ];
-        (
-            harness,
-            prefix,
-            effect_host,
-            registry,
-            turn_runner,
-            orchestration,
-        )
-    });
+    // `migrated_tools_redrive_tests` stays off the double for now: in about
+    // half of streaming runs the tool child stops after its attempt's run
+    // completes, waiting in-process on the turn's opener (FIG-3682). It runs
+    // on the live server, above.
 
     lash_conformance::effect_host_await_event_witness_tests!({
         let harness = Arc::new(LiveConformanceHarness::start_on(HarnessServer::in_process()).await);

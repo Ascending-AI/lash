@@ -86,6 +86,10 @@ impl std::fmt::Debug for RestateTestBackend {
 /// The one constructor: a fresh server double under `seed` with `config`,
 /// a fresh SQLite memory store set on a virtual clock the server moves, and
 /// lash-restate's engine and services wired between them.
+///
+/// `seed` is the run's seed and replaces whatever `config.seed` holds; pass
+/// `ServerConfig::default()` unless a test needs another time mode, protocol
+/// version, retry policy or always-replay.
 pub async fn backend(seed: u64, config: ServerConfig) -> Result<RestateTestBackend, BackendError> {
     RestateTestBackend::build(config.with_seed(seed)).await
 }
@@ -156,7 +160,7 @@ impl RestateTestBackend {
     }
 
     /// The virtual clock the stores stamp with; the server moves it.
-    pub fn clock(&self) -> Arc<TestClock> {
+    pub fn test_clock(&self) -> Arc<TestClock> {
         Arc::clone(&self.clock)
     }
 
@@ -237,10 +241,34 @@ impl RestateTestBackend {
         parked: Parked,
     ) -> Result<String, String> {
         let key = self.jobs.park(admitted, parked);
-        let ran = self
-            .ingress()
-            .call_workflow_json::<_, bool>(HANDLER_HOST, &key, "run", &key)
-            .await;
+        let ingress = self.ingress();
+        let call = ingress.call_workflow_json::<_, bool>(HANDLER_HOST, &key, "run", &key);
+        // A job whose handler exhausted its retries is paused, not failed:
+        // report it at once instead of waiting out the attach ceiling.
+        let target = format!("{HANDLER_HOST}/{key}/run");
+        let paused = async {
+            loop {
+                if let Some(view) = self
+                    .server
+                    .invocations()
+                    .into_iter()
+                    .find(|view| view.target == target && view.status == "paused")
+                {
+                    return view;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        };
+        let ran = tokio::select! {
+            ran = call => ran,
+            view = paused => {
+                self.jobs.take(&key);
+                return Err(format!(
+                    "job `{key}` paused after {} attempts; last failure: {:?}",
+                    view.attempts, view.last_failure
+                ));
+            }
+        };
         match ran {
             Ok(true) => Ok(key),
             Ok(false) => Err(format!("job `{key}` reported failure")),

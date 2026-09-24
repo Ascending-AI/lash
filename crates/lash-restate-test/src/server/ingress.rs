@@ -2,7 +2,7 @@
 //! awakeables, attach and output) and the admin API routes lash uses
 //! (cancel, kill, resume, the `sys_invocation` query), served in process.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -21,9 +21,13 @@ use super::processor::{
 };
 use crate::protocol::generated::{self as pb, notification_template};
 
+/// The transport clients hold. It reaches the server weakly: the endpoint's
+/// services hold connections over this transport and the server holds the
+/// endpoint, so a strong reference would keep every server alive forever.
+/// A server that is gone answers 503.
 #[derive(Clone)]
 pub(super) struct IngressTransport {
-    shared: Arc<Shared>,
+    shared: Weak<Shared>,
 }
 
 impl std::fmt::Debug for IngressTransport {
@@ -33,8 +37,10 @@ impl std::fmt::Debug for IngressTransport {
 }
 
 impl IngressTransport {
-    pub(super) fn new(shared: Arc<Shared>) -> Self {
-        Self { shared }
+    pub(super) fn new(shared: &Arc<Shared>) -> Self {
+        Self {
+            shared: Arc::downgrade(shared),
+        }
     }
 }
 
@@ -45,12 +51,20 @@ impl HttpTransport for IngressTransport {
         request: HttpRequest,
         timeout: Option<Duration>,
     ) -> Result<HttpResponse, LlmTransportError> {
+        let Some(shared) = self.shared.upgrade() else {
+            return Ok(error(503, "the Restate test server has shut down"));
+        };
+        let routes = Routes { shared };
         let message = request
             .response_start_timeout_message
             .clone()
             .unwrap_or_else(|| format!("{} timed out", request.url));
-        run_with_timeout(async { Ok(self.route(request).await) }, timeout, &message).await
+        run_with_timeout(async { Ok(routes.route(request).await) }, timeout, &message).await
     }
+}
+
+struct Routes {
+    shared: Arc<Shared>,
 }
 
 fn respond(status: u16, body: impl Into<Bytes>) -> HttpResponse {
@@ -143,7 +157,7 @@ fn parse_delay(query: &str) -> Result<Option<Duration>, String> {
     Ok(None)
 }
 
-impl IngressTransport {
+impl Routes {
     async fn route(&self, request: HttpRequest) -> HttpResponse {
         let base = self.shared.config.ingress_url.trim_end_matches('/');
         let rest = request

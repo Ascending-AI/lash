@@ -159,6 +159,8 @@ pub struct State {
     /// Virtual time at the last move, and the wall instant it happened: auto
     /// advance lets virtual time flow at wall speed from here.
     pub anchor: (u64, std::time::Instant),
+    /// Wall-clock microseconds the frame being applied was read at.
+    pub frame_received_us: u128,
 }
 
 impl State {
@@ -172,6 +174,7 @@ impl State {
     pub fn new(seed: u64, start_ms: u64) -> Self {
         Self {
             anchor: (start_ms, std::time::Instant::now()),
+            frame_received_us: 0,
             now_ms: start_ms,
             ids: SeededIds::new(seed),
             seq: 0,
@@ -284,6 +287,7 @@ impl State {
             suspensions: 0,
             parent: submission.parent,
             children: Vec::new(),
+            pending_runs: std::collections::BTreeSet::new(),
         });
         self.by_id.insert(id.as_str().to_owned(), key);
         if let Some(idempotency) = idempotency {
@@ -415,6 +419,9 @@ impl State {
         // eager map partial, and a keyed target gets its whole state.
         let partial_state = !invocation.spec.kind.is_keyed();
         invocation.attempts += 1;
+        // Only this attempt's own runs count as in flight: a replay need not
+        // reach a run an earlier attempt left open.
+        invocation.pending_runs.clear();
         let number = invocation.attempts;
         let journal_len = invocation.journal.len();
         let start = StartMessage {
@@ -453,6 +460,7 @@ impl State {
             invocation.target.service.clone(),
             invocation.target.handler.clone(),
             body,
+            Arc::clone(&probe),
         ));
         invocation.status = Status::Running(LiveAttempt {
             number,
@@ -512,6 +520,11 @@ impl State {
     pub(super) fn append_command(&mut self, key: InvKey, frame: Frame) {
         let now_ms = self.now_ms;
         let invocation = &mut self.invocations[key.0];
+        if frame.ty == MessageType::RunCommand
+            && let Ok(run) = frame.decode::<RunCommandMessage>()
+        {
+            invocation.pending_runs.insert(run.result_completion_id);
+        }
         invocation.journal.push(Entry {
             frame,
             notification: None,
@@ -566,6 +579,11 @@ impl State {
         }
         let index = invocation.journal.len();
         let encoded = frame.encode();
+        if frame.ty == MessageType::RunCompletionNotification
+            && let NotificationKey::Completion(completion_id) = &notification_key
+        {
+            invocation.pending_runs.remove(completion_id);
+        }
         invocation.journal.push(Entry {
             frame,
             notification: Some(notification_key.clone()),
@@ -574,8 +592,15 @@ impl State {
         invocation.retry.failures_since_last_entry = 0;
         let resume = match &mut invocation.status {
             Status::Running(attempt) => {
-                let delivered = push && attempt.push(encoded);
-                if !delivered && push {
+                // Unpushed (a V7 run result the SDK already holds), the
+                // attempt has it only while its input is open for the ack;
+                // once the input is closed, it must resume to replay it.
+                let delivered = if push {
+                    attempt.push(encoded)
+                } else {
+                    attempt.input.is_some()
+                };
+                if !delivered {
                     attempt.unseen_from.get_or_insert(index);
                 }
                 false
@@ -614,12 +639,33 @@ impl State {
     // ---------------------------------------------------------------------
 
     /// Apply one frame the SDK wrote on attempt `number` of `key`.
-    pub fn on_frame(&mut self, sh: &Arc<Shared>, key: InvKey, number: u32, frame: Frame) -> Flow {
+    pub fn on_frame(
+        &mut self,
+        sh: &Arc<Shared>,
+        key: InvKey,
+        number: u32,
+        frame: Frame,
+        received_us: u128,
+    ) -> Flow {
         if self.running_attempt(key, number).is_none() {
             return Flow::Stop;
         }
+        self.frame_received_us = received_us;
         let site = self.crash_site(key, &frame);
-        if self.crash_plan.should_crash(&site, &mut self.ids) {
+        // A random crash's draw is keyed to the frame it would hit, so one
+        // seed crashes the same frames however attempts interleave.
+        let draw = self
+            .ids
+            .derive(&[
+                b"crash",
+                self.invocations[key.0].id.bytes(),
+                &number.to_be_bytes(),
+                &(site.command_index as u64).to_be_bytes(),
+                &site.ty.code().to_be_bytes(),
+                &(self.invocations[key.0].journal.len() as u64).to_be_bytes(),
+            ])
+            .1;
+        if self.crash_plan.should_crash(&site, draw) {
             self.crash(sh, key);
             return Flow::Stop;
         }
@@ -890,6 +936,9 @@ impl State {
         });
         invocation.status = Status::Suspended(waiting);
         invocation.suspensions += 1;
+        // The invoker starts a fresh retry loop on every invocation start,
+        // a resume from suspension included.
+        invocation.retry.failures_in_loop = 0;
         self.stats.suspensions += 1;
         self.touch(key);
         if already_there {
@@ -1022,7 +1071,7 @@ impl State {
             self.start_attempt(sh, key);
         } else {
             self.add_timer(
-                self.now_ms + delay_ms,
+                self.now_ms.saturating_add(delay_ms),
                 TimerAction::Retry { invocation: key },
             );
             sh.activity.notify_waiters();
@@ -1156,11 +1205,21 @@ impl State {
 
     /// Whether nothing can happen without time moving or outside input:
     /// every live attempt is blocked reading its input.
+    ///
+    /// An attempt counts as blocked only when its SDK waits on its input,
+    /// the server has applied everything it wrote (its response body is
+    /// idle), and no `ctx.run` closure of it is executing — a handler may
+    /// poll its input beside a running closure (`select!`), and that closure
+    /// is work in progress.
     pub fn is_quiescent(&self) -> bool {
         self.invocations
             .iter()
             .all(|invocation| match &invocation.status {
-                Status::Running(attempt) => attempt.input.is_some() && attempt.probe.is_starved(),
+                Status::Running(attempt) => {
+                    attempt.input.is_some()
+                        && attempt.probe.is_idle()
+                        && invocation.pending_runs.is_empty()
+                }
                 _ => true,
             })
     }

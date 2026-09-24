@@ -459,6 +459,26 @@ impl LiveConformanceHarness {
                         .always_replay(*always_replay),
                 )
                 .expect("start the in-process Restate server double");
+                if std::env::var("LASH_RESTATE_TEST_WATCHDOG").is_ok() {
+                    let watched = server.clone();
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::time::sleep(Duration::from_secs(20)).await;
+                            for view in watched.invocations() {
+                                if view.status != "completed" {
+                                    let journal: Vec<_> = watched
+                                        .journal(&view.id)
+                                        .unwrap_or_default()
+                                        .into_iter()
+                                        .map(|entry| format!("{:?}:{:?}", entry.ty, entry.name))
+                                        .collect();
+                                    println!("WATCHDOG {view:?} journal={journal:?}");
+                                }
+                            }
+                            println!("WATCHDOG timers {:?}", watched.timers());
+                        }
+                    });
+                }
                 (
                     RestateConnection::with_transport(server.ingress_url(), server.transport()),
                     HarnessAdmin::InProcess { server },

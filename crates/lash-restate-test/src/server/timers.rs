@@ -15,9 +15,24 @@ impl State {
     // Virtual time
     // ---------------------------------------------------------------------
 
+    /// Add a timer. Timers due at one instant fire in an order the seed
+    /// fixes from what each timer is — its invocation and completion — not
+    /// from which handler happened to register first.
     pub(super) fn add_timer(&mut self, fire_at_ms: u64, action: TimerAction) {
         self.seq += 1;
-        let tie_break = self.ids.next_u64();
+        let (invocation, kind, detail) = match &action {
+            TimerAction::Sleep {
+                invocation,
+                completion_id,
+            } => (*invocation, &b"sleep"[..], *completion_id),
+            TimerAction::Start { invocation } => (*invocation, &b"start"[..], 0),
+            TimerAction::Retry { invocation } => (*invocation, &b"retry"[..], 0),
+        };
+        let invocation_id = self.invocations[invocation.0].id.bytes().clone();
+        let tie_break = self
+            .ids
+            .derive(&[b"timer", &invocation_id, kind, &detail.to_be_bytes()])
+            .1;
         self.timers
             .insert((fire_at_ms, tie_break, self.seq), action);
     }
@@ -160,7 +175,8 @@ pub fn duration_ms(duration: Duration) -> u64 {
 /// The SDK stamps sleeps and delayed sends with wall-clock epoch
 /// milliseconds (`SystemTime::now() + duration`, truncated). The server
 /// keeps virtual time, so it recovers the duration the handler asked for by
-/// measuring the stamp against the wall clock when the command arrives, and
+/// measuring the stamp against the wall clock at `received_us` — when the
+/// attempt task read the frame, before it waited for the server lock — and
 /// re-anchors it on the virtual clock.
 ///
 /// Truncation and the frame's transit make the measured value read short of
@@ -168,13 +184,9 @@ pub fn duration_ms(duration: Duration) -> u64 {
 /// window the server picks the roundest candidate (a whole second, then a
 /// multiple of 100 ms, 10 ms, 1 ms), so the durations handlers use recover
 /// exactly and one seed fires timers in one order.
-pub fn wall_delay_ms(wall_epoch_ms: u64) -> u64 {
-    let now_us = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_micros())
-        .unwrap_or(0);
+pub fn wall_delay_ms(wall_epoch_ms: u64, received_us: u128) -> u64 {
     let target_us = u128::from(wall_epoch_ms) * 1000;
-    snap_duration_ms(target_us.saturating_sub(now_us))
+    snap_duration_ms(target_us.saturating_sub(received_us))
 }
 
 /// How far short of the requested duration a measured one may read.
