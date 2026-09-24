@@ -673,15 +673,39 @@ for (const item of items) {
 lash {"outcome":"rejected","diagnostic":"TS_FOR_OF_UNSUPPORTED","prints":[],"probes":{"item":"unbound","items":"unbound"}}
 end
 
-session spread-object-field-check
-about a field of an object literal built by a spread links as TypeScript types it (FIG-3626)
+session spread-built-object-fields
+about an object literal built by a spread is open, so its fields read and write as in JavaScript (FIG-3626)
 probe base copy
-cell defect spread-object-field-check
+cell
 const base = { a: 1 };
 const copy = { ...base, b: 2 };
 copy.a = 3;
-console.log(copy);
-lash {"outcome":"rejected","diagnostic":"TS_LINK_ERROR","prints":[],"probes":{"base":"unbound","copy":"unbound"}}
+copy.c = 4;
+console.log(copy, copy.missing);
+end
+
+session open-object-shapes
+about a computed key, a computed-key write or an escape opens an object literal, so a missing field reads undefined (FIG-3626)
+probe name keyed written grown
+cell
+const name = 'k';
+const keyed = { [name]: 1 };
+const written = { a: 1 };
+written[name] = 2;
+const grown = { a: 1 };
+Object.assign(grown, { k: 3 });
+console.log(keyed.k, keyed.missing, written.k, written.missing, grown.k, grown.missing);
+cell
+console.log(keyed.k, written.k, grown.k);
+end
+
+session closed-shape-field-guard
+about a field a closed object literal lacks is refused at link, where Node reads undefined
+probe point
+cell deviation closed-shape-field-guard
+const point = { x: 1, y: 2 };
+console.log(point.z);
+lash {"outcome":"rejected","diagnostic":"TS_LINK_ERROR","prints":[],"probes":{"point":"unbound"}}
 end
 
 session builtin-call-spread

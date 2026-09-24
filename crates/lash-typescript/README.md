@@ -239,6 +239,18 @@ no probe that fires it fails that test.
 
 - Instruction, wall-clock, logical-memory, and call-frame limits may terminate
   execution with the existing typed VM bound errors.
+- The closed-shape field guard (`closed-shape-field-guard`, FIG-3626): a read
+  or write of a field that a statically closed object literal lacks is refused
+  at link as `TS_LINK_ERROR`, naming the field and the literal's fields
+  (``object has no field `c`; its fields are `a`, `b` ``), where Node answers
+  `undefined`. TypeScript's checker refuses the same program. A literal stays
+  closed only while nothing can give it a field the linker cannot see: a
+  spread (`{ ...base, b: 2 }`), a computed key (`{ [k]: 1 }`), a computed-key
+  write (`o[k] = v`), or an escape (the object passed to a function or a
+  builtin, bound to another name, stored in an array or object, returned, or
+  reached through `globalThis`) opens it for the whole cell, and an open
+  object reads a missing field as `undefined`. `console.log`, `Object.keys`
+  and `Array.isArray` read their argument without opening it.
 - Await permission stops at every function boundary: an async IIFE or async
   `map` callback must await its own tool calls, `sleep`, `waitSignal`, and
   `triggers.register` operations.
@@ -513,10 +525,6 @@ is silent while its fix is owed.
   `const same = items; for (const item of items) { same.push(item); }` visits
   the items the loop started with, where Node also visits the appended ones
   (and, unbounded, never ends).
-- `spread-object-field-check` (FIG-3626): an object literal built by a spread
-  is typed `{}`, so reading or writing one of its fields is refused
-  (`TS_LINK_ERROR`, `object type has no field`), where TypeScript types the
-  spread's fields.
 - `sibling-block-binding-types` (FIG-3631): block declarations of one name in
   sibling blocks are separate bindings, but share one slot the linker types as
   one variable, so after a branch binds it two ways a later block's
@@ -756,10 +764,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 583 rows, of which 510 are distinct
+The Node differential table carries 588 rows, of which 515 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of those 510 unique expressions rather than of all 583 rows. Every count in
+that of those 515 unique expressions rather than of all 588 rows. Every count in
 this paragraph is pinned against the table by
 `committed_row_counts_match_the_register`, and the generator pins each lane's
 own row count, so neither this paragraph nor a lane can drift from the corpus in

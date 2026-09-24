@@ -43,6 +43,8 @@ enum Source {
     Generated(fn() -> String),
     /// Parsed under a 2 GiB address-space limit, in a child process.
     UnderAddressLimit(fn() -> String),
+    /// Linked the way a cell is admitted, for a refusal the linker makes.
+    Linked(&'static str),
 }
 
 struct Probe {
@@ -59,6 +61,14 @@ const fn probe(entry: u32, refusal: &'static str, source: &'static str) -> Probe
         entry: Some(entry),
         refusal,
         source: Source::Text(source),
+    }
+}
+
+const fn linked_probe(entry: u32, refusal: &'static str, source: &'static str) -> Probe {
+    Probe {
+        entry: Some(entry),
+        refusal,
+        source: Source::Linked(source),
     }
 }
 
@@ -201,6 +211,17 @@ const PROBES: &[Probe] = &[
         16,
         "TS_FOR_UNSUPPORTED",
         "for (let i = 0; i < 2; i++) { try { continue; } finally { } } finish(1);",
+    ),
+    // 22. The closed-shape field guard, on the read path and the write path.
+    linked_probe(
+        22,
+        "TS_LINK_ERROR",
+        "const point = { x: 1, y: 2 }; finish(point.z);",
+    ),
+    linked_probe(
+        22,
+        "TS_LINK_ERROR",
+        "const point = { x: 1 }; point.y = 2; finish(point.x);",
     ),
     // The README register's refusals that have no numbered ADR entry.
     readme_probe(
@@ -478,6 +499,18 @@ fn fires(refusal: &str, source: &str) -> Result<(), String> {
     }
 }
 
+/// Whether linking `source` as a cell is refused with `refusal`.
+fn link_fires(refusal: &str, source: &str) -> Result<(), String> {
+    match lash_typescript::link(source, &lashlang::testing::harness::test_environment()) {
+        Ok(_) => Err("linked".to_string()),
+        Err(diagnostic) if diagnostic.code.as_str() == refusal => Ok(()),
+        Err(diagnostic) => Err(format!(
+            "refused as {}: {diagnostic}",
+            diagnostic.code.as_str()
+        )),
+    }
+}
+
 #[test]
 fn every_register_probe_fires_its_refusal() {
     let mut failures = Vec::new();
@@ -486,6 +519,12 @@ fn every_register_probe_fires_its_refusal() {
             Source::Text(source) => (*source).to_string(),
             Source::Generated(build) => build(),
             Source::UnderAddressLimit(_) => continue,
+            Source::Linked(source) => {
+                if let Err(outcome) = link_fires(probe.refusal, source) {
+                    failures.push(format!("{} probe `{source}`: {outcome}", probe.refusal));
+                }
+                continue;
+            }
         };
         if let Err(outcome) = fires(probe.refusal, &source) {
             let shown = source.chars().take(120).collect::<String>();

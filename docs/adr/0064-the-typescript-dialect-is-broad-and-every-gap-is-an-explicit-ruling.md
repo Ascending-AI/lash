@@ -20,6 +20,17 @@ probes. The session corpus and the round-trip allowlist are ratchets like the
 census: a row that stops diverging, or an allowlist entry that stops being
 needed, fails CI.
 
+Amended 2026-09-24 (FIG-3626): the linker's missing-field check is a named
+deviation, the **closed-shape field guard**
+([ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md#deviation-register)
+register entry 22), and it is kept only where it is sound. It refuses a read
+or write of a field that a statically closed object literal lacks, as `tsc`
+does; a literal that a spread, a computed key, a computed-key write or an
+escape opens reads a missing field as `undefined`, as JavaScript does. It is
+not a type checker: it refuses nothing a closed literal could hold at run
+time. Each open trigger has a law, and the refusal names the missing field
+and the literal's fields so a model can repair the program.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves
@@ -120,7 +131,8 @@ aspirational:
    loud error on string coercion, sequential async callbacks, ToLength at
    `lastIndex` write, lone-surrogate match output, dense arrays, no prototype
    chain, value trees at the durable boundary, cycle preflight before
-   stringify replacers. Silent divergence remains the one forbidden outcome.
+   stringify replacers, the closed-shape field guard. Silent divergence
+   remains the one forbidden outcome.
    `forEach` is **not** on this list: it iterates live and node-exact across
    arrays, `Map`, `Set`, and `URLSearchParams`, and an earlier revision of this
    ADR claimed a snapshot deviation the code does not have.

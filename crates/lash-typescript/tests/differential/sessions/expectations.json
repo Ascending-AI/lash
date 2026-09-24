@@ -2184,8 +2184,8 @@
       ]
     },
     {
-      "id": "spread-object-field-check",
-      "about": "a field of an object literal built by a spread links as TypeScript types it (FIG-3626)",
+      "id": "spread-built-object-fields",
+      "about": "an object literal built by a spread is open, so its fields read and write as in JavaScript (FIG-3626)",
       "probe": [
         "base",
         "copy"
@@ -2193,18 +2193,95 @@
       "deviations": [],
       "cells": [
         {
-          "source": "const base = { a: 1 };\nconst copy = { ...base, b: 2 };\ncopy.a = 3;\nconsole.log(copy);\n",
+          "source": "const base = { a: 1 };\nconst copy = { ...base, b: 2 };\ncopy.a = 3;\ncopy.c = 4;\nconsole.log(copy, copy.missing);\n",
           "reject": null,
           "deviation": null,
-          "defect": "spread-object-field-check",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
-              "{\"a\":3,\"b\":2}"
+              "{\"a\":3,\"b\":2,\"c\":4} undefined"
             ],
             "probes": {
               "base": "object {\"a\":1}",
-              "copy": "object {\"a\":3,\"b\":2}"
+              "copy": "object {\"a\":3,\"b\":2,\"c\":4}"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "open-object-shapes",
+      "about": "a computed key, a computed-key write or an escape opens an object literal, so a missing field reads undefined (FIG-3626)",
+      "probe": [
+        "name",
+        "keyed",
+        "written",
+        "grown"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const name = 'k';\nconst keyed = { [name]: 1 };\nconst written = { a: 1 };\nwritten[name] = 2;\nconst grown = { a: 1 };\nObject.assign(grown, { k: 3 });\nconsole.log(keyed.k, keyed.missing, written.k, written.missing, grown.k, grown.missing);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1 undefined 2 undefined 3 undefined"
+            ],
+            "probes": {
+              "name": "string \"k\"",
+              "keyed": "object {\"k\":1}",
+              "written": "object {\"a\":1,\"k\":2}",
+              "grown": "object {\"a\":1,\"k\":3}"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "console.log(keyed.k, written.k, grown.k);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "1 2 3"
+            ],
+            "probes": {
+              "name": "string \"k\"",
+              "keyed": "object {\"k\":1}",
+              "written": "object {\"a\":1,\"k\":2}",
+              "grown": "object {\"a\":1,\"k\":3}"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "closed-shape-field-guard",
+      "about": "a field a closed object literal lacks is refused at link, where Node reads undefined",
+      "probe": [
+        "point"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const point = { x: 1, y: 2 };\nconsole.log(point.z);\n",
+          "reject": null,
+          "deviation": "closed-shape-field-guard",
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "undefined"
+            ],
+            "probes": {
+              "point": "object {\"x\":1,\"y\":2}"
             },
             "closures": []
           },
@@ -2214,8 +2291,7 @@
               "diagnostic": "TS_LINK_ERROR",
               "prints": [],
               "probes": {
-                "base": "unbound",
-                "copy": "unbound"
+                "point": "unbound"
               }
             },
             "restart": {
@@ -2223,8 +2299,7 @@
               "diagnostic": "TS_LINK_ERROR",
               "prints": [],
               "probes": {
-                "base": "unbound",
-                "copy": "unbound"
+                "point": "unbound"
               }
             }
           }

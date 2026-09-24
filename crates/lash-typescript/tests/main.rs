@@ -16,6 +16,8 @@ mod array_append;
 mod assignment_in_operand;
 #[path = "cell_boundary_closures.rs"]
 mod cell_boundary_closures;
+#[path = "closed_shape_guard.rs"]
+mod closed_shape_guard;
 #[path = "codemode_parity_examples.rs"]
 mod codemode_parity_examples;
 #[path = "console_observation.rs"]

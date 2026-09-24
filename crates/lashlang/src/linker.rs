@@ -32,6 +32,8 @@ use pass_setup::{Binding, Linker, function_signature};
 mod lower_expr;
 mod lower_javascript;
 mod module_resolution;
+mod open_shapes;
+use open_shapes::OpenPlaces;
 mod pass_validation;
 mod process_literal;
 use pass_validation::validate_trigger_operation_subscription_key;

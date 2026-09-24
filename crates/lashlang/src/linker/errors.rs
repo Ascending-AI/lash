@@ -215,8 +215,15 @@ pub enum LinkError {
         access: String,
         span: Option<Span>,
     },
-    #[error("object type has no field `{field}`")]
-    UnknownObjectField { field: String, span: Option<Span> },
+    /// A read or write of a field a closed object shape lacks (the
+    /// closed-shape field guard, FIG-3626). `known` is the shape's fields, in
+    /// order, so the refusal can name what the object does have.
+    #[error("object has no field `{field}`; {}", known_fields(.known))]
+    UnknownObjectField {
+        field: String,
+        known: Vec<String>,
+        span: Option<Span>,
+    },
     #[error("operator `{operator}` does not accept {left} and {right}")]
     IncompatibleBinaryOperands {
         operator: &'static str,
@@ -292,4 +299,16 @@ impl LinkError {
             Self::ModuleHash { .. } | Self::InvalidAst { .. } => None,
         }
     }
+}
+
+fn known_fields(known: &[String]) -> String {
+    if known.is_empty() {
+        return "it has no fields".to_string();
+    }
+    let names = known
+        .iter()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("its fields are {names}")
 }

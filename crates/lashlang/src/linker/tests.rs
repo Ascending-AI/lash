@@ -7,6 +7,7 @@ mod catalog_tests;
 mod diagnostic_tests;
 mod identity_tests;
 mod module_link_tests;
+mod open_shape_tests;
 mod process_literal_tests;
 mod process_signature_tests;
 mod schema_witness_tests;

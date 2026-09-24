@@ -74,6 +74,9 @@ pub(super) struct Linker<'module> {
     /// nested definition has to reach the child's own start site — one level
     /// deeper than any start argument the enclosing start can carry.
     pub(super) lifted_process_aliases: RefCell<BTreeMap<String, (String, TypeExpr)>>,
+    /// The places whose object shapes the field guard may not trust
+    /// (FIG-3626): every read of a binding sees them open.
+    pub(super) open_places: OpenPlaces,
 }
 
 impl<'module> Linker<'module> {
@@ -98,6 +101,7 @@ impl<'module> Linker<'module> {
             inferred_signals: RefCell::new(BTreeMap::new()),
             lifted_declarations: RefCell::new(Vec::new()),
             lifted_process_aliases: RefCell::new(BTreeMap::new()),
+            open_places: OpenPlaces::of(program),
         }
     }
 
@@ -605,7 +609,10 @@ impl<'module> Linker<'module> {
         target: &crate::ast::AssignTarget,
         scope: &Scope,
     ) -> Result<Option<TypeExpr>, LinkError> {
-        let Some(mut ty) = scope.binding_type(&target.root) else {
+        let Some(mut ty) = scope
+            .binding_type(&target.root)
+            .map(|ty| self.open_type(target.root.as_str(), ty))
+        else {
             return Ok(None);
         };
         for step in &target.steps {
