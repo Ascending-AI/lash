@@ -685,9 +685,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         }
                     }
                     "intersection" => {
-                        for value in &left {
-                            if self.heap.set_has(*other, value)? {
-                                output.push(value.clone());
+                        // ECMA iterates the smaller set and keeps its order:
+                        // `this` when it is no larger than the argument,
+                        // otherwise the argument's own insertion order.
+                        if left.len() <= right.len() {
+                            for value in &left {
+                                if self.heap.set_has(*other, value)? {
+                                    output.push(value.clone());
+                                }
+                            }
+                        } else {
+                            for value in &right {
+                                if self.heap.set_has(receiver, value)? {
+                                    output.push(value.clone());
+                                }
                             }
                         }
                     }
@@ -1452,15 +1463,19 @@ fn javascript_exponential(value: f64, fraction: Option<usize>) -> String {
         return javascript_to_string(&Value::Number(value));
     }
     let value = if value == 0.0 { 0.0 } else { value };
-    let raw = match fraction {
-        Some(fraction) => format!("{value:.fraction$e}"),
+    match fraction {
+        // ECMA rounds the exact decimal value to `fraction + 1` significant
+        // digits and takes the larger mantissa on an exact tie (`25` with zero
+        // fraction digits is `3e+1`, not `2e+1`). Rust's own formatter rounds
+        // half-to-even, so the digits come from the exact binary expansion
+        // instead.
+        Some(fraction) => exact_exponential(value, fraction),
         None => {
             let shortest = javascript_to_string(&Value::Number(value));
             let parsed = shortest.parse::<f64>().unwrap_or(value);
-            format!("{parsed:e}")
+            normalize_exponent(format!("{parsed:e}"), fraction)
         }
-    };
-    normalize_exponent(raw, fraction)
+    }
 }
 
 #[expect(

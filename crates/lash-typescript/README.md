@@ -282,7 +282,8 @@ no probe that fires it fails that test.
   `JSON.stringify` throws Node's catchable
   `TypeError: Converting circular structure to JSON` — but a durable binding
   that still holds one when the cell ends cannot be written down, and refuses
-  by name at the boundary. Hold a key or index instead of the parent object.
+  at the boundary as `TS_CYCLIC_VALUE_UNSUPPORTED`. Hold a key or index
+  instead of the parent object.
 - The value model is dense records with no prototype chain, so `__proto__`,
   `__defineGetter__`, `__defineSetter__`, `__lookupGetter__`, and
   `__lookupSetter__` all reject as `TS_PROTOTYPE_MUTATION_UNSUPPORTED` — as a
@@ -772,10 +773,10 @@ lowers into a left-nested concatenation chain, so its holes deepen the tree
 after they close. Charging them keeps the source budget binding before the
 shared AST's generic limit, which no accepted-grammar source can reach.
 
-The Node differential table carries 699 rows, of which 626 are distinct
+The Node differential table carries 708 rows, of which 635 are distinct
 expressions: duplicates are retained deliberately so each review lane's
 provenance count stays executable, and the table's effective corner coverage is
-that of those 626 unique expressions rather than of all 699 rows. Every count in
+that of those 635 unique expressions rather than of all 708 rows. Every count in
 this paragraph is pinned against the table by
 `committed_row_counts_match_the_register`, and the generator pins each lane's
 own row count, so neither this paragraph nor a lane can drift from the corpus in
