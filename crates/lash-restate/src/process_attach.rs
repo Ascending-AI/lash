@@ -49,17 +49,17 @@ pub(crate) fn process_attach_workflow_key(key: &AwaitEventKey) -> String {
     RestateDurableWaitAddress::for_key(key).workflow_key
 }
 
-/// Bind [`LashProcessAttachImpl::serve`] on every endpoint that binds
-/// [`LashProcessWorkflow`](crate::process::LashProcessWorkflow) and the
-/// durable-wait services: a deployment that arms process terminals without it
-/// parks calls nothing will ever resolve.
+/// Holds a process-terminal wait armed for a parked caller. Every lash
+/// deployment serves it beside the process workflow and the durable-wait
+/// services (`crate::services::bind_lash_services`): a deployment that armed
+/// process terminals without it would park calls nothing ever resolves.
 #[restate_sdk::workflow]
 pub trait LashProcessAttach {
     async fn run(request: Json<RestateProcessAttachRequest>) -> HandlerResult<Json<()>>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct LashProcessAttachImpl;
+pub(crate) struct LashProcessAttachImpl;
 
 impl LashProcessAttach for LashProcessAttachImpl {
     async fn run(

@@ -72,54 +72,39 @@ adapter returns an explicit terminal error code to the handler. Hosts should
 surface that failure and clear their running state rather than leaving the
 invocation to back off forever.
 
-Background tasks are scheduled through the first-party
-`LashProcessWorkflow`. Effect groups require their index, payload, dispatcher,
-and durable-wait service bundle; the same exact-address wait workflow and
-session index also serve ordinary durable waits. Bind the complete set on every
-endpoint that enables groups:
+Lash's own Restate services — the durable-wait workflow and index, the
+`LashProcessWorkflow` background tasks run on, process attach, and the
+effect-group index, payload and dispatcher — are bound by lash, never by the
+host. A deployment that serves lash work starts its endpoint from
+`RestateBackend::endpoint_builder`, which binds every one of them, and binds
+only its own services beside them:
 
 ```rust,no_run
-use std::sync::Arc;
-
-use lash_restate::{
-    LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessWorkflow,
-    LashProcessWorkflowImpl, RestateCoreProcessRunner, RestateEffectGroupRetryPolicy,
-    RestateEffectGroupServices,
-};
-use restate_sdk::prelude::Endpoint;
+use lash_restate::{RestateBackend, RestateProcessServing};
+use restate_sdk::prelude::*;
 
 fn endpoint(
+    backend: &RestateBackend,
+    // The process worker of the core built over `backend`.
     worker: lash_core::DurableProcessWorker,
-    registry: Arc<dyn lash_core::ProcessRegistry>,
-    host: &lash_restate::RestateEffectHost,
-    ingress: lash_restate::RestateIngressClient,
-    // The session catalog the deployment's turns run against: a session-scope
-    // group child checks its owning session's state generation there before
-    // it runs.
-    sessions: Arc<dyn lash_core::SessionStoreFactory>,
-) -> restate_sdk::endpoint::Endpoint
-{
-    let runner = Arc::new(RestateCoreProcessRunner::new(worker));
-    // The endpoint routes grouped children through the resolver registered on
-    // the deployment host — the runtime's `ToolChildHost` when it installs
-    // one, or the embedder's own `register_group_executors` answer — so there
-    // is one resolver and one authority by construction.
-    let groups = RestateEffectGroupServices::new(
-        host,
-        ingress,
-        RestateEffectGroupRetryPolicy::infinite(),
-        sessions,
-    );
-    Endpoint::builder()
-        .bind(LashProcessWorkflowImpl::new(runner, registry).serve())
-        .bind(groups.index)
-        .bind(groups.payload)
-        .bind(groups.dispatch)
-        .bind(groups.wait.workflow.serve())
-        .bind(groups.wait.index.serve())
+) -> restate_sdk::endpoint::Endpoint {
+    backend
+        // A bare worker serves processes under the default segment policy;
+        // `RestateProcessServing` sets a duration cap or effect budget.
+        .endpoint_builder(RestateProcessServing::new(worker))
+        .bind(lash_restate::turn_service(
+            AgentTurnWorkflowImpl.serve(),
+            "run",
+        ))
         .build()
 }
 ```
+
+Effect-group children route through the resolver registered on the backend's
+effect host — the runtime's `ToolChildHost` once a core over the backend
+installs it — so there is one resolver and one authority by construction. A
+process that only submits work to Restate and serves no handlers does not call
+`endpoint_builder`.
 
 A missing binding is itself a deterministic contract failure, so it is treated
 as one: Restate answers an invocation of a service no deployment binds with

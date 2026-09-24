@@ -65,11 +65,13 @@
 //! Substrate-native Restate turns do not use store-side in-flight replay rows;
 //! Lash only commits final session state through turn-commit idempotency.
 //!
-//! Endpoints using this controller must also bind
-//! [`LashDurableWaitWorkflowImpl`] and [`LashDurableWaitIndexImpl`]. The first
-//! owns exact-address promises and durable deadline timers for every
-//! [`ExecutionScope`](lash_core::ExecutionScope); the second indexes
-//! session-owned waits so cancellation and deletion can resolve them durably.
+//! An endpoint that serves lash work starts from
+//! [`RestateBackend::endpoint_builder`], which binds every Restate service lash
+//! itself serves; the host binds only its own services on it. Among lash's are
+//! the durable-wait workflow, which owns exact-address promises and durable
+//! deadline timers for every [`ExecutionScope`](lash_core::ExecutionScope),
+//! and the durable-wait index, which indexes session-owned waits so
+//! cancellation and deletion can resolve them durably.
 //! Await-event identity epoch 6 uses the v2 wait-index namespace and marker;
 //! requests and indexed wait values carry the `AwaitEventKey` preimage so each
 //! handler derives scope, classification, and workflow address locally.
@@ -81,7 +83,6 @@
 //! cancels it.
 
 mod backend;
-mod bindings;
 mod controller;
 mod durable_wait;
 mod effect_group;
@@ -89,6 +90,7 @@ mod effect_host;
 mod ingress;
 mod process;
 mod process_attach;
+mod services;
 mod session_administration;
 mod turn;
 mod turn_handler;
@@ -96,32 +98,25 @@ mod turn_handler;
 pub use restate_sdk;
 
 pub use backend::{RestateBackend, RestateQueuedWork};
-pub use bindings::{
-    RestateBindingCheckError, RestateEndpointDiscoveryError, assert_services_bound,
-    bound_service_names,
-};
 pub use controller::{
     EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
 };
 pub use durable_wait::{
-    DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION, LashDurableWaitIndex,
-    LashDurableWaitIndexClient, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
-    LashDurableWaitWorkflowClient, LashDurableWaitWorkflowImpl, RestateDurableWaitAddress,
+    DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION, RestateDurableWaitAddress,
     RestateDurableWaitAwaitInput, RestateDurableWaitAwaitRequest,
     RestateDurableWaitAwakeableRequest, RestateDurableWaitCancelDecidedRequest,
     RestateDurableWaitClassification, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
     RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
     RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateDurableWaitScope,
-    RestateDurableWaitSettleRequest, ServeLashDurableWaitIndex, ServeLashDurableWaitWorkflow,
+    RestateDurableWaitSettleRequest,
 };
 pub use effect_group::{
     EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EffectGroupAdmissionRequest, EffectGroupAdmissionResponse,
     EffectGroupAdoptRequest, EffectGroupCleanup, EffectGroupCleanupFacts,
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
-    EffectGroupDispatch, EffectGroupDispatchRequest, EffectGroupDispatchState,
-    EffectGroupFinishRetirementResponse, EffectGroupIndex, EffectGroupOpenRequest,
-    EffectGroupOpenResponse, EffectGroupPayload, EffectGroupPayloadGetResponse,
+    EffectGroupDispatchRequest, EffectGroupDispatchState, EffectGroupFinishRetirementResponse,
+    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadGetResponse,
     EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse, EffectGroupPhase,
     EffectGroupProbeAdoptResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
     EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
@@ -130,7 +125,6 @@ pub use effect_group::{
     EffectGroupRegisterRefusalResponse, EffectGroupRegisterRequest, EffectGroupRegisterResponse,
     EffectGroupRetireResponse, EffectGroupRetirementCancelResponse, EffectGroupSettlementRecord,
     EffectGroupSettlementTerminal, EffectGroupShape, EffectGroupWaitResolution,
-    RestateEffectGroupRetryPolicy, RestateEffectGroupServices, RestateEffectGroupWaitServices,
 };
 pub use effect_host::RestateEffectHost;
 pub use ingress::{
@@ -139,17 +133,12 @@ pub use ingress::{
     RestateInvocationLifecycle, RestateInvocationStatus,
 };
 pub use process::{
-    LashProcessWorkflow, LashProcessWorkflowClient, LashProcessWorkflowImpl,
-    RESTATE_PROCESS_JOURNAL_VERSION, RestateCoreProcessRunner, RestateProcessAwaitRequest,
-    RestateProcessCancelRequest, RestateProcessCancelSignal, RestateProcessCompleteRequest,
-    RestateProcessDeployment, RestateProcessIngressRunner, RestateProcessRunner,
+    RESTATE_PROCESS_JOURNAL_VERSION, RestateProcessAwaitRequest, RestateProcessCancelRequest,
+    RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessDeployment,
+    RestateProcessIngressRunner, RestateProcessServing, RestateProcessWorkerSlot,
     RestateProcessWorkflowInput, RestateProcessWorkflowOutput, SegmentStarted,
-    ServeLashProcessWorkflow,
 };
-pub use process_attach::{
-    LashProcessAttach, LashProcessAttachClient, LashProcessAttachImpl, RestateProcessAttachRequest,
-    ServeLashProcessAttach,
-};
+pub use process_attach::RestateProcessAttachRequest;
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use turn::RestateTurnAttach;
 pub use turn_handler::{
@@ -160,6 +149,22 @@ pub use turn_handler::{
 // generated handlers can name them; they are not a host contract.
 pub use controller::RestateControllerContext;
 pub use durable_wait::RestateTurnCancelRaceOutcome;
+
+// Lash's own Restate services. A deployment binds them only through
+// `RestateBackend::endpoint_builder`, so they are not a host contract; the
+// crate's tests drive them one at a time.
+#[cfg(test)]
+pub(crate) use durable_wait::{
+    LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
+    LashDurableWaitWorkflowImpl,
+};
+#[cfg(test)]
+pub(crate) use effect_group::EffectGroupDispatch;
+#[cfg(test)]
+pub(crate) use process::{
+    LashProcessWorkflow, LashProcessWorkflowImpl, RestateCoreProcessRunner, RestateProcessRunner,
+};
+pub(crate) use services::LashService;
 
 #[cfg(test)]
 mod tests;

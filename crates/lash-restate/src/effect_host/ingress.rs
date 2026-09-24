@@ -19,7 +19,7 @@ pub(super) async fn resolve_restate_await_event_via_ingress(
     let outcome = ingress
         .ingress
         .call_object_json::<_, RestateDurableWaitResolveResponse>(
-            "LashDurableWaitIndex",
+            crate::LashService::DurableWaitIndex.name(),
             &index_key,
             "resolve",
             &request,
@@ -43,7 +43,11 @@ pub(super) async fn update_restate_session_waits_via_ingress(
     let handler = if revoke { "revoke_all" } else { "cancel_all" };
     ingress
         .ingress
-        .call_object_empty("LashDurableWaitIndex", session_id, handler)
+        .call_object_empty(
+            crate::LashService::DurableWaitIndex.name(),
+            session_id,
+            handler,
+        )
         .await
         .map_err(|err| {
             RuntimeError::new(
@@ -62,7 +66,12 @@ pub(super) async fn restate_index_is_revoked_via_ingress(
 ) -> Result<bool, RuntimeError> {
     ingress
         .ingress
-        .call_object_json::<_, bool>("LashDurableWaitIndex", index_key, "is_revoked", &())
+        .call_object_json::<_, bool>(
+            crate::LashService::DurableWaitIndex.name(),
+            index_key,
+            "is_revoked",
+            &(),
+        )
         .await
         .map_err(|err| {
             RuntimeError::new(
@@ -104,7 +113,11 @@ pub(super) async fn update_restate_scope_waits_via_ingress(
     let index_key = durable_wait_index_key_for_scope(scope);
     ingress
         .ingress
-        .call_object_empty("LashDurableWaitIndex", &index_key, handler)
+        .call_object_empty(
+            crate::LashService::DurableWaitIndex.name(),
+            &index_key,
+            handler,
+        )
         .await
         .map_err(|err| {
             RuntimeError::new(
@@ -127,7 +140,12 @@ pub(super) async fn retire_restate_scope_via_ingress(
     };
     let retired = ingress
         .ingress
-        .call_object_json::<_, bool>("LashDurableWaitIndex", &index_key, handler, &())
+        .call_object_json::<_, bool>(
+            crate::LashService::DurableWaitIndex.name(),
+            &index_key,
+            handler,
+            &(),
+        )
         .await
         .map_err(|error| {
             RuntimeError::new(
@@ -160,14 +178,14 @@ pub(super) async fn await_restate_await_event_via_ingress(
         result = async {
             match effect_replay_key {
                 Some(replay_key) => ingress.ingress.call_workflow_json_idempotent::<_, Resolution>(
-                    "LashDurableWaitWorkflow",
+                    crate::LashService::DurableWaitWorkflow.name(),
                     &workflow_key,
                     "await_resolution",
                     &request,
                     replay_key,
                 ).await,
                 None => ingress.ingress.call_workflow_json::<_, Resolution>(
-                    "LashDurableWaitWorkflow",
+                    crate::LashService::DurableWaitWorkflow.name(),
                     &workflow_key,
                     "await_resolution",
                     &request,

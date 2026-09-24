@@ -36,9 +36,8 @@ use sha2::{Digest, Sha256};
 
 use crate::RestateIngressClient;
 use crate::durable_wait::{
-    LASH_REPLAY_KEY_HEADER, LashDurableWaitIndexClient, LashDurableWaitIndexImpl,
-    LashDurableWaitWorkflowClient, LashDurableWaitWorkflowImpl, RestateDurableWaitAddress,
-    RestateDurableWaitAwaitRequest, RestateDurableWaitGroupChildRequest,
+    LASH_REPLAY_KEY_HEADER, LashDurableWaitIndexClient, LashDurableWaitWorkflowClient,
+    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitGroupChildRequest,
     RestateDurableWaitResolveRequest, durable_wait_index_key_for_scope,
     durable_wait_index_object_key, restate_await_event_key,
 };
@@ -70,93 +69,6 @@ pub use wire::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupPhase,
     EffectGroupProbeResponse,
 };
-
-/// Constructor-owned deployment services for Restate effect groups.
-///
-/// The resolver, ingress cancellation observer, and an explicitly infinite
-/// `ctx.run` retry policy are mandatory. A deployment also binds the existing
-/// `LashDurableWaitWorkflow` and `LashDurableWaitIndex` services.
-#[derive(Clone)]
-pub struct RestateEffectGroupServices {
-    pub index: EffectGroupIndex,
-    pub payload: EffectGroupPayload,
-    pub dispatch: EffectGroupDispatch,
-    pub wait: RestateEffectGroupWaitServices,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct RestateEffectGroupWaitServices {
-    pub workflow: LashDurableWaitWorkflowImpl,
-    pub index: LashDurableWaitIndexImpl,
-}
-
-#[derive(Clone, Debug)]
-pub struct RestateEffectGroupRetryPolicy(RunRetryPolicy);
-
-impl RestateEffectGroupRetryPolicy {
-    /// The uncapped policy required by dispatcher preflight and child runs.
-    pub fn infinite() -> Self {
-        Self(RunRetryPolicy::new())
-    }
-}
-
-impl RestateEffectGroupServices {
-    /// `host` is the deployment's `RestateEffectHost`: the endpoint routes
-    /// children through the resolver registered on it — its `ToolChildHost`
-    /// when the runtime installs one, or the embedder's own registered
-    /// resolver — and binds each child handler's controller with the host's
-    /// authority. By construction there is one resolver and one authority:
-    /// await-event keys and the cancellation binding a tool child's recorded
-    /// request is validated against derive from the same id the deployment's
-    /// turn/process controllers use.
-    ///
-    /// A session-scope child checks its owning session's state generation in
-    /// `sessions` at invocation entry, before anything else (FIG-3619).
-    pub fn new(
-        host: &crate::RestateEffectHost,
-        ingress: RestateIngressClient,
-        infinite_retry_policy: RestateEffectGroupRetryPolicy,
-        sessions: Arc<dyn lash_core::SessionStoreFactory>,
-    ) -> Self {
-        Self {
-            index: EffectGroupIndex,
-            payload: EffectGroupPayload,
-            dispatch: EffectGroupDispatch::new(host, ingress, infinite_retry_policy.0, sessions),
-            wait: RestateEffectGroupWaitServices::default(),
-        }
-    }
-
-    /// Every service name this bundle's wiring addresses on the endpoint.
-    ///
-    /// The three effect-group services plus the durable-wait pair the
-    /// dispatcher resolves waits and cancellation gates through. Assert the
-    /// set at wiring time with [`crate::assert_services_bound`].
-    ///
-    /// Deliberately an associated function rather than an
-    /// `assert_endpoint_bound(&self)` like
-    /// [`RestateBackend`](crate::RestateBackend) has: binding an
-    /// endpoint moves this struct's four service fields into the builder, so
-    /// by the only point where an `Endpoint` exists to check there is no
-    /// `&self` left to call. Those deployments survive binding; this one does
-    /// not.
-    pub fn required_service_names() -> Vec<&'static str> {
-        vec![
-            "EffectGroupIndex",
-            "EffectGroupPayload",
-            "EffectGroupDispatch",
-            "LashDurableWaitWorkflow",
-            "LashDurableWaitIndex",
-        ]
-    }
-}
-
-impl std::fmt::Debug for RestateEffectGroupServices {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("RestateEffectGroupServices")
-            .finish_non_exhaustive()
-    }
-}
 
 mod shape;
 pub use shape::EffectGroupShape;
@@ -582,7 +494,7 @@ fn store_index(ctx: &ObjectContext<'_>, record: EffectGroupIndexRecord) {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct EffectGroupIndex;
+pub(crate) struct EffectGroupIndex;
 
 #[restate_sdk::object(name = "EffectGroupIndex")]
 impl EffectGroupIndex {
@@ -1601,7 +1513,7 @@ pub struct EffectGroupPayloadPutRequest {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct EffectGroupPayload;
+pub(crate) struct EffectGroupPayload;
 
 #[restate_sdk::object(name = "EffectGroupPayload")]
 impl EffectGroupPayload {
@@ -1655,8 +1567,9 @@ impl EffectGroupPayload {
 mod dispatch;
 #[cfg(test)]
 pub(crate) use dispatch::EffectGroupChildRequest;
+pub(crate) use dispatch::EffectGroupDispatch;
 pub(crate) use dispatch::EffectGroupDispatchClient;
-pub use dispatch::{EffectGroupDispatch, EffectGroupDispatchRequest};
+pub use dispatch::EffectGroupDispatchRequest;
 pub(crate) fn payload_key(group_key: &str, position: usize) -> String {
     let digest = Sha256::digest(group_key.as_bytes());
     format!("{:x}:{position}", digest)

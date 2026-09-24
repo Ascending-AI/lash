@@ -30,7 +30,7 @@ use super::endpoint_protocol::{
 };
 use crate::effect_group::{
     EffectGroupChildRequest, EffectGroupRecordSettlementRequest, EffectGroupSettlementTerminal,
-    EffectGroupShape, RestateEffectGroupRetryPolicy, RestateEffectGroupServices,
+    EffectGroupShape,
 };
 
 const SESSION: &str = "pre-cutover-session";
@@ -208,13 +208,14 @@ fn endpoint(sessions: Arc<dyn SessionStoreFactory>, executors: Arc<CountingExecu
     let host = crate::RestateEffectHost::new_for_test("http://127.0.0.1:9");
     host.register_group_executors(executors as Arc<dyn GroupExecutors>)
         .expect("register the counting resolver");
-    let services = RestateEffectGroupServices::new(
-        &host,
-        crate::RestateIngressClient::new("http://127.0.0.1:9".to_string()),
-        RestateEffectGroupRetryPolicy::infinite(),
-        sessions,
-    );
-    Endpoint::builder().bind(services.dispatch).build()
+    Endpoint::builder()
+        .bind(crate::EffectGroupDispatch::new(
+            &host,
+            crate::RestateIngressClient::new("http://127.0.0.1:9".to_string()),
+            restate_sdk::context::RunRetryPolicy::new(),
+            sessions,
+        ))
+        .build()
 }
 
 /// The scenario from FIG-3619: the pre-cutover turn's tool child lands on

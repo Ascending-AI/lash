@@ -14,20 +14,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core::testing::TestClock;
-use lash_core::{AdmittedScope, Backend as _, ScopedEffectController, StoreSet};
+use lash_core::{AdmittedScope, ScopedEffectController, StoreSet};
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
-    LashDurableWaitIndex as _, LashDurableWaitWorkflow as _, LashProcessAttach as _,
-    LashProcessAttachImpl, LashProcessWorkflow as _, LashProcessWorkflowImpl, RestateAuthorityId,
-    RestateBackend, RestateConnection, RestateCoreProcessRunner, RestateEffectGroupRetryPolicy,
-    RestateEffectGroupServices, RestateIngressClient, RestateProcessCancelRequest,
-    RestateProcessRunner, RestateQueuedWork, SegmentStarted,
+    RestateAuthorityId, RestateBackend, RestateConnection, RestateIngressClient,
+    RestateProcessWorkerSlot, RestateQueuedWork,
 };
 use restate_sdk::context::WorkflowContext;
-use restate_sdk::endpoint::Endpoint;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
-use tokio_util::sync::CancellationToken;
 
 use crate::server::{RestateTestServer, ServerConfig, StartError};
 
@@ -54,8 +49,6 @@ pub enum BackendError {
     Stores(String),
     #[error("the Restate authority id is invalid: {0}")]
     Authority(String),
-    #[error("the endpoint does not bind every lash service: {0}")]
-    Binding(String),
 }
 
 /// A lash backend whose effect engine is lash-restate on the server double.
@@ -70,7 +63,7 @@ pub struct RestateTestBackend {
     stores: Arc<lash_sqlite_store::SqliteStoreSet>,
     clock: Arc<TestClock>,
     connection: RestateConnection,
-    processes: Arc<DeploymentProcessRunner>,
+    processes: RestateProcessWorkerSlot,
     jobs: Arc<ParkedJobs>,
 }
 
@@ -118,20 +111,17 @@ impl RestateTestBackend {
             Arc::clone(&stores) as Arc<dyn StoreSet>,
             RestateQueuedWork::Disabled,
         ));
-        let processes = Arc::new(DeploymentProcessRunner::default());
+        // The endpoint exists before any core over this backend does, so it
+        // serves processes on whatever worker the fixture installs later.
+        let processes = RestateProcessWorkerSlot::new();
         let jobs = Arc::new(ParkedJobs::default());
-        let endpoint = deployment_endpoint(
-            &restate,
-            &stores,
-            &connection,
-            &authority,
-            &processes,
-            &jobs,
-        );
-        restate
-            .assert_endpoint_bound(&endpoint)
-            .await
-            .map_err(|error| BackendError::Binding(error.to_string()))?;
+        let endpoint = restate
+            .endpoint_builder(processes.clone())
+            .bind(HandlerHost {
+                jobs: Arc::clone(&jobs),
+                authority,
+            })
+            .build();
         server.register(endpoint).await?;
         Ok(Self {
             server,
@@ -174,9 +164,9 @@ impl RestateTestBackend {
         RestateIngressClient::new(self.connection.clone())
     }
 
-    /// Serve process segments with `worker`, as a deployment's
-    /// `RestateCoreProcessRunner` does. Until a worker is installed, a
-    /// process segment fails terminally naming the missing worker.
+    /// Serve process segments with `worker`, the process worker of a core
+    /// built over this backend. Until a worker is installed, a process
+    /// segment fails naming the empty worker slot.
     pub fn install_process_worker(&self, worker: DurableProcessWorker) {
         self.processes.install(worker);
     }
@@ -325,111 +315,6 @@ impl lash_core::Backend for RestateTestBackend {
 
     fn queued_work(&self) -> lash_core::BackendQueuedWork {
         self.restate.queued_work()
-    }
-}
-
-/// The endpoint a lash deployment binds, plus the handler host that runs
-/// test jobs.
-fn deployment_endpoint(
-    restate: &Arc<RestateBackend>,
-    stores: &Arc<lash_sqlite_store::SqliteStoreSet>,
-    connection: &RestateConnection,
-    authority: &RestateAuthorityId,
-    processes: &Arc<DeploymentProcessRunner>,
-    jobs: &Arc<ParkedJobs>,
-) -> Endpoint {
-    let groups = RestateEffectGroupServices::new(
-        restate.effect_host().as_ref(),
-        RestateIngressClient::new(connection.clone()),
-        RestateEffectGroupRetryPolicy::infinite(),
-        stores.session_store_factory(),
-    );
-    let process_workflow = LashProcessWorkflowImpl::new(
-        Arc::clone(processes),
-        restate.process_registry(),
-        stores.process_continuations(),
-        RestateIngressClient::new(connection.clone()),
-        authority.clone(),
-    );
-    Endpoint::builder()
-        .bind(process_workflow.serve())
-        .bind(LashProcessAttachImpl.serve())
-        .bind(groups.index)
-        .bind(groups.payload)
-        .bind(groups.dispatch)
-        .bind(groups.wait.workflow.serve())
-        .bind(groups.wait.index.serve())
-        .bind(HandlerHost {
-            jobs: Arc::clone(jobs),
-            authority: authority.clone(),
-        })
-        .build()
-}
-
-/// The process runner the endpoint's `LashProcessWorkflow` serves segments
-/// with: the runtime's worker, installed once the runtime exists.
-#[derive(Default)]
-struct DeploymentProcessRunner {
-    installed: Mutex<Option<RestateCoreProcessRunner>>,
-}
-
-impl DeploymentProcessRunner {
-    fn install(&self, worker: DurableProcessWorker) {
-        *self
-            .installed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(RestateCoreProcessRunner::new(worker));
-    }
-
-    fn installed(&self) -> Result<RestateCoreProcessRunner, lash_core::PluginError> {
-        self.installed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .ok_or_else(|| {
-                lash_core::PluginError::Invoke(
-                    "no process worker is installed on the lash-restate-test deployment; call \
-                     RestateTestBackend::install_process_worker"
-                        .to_owned(),
-                )
-            })
-    }
-}
-
-#[async_trait::async_trait]
-impl RestateProcessRunner for DeploymentProcessRunner {
-    fn replay_key_grammar(&self, registration: &lash_core::ProcessRegistration) -> Option<u32> {
-        self.installed()
-            .ok()
-            .and_then(|runner| runner.replay_key_grammar(registration))
-    }
-
-    async fn run_process_segment(
-        &self,
-        started: &SegmentStarted,
-        registration: lash_core::ProcessRegistration,
-        execution_context: lash_core::ProcessExecutionContext,
-        scoped_effect_controller: ScopedEffectController<'_>,
-        handover: Option<lash_core::SegmentHandover>,
-        cancellation: CancellationToken,
-    ) -> Result<lash_core::ProcessRunOutcome, lash_core::PluginError> {
-        let runner = self.installed()?;
-        Box::pin(runner.run_process_segment(
-            started,
-            registration,
-            execution_context,
-            scoped_effect_controller,
-            handover,
-            cancellation,
-        ))
-        .await
-    }
-
-    async fn request_process_cancel(
-        &self,
-        request: RestateProcessCancelRequest,
-    ) -> Result<(), lash_core::PluginError> {
-        self.installed()?.request_process_cancel(request).await
     }
 }
 

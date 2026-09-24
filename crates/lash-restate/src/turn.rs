@@ -52,7 +52,7 @@ impl TurnAttach for RestateTurnAttach {
         let resolution = self
             .ingress
             .call_workflow_json::<_, Resolution>(
-                "LashDurableWaitWorkflow",
+                crate::LashService::DurableWaitWorkflow.name(),
                 &workflow_key,
                 "await_resolution",
                 &RestateDurableWaitAwaitRequest {
@@ -75,7 +75,7 @@ impl TurnAttach for RestateTurnAttach {
                 // deployment that is fine.
                 let message = if err.is_service_unregistered() {
                     crate::ingress::unresolvable_call_target_message(
-                        "LashDurableWaitWorkflow",
+                        crate::LashService::DurableWaitWorkflow.name(),
                         "await_resolution",
                         &err,
                     )

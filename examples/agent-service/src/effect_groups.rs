@@ -14,8 +14,7 @@ use lash::runtime::{
 };
 use lash_restate::{
     EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupSettlementTerminal,
-    RestateEffectGroupRetryPolicy, RestateEffectGroupServices, RestateIngressClient,
-    RestateRuntimeEffectController,
+    RestateIngressClient, RestateRuntimeEffectController,
 };
 use serde::{Deserialize, Serialize};
 
@@ -128,19 +127,6 @@ impl AgentServiceEffectGroupWorkflow for AgentServiceEffectGroupWorkflowImpl {
             first_sequence: first.sequence,
         }))
     }
-}
-
-pub(crate) fn effect_group_services(
-    host: &lash_restate::RestateEffectHost,
-    ingress_url: impl Into<String>,
-    sessions: std::sync::Arc<dyn lash::persistence::SessionStoreFactory>,
-) -> RestateEffectGroupServices {
-    RestateEffectGroupServices::new(
-        host,
-        RestateIngressClient::new(ingress_url.into()),
-        RestateEffectGroupRetryPolicy::infinite(),
-        sessions,
-    )
 }
 
 pub(crate) async fn run_effect_group(

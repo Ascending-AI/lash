@@ -665,7 +665,7 @@ pub trait LashDurableWaitWorkflow {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct LashDurableWaitWorkflowImpl;
+pub(crate) struct LashDurableWaitWorkflowImpl;
 
 impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
     async fn await_resolution(
@@ -866,7 +866,7 @@ pub trait LashDurableWaitIndex {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct LashDurableWaitIndexImpl;
+pub(crate) struct LashDurableWaitIndexImpl;
 pub(crate) fn durable_wait_index_state_key(address: &RestateDurableWaitAddress) -> String {
     let classification = match address.classification {
         RestateDurableWaitClassification::DurableWait => "durable",

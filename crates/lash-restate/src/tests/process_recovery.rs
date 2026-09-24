@@ -1356,7 +1356,7 @@ pub(super) async fn process_deployment_driver_and_workflow_share_registry() {
         lash_core::testing::runtime_lease_owner(),
     ))
     .expect("valid test native substrate config");
-    let service = deployment.workflow(worker).serve();
+    let service = deployment.workflow(worker.into()).serve();
     let discovery = discover_service(&service);
     let endpoint = Endpoint::builder().bind(service).build();
 

@@ -429,7 +429,7 @@ mod restate_tests {
     use crate::effect_groups::{
         AgentServiceEffectGroupExecutors, AgentServiceEffectGroupWorkflow,
         AgentServiceEffectGroupWorkflowImpl, EffectGroupRunReport, EffectGroupRunTerminal,
-        effect_group_services, get_effect_group, run_effect_group,
+        get_effect_group, run_effect_group,
     };
     use crate::routes::settings;
     use crate::state::AgentServiceDurability;
@@ -442,10 +442,7 @@ mod restate_tests {
         AwaitEventWaitIdentity, CancellationToken, LashCore, PluginBinding, Resolution,
         ResolveOutcome,
     };
-    use lash_restate::{
-        LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessAttach, LashProcessAttachImpl,
-        LashProcessWorkflow, RestateEffectGroupServices, RestateEffectHost,
-    };
+    use lash_restate::RestateEffectHost;
 
     const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
@@ -537,36 +534,15 @@ mod restate_tests {
         } else {
             local_addr
         };
-        let effect_groups = effect_group_services(
-            harness.backend.effect_host().as_ref(),
-            ingress_url.clone(),
-            lash::Backend::session_store_factory(harness.backend.as_ref()),
-        );
-        let endpoint = restate_sdk::endpoint::Endpoint::builder()
+        let endpoint = harness
+            .backend
+            .endpoint_builder(harness.process_worker.clone())
             .bind(lash_restate::turn_service(
                 AgentServiceTurnWorkflowImpl::new(state.clone()).serve(),
                 "run",
             ))
             .bind(AgentServiceEffectGroupWorkflowImpl.serve())
-            .bind(
-                harness
-                    .backend
-                    .process_deployment()
-                    .workflow(harness.process_worker.clone())
-                    .serve(),
-            )
-            .bind(effect_groups.index)
-            .bind(effect_groups.payload)
-            .bind(effect_groups.dispatch)
-            .bind(effect_groups.wait.workflow.serve())
-            .bind(effect_groups.wait.index.serve())
-            .bind(LashProcessAttachImpl.serve())
             .build();
-        let mut required_services = lash_restate::RestateBackend::required_service_names();
-        required_services.extend(RestateEffectGroupServices::required_service_names());
-        lash_restate::assert_services_bound(&endpoint, &required_services)
-            .await
-            .expect("agent-service Restate endpoint must bind the lash service surface");
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
             restate_sdk::http_server::HttpServer::new(endpoint)

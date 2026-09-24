@@ -30,7 +30,7 @@ enum EffectGroupChildRunOutcome {
 }
 
 #[derive(Clone)]
-pub struct EffectGroupDispatch {
+pub(crate) struct EffectGroupDispatch {
     pub(super) executors: Arc<dyn GroupExecutors>,
     pub(super) ingress: RestateIngressClient,
     pub(super) authority_id: crate::ingress::RestateAuthorityId,
@@ -41,7 +41,7 @@ pub struct EffectGroupDispatch {
 }
 
 impl EffectGroupDispatch {
-    pub(super) fn new(
+    pub(crate) fn new(
         host: &crate::RestateEffectHost,
         ingress: RestateIngressClient,
         infinite_retry_policy: RunRetryPolicy,
@@ -427,7 +427,7 @@ impl EffectGroupDispatch {
             deadline: None,
         };
         let cancel_watch = self.ingress.call_workflow_json::<_, Resolution>(
-            "LashDurableWaitWorkflow",
+            crate::LashService::DurableWaitWorkflow.name(),
             &cancel_address.workflow_key,
             "await_resolution",
             &cancel_request,

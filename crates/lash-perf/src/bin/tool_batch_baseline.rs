@@ -16,9 +16,10 @@
 //!   `lash_` names. The build carries lash-postgres-store's `testing` feature,
 //!   so statement counts include its testing-only probes; row counts are
 //!   unaffected.
-//! * `restate` serves an endpoint binding the durable-wait pair plus a probe
-//!   workflow whose handler runs the same measured turn through
-//!   `RestateRuntimeEffectController`, registers it on the deployment at
+//! * `restate` serves a Restate backend's endpoint — every lash service, over
+//!   a SQLite memory store set — plus a probe workflow whose handler runs the
+//!   same measured turn through `RestateRuntimeEffectController` on that
+//!   backend's effect host, registers it on the deployment at
 //!   `--restate-admin-url`, and counts the invocation's `sys_journal` entries.
 //!   Before FIG-3397 Restate ran a batch serially (the since-deleted
 //!   `supports_concurrent_effects()` was hardcoded false), so its pre-cutover
@@ -447,7 +448,9 @@ trait ToolBatchProbe {
 }
 
 struct ToolBatchProbeImpl {
-    ingress_url: String,
+    /// The backend's effect host: the batch's effect group routes its
+    /// children through the resolver the measured runtime installs here.
+    host: Arc<lash_restate::RestateEffectHost>,
     authority: lash_restate::RestateAuthorityId,
     producers: Vec<lash_conformance::ToolBatchProducer>,
 }
@@ -467,10 +470,7 @@ impl ToolBatchProbe for ToolBatchProbeImpl {
                 lash_conformance::tool_batch_turn_id(&session_id),
             ))
             .map_err(TerminalError::from_error)?;
-        let host = Arc::new(lash_restate::RestateEffectHost::new(
-            self.ingress_url.clone(),
-            self.authority.clone(),
-        )) as Arc<dyn lash_core::EffectHost>;
+        let host = Arc::clone(&self.host) as Arc<dyn lash_core::EffectHost>;
         let Some(producer) = self
             .producers
             .iter()
@@ -495,6 +495,56 @@ impl ToolBatchProbe for ToolBatchProbeImpl {
         .map_err(|_| TerminalError::new("the tool-batch measurement panicked"))?;
         Ok(Json(ProbeResponse::from(measurement)))
     }
+}
+
+/// The Restate backend the probe endpoint serves, over a SQLite memory store
+/// set, and the process worker of a core built over it: an endpoint serves
+/// every lash service, processes included, so it needs one.
+async fn restate_deployment(
+    ingress_url: &str,
+    authority: &lash_restate::RestateAuthorityId,
+) -> anyhow::Result<(
+    Arc<lash_restate::RestateBackend>,
+    lash::durability::DurableProcessWorker,
+)> {
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .map_err(|error| anyhow::anyhow!("open the probe's store set: {error}"))?;
+    let backend = Arc::new(lash_restate::RestateBackend::new(
+        ingress_url,
+        authority.clone(),
+        Arc::new(stores) as Arc<dyn lash_core::StoreSet>,
+        lash_restate::RestateQueuedWork::Disabled,
+    ));
+    let core = lash::LashCore::standard_builder(
+        Arc::clone(&backend) as Arc<dyn lash_core::Backend>,
+        lash::TurnBudget::Unbounded,
+    )
+    .provider(
+        lash_core::testing::TestProvider::builder()
+            .kind("tool-batch-probe-deployment")
+            .complete(|_| async { Ok(lash_core::LlmResponse::default()) })
+            .build()
+            .into_handle(),
+    )
+    .model(lash_core::ModelSpec::new(
+        "tool-batch-probe-deployment",
+        std::num::NonZeroUsize::new(1024)
+            .ok_or_else(|| anyhow::anyhow!("the probe's context window is zero"))?,
+    ))
+    .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        "lash-perf-tool-batch",
+        "lash-perf-tool-batch-boot",
+    ))
+    .map_err(|error| anyhow::anyhow!("build the probe deployment's core: {error}"))?;
+    let worker = lash::durability::DurableProcessWorker::new(
+        core.durable_process_worker_config()
+            .map_err(|error| anyhow::anyhow!("configure the probe's process worker: {error}"))?,
+    )
+    .map_err(|error| anyhow::anyhow!("build the probe's process worker: {error}"))?;
+    Ok((backend, worker))
 }
 
 /// The invocation id a workflow key produced, for the journal count.
@@ -601,33 +651,19 @@ async fn run_restate(
     let authority = lash_restate::RestateAuthorityId::new(RESTATE_AUTHORITY)
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
 
-    use lash_restate::{LashDurableWaitIndex, LashDurableWaitWorkflow};
-    use restate_sdk::endpoint::Endpoint;
     use restate_sdk::http_server::HttpServer;
-    let endpoint = Endpoint::builder()
-        .bind(lash_restate::LashDurableWaitWorkflowImpl.serve())
-        .bind(lash_restate::LashDurableWaitIndexImpl.serve())
+    let (backend, process_worker) = restate_deployment(&ingress_url, &authority).await?;
+    let endpoint = backend
+        .endpoint_builder(process_worker)
         .bind(
             ToolBatchProbeImpl {
-                ingress_url: ingress_url.clone(),
+                host: backend.effect_host(),
                 authority: authority.clone(),
                 producers: producers.to_vec(),
             }
             .serve(),
         )
         .build();
-    // The probe turns only on the durable-wait pair; a dropped bind would
-    // surface mid-rep as a 404, so assert the whole surface up front.
-    lash_restate::assert_services_bound(
-        &endpoint,
-        &[
-            "LashDurableWaitWorkflow",
-            "LashDurableWaitIndex",
-            PROBE_SERVICE,
-        ],
-    )
-    .await
-    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let listener = tokio::net::TcpListener::bind(bind).await?;
     let server = tokio::spawn(HttpServer::new(endpoint).serve(listener));
     wait_for_endpoint(bind).await?;

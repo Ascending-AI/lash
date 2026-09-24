@@ -33,10 +33,7 @@ use crate::effect_group::{
     EffectGroupChildRequest, admit_wait_request, arm_admission_witness, decode_wait_resolution,
     payload_key, rank_wait_request, ready_wait_request,
 };
-use crate::process::{
-    LashProcessWorkflow, LashProcessWorkflowImpl, RestateProcessCancelRequest, RestateProcessRunner,
-};
-use crate::process_attach::{LashProcessAttach, LashProcessAttachImpl};
+use crate::process::{LashProcessWorkflowImpl, RestateProcessCancelRequest, RestateProcessRunner};
 use crate::{
     EffectGroupAdoptRequest, EffectGroupCleanupFacts, EffectGroupDispatchRequest,
     EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadPutRequest,
@@ -44,9 +41,8 @@ use crate::{
     EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
     EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
     EffectGroupRecordSettlementResponse, EffectGroupRetireResponse, EffectGroupSettlementTerminal,
-    EffectGroupShape, EffectGroupWaitResolution, LashDurableWaitIndex, LashDurableWaitWorkflow,
-    RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitRegistration,
-    RestateEffectGroupRetryPolicy, RestateEffectGroupServices, RestateEffectHost,
+    EffectGroupShape, EffectGroupWaitResolution, RestateDurableWaitAddress,
+    RestateDurableWaitAwaitRequest, RestateDurableWaitRegistration, RestateEffectHost,
     RestateIngressClient,
 };
 use lash_http_transport::HttpRequest;
@@ -398,7 +394,7 @@ impl LiveConformanceHarness {
     pub(super) async fn start_on(target: HarnessServer) -> Self {
         let executors = Arc::new(ConformanceExecutors::default());
         let registered = Arc::clone(&executors);
-        Self::start_with(target, executors, false, move |host| {
+        Self::start_with(target, executors, move |host| {
             host.register_group_executors(registered)
                 .expect("register the conformance resolver on the endpoint host")
         })
@@ -413,24 +409,18 @@ impl LiveConformanceHarness {
     /// The tool-child laws' endpoint: nothing is registered, so the runtime's
     /// `install_tool_child_host` installs its `ToolChildHost` on this host and
     /// the endpoint routes `ToolInvocation` children through it — the one
-    /// resolver a deployment has. The endpoint also binds the process surface:
-    /// an orchestrating child's durable start submits `LashProcessWorkflow/run`
-    /// through the handler's context, and a deployment that does not serve it
-    /// makes that submission a permanently failing command.
+    /// resolver a deployment has. An orchestrating child's durable start
+    /// submits `LashProcessWorkflow/run` through the handler's context, which
+    /// the endpoint serves with the law's installed process worker.
     pub(super) async fn start_for_tool_children_on(target: HarnessServer) -> Self {
-        Self::start_with(
-            target,
-            Arc::new(ConformanceExecutors::default()),
-            true,
-            |_| {},
-        )
-        .await
+        Self::start_with(target, Arc::new(ConformanceExecutors::default()), |_| {}).await
     }
 
+    /// The endpoint binds every lash service through the one binder a
+    /// deployment uses, beside the suite's probes.
     async fn start_with(
         target: HarnessServer,
         executors: Arc<ConformanceExecutors>,
-        bind_process_surface: bool,
         register: impl FnOnce(&RestateEffectHost),
     ) -> Self {
         let (connection, admin, live) = match &target {
@@ -489,52 +479,30 @@ impl LiveConformanceHarness {
         let ingress = RestateIngressClient::new(connection.clone());
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
         register(&host);
-        let services = RestateEffectGroupServices::new(
-            &host,
-            ingress,
-            RestateEffectGroupRetryPolicy::infinite(),
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-        );
         let process_registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
         let process_runner = Arc::new(LawProcessRunner::default());
-        let mut endpoint = Endpoint::builder()
-            .bind(ScopeLivenessProbeImpl.serve())
-            .bind(GroupOpenBudgetProbeImpl.serve())
-            // A turn handler: a parked attempt fails retryably and the
-            // invocation pauses after its last attempt (FIG-3697).
-            .bind(crate::turn_service(
-                super::live_turn_probe::ConformanceTurnProbeImpl.serve(),
-                "run",
-            ))
-            .bind(services.index)
-            .bind(services.payload)
-            .bind(services.dispatch)
-            .bind(services.wait.workflow.serve())
-            .bind(services.wait.index.serve());
-        if bind_process_surface {
-            endpoint = endpoint
-                .bind(
-                    LashProcessWorkflowImpl::new_for_test(
-                        Arc::clone(&process_runner),
-                        Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
-                        Arc::clone(&process_registry)
-                            as Arc<dyn lash_core::ProcessContinuationStore>,
-                    )
-                    .serve(),
-                )
-                .bind(LashProcessAttachImpl.serve());
-        }
-        let endpoint = endpoint.build();
-        // The suite binds the same five services the deployment does, and
-        // until now asserted none of them. A dropped bind would have surfaced
-        // as a 404 partway through a group — after the index had recorded it,
-        // which is the state ADR 0065's whole-open refusal exists to prevent.
-        crate::assert_services_bound(
-            &endpoint,
-            RestateEffectGroupServices::required_service_names().as_slice(),
+        let endpoint = crate::services::bind_lash_services(
+            Endpoint::builder(),
+            crate::services::LashServiceParts {
+                effect_host: &host,
+                ingress,
+                sessions: Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+                process_workflow: LashProcessWorkflowImpl::new_for_test(
+                    Arc::clone(&process_runner),
+                    Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
+                    Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessContinuationStore>,
+                ),
+            },
         )
-        .await
-        .expect("effect-group conformance endpoint must bind the whole group surface");
+        .bind(ScopeLivenessProbeImpl.serve())
+        .bind(GroupOpenBudgetProbeImpl.serve())
+        // A turn handler: a parked attempt fails retryably and the
+        // invocation pauses after its last attempt (FIG-3697).
+        .bind(crate::turn_service(
+            super::live_turn_probe::ConformanceTurnProbeImpl.serve(),
+            "run",
+        ))
+        .build();
         let (shutdown_tx, server) = match (live, &admin) {
             (Some((admin_url, bind_addr, endpoint_url)), _) => {
                 let listener = tokio::net::TcpListener::bind(bind_addr)
