@@ -990,7 +990,7 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
         };
         let row = sqlx::query(effect_sql().replay.select_settlement_by_rank.sql())
             .bind(group_key)
-            .bind(offset as i64)
+            .bind(clamp_sequence_bound(offset))
             .fetch_optional(&self.pool)
             .await
             .map_err(effect_store_error)?;

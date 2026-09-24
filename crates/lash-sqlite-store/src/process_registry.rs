@@ -743,7 +743,11 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                     Self::require_process_conn(conn, &process_id)?;
                     conn.query_row(
                         process_sql().event.count_by_type_through_sequence.sql(),
-                        params![process_id.as_str(), event_type, up_to_sequence as i64],
+                        params![
+                            process_id.as_str(),
+                            event_type,
+                            crate::clamp_sequence_bound(up_to_sequence)
+                        ],
                         |row| row.get::<_, i64>(0),
                     )
                     .map(|count| count as u64)
@@ -775,7 +779,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                             process_ref.process_id.as_str(),
                             process_ref.incarnation.registration_sequence() as i64,
                             event_type,
-                            up_to_sequence as i64,
+                            crate::clamp_sequence_bound(up_to_sequence),
                         ],
                         |row| row.get::<_, i64>(0),
                     )

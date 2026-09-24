@@ -1657,6 +1657,21 @@ pub async fn awaiting_past_the_last_child_is_refused<F: Fn() -> Host>(make: &F, 
     next(&scoped, &mut handle).await.expect("rank 1 is served");
     assert!(handle.is_exhausted());
 
+    // A rank read past the last child is unsettled for every rank a caller can
+    // name, including ranks whose offset leaves the SQL backends' signed range
+    // (FIG-3601): a wrapped offset must not serve rank 1 again.
+    for rank in [2, i64::MAX as u64 + 1, u64::MAX] {
+        assert!(
+            scoped
+                .controller()
+                .read_group_settlement(&key, rank)
+                .await
+                .expect("a rank read past the last child is answered")
+                .is_none(),
+            "rank {rank} of a one-child group holds no settlement"
+        );
+    }
+
     let error = next(&scoped, &mut handle)
         .await
         .expect_err("awaiting past the last child must be refused");
