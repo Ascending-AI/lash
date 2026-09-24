@@ -468,6 +468,8 @@ fn closure(heap: &mut Heap) -> Value {
     heap.allocate(HeapObject::Closure {
         function: 0,
         captures: Vec::new(),
+        name: Some(Value::String("f".into())),
+        length: Some(Value::Number(0.0)),
     })
     .expect("allocate a closure")
 }

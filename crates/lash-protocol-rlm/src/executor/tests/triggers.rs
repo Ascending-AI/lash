@@ -1676,6 +1676,12 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// FIG-3620 moved `LASHLANG_SEMANTIC_HASH_VERSION` to `v18` for the new
 /// `__typescript_global_get` builtin: only the module, host-requirement and
 /// component hashes moved; the lifted name and the canonical IR did not.
+///
+/// FIG-3655 re-pinned them once more: `FunctionExpr` gained `js_name`, so the
+/// canonical artifact bytes moved even though the JSON view of the IR is
+/// unchanged (`js_name` skips serialization when absent). Only the module and
+/// component hashes and the derived registration identity moved; the lifted
+/// name, the compiled program and the registration payload did not.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"
@@ -1782,8 +1788,15 @@ fn trigger_inputs_arrow_reproduces_the_retired_record_form() {
 #[test]
 #[ignore = "re-pins the trigger-inputs capture; run by name after a deliberate identity move"]
 fn repin_trigger_inputs_retired_record_form() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/executor/tests/fixtures/trigger_inputs_retired_record_form.json");
+    let path = std::env::var("BUILD_WORKSPACE_DIRECTORY")
+        .map(|root| {
+            std::path::PathBuf::from(root)
+                .join("crates/lash-protocol-rlm/src/executor/tests/fixtures")
+        })
+        .unwrap_or_else(|_| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/executor/tests/fixtures")
+        })
+        .join("trigger_inputs_retired_record_form.json");
     let mut fixture: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).expect("the capture is readable"))
             .expect("the captured fixture is valid JSON");

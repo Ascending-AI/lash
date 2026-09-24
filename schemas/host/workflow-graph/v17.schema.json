@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-graph/v16",
+  "$id": "https://lash.dev/schemas/workflow-graph/v17",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -1051,6 +1051,13 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "js_name": {
+          "description": "The ECMA-262 `name` own property the closure value carries: the function's own binding name, or the name a `NamedEvaluation` / `SetFunctionName` context assigned it. `None` is the anonymous `\"\"` ECMA reports for a function no naming context reached.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "name": {
           "type": [
@@ -2812,7 +2819,7 @@
     },
     "schema_version": {
       "enum": [
-        16
+        17
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -2832,6 +2839,6 @@
   ],
   "title": "WorkflowGraph",
   "type": "object",
-  "x-lash-schema-version": 16,
+  "x-lash-schema-version": 17,
   "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
 }

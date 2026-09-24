@@ -328,7 +328,6 @@ impl Lowerer {
         };
         LashExpr::Function(Box::new(FunctionExpr {
             name: None,
-            // `String.name`/`Number.name`/`Boolean.name` answer as node's do.
             js_name: Some(name.into()),
             params: vec![value.into()],
             captures: Vec::new(),
@@ -557,8 +556,7 @@ impl Lowerer {
             return Ok(LashExpr::Record(
                 fields
                     .into_iter()
-                    // NamedEvaluation: `{ p: () => {} }` and `{ m() {} }` name
-                    // the anonymous function after the key.
+                    // NamedEvaluation: `{ p: () => {} }` and `{ m() {} }` name the value.
                     .map(|(key, value)| {
                         Ok((key.into(), self.lower_named_expr(value, Some(key))?))
                     })
@@ -570,8 +568,7 @@ impl Lowerer {
         for property in properties {
             match property {
                 ObjectProperty::KeyValue(key, value) => {
-                    // A statically known key names the anonymous function
-                    // value; a computed key's name is run-time-only here.
+                    // A statically known key names the function; a computed key cannot.
                     let inferred = static_key(key);
                     let key = self.lower_property_key(key)?;
                     expressions.push(LashExpr::Assign {
@@ -953,8 +950,7 @@ impl Lowerer {
                         js_unary(JavaScriptUnaryOp::Not, Self::nullish(old.clone()))
                     }
                 };
-                // `f ??= () => {}` (and `||=`/`&&=`) is also an ECMA
-                // NamedEvaluation position for an identifier target.
+                // `f ??= () => {}` (and `||=`/`&&=`) is also a NamedEvaluation position.
                 let rhs = self.lower_named_expr(value, assigned_name)?;
                 let write = LashExpr::Block(vec![
                     Self::temp_assignment(&result, rhs),
