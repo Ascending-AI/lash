@@ -107,6 +107,13 @@ impl SessionStoreFactory for CountingSessionStoreFactory {
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
+        self.inner.count_unsettled_turns().await
+    }
 }
 
 fn counting_core(factory: Arc<CountingSessionStoreFactory>) -> Result<LashCore> {
@@ -913,6 +920,13 @@ impl SessionStoreFactory for NoByIdLookupFactory {
         session_id: &SessionId,
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
+    }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
+        self.inner.count_unsettled_turns().await
     }
 }
 

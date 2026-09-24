@@ -474,16 +474,16 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
     /// deployment with a parked turn — or one whose claims a crashed driver
     /// still holds — never reports drained.
     ///
-    /// Factories that cannot answer refuse rather than report zero: an
+    /// Required, with no default: every factory states its answer, so a
+    /// factory that silently lacks one fails to compile rather than failing
+    /// the first drain at runtime. A decorator forwards to the catalog it
+    /// wraps. A factory that keeps no countable catalog returns
+    /// `StoreError::UnsupportedStoreOperation` rather than report zero: an
     /// inferred zero would let a host retire a deployment with turns still in
     /// flight.
     async fn count_unsettled_turns(
         &self,
-    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::count_unsettled_turns",
-        })
-    }
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError>;
 
     /// Open an existing session when only its durable routing identity is
     /// known, without creating one.

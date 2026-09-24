@@ -305,6 +305,13 @@ impl lash::persistence::SessionStoreFactory for GatedSessionStoreFactory {
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
+        self.inner.count_unsettled_turns().await
+    }
 }
 
 #[async_trait::async_trait]

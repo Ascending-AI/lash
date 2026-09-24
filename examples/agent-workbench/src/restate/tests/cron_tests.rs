@@ -1062,6 +1062,13 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         lash::persistence::SessionStoreFactory::delete_session(&self.inner, session_id).await
     }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
+        lash::persistence::SessionStoreFactory::count_unsettled_turns(&self.inner).await
+    }
 }
 
 impl MetaLossSessionStoreFactory {
@@ -1158,6 +1165,13 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         lash::persistence::SessionStoreFactory::delete_session(&self.inner, session_id).await
+    }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
+        lash::persistence::SessionStoreFactory::count_unsettled_turns(&self.inner).await
     }
 }
 
