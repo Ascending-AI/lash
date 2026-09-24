@@ -6,7 +6,7 @@
 
 use super::*;
 
-use futures_util::stream::{FuturesUnordered, StreamExt};
+use std::task::Poll;
 
 type EffectControllerTaskFuture<'run> = Pin<Box<dyn Future<Output = ()> + Send + 'run>>;
 
@@ -648,43 +648,48 @@ pub async fn drive_effect_controller_task(
     // needed its scope lock was exactly that shape. Requests are independent
     // RPCs whose callers already await their own response, so progress under
     // the root is free.
-    let mut in_flight = FuturesUnordered::new();
-    in_flight.push(root.into_future(controller));
+    //
+    // Each in-flight request is polled at most once per poll of this task. A
+    // host future may wake its task and park to hand a terminal state to an
+    // enclosing future that is only consulted on the task's next poll: the
+    // Restate SDK does exactly that when it records a suspension, and polling
+    // the same future again before the task re-polls from the top resumes an
+    // SDK future that has already completed. A `FuturesUnordered` re-polls a
+    // self-woken future inside one `poll_next`, and a loop that re-enters the
+    // poll after another request settles does the same, so neither is used
+    // here: one pass polls every request once and returns.
+    let mut root_rx = root_rx;
+    let mut in_flight = vec![root.into_future(controller)];
     let mut requests_open = true;
-    tokio::pin!(root_rx);
-
-    loop {
-        if in_flight.is_empty() {
-            return root_rx.await.map_err(|_| {
+    let root_response = |response: Result<
+        Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
+        oneshot::error::RecvError,
+    >| {
+        response
+            .map_err(|_| {
                 RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
                     "root effect controller response was dropped",
                 )
-            })?;
+            })
+            .and_then(|outcome| outcome)
+    };
+    std::future::poll_fn(|cx| {
+        if let Poll::Ready(response) = Pin::new(&mut root_rx).poll(cx) {
+            return Poll::Ready(root_response(response));
         }
-        tokio::select! {
-            biased;
-            response = &mut root_rx => {
-                return response.map_err(|_| {
-                    RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectControllerTaskClosed,
-                        "root effect controller response was dropped",
-                    )
-                })?;
-            }
-            _ = in_flight.next() => {}
-            request = async {
-                if requests_open {
-                    requests.recv().await
-                } else {
-                    std::future::pending().await
-                }
-            } => {
-                match request {
-                    Some(request) => in_flight.push(request.into_future(controller)),
-                    None => requests_open = false,
-                }
+        while requests_open {
+            match requests.poll_recv(cx) {
+                Poll::Ready(Some(request)) => in_flight.push(request.into_future(controller)),
+                Poll::Ready(None) => requests_open = false,
+                Poll::Pending => break,
             }
         }
-    }
+        in_flight.retain_mut(|request| request.as_mut().poll(cx).is_pending());
+        match Pin::new(&mut root_rx).poll(cx) {
+            Poll::Ready(response) => Poll::Ready(root_response(response)),
+            Poll::Pending => Poll::Pending,
+        }
+    })
+    .await
 }
