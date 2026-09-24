@@ -17,12 +17,14 @@ use restate_sdk::serde::Json;
 use super::context::RestateControllerContext;
 use super::journal_budget::{
     JournaledBudgetVerdict, JournaledEffectRecord, budget_verdict, gave_up_over_budget_entry,
-    journalable_recorded_effect, recorded_effect_from_journal, unjournalable_envelope_give_up,
+    group_open_budget_verdict, group_open_gave_up_over_budget, journalable_recorded_effect,
+    recorded_effect_from_journal, unjournalable_envelope_give_up,
 };
 use super::{
     RecordedRuntimeEffect, RestateEffectError, RestateRuntimeEffectController, restate_effect_name,
     validate_recorded_effect_envelope,
 };
+use crate::effect_group::EffectGroupOpenRequest;
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>
 where
@@ -98,24 +100,9 @@ where
         let payload_budget = self.options.journaled_effect_byte_budget?;
         let effect_name = restate_effect_name(metadata);
         let verdict = budget_verdict(&effect_name, Some(payload_budget), envelope);
-        let verdict_name = format!("{effect_name}.journal-budget");
-        let run_retry_policy = self.options.run_retry_policy.clone();
-        let journaled = self
-            .context
-            .run_json_send(
-                verdict_name.clone(),
-                run_retry_policy,
-                Box::pin(async move { verdict }),
-            )
-            .await;
-        let Json(journaled) = match journaled {
+        let journaled = match self.journal_budget_verdict(&effect_name, verdict).await {
             Ok(journaled) => journaled,
-            Err(source) => {
-                return Some(Err(RestateEffectError::Terminal {
-                    effect: verdict_name,
-                    terminal: source,
-                }));
-            }
+            Err(error) => return Some(Err(error)),
         };
         match journaled {
             JournaledBudgetVerdict::Proceed => None,
@@ -131,6 +118,72 @@ where
                 )))
             }
         }
+    }
+
+    /// The pre-flight gate for an effect-group open, mirroring
+    /// [`Self::journaled_budget_give_up`] for the durable process command.
+    ///
+    /// Opening a group is not a recorded effect: it is a run of engine calls
+    /// (probe, dispatch pre-flight, open) whose requests carry every child's
+    /// envelope and each land in the journal. A group whose open cannot be
+    /// journaled must give up before the first of them, so the verdict is
+    /// journaled in its own slot ahead of the open and the journaled verdict
+    /// decides: a replay under a larger budget reproduces the give-up instead
+    /// of opening the group, and a replayed `Proceed` never turns into a
+    /// give-up that abandons a group it already opened. An `Err` means the
+    /// open must not reach the engine at all.
+    pub(super) async fn refuse_over_budget_group_open<'run>(
+        &'run self,
+        group: &RuntimeEffectInvocation,
+        request: &EffectGroupOpenRequest,
+    ) -> Result<(), RuntimeEffectControllerError>
+    where
+        'ctx: 'run,
+    {
+        // As for the process command: no configured budget, no slot.
+        let Some(payload_budget) = self.options.journaled_effect_byte_budget else {
+            return Ok(());
+        };
+        let group_name = restate_effect_name(group);
+        let verdict = group_open_budget_verdict(&group_name, payload_budget, request);
+        match self.journal_budget_verdict(&group_name, verdict).await {
+            Ok(JournaledBudgetVerdict::Proceed) => Ok(()),
+            Ok(JournaledBudgetVerdict::GaveUpOverBudget { budget }) => {
+                Err(group_open_gave_up_over_budget(&group_name, budget))
+            }
+            Err(error) => Err(RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RestateEffectController,
+                error.to_string(),
+            )),
+        }
+    }
+
+    /// Journal a budget verdict in the `.journal-budget` slot ahead of its
+    /// effect, and return the journaled verdict - which, on replay, is the
+    /// recorded one rather than the one this attempt computed.
+    async fn journal_budget_verdict<'run>(
+        &'run self,
+        effect_name: &str,
+        verdict: JournaledBudgetVerdict,
+    ) -> Result<JournaledBudgetVerdict, RestateEffectError>
+    where
+        'ctx: 'run,
+    {
+        let verdict_name = format!("{effect_name}.journal-budget");
+        let run_retry_policy = self.options.run_retry_policy.clone();
+        let Json(journaled) = self
+            .context
+            .run_json_send(
+                verdict_name.clone(),
+                run_retry_policy,
+                Box::pin(async move { verdict }),
+            )
+            .await
+            .map_err(|source| RestateEffectError::Terminal {
+                effect: verdict_name,
+                terminal: source,
+            })?;
+        Ok(journaled)
     }
 
     pub(super) async fn record_effect<'run>(

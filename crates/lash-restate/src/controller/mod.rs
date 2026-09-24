@@ -723,6 +723,13 @@ where
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
         let shape = EffectGroupShape::from_group(&group)?;
+        let open_request = EffectGroupOpenRequest {
+            shape,
+            content_checked: group.reopen() == lash_core::GroupReopen::RetainedContent,
+        };
+        self.refuse_over_budget_group_open(group.invocation(), &open_request)
+            .await?;
+        let shape = &open_request.shape;
         let probe = self
             .context
             .effect_group_probe(group_key.clone())
@@ -747,16 +754,9 @@ where
                 "effect group {group_key} child {position} ({replay_key}) has no registered executor; refusing before group state is created"
             )));
         }
-        let content_checked = group.reopen() == lash_core::GroupReopen::RetainedContent;
         let opened = self
             .context
-            .effect_group_open(
-                group_key.clone(),
-                EffectGroupOpenRequest {
-                    shape: shape.clone(),
-                    content_checked,
-                },
-            )
+            .effect_group_open(group_key.clone(), open_request.clone())
             .await
             .map_err(|error| effect_group_engine_error("EffectGroupIndex/open", error))?;
         match opened {
@@ -811,7 +811,7 @@ where
             EffectGroupOpenResponse::Retired => Err(group_shape_error(format!(
                 "effect group {group_key} is retired"
             ))),
-            EffectGroupOpenResponse::ShapeMismatch if content_checked => Err(
+            EffectGroupOpenResponse::ShapeMismatch if open_request.content_checked => Err(
                 crate::effect_group::content_checked_shape_mismatch(&group_key),
             ),
             EffectGroupOpenResponse::ShapeMismatch => Err(group_shape_error(format!(

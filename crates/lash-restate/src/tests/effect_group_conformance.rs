@@ -364,6 +364,7 @@ impl LiveConformanceHarness {
             .expect("bind Restate effect-group endpoint");
         let mut endpoint = Endpoint::builder()
             .bind(ScopeLivenessProbeImpl.serve())
+            .bind(GroupOpenBudgetProbeImpl.serve())
             .bind(super::live_turn_probe::ConformanceTurnProbeImpl.serve())
             .bind(services.index)
             .bind(services.payload)
@@ -521,6 +522,49 @@ impl LiveConformanceHarness {
         if let Some(server) = self.server.lock().await.take() {
             server.await.expect("Restate effect-group endpoint task");
         }
+    }
+
+    /// FIG-3564 on live Restate: an over-budget group open gives up with the
+    /// process-command arm's typed failure, and the group index never hears
+    /// of the group.
+    pub(super) async fn run_group_open_budget_witness(&self) {
+        let operation = format!("fig3564-group-open-budget-{}", nonce());
+        let ingress = RestateIngressClient::new(self.ingress_url.clone());
+        let refused = ingress
+            .call_workflow_json::<_, Option<RuntimeEffectControllerError>>(
+                "GroupOpenBudgetProbe",
+                &operation,
+                "run",
+                &operation,
+            )
+            .await
+            .expect("the group-open budget probe completes in its handler")
+            .expect("an over-budget group open must give up");
+        assert_eq!(
+            refused.code,
+            RuntimeErrorCode::RestateJournaledEffectPoisoned,
+            "the group open must give up with the process-command arm's typed failure: {}",
+            refused.message
+        );
+        assert_eq!(
+            refused.message,
+            format!(
+                "journaled effect `lash:{operation}:group` gave up because its payload \
+                 exceeded the 16-byte durable journal budget"
+            )
+        );
+        let probe = ingress
+            .call_object_empty_json::<crate::EffectGroupProbeResponse>(
+                "EffectGroupIndex",
+                &operation,
+                "probe",
+            )
+            .await
+            .expect("probe the group index");
+        assert!(
+            matches!(probe, crate::EffectGroupProbeResponse::Absent),
+            "the give-up must precede every group-index write: {probe:?}"
+        );
     }
 
     pub(super) async fn run_design_witnesses(&self) {
@@ -825,6 +869,37 @@ impl ScopeLivenessProbe for ScopeLivenessProbeImpl {
             .await
             .map_err(TerminalError::from_error)?;
         Ok(Json(true))
+    }
+}
+
+/// A workflow that opens one effect group on a controller configured with a
+/// 16-byte journal budget, and returns the open's error (`None` when the open
+/// succeeded): the FIG-3564 group-open pre-flight, observed on a real journal.
+#[restate_sdk::workflow]
+pub(super) trait GroupOpenBudgetProbe {
+    async fn run(
+        operation: Json<String>,
+    ) -> HandlerResult<Json<Option<RuntimeEffectControllerError>>>;
+}
+
+pub(super) struct GroupOpenBudgetProbeImpl;
+
+impl GroupOpenBudgetProbe for GroupOpenBudgetProbeImpl {
+    async fn run(
+        &self,
+        ctx: WorkflowContext<'_>,
+        Json(operation): Json<String>,
+    ) -> HandlerResult<Json<Option<RuntimeEffectControllerError>>> {
+        let controller = crate::RestateRuntimeEffectController::with_options_for_test(
+            ctx,
+            crate::RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
+        );
+        let opened = lash_core::RuntimeEffectController::open_effect_group(
+            &controller,
+            super::conformance_and_poison::fig3564_budget_group(&operation),
+        )
+        .await;
+        Ok(Json(opened.err()))
     }
 }
 
