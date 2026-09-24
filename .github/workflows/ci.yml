@@ -473,6 +473,7 @@ jobs:
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_conformance_law_registration.py
           python3 scripts/test_check_law_execution_receipts.py
+          python3 scripts/test_check_test_shard_coverage.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_toolchain_canary.py
           python3 scripts/test_main_ci_policy.py
@@ -1529,6 +1530,10 @@ jobs:
       # suites while they were dispatch-only. `integration__test` is one of
       # its binaries, so it also covers the parent-end recovery and automatic
       # queued retry scenarios a narrower pull-request step used to filter.
+      # Trusted events shard the conformance and integration binaries and run
+      # the shards and the other binaries in parallel, each on a database of
+      # its own (`tools/bazel/postgres_slot_runner.sh`); the step then proves
+      # the shards ran every listed case exactly once.
       - name: Test Postgres store (conformance and attempt atomicity)
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \

@@ -248,12 +248,20 @@ class ClassifyTests(unittest.TestCase):
             ("examples/agent-workbench/src/main.rs", "false"),
             ("schemas/host/workflow/v1.schema.json", "false"),
             ("tools/bazel/clippy.bzl", "false"),
+            # The job runs every test through these.
+            ("tools/bazel/postgres_slot_runner.sh", "true"),
+            ("tools/bazel/test_xml_runner.sh", "true"),
         ):
             with self.subTest(path=path):
                 self.assertEqual(
                     expected, ci_plan.classify([("M", path)])["stores"]
                 )
 
+
+    def test_the_store_job_tooling_exists(self) -> None:
+        for path in sorted(ci_plan.POSTGRES_STORE_TOOLING):
+            with self.subTest(path=path):
+                self.assertTrue((ROOT / path).is_file())
     def test_tooling_selects_repo_gates(self) -> None:
         # CI machinery always selects tooling: the repository gates hold every
         # script self-test (`CiMachineryTests` pins the rest of its map).

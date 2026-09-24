@@ -30,3 +30,16 @@ test_xml_runner(
     src = "test_xml_runner.sh",
     data = ["junit_xml.py"],
 )
+
+# The `--run_under` prefix of the PostgreSQL store job's sharded suites
+# (`scripts/ci/store-tests.sh pg-store`): each test action takes a database
+# slot of its own, records its shard's share of the binary's `--list`, then
+# runs under `test_xml_runner.sh` like every other test.
+test_xml_runner(
+    name = "postgres_slot_runner",
+    src = "postgres_slot_runner.sh",
+    data = [
+        "junit_xml.py",
+        "test_xml_runner.sh",
+    ],
+)

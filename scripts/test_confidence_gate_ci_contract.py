@@ -108,6 +108,9 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
             f"{_store_tests_stub_bin()}{os.pathsep}{environment['PATH']}"
         )
         environment["BAZEL_TRUSTED"] = trusted
+        # `scripts/ci/with-service.sh` exports the slot count to every suite
+        # it wraps; the sharded PostgreSQL suite refuses to run without it.
+        environment["LASH_POSTGRES_SLOT_COUNT"] = "4"
         result = subprocess.run(
             ["bash", str(STORE_TESTS), suite],
             cwd=ROOT,

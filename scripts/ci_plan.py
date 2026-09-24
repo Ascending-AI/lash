@@ -886,12 +886,25 @@ def _is_schema_path(path: str) -> bool:
 # FIG-3550 were runtime changes outside every store crate, invisible to the
 # hand list of store crates this replaced. The root `fixtures/` tree is their
 # `//:durable_fixtures` input, and a SQL script or a SQLite database anywhere
-# is store input. Build tooling does not select it: the Lint job's workspace
-# clippy compiles every one of these test targets, so a tooling diff that
-# breaks their build fails there, and the release dispatch runs them all.
+# is store input. Build tooling does not select it, except the files the job
+# itself runs its tests through (`POSTGRES_STORE_TOOLING`): the Lint job's
+# workspace clippy compiles every one of these test targets, so a tooling diff
+# that breaks their build fails there, and the release dispatch runs them all.
+POSTGRES_STORE_TOOLING = frozenset(
+    {
+        "tools/bazel/postgres_slot_runner.sh",
+        "tools/bazel/test_xml_runner.sh",
+        "tools/bazel/junit_xml.py",
+        "tools/bazel/postgres_test_labels.txt",
+    }
+)
+
+
 def _is_stores_path(path: str, path_class: PathClass, store_dirs: frozenset[str]) -> bool:
     posix = PurePosixPath(path)
     if "migrations" in posix.parts or posix.suffix in {".sql", ".db"}:
+        return True
+    if path in POSTGRES_STORE_TOOLING:
         return True
     if path_class.kind is PathKind.PACKAGE:
         return path_class.package in store_dirs

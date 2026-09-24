@@ -130,6 +130,7 @@ lash_rust_integration_test(
     ],
     exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "4", "test.memory_kb": "4194304"},
     extra_compile_data = [],
+    shard_count = 2,
     library = ":lash-postgres-store",
     library_crate_name = "lash_postgres_store",
     manifest_dir = "crates/lash-postgres-store",
@@ -165,6 +166,7 @@ lash_rust_integration_test(
     extra_data = [
         ":postgres-await-event-helper__example",
     ],
+    shard_count = 6,
     test_env = {"LASH_CONFORMANCE_HELPER_EXE": "$(rootpath :postgres-await-event-helper__example)"},
     library = ":lash-postgres-store",
     library_crate_name = "lash_postgres_store",

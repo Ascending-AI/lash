@@ -36,6 +36,11 @@ readonly PROGRAM="scripts/ci/with-service.sh"
 readonly MINIO_IMAGE="quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
 readonly MC_IMAGE="quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z"
 readonly SERVICES=(pg14 pg16 pg18 s3)
+# Databases a PostgreSQL service carries beside the default `lash`, one per
+# test that `scripts/ci/store-tests.sh pg-store` runs at once. Each is named
+# `lash_slot_<index>`; `tools/bazel/postgres_slot_runner.sh` hands one to each
+# test action so the sharded suites never share tables (FIG-3572).
+readonly POSTGRES_SLOT_COUNT=4
 
 service_description() {
   case "$1" in
@@ -81,7 +86,14 @@ service_run_spec() {
         --env POSTGRES_DB=lash
       )
       # pg_stat_statements is what the statement-count tests measure through.
-      RUN_COMMAND=(-c shared_preload_libraries=pg_stat_statements)
+      # The default 100 connections and lock table fit one test process; the
+      # store job runs POSTGRES_SLOT_COUNT at once, each with its own pools and
+      # each applying the whole DDL artifact in one transaction.
+      RUN_COMMAND=(
+        -c shared_preload_libraries=pg_stat_statements
+        -c "max_connections=$((100 * POSTGRES_SLOT_COUNT))"
+        -c max_locks_per_transaction=256
+      )
       ;;
     s3)
       RUN_ARGS=(
@@ -103,6 +115,7 @@ service_test_env() {
       TEST_ENV=(
         "LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:${port}/lash"
         "LASH_REQUIRE_POSTGRES=1"
+        "LASH_POSTGRES_SLOT_COUNT=${POSTGRES_SLOT_COUNT}"
       )
       ;;
     s3)
@@ -147,8 +160,15 @@ service_ready_probe() {
 
 # One-time preparation after readiness, before the command runs.
 service_setup() {
-  local name="$1" port="$3"
+  local name="$1" container="$2" port="$3"
+  local index
   case "$name" in
+    pg*)
+      for ((index = 0; index < POSTGRES_SLOT_COUNT; index++)); do
+        docker exec "$container" psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
+          -c "CREATE DATABASE lash_slot_${index}" >/dev/null
+      done
+      ;;
     s3)
       docker run --rm --network host --entrypoint /bin/sh "$MC_IMAGE" -c \
         "mc alias set with-service http://127.0.0.1:${port} minioadmin minioadmin >/dev/null && mc mb --ignore-existing with-service/lash-attachments"

@@ -37,6 +37,24 @@ kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["manual", "cargo-service-gate"]
 reason = "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service"
 
+# The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
+# ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
+# Each shard runs through `//tools/bazel:postgres_slot_runner`, which gives it
+# a database of its own, so shards run in parallel without sharing the tables
+# `reset()` truncates. `scripts/ci/check_test_shard_coverage.py` proves the
+# shards of each label partition the full `--list`.
+[[rule]]
+packages = ["lash-internal-postgres-store"]
+kinds = ["test"]
+targets = ["conformance"]
+shards = 6
+
+[[rule]]
+packages = ["lash-internal-postgres-store"]
+kinds = ["test"]
+targets = ["integration"]
+shards = 2
+
 [[rule]]
 packages = ["lash-runtime"]
 kinds = ["test"]
