@@ -310,10 +310,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
             [Value::String(pattern), Value::String(flags)] => {
                 (pattern.to_string(), flags.to_string())
             }
-            [_, ..] if args.len() <= 2 => {
-                return Err(self.regexp_type_error(
-                    "TS_REGEX_CONSTRUCTOR_STRING_REQUIRED: RegExp pattern and flags must be strings or undefined; pass an explicit string",
-                ));
+            [pattern, ..] if args.len() <= 2 => {
+                // A non-RegExp pattern goes through ToString — `new
+                // RegExp(5)` is `/5/` in Node — as do explicit flags.
+                let pattern = match pattern {
+                    Value::Undefined => String::new(),
+                    other => self.heap.javascript_to_string(other)?,
+                };
+                let flags = match args.get(1) {
+                    None | Some(Value::Undefined) => String::new(),
+                    Some(flags) => self.heap.javascript_to_string(flags)?,
+                };
+                (pattern, flags)
             }
             _ => {
                 return Err(js_stdlib_error(format!(
@@ -599,16 +607,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
         input: &str,
     ) -> Result<Value, RuntimeError> {
         let units = bounded_utf16_input(&self.heap, input)?;
-        let (global, sticky, start) = match self.heap.get(receiver)? {
-            HeapObject::RegExp(regexp) => (
-                regexp.flags.contains('g'),
-                regexp.flags.contains('y'),
-                regexp.last_index as usize,
-            ),
+        let (global, sticky) = match self.heap.get(receiver)? {
+            HeapObject::RegExp(regexp) => (regexp.flags.contains('g'), regexp.flags.contains('y')),
             _ => return Err(js_stdlib_error("RegExp.exec requires a RegExp receiver")),
         };
         let stateful = global || sticky;
-        let start = if stateful { start } else { 0 };
+        // `lastIndex` stores the raw written value; `exec` coerces at use.
+        let start = if stateful {
+            self.heap.regexp_last_index_coerced(receiver)? as usize
+        } else {
+            0
+        };
         if start > units.len() {
             if stateful {
                 self.heap.set_regexp_last_index(receiver, 0)?;
@@ -734,6 +743,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
         separator: &Value,
         limit: &Value,
     ) -> Result<Value, RuntimeError> {
+        // ECMA coerces `separator` with ToString and `limit` with ToUint32;
+        // an object with its own `toString`/`valueOf` suspends the
+        // instruction so the hook runs (FIG-3652).
         let limit = if matches!(limit, Value::Undefined) {
             u32::MAX
         } else {
@@ -750,7 +762,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
             );
         };
         if !matches!(self.heap.get(*receiver)?, HeapObject::RegExp(_)) {
-            return Err(js_stdlib_error("split separator is not a RegExp"));
+            // Any other object is a string separator through ToString — an
+            // object with guest hooks suspends so the hook answers.
+            let coerced = Value::String(self.heap.javascript_to_string(separator)?.into());
+            return super::javascript::javascript_string_method(
+                "split",
+                input,
+                &[coerced, Value::Number(limit as f64)],
+            );
         }
         let units = bounded_utf16_input(&self.heap, input)?;
         if limit == 1 && !units.is_empty() {
@@ -952,7 +971,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     self.regexp_matches(*receiver, &units, 0, true, None)?
                 } else {
                     let start = if sticky {
-                        self.heap.regexp_last_index(*receiver)?.unwrap_or(0)
+                        self.heap.regexp_last_index_coerced(*receiver)?
                     } else {
                         0
                     };

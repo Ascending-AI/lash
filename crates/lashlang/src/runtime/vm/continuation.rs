@@ -100,9 +100,15 @@ use super::exceptions::PendingErrorOrigin;
 /// the instruction. A v24 continuation's reader meets the unknown variant, so
 /// it is refused.
 ///
+/// v26 (FIG-3656) renames the `builtin_function` object's `prototype` field to
+/// `owner`: built-in values now include constructors, namespaces, and static
+/// methods whose scope is not a prototype, so the field names the owning
+/// scope. A v25 reader rejects the unknown field, so the bump is what makes
+/// its refusal a version boundary.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 25;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 26;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
@@ -434,11 +440,11 @@ mod continuation_serde {
             name: Option<ValueWire>,
             length: Option<ValueWire>,
         },
-        /// A built-in method value, named by its prototype and its ECMA
-        /// `name` rather than by a table position, so the bytes do not move
-        /// when the table is reordered.
+        /// A built-in value, named by its owner scope and its ECMA `name`
+        /// rather than by a table position, so the bytes do not move when
+        /// the table is reordered.
         BuiltinFunction {
-            prototype: String,
+            owner: String,
             name: String,
         },
         RegExp {
@@ -579,7 +585,7 @@ mod continuation_serde {
                 length: length.as_ref().map(value_to_wire).transpose()?,
             },
             HeapObject::BuiltinFunction(function) => HeapObjectWire::BuiltinFunction {
-                prototype: function.prototype().name().to_string(),
+                owner: function.owner().name().to_string(),
                 name: function.name().to_string(),
             },
             HeapObject::RegExp(regexp) => HeapObjectWire::RegExp {
@@ -661,11 +667,8 @@ mod continuation_serde {
                 name: name.map(value_from_wire).transpose()?,
                 length: length.map(value_from_wire).transpose()?,
             },
-            HeapObjectWire::BuiltinFunction { prototype, name } => HeapObject::BuiltinFunction(
-                crate::runtime::heap::BuiltinPrototype::from_name(&prototype)
-                    .and_then(|prototype| {
-                        crate::runtime::heap::BuiltinFunction::named(prototype, &name)
-                    })
+            HeapObjectWire::BuiltinFunction { owner, name } => HeapObject::BuiltinFunction(
+                crate::runtime::heap::BuiltinFunction::named_scoped(&owner, &name)
                     .ok_or("unknown built-in function")?,
             ),
             HeapObjectWire::RegExp {

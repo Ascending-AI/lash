@@ -142,6 +142,12 @@ impl Lowerer {
         let index = self.temporary("group_index");
         let key = self.temporary("group_key");
         let group = self.temporary("group_values");
+        // groupBy takes an iterable only — never an array-like — and checks
+        // the callback is callable, both as guest TypeErrors.
+        let source_value = stdlib(
+            "Lash.GroupBySource",
+            vec![self.lower_iterable_sink(source)?],
+        );
         let output_value = if owner == "Map" {
             LashExpr::BuiltinCall {
                 name: "__typescript_heap_new".into(),
@@ -224,13 +230,7 @@ impl Lowerer {
             LashExpr::Undefined,
         ]);
         Ok(LashExpr::Block(vec![
-            assign(
-                &source_name,
-                stdlib(
-                    "Lash.ArrayFromIterable",
-                    vec![self.lower_iterable_sink(source)?],
-                ),
-            ),
+            assign(&source_name, source_value),
             assign(&callback_name, self.lower_expr(callback)?),
             // GroupBy refuses a non-callable callback before it calls one.
             assign(&callback_name, require_callable(variable(&callback_name))),

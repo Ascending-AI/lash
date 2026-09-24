@@ -355,6 +355,49 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 None,
             );
         }
+        // Reading a member off `undefined`/`null` is ECMA's most common
+        // TypeError; the substrate's CannotReadField/CannotIndex names it.
+        if let RuntimeError::CannotReadField { field, actual }
+        | RuntimeError::CannotAssignField { field, actual } = error
+            && matches!(actual.as_str(), "undefined" | "null")
+        {
+            return self.heap.allocate_error(
+                ErrorKind::TypeError,
+                Some(format!(
+                    "Cannot read properties of {actual} (reading '{field}')"
+                )),
+                None,
+                None,
+            );
+        }
+        if let RuntimeError::CannotIndex { actual } = error
+            && matches!(actual.as_str(), "undefined" | "null")
+        {
+            return self.heap.allocate_error(
+                ErrorKind::TypeError,
+                Some(format!("Cannot read properties of {actual}")),
+                None,
+                None,
+            );
+        }
+        // Runtime paths name a native error by prefixing its message
+        // (`"TypeError: ..."` from the nullish-receiver stdlib guard,
+        // `"RangeError: Invalid array length"`, ...). The guest-visible
+        // value is that error kind, so `e instanceof TypeError` answers.
+        if let RuntimeError::ValidationFailed { reason } = error {
+            for (prefix, kind) in [
+                ("TypeError: ", ErrorKind::TypeError),
+                ("RangeError: ", ErrorKind::RangeError),
+                ("SyntaxError: ", ErrorKind::SyntaxError),
+                ("ReferenceError: ", ErrorKind::ReferenceError),
+            ] {
+                if let Some(message) = reason.strip_prefix(prefix) {
+                    return self
+                        .heap
+                        .allocate_error(kind, Some(format!("{message}")), None, None);
+                }
+            }
+        }
         let mut details = record_with_capacity(3);
         details.insert(
             "kind".to_string(),

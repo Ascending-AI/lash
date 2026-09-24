@@ -35,9 +35,8 @@ impl Heap {
                 && self.builtin_functions.insert(function, *id).is_some()
             {
                 return Err(format!(
-                    "built-in function {}.prototype.{} is held by two heap objects",
-                    function.prototype().name(),
-                    function.name()
+                    "built-in {} is held by two heap objects",
+                    function.qualified_name()
                 ));
             }
         }

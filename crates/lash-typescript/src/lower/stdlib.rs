@@ -57,6 +57,11 @@ pub(super) fn is_known_runtime_global(name: &str) -> bool {
 /// exactly these rows, and the census probes now hold that claim to the code.
 pub(super) fn is_ecma_global_namespace(name: &str) -> bool {
     is_known_runtime_global(name)
+        // The materializable built-ins — `eval`, `parseInt`, the URI
+        // functions — are global values, never tool-module roots, so a
+        // member access like `eval.hasOwnProperty` reads the built-in's
+        // own surface rather than linking a module named `eval`.
+        || lashlang::is_javascript_builtin_global(name)
         || matches!(
             name,
             "Error"

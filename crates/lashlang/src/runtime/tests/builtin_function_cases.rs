@@ -168,13 +168,13 @@ async fn continuation_holding_a_builtin() -> (CompiledProgram, VmContinuation) {
     (program, continuation)
 }
 
-/// The wire names a built-in by prototype and name, never by table position.
+/// The wire names a built-in by owner scope and name, never by table position.
 #[tokio::test(flavor = "current_thread")]
 async fn a_continuation_names_a_builtin_by_prototype_and_name() {
     let (_, continuation) = continuation_holding_a_builtin().await;
     let text = serde_json::to_string(&continuation).expect("encode");
     assert!(
-        text.contains(r#"{"kind":"builtin_function","prototype":"String","name":"includes"}"#),
+        text.contains(r#"{"kind":"builtin_function","owner":"String","name":"includes"}"#),
         "{text}"
     );
 }
@@ -186,8 +186,8 @@ async fn a_continuation_naming_an_unknown_builtin_is_refused() {
     let (_, continuation) = continuation_holding_a_builtin().await;
     let text = serde_json::to_string(&continuation).expect("encode");
     for forged in [
-        text.replace(r#""name":"includes""#, r#""name":"localeCompare""#),
-        text.replace(r#""prototype":"String""#, r#""prototype":"Symbol""#),
+        text.replace(r#""name":"includes""#, r#""name":"bogus""#),
+        text.replace(r#""owner":"String""#, r#""owner":"Symbol""#),
     ] {
         assert_ne!(forged, text);
         let error = serde_json::from_str::<VmContinuation>(&forged)
@@ -203,8 +203,12 @@ async fn a_continuation_naming_an_unknown_builtin_is_refused() {
 #[test]
 fn inherited_reads_follow_ecma_identity() {
     let inherited = |prototype, key| {
-        BuiltinFunction::inherited(prototype, key)
-            .map(|function| (function.prototype(), function.name()))
+        BuiltinFunction::inherited(prototype, key).map(|function| {
+            (
+                function.prototype().expect("a method's owner"),
+                function.name(),
+            )
+        })
     };
     assert_eq!(
         inherited(BuiltinPrototype::Set, "keys"),
@@ -227,5 +231,8 @@ fn inherited_reads_follow_ecma_identity() {
         Some((BuiltinPrototype::Object, "valueOf"))
     );
     assert_eq!(inherited(BuiltinPrototype::String, "map"), None);
-    assert_eq!(inherited(BuiltinPrototype::String, "localeCompare"), None);
+    assert_eq!(
+        inherited(BuiltinPrototype::String, "localeCompare"),
+        Some((BuiltinPrototype::String, "localeCompare"))
+    );
 }

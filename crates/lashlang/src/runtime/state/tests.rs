@@ -476,9 +476,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x99, 0x54, 0x0a, 0xfb, 0x45, 0x0b, 0xcd, 0x3c, 0x00, 0x20, 0x63, 0x37, 0xcc, 0x61,
-            0xe8, 0xdb, 0xb2, 0x28, 0x08, 0x93, 0x96, 0xe1, 0x44, 0xa2, 0x6a, 0x3b, 0x21, 0x6c,
-            0x4e, 0x29, 0x8a, 0xb3,
+            0xe9, 0x7d, 0x1d, 0x3e, 0x2d, 0xca, 0xc4, 0x5e, 0x8f, 0x62, 0x13, 0x01, 0xaa, 0x2c,
+            0x4d, 0xc3, 0xa4, 0xe2, 0x7e, 0x2f, 0x90, 0x60, 0xdb, 0xa3, 0xdd, 0xf5, 0xae, 0x28,
+            0xac, 0x62, 0xef, 0x6a,
         ]
     );
 }
@@ -668,7 +668,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e0ca7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e0da7676c6f62616c7390");
 }
 
 #[test]
@@ -1982,15 +1982,15 @@ fn a_snapshot_round_trips_a_builtin_function_object() {
         })),
     };
     let bytes = snapshot.to_canonical_bytes().expect("encode");
-    // The object is `{kind: "builtin_function", prototype: "Set", name:
+    // The object is `{kind: "builtin_function", owner: "Set", name:
     // "values"}`, in that declared order.
     let object = [
         &[0x83, 0xa4][..],
         b"kind",
         &[0xb0],
         b"builtin_function",
-        &[0xa9],
-        b"prototype",
+        &[0xa5],
+        b"owner",
         &[0xa3],
         b"Set",
         &[0xa4],
@@ -2001,7 +2001,7 @@ fn a_snapshot_round_trips_a_builtin_function_object() {
     .concat();
     assert!(
         bytes.windows(object.len()).any(|window| window == object),
-        "the canonical bytes spell the built-in by prototype and name"
+        "the canonical bytes spell the built-in by owner and name"
     );
     let decoded = Snapshot::from_canonical_bytes(&bytes).expect("decode");
     assert_eq!(decoded.to_canonical_bytes().expect("re-encode"), bytes);

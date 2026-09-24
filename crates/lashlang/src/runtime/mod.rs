@@ -58,7 +58,7 @@ pub(crate) use heap::{
 };
 pub use heap::{
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL, HEAP_SIZE_SCHEDULE_VERSION,
-    HeapId,
+    HeapId, is_javascript_builtin_global,
 };
 pub use host::{
     AbilityOp, AbilityResult, AggregateConsumer, DEFAULT_HOST_MEMORY_LIMIT_BYTES,

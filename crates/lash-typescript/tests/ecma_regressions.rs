@@ -31,6 +31,53 @@ fn finished(source: &str) -> Value {
     }
 }
 
+/// A built-in object is a first-class value: a missing member reads
+/// `undefined`, a write lands an expando, a read-only constant write throws
+/// Node's TypeError, and `Ctor.prototype` reads the prototype object
+/// (FIG-3656).
+#[test]
+fn builtin_member_semantics_match_node() {
+    assert_eq!(
+        finished("finish(Math.extra);"),
+        Value::Undefined,
+        "Math.extra reads undefined, as Node answers"
+    );
+    assert_eq!(
+        finished("Math.extra = 1; finish(Math.extra);"),
+        Value::Number(1.0),
+        "an expando on a built-in lands and reads back"
+    );
+    assert_eq!(
+        finished(
+            "try { Math.PI = 2; finish('no throw'); } catch (e) { finish([e instanceof TypeError, e.message]); }"
+        ),
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::String("Cannot assign to read only property 'PI' of object 'Math'".into()),
+            ]
+            .into()
+        )
+    );
+    for (source, expected) in [
+        ("finish(typeof String.prototype);", "object"),
+        ("finish(typeof String.prototype.trim);", "function"),
+        ("finish(typeof Number.prototype);", "object"),
+    ] {
+        assert_eq!(finished(source), Value::String(expected.into()));
+    }
+    assert_eq!(
+        finished("finish(String.prototype === String.prototype);"),
+        Value::Bool(true),
+        "a built-in's prototype has one canonical object"
+    );
+    assert_eq!(
+        finished("finish(Math.prototype);"),
+        Value::Undefined,
+        "Math has no `prototype` own property, as Node answers"
+    );
+}
+
 #[test]
 fn missing_and_non_index_property_reads_produce_undefined() {
     let cases = [
@@ -212,6 +259,20 @@ fn agent_stdlib_regressions_match_ecmascript() {
             ]
             .into()
         )
+    );
+    // A catchable runtime fault with no ECMA brand of its own is delivered
+    // as an ordinary JavaScript error branded `RuntimeError`, with its typed
+    // payload on `cause`. `AggregateError` requires an `errors` list: the
+    // fault has no ECMA class, so it keeps the substrate's.
+    assert_eq!(
+        finished(
+            "try { new AggregateError(5, 'x'); } catch (error) { finish(error instanceof Error ? error.name : String(error)); }"
+        ),
+        Value::String("RuntimeError".into())
+    );
+    assert_eq!(
+        finished("try { new AggregateError(5, 'x'); } catch (error) { finish(error.cause.code); }"),
+        Value::String("ValidationFailed".into())
     );
 }
 
@@ -1215,36 +1276,35 @@ fn match_all_is_accepted_in_every_iterable_sink() {
     assert!(rendered.contains("Object.fromEntries"), "{rendered}");
 }
 
-/// `lastIndex` applies ECMA `ToLength` at the write, so reading it straight
-/// back does not return what was stored.
-///
 /// ECMA makes `lastIndex` an ordinary writable data property and coerces on
-/// use; Node therefore reads back `-1` and `Infinity` verbatim. Storing the
-/// coerced value is what keeps it a durable integer, and the coerced value is
-/// what every accepted operation would have used anyway — so the divergence is
-/// confined to the read-back, and this test is what keeps that claim true.
+/// use; Node therefore reads back `-1`, `2.7`, `NaN` and `Infinity` verbatim,
+/// and so does this store. The raw value is not always a durable integer,
+/// though: what the `u64` slot cannot hold rides an in-memory override while
+/// the slot keeps the value's ToLength floor, so a resumed process reads the
+/// coercion where the live one read the raw write.
 #[test]
-fn last_index_read_back_is_the_tolength_value_not_the_written_one() {
+fn last_index_reads_back_the_written_value() {
     for (source, expected) in [
         (
             "const r = /a/g; r.lastIndex = -1; finish(r.lastIndex);",
-            0.0,
+            -1.0,
         ),
         (
             "const r = /a/g; r.lastIndex = 2.7; finish(r.lastIndex);",
-            2.0,
-        ),
-        (
-            "const r = /a/g; r.lastIndex = NaN; finish(r.lastIndex);",
-            0.0,
+            2.7,
         ),
         (
             "const r = /a/g; r.lastIndex = Infinity; finish(r.lastIndex);",
-            9_007_199_254_740_991.0,
+            f64::INFINITY,
         ),
     ] {
         assert_eq!(finished(source), Value::Number(expected), "{source}");
     }
+    let Value::Number(value) = finished("const r = /a/g; r.lastIndex = NaN; finish(r.lastIndex);")
+    else {
+        panic!("lastIndex reads back the written NaN");
+    };
+    assert!(value.is_nan());
 }
 
 /// A prototype-chain name arriving as a data key refuses where the value
@@ -1533,7 +1593,9 @@ fn error_message_is_an_own_property_only_when_supplied() {
         ),
         ("finish(Object.hasOwn(new TypeError(), 'message'));", false),
         ("finish('message' in new Error('x'));", true),
-        ("finish('message' in new Error());", false),
+        // `in` walks the prototype chain, and `Error.prototype` owns a
+        // `message` — so the answer is true even when nothing was supplied.
+        ("finish('message' in new Error());", true),
     ] {
         assert_eq!(finished(source), Value::Bool(expected), "{source}");
     }

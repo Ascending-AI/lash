@@ -125,7 +125,7 @@ rejection_test!(
 );
 rejection_test!(
     rejects_prototype_access,
-    "const x = Object.prototype;",
+    "Object.prototype.x = 1;",
     Code::PrototypeMutationUnsupported
 );
 rejection_test!(rejects_this, "const x = this;", Code::ThisUnsupported);
@@ -319,13 +319,12 @@ fn reserved_value_identifiers_refuse_only_at_the_top_level() {
     }
 }
 
-/// A hole in an array literal is a sparse array, which the dense v1
-/// representation cannot express; it refuses statically rather than filling
-/// the slot with `undefined` (FIG-3702). A trailing comma alone is not an
-/// elision, and a hole in a destructuring *pattern* skips an element without
-/// creating one.
+/// A hole in an array literal is a sparse array: admitted since the heap
+/// tracks elisions, with the remaining hole semantics owned by FIG-3700. A
+/// trailing comma alone is not an elision, and a hole in a destructuring
+/// *pattern* skips an element without creating one.
 #[test]
-fn array_literal_elisions_reject_but_commas_and_pattern_holes_do_not() {
+fn array_literal_elisions_admit_and_commas_and_pattern_holes_do_not() {
     for source in [
         "const a = [, 2];",
         "const a = [0, , 2];",
@@ -333,11 +332,6 @@ fn array_literal_elisions_reject_but_commas_and_pattern_holes_do_not() {
         "const a = [0, , 2, , 4];",
         "const a = [[0, , 2]];",
         "const a = [1, ...[0, , 2]];",
-    ] {
-        let error = lash_typescript::validate(source).expect_err(source);
-        assert_eq!(error.code, Code::SparseArrayUnsupported, "{error}");
-    }
-    for source in [
         "const a = [1,];",
         "const a = [];",
         "const [x, , z] = [1, 2, 3]; finish(z);",
@@ -669,18 +663,13 @@ rejection_test!(
     "const x = x;",
     Code::TemporalDeadZone
 );
-// tsc TS2339 on a missing member of a built-in namespace.
+// tsc TS2339 on a missing member of a built-in namespace — a *call* of one
+// still refuses (a read answers `undefined` and a write lands an expando, as
+// Node answers).
 rejection_test!(
-    rejects_a_missing_builtin_member_read_tsc_also_rejects,
-    "const x = Math.extra;",
+    rejects_a_missing_builtin_member_call_tsc_also_rejects,
+    "const x = Math.extra();",
     Code::MethodUnsupported
-);
-// tsc TS2339 on the write of one too (TS2540 when the member exists but is
-// read-only, e.g. `Math.PI = 2` — the same refusal covers both).
-rejection_test!(
-    rejects_a_builtin_member_write_tsc_also_rejects,
-    "Math.extra = 1;",
-    Code::UnknownBinding
 );
 // tsc TS2554 on a missing-argument call to a listed method.
 rejection_test!(

@@ -24,6 +24,35 @@ pub(crate) fn is_prototype_chain_property(name: &str) -> bool {
     )
 }
 
+/// Whether `expr` is `<built-in global>.prototype` — the member access the
+/// adapter admits for reads, but never as a mutation target:
+/// `Array.prototype[1] = x` would land on the prototype object while staying
+/// invisible to `[]`'s element reads, a silent near-miss.
+pub(super) fn is_builtin_prototype_object(expr: &swc::Expr) -> bool {
+    let swc::Expr::Member(member) = expr else {
+        return false;
+    };
+    let swc::Expr::Ident(owner) = member.obj.as_ref() else {
+        return false;
+    };
+    if !lashlang::is_javascript_builtin_global(owner.sym.as_ref()) {
+        return false;
+    }
+    match &member.prop {
+        swc::MemberProp::Ident(name) => name.sym.as_ref() == "prototype",
+        swc::MemberProp::Computed(computed) => matches!(
+            computed.expr.as_ref(),
+            swc::Expr::Lit(swc::Lit::Str(name)) if name.value.to_string_lossy() == "prototype"
+        ),
+        _ => false,
+    }
+}
+
+/// The refusal for a member write whose object is `<built-in global>.prototype`.
+pub(super) fn builtin_prototype_mutation(member: &swc::MemberExpr) -> Option<Diagnostic> {
+    is_builtin_prototype_object(&member.obj).then(|| prototype_access_rejection(member.span))
+}
+
 pub(super) fn prototype_access_rejection(span: swc_common::Span) -> Diagnostic {
     reject(
         DiagnosticCode::PrototypeMutationUnsupported,

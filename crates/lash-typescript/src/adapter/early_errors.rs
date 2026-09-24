@@ -9,6 +9,7 @@
 use swc_common::Spanned;
 use swc_ecma_ast as swc;
 
+use super::prototype_chain::builtin_prototype_mutation;
 use super::rejections::{reject, source_span};
 use super::{Adapter, Expr, Goal};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
@@ -234,6 +235,12 @@ impl Adapter<'_> {
                 "`delete` of an unqualified identifier is not allowed in strict mode",
                 span,
             ));
+        }
+        if let Some(diagnostic) = unparenthesized
+            .as_member()
+            .and_then(builtin_prototype_mutation)
+        {
+            return Err(diagnostic);
         }
         match self.convert_expr(operand)? {
             Expr::Member {

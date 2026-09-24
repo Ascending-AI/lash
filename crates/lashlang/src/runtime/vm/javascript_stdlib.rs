@@ -2,7 +2,6 @@ use super::super::{
     ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_string,
 };
 use super::*;
-use num_traits::Float;
 
 pub(super) fn js_stdlib_error(reason: impl Into<String>) -> RuntimeError {
     RuntimeError::ValidationFailed {
@@ -587,11 +586,11 @@ pub(super) fn to_uint16(value: f64) -> u16 {
 }
 
 pub(super) fn javascript_round(value: f64) -> f64 {
-    if !value.is_finite() || value == 0.0 {
+    if !value.is_finite() || value == 0.0 || value.trunc() == value {
         return value;
     }
-    if (-0.5..0.0).contains(&value) {
-        return -0.0;
+    if (-0.5..0.5).contains(&value) {
+        return if value.is_sign_negative() { -0.0 } else { 0.0 };
     }
     (value + 0.5).floor()
 }
@@ -738,183 +737,6 @@ pub(super) fn pad_string(
         }
         .into(),
     ))
-}
-
-/// `toExponential(f)` with ECMA rounding: the absolute value's exact decimal
-/// expansion is rounded to `f + 1` significant digits, halves up.
-pub(super) fn exact_exponential(value: f64, fraction: usize) -> String {
-    if value == 0.0 {
-        return if fraction == 0 {
-            "0e+0".to_string()
-        } else {
-            format!("0.{}e+0", "0".repeat(fraction))
-        };
-    }
-    // `value = mantissa * 2^exponent` exactly.
-    let (mantissa, exponent, sign) = value.integer_decode();
-    let (digits, shift) = if exponent >= 0 {
-        (
-            num_bigint::BigUint::from(mantissa) << exponent as usize,
-            0i64,
-        )
-    } else {
-        let halvings = (-exponent) as u32;
-        (
-            num_bigint::BigUint::from(mantissa) * num_bigint::BigUint::from(5u64).pow(halvings),
-            -i64::from(halvings),
-        )
-    };
-    // `|value| = digits * 10^shift`; `digits` is the full exact expansion.
-    let digits = digits.to_string();
-    let scientific_exponent = digits.len() as i64 + shift - 1;
-    let kept = fraction + 1;
-    let mut rounded: Vec<u8> = digits
-        .bytes()
-        .take(kept)
-        .chain(std::iter::repeat(b'0'))
-        .take(kept)
-        .collect();
-    let mut overflowed = false;
-    if digits
-        .as_bytes()
-        .get(kept)
-        .copied()
-        .is_some_and(|digit| digit >= b'5')
-    {
-        // Round half up: an exact tie takes the larger mantissa, and anything
-        // past the first dropped digit can only widen the gap upward.
-        let mut position = kept;
-        loop {
-            position -= 1;
-            if rounded[position] == b'9' {
-                rounded[position] = b'0';
-                if position == 0 {
-                    rounded.insert(0, b'1');
-                    rounded.truncate(kept);
-                    overflowed = true;
-                    break;
-                }
-            } else {
-                rounded[position] += 1;
-                break;
-            }
-        }
-    }
-    let mut mantissa_text = String::with_capacity(kept + 1);
-    mantissa_text.push(rounded[0] as char);
-    if fraction > 0 {
-        mantissa_text.push('.');
-        mantissa_text.extend(rounded[1..].iter().map(|digit| *digit as char));
-    }
-    // A carry out of the leading digit (`9.99` rounding to `10`) lifts the
-    // scientific exponent one place.
-    let exponent_text = scientific_exponent + i64::from(overflowed);
-    format!(
-        "{}{mantissa_text}e{}{exponent_text}",
-        if sign < 0 { "-" } else { "" },
-        if exponent_text >= 0 { "+" } else { "" },
-    )
-}
-
-pub(super) fn parse_float_prefix(value: &str) -> f64 {
-    let value = value.trim_start_matches(super::super::javascript::is_ecma_string_whitespace);
-    let bytes = value.as_bytes();
-    let mut cursor = 0usize;
-    if matches!(bytes.first(), Some(b'+' | b'-')) {
-        cursor = 1;
-    }
-    let negative = bytes.first() == Some(&b'-');
-    if value[cursor..].starts_with("Infinity") {
-        return if negative {
-            f64::NEG_INFINITY
-        } else {
-            f64::INFINITY
-        };
-    }
-    let integer_start = cursor;
-    while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
-        cursor += 1;
-    }
-    let integer_digits = cursor - integer_start;
-    let mut fraction_digits = 0usize;
-    if bytes.get(cursor) == Some(&b'.') {
-        cursor += 1;
-        let fraction_start = cursor;
-        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
-            cursor += 1;
-        }
-        fraction_digits = cursor - fraction_start;
-        if integer_digits == 0 && fraction_digits == 0 {
-            cursor -= 1 + fraction_digits;
-        }
-    }
-    if integer_digits + fraction_digits == 0 {
-        return f64::NAN;
-    }
-    let mantissa_end = cursor;
-    if matches!(bytes.get(cursor), Some(b'e' | b'E')) {
-        let mut probe = cursor + 1;
-        if matches!(bytes.get(probe), Some(b'+' | b'-')) {
-            probe += 1;
-        }
-        let exponent_start = probe;
-        while bytes.get(probe).is_some_and(u8::is_ascii_digit) {
-            probe += 1;
-        }
-        if probe > exponent_start {
-            cursor = probe;
-        }
-    }
-    // `5.e3` matched the grammar with a bare fraction point; Rust's parser
-    // wants a digit after it, so supply the implied zero.
-    let mut literal = String::with_capacity(cursor + 1);
-    literal.push_str(&value[..mantissa_end]);
-    if literal.ends_with('.') {
-        literal.push('0');
-    }
-    literal.push_str(&value[mantissa_end..cursor]);
-    literal.parse::<f64>().unwrap_or(f64::NAN)
-}
-
-pub(super) fn parse_int_prefix(value: &str, radix: Option<f64>) -> f64 {
-    let value = value.trim_start_matches(super::super::javascript::is_ecma_string_whitespace);
-    let (negative, value) = value
-        .strip_prefix('-')
-        .map_or((false, value), |value| (true, value));
-    let value = value.strip_prefix('+').unwrap_or(value);
-    let radix = radix.map_or(0, |radix| {
-        i64::from(crate::runtime::javascript_to_int32(radix))
-    });
-    if radix != 0 && !(2..=36).contains(&radix) {
-        return f64::NAN;
-    }
-    let (radix, value) = if radix == 0 {
-        value
-            .strip_prefix("0x")
-            .or_else(|| value.strip_prefix("0X"))
-            .map_or((10, value), |value| (16, value))
-    } else if radix == 16 {
-        (
-            16,
-            value
-                .strip_prefix("0x")
-                .or_else(|| value.strip_prefix("0X"))
-                .unwrap_or(value),
-        )
-    } else {
-        (radix as u32, value)
-    };
-    let digits = value
-        .chars()
-        .take_while(|character| character.is_digit(radix))
-        .collect::<String>();
-    if digits.is_empty() {
-        return f64::NAN;
-    }
-    let number = num_bigint::BigUint::parse_bytes(digits.as_bytes(), radix)
-        .and_then(|value| num_traits::ToPrimitive::to_f64(&value))
-        .unwrap_or(f64::INFINITY);
-    if negative { -number } else { number }
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -1263,6 +1085,393 @@ fn non_callable_text(value: &Value) -> String {
         Value::Number(_) => format!("number {}", javascript_to_string(value)),
         Value::String(value) => format!("string \"{value}\""),
         _ => "object".to_string(),
+    }
+}
+
+/// `Lash.*` intrinsics the lowerer emits for semantics no surface method
+/// names: first-class built-in values, the `in` operator's full property
+/// question, sparse array literals, and the `arguments` record.
+impl<H: ExecutionHost> Vm<'_, H> {
+    pub(super) fn execute_lash_intrinsic(
+        &mut self,
+        values: &[Value],
+    ) -> Result<bool, RuntimeError> {
+        match values {
+            [Value::String(method), name] if method.as_str() == "Lash.Builtin" => {
+                let name = self.heap.javascript_to_string(name)?;
+                let value = self.heap.builtin_value(&name)?;
+                self.stack.push(value);
+                Ok(true)
+            }
+            [Value::String(method), key, receiver] if method.as_str() == "Lash.HasProperty" => {
+                // ECMA `in`: ToPropertyKey the left operand, then a
+                // non-object right operand is a TypeError, then presence is
+                // own keys plus the kind's built-in prototype surface.
+                let key = self.heap.javascript_to_string(key)?;
+                let has = match receiver {
+                    Value::Null
+                    | Value::Undefined
+                    | Value::Number(_)
+                    | Value::Bool(_)
+                    | Value::String(_)
+                    | Value::Image(_)
+                    | Value::Resource(_) => {
+                        let error = self.heap.allocate_error(
+                            ErrorKind::TypeError,
+                            Some(format!(
+                                "Cannot use 'in' operator to search for '{key}' in {}",
+                                crate::runtime::value_type_name(receiver)
+                            )),
+                            None,
+                            None,
+                        )?;
+                        return Err(RuntimeError::UncaughtException { value: error });
+                    }
+                    _ => crate::runtime::access::javascript_value_has_property(
+                        &self.heap, receiver, &key,
+                    )?,
+                };
+                self.stack.push(Value::Bool(has));
+                Ok(true)
+            }
+            [Value::String(method), elements, holes] if method.as_str() == "Lash.SparseArray" => {
+                // Either operand may arrive heapified: the operand-import
+                // pass turns an inline `List` into a `HeapObject::List` ref.
+                let elements = match elements {
+                    Value::List(elements) => elements.to_vec(),
+                    Value::Ref(id) => match self.heap.get(*id)? {
+                        HeapObject::List(elements) => elements.clone(),
+                        _ => {
+                            return Err(js_stdlib_error(
+                                "Lash.SparseArray expects an element list and a hole-index list",
+                            ));
+                        }
+                    },
+                    _ => {
+                        return Err(js_stdlib_error(
+                            "Lash.SparseArray expects an element list and a hole-index list",
+                        ));
+                    }
+                };
+                let holes = match holes {
+                    Value::List(holes) => holes.to_vec(),
+                    Value::Ref(id) => match self.heap.get(*id)? {
+                        HeapObject::List(holes) => holes.clone(),
+                        _ => {
+                            return Err(js_stdlib_error(
+                                "Lash.SparseArray expects an element list and a hole-index list",
+                            ));
+                        }
+                    },
+                    _ => {
+                        return Err(js_stdlib_error(
+                            "Lash.SparseArray expects an element list and a hole-index list",
+                        ));
+                    }
+                };
+                let holes = holes
+                    .iter()
+                    .map(|hole| match hole {
+                        Value::Number(index)
+                            if index.fract() == 0.0
+                                && *index >= 0.0
+                                && *index <= usize::MAX as f64 =>
+                        {
+                            Ok(*index as usize)
+                        }
+                        _ => Err(js_stdlib_error(
+                            "Lash.SparseArray hole indexes must be non-negative integers",
+                        )),
+                    })
+                    .collect::<Result<std::collections::BTreeSet<usize>, _>>()?;
+                self.heap.ensure_list_allocation_len(elements.len())?;
+                let list = self.heap.allocate_list(elements.to_vec())?;
+                if let Value::Ref(id) = list {
+                    self.heap.mark_list_holes(id, holes);
+                }
+                self.stack.push(list);
+                Ok(true)
+            }
+            [Value::String(method)] if method.as_str() == "Lash.Arguments" => {
+                if let Some(existing) = self.slots.extras.get("lash:arguments") {
+                    let existing = existing.clone();
+                    self.stack.push(existing);
+                    return Ok(true);
+                }
+                let extras = self.slots.extras.clone();
+                let argv: Vec<Value> = match extras.get("lash:argv") {
+                    Some(Value::List(argv)) => argv.to_vec(),
+                    // The heapify pass imports an inline extras list, so by
+                    // the time `arguments` is mentioned the argv is a heap
+                    // `List` reference.
+                    Some(Value::Ref(id)) => match self.heap.get(*id)? {
+                        HeapObject::List(argv) => argv.clone(),
+                        _ => Vec::new(),
+                    },
+                    _ => Vec::new(),
+                };
+                // The dialect is strict-mode, so `callee` and `caller` are
+                // own poisoned names: present for `hasOwnProperty`, absent
+                // from enumeration, and a `TypeError` on read or write.
+                let mut arguments = Record::new();
+                arguments.insert_str("callee", Value::Null);
+                arguments.insert_str("caller", Value::Null);
+                arguments.insert_str("length", Value::Number(argv.len() as f64));
+                for (index, value) in argv.iter().enumerate() {
+                    arguments.insert_str(&index.to_string(), value.clone());
+                }
+                let arguments = self.heap.allocate_record(arguments)?;
+                if let Value::Ref(id) = arguments {
+                    self.heap.mark_arguments_record(id);
+                    self.slots
+                        .extras
+                        .insert_str("lash:arguments", Value::Ref(id));
+                }
+                self.stack.push(arguments);
+                Ok(true)
+            }
+            [Value::String(method), source] if method.as_str() == "Lash.GroupBySource" => {
+                // `Map.groupBy`/`Object.groupBy` take an iterable only — never
+                // an array-like — so a record or primitive is the same
+                // TypeError GetIterator raises.
+                match self.group_by_elements(source)? {
+                    Some(elements) => {
+                        self.stack.push(Value::List(elements.into()));
+                        Ok(true)
+                    }
+                    None => Err(crate::runtime::not_iterable_error(source)),
+                }
+            }
+            [Value::String(method), milliseconds] if method.as_str() == "Lash.DateString" => {
+                // A bare `Date()` call answers the current date-time string;
+                // the lowerer feeds it the journaled clock so the UTC math
+                // stays deterministic.
+                let Value::Number(milliseconds) = milliseconds else {
+                    return Err(js_stdlib_error(
+                        "Lash.DateString expects the journaled clock milliseconds",
+                    ));
+                };
+                self.stack.push(Value::String(
+                    super::javascript_date::javascript_date_string(*milliseconds).into(),
+                ));
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// The elements `groupBy` would iterate: the dialect's iterable kinds —
+    /// lists, tuples, strings, and the heap collections — or `None` when
+    /// ECMA's GetIterator would throw.
+    fn group_by_elements(&self, source: &Value) -> Result<Option<Vec<Value>>, RuntimeError> {
+        Ok(match source {
+            Value::List(elements) | Value::Tuple(elements) => Some(elements.to_vec()),
+            Value::String(text) => Some(
+                text.chars()
+                    .map(|character| Value::String(character.to_string().into()))
+                    .collect(),
+            ),
+            Value::Ref(id) => match self.heap.get(*id)? {
+                HeapObject::List(elements) | HeapObject::Tuple(elements) => Some(elements.clone()),
+                HeapObject::Set(set) => Some(set.values.clone()),
+                HeapObject::Map(map) => Some(
+                    map.entries
+                        .iter()
+                        .map(|(key, value)| Value::List(vec![key.clone(), value.clone()].into()))
+                        .collect(),
+                ),
+                HeapObject::UrlSearchParams(params) => Some(
+                    params
+                        .entries
+                        .iter()
+                        .map(|(key, value)| {
+                            Value::List(
+                                vec![
+                                    Value::String(key.clone().into()),
+                                    Value::String(value.clone().into()),
+                                ]
+                                .into(),
+                            )
+                        })
+                        .collect(),
+                ),
+                HeapObject::RegExpMatch(result) => Some(result.items.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+    }
+
+    /// `Object.keys`/`values`/`entries`/`hasOwn`/`assign` on heap receivers:
+    /// the materializing `javascript_stdlib` dispatch below can only see
+    /// inline values, so heap objects answer here while they are still
+    /// references. Errors own no enumerable data keys.
+    pub(super) fn execute_heap_property_intrinsic(
+        &mut self,
+        values: &[Value],
+    ) -> Result<bool, RuntimeError> {
+        if let [Value::String(method), Value::Ref(receiver)] = values
+            && matches!(self.heap.get(*receiver)?, HeapObject::Error(_))
+        {
+            let result = match method.as_str() {
+                "Object.keys" | "Object.values" | "Object.entries" => {
+                    Some(Value::List(Vec::new().into()))
+                }
+                "JSON.stringify" => Some(Value::String("{}".into())),
+                _ => None,
+            };
+            if let Some(result) = result {
+                self.stack.push(result);
+                return Ok(true);
+            }
+        }
+        if let [Value::String(method), Value::Ref(receiver)] = values
+            && matches!(
+                method.as_str(),
+                "Object.keys" | "Object.values" | "Object.entries"
+            )
+        {
+            if self.heap.is_builtin_object(*receiver) {
+                let keys = self.heap.builtin_enumerable_keys(*receiver)?;
+                let result = match method.as_str() {
+                    "Object.keys" => keys
+                        .into_iter()
+                        .map(|key| Value::String(key.into()))
+                        .collect(),
+                    _ => {
+                        let mut result = Vec::with_capacity(keys.len());
+                        for key in keys {
+                            let value = self.heap.builtin_read(*receiver, &key)?;
+                            result.push(if method.as_str() == "Object.values" {
+                                value
+                            } else {
+                                Value::List(vec![Value::String(key.into()), value].into())
+                            });
+                        }
+                        result
+                    }
+                };
+                self.stack.push(Value::List(result.into()));
+                return Ok(true);
+            }
+            let result = match self.heap.get(*receiver)? {
+                HeapObject::Record(record) => {
+                    let mut entries = ecma_record_entries(record);
+                    // The arguments record's `length`/`callee`/`caller` are
+                    // own but non-enumerable.
+                    if self.heap.is_arguments_record(*receiver) {
+                        entries.retain(|(key, _)| !matches!(*key, "length" | "callee" | "caller"));
+                    }
+                    match method.as_str() {
+                        "Object.keys" => entries
+                            .into_iter()
+                            .map(|(key, _)| Value::String(key.into()))
+                            .collect(),
+                        "Object.values" => entries
+                            .into_iter()
+                            .map(|(_, value)| value.clone())
+                            .collect(),
+                        "Object.entries" => entries
+                            .into_iter()
+                            .map(|(key, value)| {
+                                Value::List(vec![Value::String(key.into()), value.clone()].into())
+                            })
+                            .collect(),
+                        _ => unreachable!(),
+                    }
+                }
+                HeapObject::List(items) => {
+                    // A hole is not an own property: `Object.*` skip it, as
+                    // Node does on a sparse array.
+                    let present = |index: usize| !self.heap.is_list_hole(*receiver, index);
+                    match method.as_str() {
+                        "Object.keys" => (0..items.len())
+                            .filter(|index| present(*index))
+                            .map(|index| Value::String(index.to_string().into()))
+                            .collect(),
+                        "Object.values" => items
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, _)| present(*index))
+                            .map(|(_, value)| value.clone())
+                            .collect(),
+                        "Object.entries" => items
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, _)| present(*index))
+                            .map(|(index, value)| {
+                                Value::List(
+                                    vec![Value::String(index.to_string().into()), value.clone()]
+                                        .into(),
+                                )
+                            })
+                            .collect(),
+                        _ => unreachable!(),
+                    }
+                }
+                HeapObject::Tuple(items) => match method.as_str() {
+                    "Object.keys" => (0..items.len())
+                        .map(|index| Value::String(index.to_string().into()))
+                        .collect(),
+                    "Object.values" => items.to_vec(),
+                    "Object.entries" => items
+                        .iter()
+                        .enumerate()
+                        .map(|(index, value)| {
+                            Value::List(
+                                vec![Value::String(index.to_string().into()), value.clone()].into(),
+                            )
+                        })
+                        .collect(),
+                    _ => unreachable!(),
+                },
+                _ => Vec::new(),
+            };
+            self.stack.push(Value::List(result.into()));
+            return Ok(true);
+        }
+        if let [Value::String(method), Value::Ref(receiver), key] = values
+            && method.as_str() == "Object.hasOwn"
+        {
+            let key = self.heap.javascript_to_string(key)?;
+            let has = crate::runtime::access::javascript_heap_has_own(&self.heap, *receiver, &key)?;
+            self.stack.push(Value::Bool(has));
+            return Ok(true);
+        }
+        if let [Value::String(method), Value::Ref(receiver), args @ ..] = values
+            && method.as_str() == "Object.assign"
+            && matches!(self.heap.get(*receiver)?, HeapObject::Record(_))
+        {
+            let HeapObject::Record(target) = self.heap.get(*receiver)? else {
+                unreachable!("record receiver checked")
+            };
+            let mut output = target.as_ref().clone();
+            for source in args {
+                // This arm runs before the materializing dispatch below, because
+                // a heap receiver has to stay a reference. That left a projected
+                // *source* handle to match no source shape and be skipped
+                // silently, so `Object.assign(target, projected)` copied
+                // nothing. A projected handle is a host-side view of a value:
+                // assign the record behind it. Nullish sources are still
+                // skipped, projected or not.
+                let source = materialize_value(source.clone())?;
+                let entries = match &source {
+                    Value::Ref(id) => match self.heap.get(*id)? {
+                        HeapObject::Record(record) => Some(ecma_record_entries(record)),
+                        _ => None,
+                    },
+                    Value::Record(record) => Some(ecma_record_entries(record)),
+                    _ => None,
+                };
+                for (key, value) in entries.unwrap_or_default() {
+                    output.insert(key.to_string(), value.clone());
+                }
+            }
+            self.heap.replace_javascript_record(*receiver, output)?;
+            self.stack.push(Value::Ref(*receiver));
+            return Ok(true);
+        }
+        Ok(false)
     }
 }
 

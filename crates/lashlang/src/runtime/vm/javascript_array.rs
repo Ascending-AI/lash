@@ -162,7 +162,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 removed
             }
             "sort" if args.is_empty() || matches!(args, [Value::Undefined]) => {
-                let mut keyed = values
+                // A hole is not an element: ECMA sorts the members that
+                // exist and then deletes the tail positions, so the absent
+                // slots stay absent rather than becoming stored `undefined`s.
+                let length = values.len();
+                let present: Vec<Value> = values
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(index, _)| !self.heap.is_list_hole(receiver, *index))
+                    .map(|(_, value)| value)
+                    .collect();
+                let holes = length - present.len();
+                let mut keyed = present
                     .into_iter()
                     .map(|value| {
                         let key = if matches!(value, Value::Undefined) {
@@ -179,10 +190,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     (Some(_), None) => std::cmp::Ordering::Less,
                     (Some(left), Some(right)) => left.encode_utf16().cmp(right.encode_utf16()),
                 });
-                self.heap.replace_javascript_list(
-                    receiver,
-                    keyed.into_iter().map(|(value, _)| value).collect(),
-                )?;
+                let mut sorted: Vec<Value> = keyed.into_iter().map(|(value, _)| value).collect();
+                sorted.resize(length, Value::Undefined);
+                self.heap.replace_javascript_list(receiver, sorted)?;
+                if holes > 0 {
+                    self.heap
+                        .mark_list_holes(receiver, (length - holes..length).collect());
+                }
                 Value::Ref(receiver)
             }
             "toReversed" if args.is_empty() => {
@@ -278,7 +292,14 @@ pub(super) fn copy_within(values: &mut [Value], args: &[Value]) {
 }
 
 fn relative_bound(value: Option<&Value>, len: usize, default: usize) -> usize {
-    let Some(value) = value else { return default };
+    let value = match value {
+        // ToIntegerOrInfinity of the optional bound arguments treats an
+        // explicit `undefined` like an omitted argument: it selects the
+        // default rather than coercing through NaN to zero.
+        Some(Value::Undefined) => return default,
+        Some(value) => value,
+        None => return default,
+    };
     let value = javascript_to_number(value);
     if value.is_nan() || value == f64::NEG_INFINITY {
         0

@@ -265,6 +265,17 @@ impl Lowerer {
         };
         match self.classify_callee(callee) {
             CalleeFamily::UnboundGlobal(name) => {
+                // A bare `Date(...)` call ignores its arguments and answers
+                // the current date-time string; like `Date.now()` it reads
+                // the journaled clock.
+                if name == "Date" {
+                    return Ok(Self::stdlib_call(
+                        "Lash.DateString",
+                        vec![LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
+                            lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
+                        )))],
+                    ));
+                }
                 let Some(builtin) = GlobalBuiltin::classify(name) else {
                     return self.lower_dynamic_call(callee, &args);
                 };
@@ -851,9 +862,16 @@ impl Lowerer {
             ))));
         }
         let module_root = module_path(object).and_then(|path| path.first().cloned());
-        let receiver_is_module_authority = module_root
-            .as_ref()
-            .is_some_and(|root| !self.has_binding(root) && !is_ecma_global_namespace(root));
+        // The reserved value names are never module roots: `NaN.toString(2)`
+        // is a Number.prototype call and `arguments.hasOwnProperty(k)` reads
+        // the arguments object, not a tool call on a module of that name.
+        let receiver_is_module_authority = module_root.as_ref().is_some_and(|root| {
+            !matches!(
+                root.as_str(),
+                "undefined" | "NaN" | "Infinity" | "arguments"
+            ) && !self.has_binding(root)
+                && !is_ecma_global_namespace(root)
+        });
         let receiver_shadows_module_authority = module_root
             .as_deref()
             .filter(|root| self.has_binding(root) && self.module_authority_roots.contains(*root));
@@ -1186,7 +1204,9 @@ impl Lowerer {
                 )
                 || !receiver_is_callback_exotic
                     && matches!(method, "sort" | "toSorted")
-                    && !args.is_empty())
+                    && args.first().is_some_and(
+                        |argument| !matches!(argument, Expr::Ident(name, _) if name == "undefined"),
+                    ))
         {
             return self.lower_array_callback_method(method, object, args);
         }

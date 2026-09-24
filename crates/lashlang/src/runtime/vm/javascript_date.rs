@@ -331,6 +331,35 @@ fn date_parts(milliseconds: f64) -> Option<DateParts> {
     })
 }
 
+/// ECMA `Date()`/`Date.prototype.toString` layout under the dialect's UTC
+/// pin: `Www Mmm dd yyyy HH:mm:ss GMT+0000 (Coordinated Universal Time)`.
+pub(super) fn javascript_date_string(milliseconds: f64) -> String {
+    const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let Some(parts) = date_parts(milliseconds) else {
+        return "Invalid Date".to_string();
+    };
+    let year = if (0..=9_999).contains(&parts.year) {
+        format!("{:04}", parts.year)
+    } else if parts.year < 0 {
+        format!("-{:06}", parts.year.unsigned_abs())
+    } else {
+        format!("+{:06}", parts.year)
+    };
+    format!(
+        "{} {} {:02} {} {:02}:{:02}:{:02} GMT+0000 (Coordinated Universal Time)",
+        WEEKDAYS[parts.weekday as usize],
+        MONTHS[parts.month as usize],
+        parts.date,
+        year,
+        parts.hour,
+        parts.minute,
+        parts.second,
+    )
+}
+
 pub(crate) fn to_iso_string(milliseconds: f64) -> Option<String> {
     let parts = date_parts(milliseconds)?;
     let year = if (0..=9_999).contains(&parts.year) {

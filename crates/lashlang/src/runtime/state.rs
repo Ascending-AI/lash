@@ -51,7 +51,12 @@ pub use canonical_messagepack::{
 // v12 writes a built-in method value as a `builtin_function` heap object named
 // by prototype and `name` (FIG-3701). A v11 reader meets an unknown kind while
 // deserializing, so the bump is what makes its refusal a version boundary.
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 12;
+// v13 renames that object's `prototype` field to `owner` (FIG-3656): built-in
+// values now include constructors, namespaces, and static methods whose scope
+// is not a prototype, so the field names the owning scope. A v12 reader meets
+// an unknown field while deserializing, so the bump is what makes its refusal
+// a version boundary.
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 13;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 /// The longest summary [`State::opaque_bindings`] renders, in characters.
 pub const BINDING_SUMMARY_MAX_CHARS: usize = super::heap::SUMMARY_MAX_CHARS;
@@ -945,7 +950,7 @@ const TAGGED_VALUE_FIELDS: &[&str] = &[
     "fields",
     "function",
     "captures",
-    "prototype",
+    "owner",
     "name",
     "length",
     "pattern",

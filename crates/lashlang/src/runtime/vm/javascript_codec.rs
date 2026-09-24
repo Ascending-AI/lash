@@ -3,7 +3,7 @@ use super::super::{
 };
 use super::{ExecutionHost, Vm};
 
-const URI_MALFORMED: &str = "URI malformed";
+pub(super) const URI_MALFORMED: &str = "URI malformed";
 
 impl<H: ExecutionHost> Vm<'_, H> {
     pub(super) fn execute_javascript_uri_codec(
@@ -37,7 +37,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 }
 
-fn encode(input: &str, preserve_uri_syntax: bool) -> String {
+pub(super) fn encode(input: &str, preserve_uri_syntax: bool) -> String {
     let mut output = String::with_capacity(input.len());
     for byte in input.bytes() {
         if is_unescaped(byte) || preserve_uri_syntax && is_uri_syntax(byte) {
@@ -49,7 +49,7 @@ fn encode(input: &str, preserve_uri_syntax: bool) -> String {
     output
 }
 
-fn decode(input: &str, preserve_uri_syntax: bool) -> Result<String, ()> {
+pub(super) fn decode(input: &str, preserve_uri_syntax: bool) -> Result<String, ()> {
     let bytes = input.as_bytes();
     let mut output = String::with_capacity(input.len());
     let mut decoded = Vec::new();

@@ -32,6 +32,13 @@ impl CallArguments<'_> {
             Self::Borrowed(values) => values.to_vec(),
         }
     }
+
+    fn to_vec(&self) -> Vec<Value> {
+        match self {
+            Self::Owned(values) => values.clone(),
+            Self::Borrowed(values) => values.to_vec(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -353,13 +360,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 actual: crate::runtime::value_type_name(&closure).to_string(),
             });
         };
+        // `arguments` materializes lazily through `Lash.Arguments` from the
+        // raw argv and the callee, stashed on the frame's extras under names
+        // no guest binding can name. The snapshot precedes parameter
+        // adjustment because ECMA's `arguments` sees what was passed, not
+        // what the signature filled.
+        let arguments_argv = args.to_vec();
         let (function_index, captures) = match self.heap.get(id)? {
             HeapObject::Closure {
                 function, captures, ..
             } => (*function as usize, captures.clone()),
             HeapObject::BuiltinFunction(function) => {
                 let function = *function;
-                return self.call_detached_builtin(function, &args.into_owned(), return_target);
+                // A prototype-owned built-in is a method value: a detached
+                // call gives it an `undefined` receiver. Everything else —
+                // constructors, namespaces, statics — answers by name.
+                if function.prototype().is_some() {
+                    return self.call_detached_builtin(function, &args.into_owned(), return_target);
+                }
+                return self.call_builtin(function, args, return_target);
             }
             _ => {
                 return Err(RuntimeError::NonFunctionCall {
@@ -420,6 +439,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
 
         let mut slots = self.take_slot_state(function.slot_names.len());
+        slots
+            .extras
+            .insert_str("lash:argv", Value::List(arguments_argv.into()));
+        slots.extras.insert_str("lash:callee", Value::Ref(id));
         if let Some(slot) = function.self_slot {
             slots.values[slot] = Some(Value::Ref(id));
         }
@@ -554,6 +577,231 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 return Ok(());
             }
         }
+    }
+
+    /// A call whose callee is a built-in object — a global, a static or a
+    /// `Owner.prototype` object `builtin_value` minted. The conversion
+    /// functions, `Array` and the error constructors answer directly; an
+    /// `Owner.method` value runs the synchronous stdlib table under its
+    /// qualified name; `Function` and its friends refuse rather than
+    /// evaluate source; a `[[Construct]]`-only constructor and a
+    /// non-callable namespace throw the TypeError Node throws.
+    fn call_builtin(
+        &mut self,
+        function: BuiltinFunction,
+        args: CallArguments<'_>,
+        return_target: ReturnTarget,
+    ) -> Result<(), RuntimeError> {
+        let name = function.qualified_name();
+        let args = args.into_owned();
+        let result = self.global_builtin_result(&name, &args)?;
+        self.complete_call(result, return_target)
+    }
+
+    /// What a global or object-scope built-in answers to a call —
+    /// `call_builtin`'s dispatch, shared with the callback driver's detached
+    /// path.
+    pub(super) fn global_builtin_result(
+        &mut self,
+        name: &str,
+        args: &[Value],
+    ) -> Result<Value, RuntimeError> {
+        let result = match name {
+            "String" => Value::String(
+                self.heap
+                    .javascript_to_string(args.first().unwrap_or(&Value::Undefined))?
+                    .into(),
+            ),
+            "Number" => Value::Number(match args.first() {
+                None => 0.0,
+                Some(value) => self.heap.javascript_to_number(value)?,
+            }),
+            "Boolean" => Value::Bool(match args.first() {
+                None => false,
+                Some(value) => self.is_truthy_for_dialect(value)?,
+            }),
+            "Array" => match args {
+                [Value::Number(length)]
+                    if length.fract() == 0.0 && *length >= 0.0 && *length <= u32::MAX as f64 =>
+                {
+                    let length = *length as usize;
+                    self.heap.ensure_list_allocation_len(length)?;
+                    let list = self.heap.allocate_list(vec![Value::Undefined; length])?;
+                    if let Value::Ref(list_id) = list {
+                        self.heap.mark_list_holes(list_id, (0..length).collect());
+                    }
+                    list
+                }
+                _ => {
+                    self.heap.ensure_list_allocation_len(args.len())?;
+                    self.heap.allocate_list(args.to_vec())?
+                }
+            },
+            "Error" | "AggregateError" | "EvalError" | "RangeError" | "ReferenceError"
+            | "SyntaxError" | "TypeError" | "URIError" => {
+                let kind = crate::runtime::ErrorKind::from_name(&name).ok_or_else(|| {
+                    RuntimeError::ValidationFailed {
+                        reason: format!("unknown error kind `{name}`"),
+                    }
+                })?;
+                let (message_arg, options) = if kind == crate::runtime::ErrorKind::AggregateError {
+                    (args.get(1), args.get(2))
+                } else {
+                    (args.first(), args.get(1))
+                };
+                let message = match message_arg {
+                    None | Some(Value::Undefined) => None,
+                    Some(value) => Some(self.heap.javascript_to_string(value)?),
+                };
+                let cause = match options {
+                    Some(Value::Ref(id)) => match self.heap.get(*id)? {
+                        HeapObject::Record(record) => record.get("cause").cloned(),
+                        _ => None,
+                    },
+                    Some(Value::Record(record)) => record.get("cause").cloned(),
+                    _ => None,
+                };
+                let errors = if kind == crate::runtime::ErrorKind::AggregateError {
+                    Some(
+                        self.heap
+                            .isolate_value(args.first().unwrap_or(&Value::Undefined))?,
+                    )
+                } else {
+                    None
+                };
+                self.heap.allocate_error(kind, message, cause, errors)?
+            }
+            // `parseInt`/`parseFloat` are the same functions as the
+            // `Number.*` statics; the global `isNaN`/`isFinite` coerce first.
+            "parseInt" | "parseFloat" => {
+                let mut call = Vec::with_capacity(args.len() + 1);
+                call.push(Value::String(format!("Number.{name}").into()));
+                call.extend(args.iter().cloned());
+                super::javascript::javascript_stdlib(&self.heap, &call)?
+            }
+            "isNaN" | "isFinite" => {
+                let value = args.first().unwrap_or(&Value::Undefined);
+                let number = self.heap.javascript_to_number(value)?;
+                Value::Bool(if name == "isNaN" {
+                    number.is_nan()
+                } else {
+                    number.is_finite()
+                })
+            }
+            "encodeURIComponent" | "encodeURI" | "decodeURIComponent" | "decodeURI" => {
+                let input = self
+                    .heap
+                    .javascript_to_string(args.first().unwrap_or(&Value::Undefined))?;
+                let result = match name {
+                    "encodeURIComponent" => Ok(super::javascript_codec::encode(&input, false)),
+                    "encodeURI" => Ok(super::javascript_codec::encode(&input, true)),
+                    "decodeURIComponent" => super::javascript_codec::decode(&input, false),
+                    _ => super::javascript_codec::decode(&input, true),
+                };
+                match result {
+                    Ok(value) => {
+                        crate::runtime::ensure_javascript_string_size(value.len())?;
+                        Value::String(value.into())
+                    }
+                    Err(()) => {
+                        let error = self.heap.allocate_error(
+                            crate::runtime::ErrorKind::URIError,
+                            Some("URI malformed".to_string()),
+                            None,
+                            None,
+                        )?;
+                        return Err(RuntimeError::UncaughtException { value: error });
+                    }
+                }
+            }
+            // `RegExp(p)` called as a function constructs, like `new RegExp`.
+            "RegExp" => self.construct_regexp(&args)?,
+            // `Object()` with no or a nullish argument is a fresh `{}`; an
+            // object argument is the object itself. A primitive would need a
+            // wrapper object the value model does not have.
+            "Object" => match args.first() {
+                None | Some(Value::Null) | Some(Value::Undefined) => {
+                    self.heap.allocate_record(Record::new())?
+                }
+                Some(
+                    value @ (Value::Record(_) | Value::List(_) | Value::Tuple(_) | Value::Ref(_)),
+                ) => value.clone(),
+                _ => {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: "TS_METHOD_UNSUPPORTED: Object() on a primitive needs a wrapper object this value model does not have".to_string(),
+                    });
+                }
+            },
+            // `eval`/`Function` evaluate source the dialect never admits; the
+            // rejected globals refuse for the same reasons their direct-call
+            // lowerings do.
+            "eval" => {
+                return Err(RuntimeError::ValidationFailed {
+                    reason:
+                        "TS_EVAL_UNSUPPORTED: eval evaluates source, which this dialect does not"
+                            .to_string(),
+                });
+            }
+            "structuredClone" | "btoa" | "atob" | "escape" | "unescape" => {
+                return Err(RuntimeError::ValidationFailed {
+                    reason: format!(
+                        "TS_METHOD_UNSUPPORTED: {name} is not in the TypeScript runtime surface"
+                    ),
+                });
+            }
+            "BigInt" => {
+                return Err(RuntimeError::ValidationFailed {
+                    reason: "TS_BIGINT_UNSUPPORTED: BigInt values are not in the dialect"
+                        .to_string(),
+                });
+            }
+            "Symbol" => {
+                return Err(RuntimeError::ValidationFailed {
+                    reason: "TS_METHOD_UNSUPPORTED: Symbol values are not in the dialect"
+                        .to_string(),
+                });
+            }
+            // A bare `Date()` call answers the current date-time string; only
+            // the lowerer can reach the journaled clock, so a materialized
+            // `Date` value invoked indirectly refuses here.
+            "Date" => {
+                return Err(RuntimeError::ValidationFailed {
+                    reason: "TS_DATE_NOW_EFFECT_REQUIRED: Date() must be lowered through the journaled clock effect".to_string(),
+                });
+            }
+            _ if name.contains('.') && !name.ends_with(".prototype") => {
+                // An `Owner.method` value: run the synchronous stdlib table
+                // under its qualified name.
+                let mut call = Vec::with_capacity(args.len() + 1);
+                call.push(Value::String(name.into()));
+                call.extend(args.iter().cloned());
+                super::javascript::javascript_stdlib(&self.heap, &call)?
+            }
+            _ if name == "Function" || name.ends_with("Function") => {
+                return Err(RuntimeError::ValidationFailed {
+                    reason: format!(
+                        "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED: `{name}()` evaluates source, which this dialect does not"
+                    ),
+                });
+            }
+            _ => {
+                let message = if name.ends_with(".prototype")
+                    || matches!(name, "Math" | "JSON" | "Reflect" | "Intl" | "Atomics")
+                {
+                    format!("{name} is not a function")
+                } else {
+                    format!("Constructor {name} requires 'new'")
+                };
+                let error = self.heap.allocate_error(
+                    crate::runtime::ErrorKind::TypeError,
+                    Some(message),
+                    None,
+                    None,
+                )?;
+                return Err(RuntimeError::UncaughtException { value: error });
+            }
+        };
+        Ok(result)
     }
 
     pub(super) fn begin_callback_driver(

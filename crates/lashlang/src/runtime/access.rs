@@ -211,7 +211,10 @@ pub(crate) fn heap_inherited_builtin(object: &HeapObject, key: &str) -> Option<B
         HeapObject::Tuple(_) | HeapObject::List(_) | HeapObject::RegExpMatch(_) => {
             BuiltinPrototype::Array
         }
-        HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) => BuiltinPrototype::Function,
+        HeapObject::Closure { .. } => BuiltinPrototype::Function,
+        // A callable built-in inherits `Function.prototype`; a namespace or
+        // `Owner.prototype` object inherits `Object.prototype` instead.
+        HeapObject::BuiltinFunction(function) if function.callable() => BuiltinPrototype::Function,
         HeapObject::RegExp(_) => BuiltinPrototype::RegExp,
         HeapObject::Map(_) => BuiltinPrototype::Map,
         HeapObject::Set(_) => BuiltinPrototype::Set,
@@ -219,13 +222,18 @@ pub(crate) fn heap_inherited_builtin(object: &HeapObject, key: &str) -> Option<B
         HeapObject::Error(_) => BuiltinPrototype::Error,
         HeapObject::Url(_) => BuiltinPrototype::Url,
         HeapObject::UrlSearchParams(_) => BuiltinPrototype::UrlSearchParams,
+        HeapObject::BuiltinFunction(_) => BuiltinPrototype::Object,
     };
     BuiltinFunction::inherited(prototype, key)
 }
 
 /// A built-in function's own `name` and `length`: the only own properties
-/// ECMA gives one, both fixed.
+/// ECMA gives one, both fixed — and only when the object is callable at
+/// all (`Math` has neither).
 fn builtin_function_own_property(function: BuiltinFunction, key: &str) -> Option<Value> {
+    if !function.callable() {
+        return None;
+    }
     match key {
         "name" => Some(Value::String(function.name().into())),
         "length" => Some(Value::Number(f64::from(function.length()))),
@@ -377,22 +385,358 @@ pub(crate) fn nullish_property_read(base: &Value, key: &Value) -> RuntimeError {
     }
 }
 
+/// The own keys of `Object.prototype`, the inherited surface every ordinary
+/// ECMA object answers `true` to under `in`.
+pub(crate) const OBJECT_PROTOTYPE_KEYS: &[&str] = &[
+    "__proto__",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    "constructor",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "toLocaleString",
+    "toString",
+    "valueOf",
+];
+
+/// The own keys of `Array.prototype`.
+pub(crate) const ARRAY_PROTOTYPE_KEYS: &[&str] = &[
+    "at",
+    "concat",
+    "copyWithin",
+    "entries",
+    "every",
+    "fill",
+    "filter",
+    "find",
+    "findIndex",
+    "findLast",
+    "findLastIndex",
+    "flat",
+    "flatMap",
+    "forEach",
+    "includes",
+    "indexOf",
+    "join",
+    "keys",
+    "lastIndexOf",
+    "map",
+    "pop",
+    "push",
+    "reduce",
+    "reduceRight",
+    "reverse",
+    "shift",
+    "slice",
+    "some",
+    "sort",
+    "splice",
+    "toReversed",
+    "toSorted",
+    "toSpliced",
+    "unshift",
+    "values",
+    "with",
+];
+
+/// The own keys of `RegExp.prototype`: the methods plus the flag getters.
+const REGEXP_PROTOTYPE_KEYS: &[&str] = &[
+    "compile",
+    "dotAll",
+    "exec",
+    "flags",
+    "global",
+    "ignoreCase",
+    "multiline",
+    "source",
+    "sticky",
+    "toString",
+    "unicode",
+    "unicodeSets",
+];
+
+/// The own keys of `Map.prototype`.
+const MAP_PROTOTYPE_KEYS: &[&str] = &[
+    "clear", "delete", "entries", "forEach", "get", "has", "keys", "set", "size", "values",
+];
+
+/// The own keys of `Set.prototype`.
+const SET_PROTOTYPE_KEYS: &[&str] = &[
+    "add",
+    "clear",
+    "delete",
+    "difference",
+    "entries",
+    "forEach",
+    "has",
+    "intersection",
+    "isDisjointFrom",
+    "isSubsetOf",
+    "isSupersetOf",
+    "keys",
+    "size",
+    "symmetricDifference",
+    "union",
+    "values",
+];
+
+/// The own keys of `Date.prototype`.
+const DATE_PROTOTYPE_KEYS: &[&str] = &[
+    "getDate",
+    "getDay",
+    "getFullYear",
+    "getHours",
+    "getMilliseconds",
+    "getMinutes",
+    "getMonth",
+    "getSeconds",
+    "getTime",
+    "getTimezoneOffset",
+    "getUTCDate",
+    "getUTCDay",
+    "getUTCFullYear",
+    "getUTCHours",
+    "getUTCMilliseconds",
+    "getUTCMinutes",
+    "getUTCMonth",
+    "getUTCSeconds",
+    "getYear",
+    "setDate",
+    "setFullYear",
+    "setHours",
+    "setMilliseconds",
+    "setMinutes",
+    "setMonth",
+    "setSeconds",
+    "setTime",
+    "setUTCDate",
+    "setUTCFullYear",
+    "setUTCHours",
+    "setUTCMilliseconds",
+    "setUTCMinutes",
+    "setUTCMonth",
+    "setUTCSeconds",
+    "setYear",
+    "toDateString",
+    "toISOString",
+    "toJSON",
+    "toLocaleDateString",
+    "toLocaleString",
+    "toLocaleTimeString",
+    "toString",
+    "toTimeString",
+    "toUTCString",
+    "valueOf",
+];
+
+/// The own keys of `Error.prototype` beyond `constructor`.
+const ERROR_PROTOTYPE_KEYS: &[&str] = &["message", "name", "toString"];
+
+/// The own keys of `URL.prototype`.
+const URL_PROTOTYPE_KEYS: &[&str] = &[
+    "hash",
+    "host",
+    "hostname",
+    "href",
+    "origin",
+    "password",
+    "pathname",
+    "port",
+    "protocol",
+    "search",
+    "searchParams",
+    "toJSON",
+    "toString",
+    "username",
+];
+
+/// The own keys of `URLSearchParams.prototype`.
+const URL_SEARCH_PARAMS_PROTOTYPE_KEYS: &[&str] = &[
+    "append", "delete", "entries", "forEach", "get", "getAll", "has", "keys", "set", "size",
+    "sort", "toString", "values",
+];
+
+/// The own keys of `Function.prototype` — the inherited surface every
+/// ECMA function answers `true` to under `in`.
+pub(crate) const FUNCTION_PROTOTYPE_KEYS: &[&str] = &[
+    "apply",
+    "arguments",
+    "bind",
+    "call",
+    "caller",
+    "constructor",
+    "length",
+    "name",
+    "prototype",
+    "toString",
+];
+
+pub(crate) fn is_object_prototype_key(key: &str) -> bool {
+    OBJECT_PROTOTYPE_KEYS.contains(&key)
+}
+
+/// The strict-mode `arguments` record poisons `callee` and `caller`: the
+/// names are own properties (so `hasOwnProperty` sees them) but reading,
+/// writing or deleting them raises the TypeError ECMA raises.
+pub(crate) fn arguments_poison_error(key: &str) -> RuntimeError {
+    RuntimeError::ValidationFailed {
+        reason: format!("TypeError: '{key}' may not be accessed on a strict mode arguments object"),
+    }
+}
+
+pub(crate) fn is_array_prototype_key(key: &str) -> bool {
+    ARRAY_PROTOTYPE_KEYS.contains(&key)
+}
+
+/// `key in value` on the heap objects this dialect materializes: own keys
+/// plus the built-in prototype surface of the value's kind. The caller
+/// rejects primitive right operands with a TypeError before asking.
+pub(crate) fn javascript_value_has_property(
+    heap: &Heap,
+    target: &Value,
+    key: &str,
+) -> Result<bool, RuntimeError> {
+    match target {
+        Value::Ref(id) => javascript_heap_has_property(heap, *id, key),
+        Value::Record(record) => Ok(record.get(key).is_some() || is_object_prototype_key(key)),
+        Value::List(values) | Value::Tuple(values) => Ok(javascript_array_index_key(key)
+            .is_some_and(|index| index < values.len())
+            || key == "length"
+            || is_array_prototype_key(key)
+            || is_object_prototype_key(key)),
+        _ => Ok(false),
+    }
+}
+
+/// `key in heap-object`: own keys plus the kind's prototype surface.
+pub(crate) fn javascript_heap_has_property(
+    heap: &Heap,
+    id: HeapId,
+    key: &str,
+) -> Result<bool, RuntimeError> {
+    if heap.is_builtin_object(id) {
+        return heap.builtin_has_property(id, key);
+    }
+    if javascript_heap_has_own(heap, id, key)? {
+        return Ok(true);
+    }
+    Ok(match heap.get(id)? {
+        HeapObject::List(_) | HeapObject::Tuple(_) | HeapObject::RegExpMatch(_) => {
+            is_array_prototype_key(key) || is_object_prototype_key(key)
+        }
+        HeapObject::RegExp(_) => {
+            REGEXP_PROTOTYPE_KEYS.contains(&key) || is_object_prototype_key(key)
+        }
+        HeapObject::Map(_) => MAP_PROTOTYPE_KEYS.contains(&key) || is_object_prototype_key(key),
+        HeapObject::Set(_) => SET_PROTOTYPE_KEYS.contains(&key) || is_object_prototype_key(key),
+        HeapObject::Date(_) => DATE_PROTOTYPE_KEYS.contains(&key) || is_object_prototype_key(key),
+        HeapObject::Error(_) => ERROR_PROTOTYPE_KEYS.contains(&key) || is_object_prototype_key(key),
+        HeapObject::Url(_) => URL_PROTOTYPE_KEYS.contains(&key) || is_object_prototype_key(key),
+        HeapObject::UrlSearchParams(_) => {
+            URL_SEARCH_PARAMS_PROTOTYPE_KEYS.contains(&key) || is_object_prototype_key(key)
+        }
+        HeapObject::Closure { .. } => {
+            FUNCTION_PROTOTYPE_KEYS.contains(&key) || is_object_prototype_key(key)
+        }
+        // `is_builtin_object` answered above; the arm only keeps the match
+        // exhaustive.
+        HeapObject::BuiltinFunction(_) => return heap.builtin_has_property(id, key),
+        HeapObject::Record(_) => is_object_prototype_key(key),
+    })
+}
+
+/// `Object.hasOwn` on a heap object: the own surface only — record fields,
+/// present list indices, match-array members, the exotic data slots, a
+/// guest function's `length`/`name`/`prototype`, and a built-in's static
+/// surface.
+pub(crate) fn javascript_heap_has_own(
+    heap: &Heap,
+    id: HeapId,
+    key: &str,
+) -> Result<bool, RuntimeError> {
+    if heap.is_builtin_object(id) {
+        return heap.builtin_has_own(id, key);
+    }
+    Ok(match heap.get(id)? {
+        HeapObject::Record(record) => record.get(key).is_some(),
+        HeapObject::List(values) => {
+            javascript_array_index_key(key)
+                .is_some_and(|index| index < values.len() && !heap.is_list_hole(id, index))
+                || key == "length"
+        }
+        HeapObject::Tuple(values) => {
+            javascript_array_index_key(key).is_some_and(|index| index < values.len())
+                || key == "length"
+        }
+        HeapObject::RegExp(_) => key == "lastIndex" || REGEXP_FLAG_KEYS.contains(&key),
+        HeapObject::RegExpMatch(result) => {
+            javascript_array_index_key(&key).is_some_and(|index| index < result.items.len())
+                || matches!(key, "index" | "input" | "groups" | "length")
+        }
+        HeapObject::Map(_) | HeapObject::Set(_) | HeapObject::UrlSearchParams(_) => key == "size",
+        HeapObject::Date(_) => false,
+        HeapObject::Error(error) => {
+            (key == "message" && error.message.is_some())
+                || (key == "cause" && error.cause.is_some())
+                || (key == "errors" && error.errors.is_some())
+        }
+        HeapObject::Url(_) => heap.url_property(id, key)?.is_some(),
+        // A guest function's own data slots are `name` and `length`, present
+        // until `delete` clears them.
+        HeapObject::Closure { name, length, .. } => match key {
+            "name" => name.is_some(),
+            "length" => length.is_some(),
+            _ => false,
+        },
+        // `is_builtin_object` answered above; the arm only keeps the match
+        // exhaustive.
+        HeapObject::BuiltinFunction(_) => return heap.builtin_has_own(id, key),
+    })
+}
+
+/// The flag getters ECMA installs as own *accessor* properties on
+/// `RegExp.prototype` — `lastIndex` is the only own data slot on the
+/// instance.
+const REGEXP_FLAG_KEYS: &[&str] = &[
+    "dotAll",
+    "flags",
+    "global",
+    "ignoreCase",
+    "multiline",
+    "source",
+    "sticky",
+    "unicode",
+    "unicodeSets",
+];
+
 pub(crate) fn read_javascript_heap_field(
     heap: &Heap,
     id: HeapId,
     field: &Name,
 ) -> Result<Value, RuntimeError> {
     if field.text.as_ref() == "lastIndex"
-        && let Some(last_index) = heap.regexp_last_index(id)?
+        && let Some(last_index) = heap.regexp_last_index_value(id)?
     {
-        return Ok(Value::Number(last_index as f64));
+        return Ok(last_index);
     }
     Ok(match heap.get(id)? {
-        HeapObject::Record(record) => record
-            .get_symbol(field.symbol)
-            .cloned()
-            .unwrap_or(Value::Undefined),
-        HeapObject::Closure { .. } if matches!(field.text.as_ref(), "caller" | "arguments") => {
+        HeapObject::Record(record) => {
+            // `callee`/`caller` are poisoned accessors on a strict-mode
+            // `arguments` record: own names that throw TypeError on read.
+            if heap.is_arguments_record(id) && matches!(field.text.as_ref(), "callee" | "caller") {
+                return Err(arguments_poison_error(field.text.as_ref()));
+            }
+            record
+                .get_symbol(field.symbol)
+                .cloned()
+                .unwrap_or(Value::Undefined)
+        }
+        HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_)
+            if matches!(field.text.as_ref(), "caller" | "arguments") =>
+        {
             return Err(super::heap::restricted_function_property());
         }
         HeapObject::List(values) | HeapObject::Tuple(values) if field.text.as_ref() == "length" => {
@@ -470,12 +814,21 @@ pub(crate) fn read_javascript_heap_index(
         HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index_key(&key)
             .and_then(|index| values.get(index).cloned())
             .unwrap_or(Value::Undefined),
-        HeapObject::Closure { .. } if matches!(key.as_str(), "caller" | "arguments") => {
+        HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_)
+            if matches!(key.as_str(), "caller" | "arguments") =>
+        {
             return Err(super::heap::restricted_function_property());
         }
-        HeapObject::Record(record) => record.get(&key).cloned().unwrap_or(Value::Undefined),
+        HeapObject::Record(record) => {
+            if heap.is_arguments_record(id) && matches!(key.as_str(), "callee" | "caller") {
+                return Err(arguments_poison_error(&key));
+            }
+            record.get(&key).cloned().unwrap_or(Value::Undefined)
+        }
         HeapObject::RegExp(regexp) => match key.as_str() {
-            "lastIndex" => Value::Number(regexp.last_index as f64),
+            "lastIndex" => heap
+                .regexp_last_index_value(id)?
+                .unwrap_or(Value::Number(regexp.last_index as f64)),
             "source" => Value::String(regexp_source(regexp).into()),
             "flags" => Value::String(regexp.flags.as_str().into()),
             "global" => Value::Bool(regexp.flags.contains('g')),
