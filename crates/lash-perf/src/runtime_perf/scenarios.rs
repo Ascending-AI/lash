@@ -645,7 +645,7 @@ impl RuntimePerfScenario {
             "turn_start_gate",
             Standard,
             RuntimeScenario,
-            "Measures the native turn-cancel gate peek through the bounded retry wrapper below protocol and facade ownership.",
+            "Measures the turn-cancel gate peek through the bounded retry wrapper below protocol and facade ownership.",
             wiring { turn_start_gate = true }
         ),
         runtime_perf_metadata!(
@@ -667,7 +667,7 @@ impl RuntimePerfScenario {
             "store_hardening_hot_paths",
             Standard,
             RuntimeScenario,
-            "Measures hardening-era store operations below protocol and facade ownership on the in-memory floor and real SQLite/PostgreSQL backends.",
+            "Measures hardening-era store operations below protocol and facade ownership on the SQLite memory floor and real SQLite file and PostgreSQL backends.",
             false
         ),
         runtime_perf_metadata!(

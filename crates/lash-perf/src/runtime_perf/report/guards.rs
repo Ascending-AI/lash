@@ -253,9 +253,8 @@ pub(super) fn evaluate_budgets(
                     stage_duration_ms(summary, stage::TOTAL),
                 ),
                 GuardedSpan::RunTurn => {
-                    // The 1,537-row fixture is populated through TestLocalProcessRegistry,
-                    // whose test-only map-clone writes are quadratic. Keep that separately
-                    // reported setup span out of the product-facing release guard.
+                    // Populating the 1,537-row registry fixture is setup, reported as its
+                    // own span. Keep it out of the product-facing release guard.
                     (
                         "run_turn_alloc_bytes",
                         stage_alloc_bytes(summary, stage::RUN_TURN),

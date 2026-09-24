@@ -31,6 +31,7 @@ lash-conformance = { workspace = true }
 lash-core = { workspace = true, features = ["perf-witness", "testing"] }
 lash-lashlang-runtime = { workspace = true }
 lash-restate = { workspace = true }
+lash-restate-test = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["perf-witness", "testing"] }
 lash = { workspace = true, features = ["rlm"] }
 lash-llm-tools = { workspace = true }

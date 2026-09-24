@@ -483,7 +483,7 @@ async fn run_once_inner(
             } else if let Some(root) = sqlite_root.as_ref() {
                 build_runtime_with_sqlite_store(scenario, root.clone()).await?
             } else {
-                build_runtime_with_store(scenario, None, trace_config).await?
+                build_runtime(scenario, trace_config).await?
             };
             Ok((sqlite_root, runtime))
         })

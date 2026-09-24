@@ -22,7 +22,7 @@ struct RuntimeBudgets {
 ///
 /// For 38 scenarios this is `WholeRun` (comparing `total_alloc_bytes` and `total_ms`).
 /// For `ProcessListStress` this is `RunTurn` (comparing `run_turn_alloc_bytes` and
-/// `run_turn_ms`), keeping the test-only quadratic fixture population out of the
+/// `run_turn_ms`), keeping the fixture population setup out of the
 /// release guard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]

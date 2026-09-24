@@ -4,12 +4,8 @@ use super::*;
 use tokio_util::sync::CancellationToken;
 
 async fn benchmark_plugin_ids(scenario: RuntimePerfScenario) -> Vec<&'static str> {
-    let effect_host = lash::Backend::effect_host(
-        memory_backend()
-            .await
-            .expect("SQLite memory backend")
-            .as_ref(),
-    );
+    let effect_host =
+        lash::Backend::effect_host(&restate_backend().await.expect("Restate test backend"));
     let settlement_control = scenario
         .settlement_children()
         .map(|_| Arc::new(BenchmarkSettlementControl::new()));
@@ -157,8 +153,7 @@ async fn rlm_globals_keeps_fixed_session_projection_across_real_turns() {
         RuntimePerfScenario::RlmGlobals,
         1,
         Box::pin(async {
-            let mut runtime =
-                build_runtime_with_store(RuntimePerfScenario::RlmGlobals, None, None).await?;
+            let mut runtime = build_runtime(RuntimePerfScenario::RlmGlobals, None).await?;
             seed_runtime_state(&mut runtime, RuntimePerfScenario::RlmGlobals).await?;
             let turn = runtime
                 .run_turn(

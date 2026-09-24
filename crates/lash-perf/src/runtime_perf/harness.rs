@@ -30,7 +30,8 @@ use super::providers::{
 };
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
-use backend::{PerfBackend, memory_backend};
+pub(crate) use backend::memory_stores;
+use backend::{PerfBackend, restate_backend};
 
 const HISTORY_EXCHANGES: usize = 18;
 // `deep_turn_composition` performs two provider iterations: one runs the
@@ -136,7 +137,109 @@ impl BenchmarkCore {
     }
 }
 
+/// How a benchmark turn reaches its effect controller.
+#[derive(Clone)]
+pub(crate) enum TurnEntry {
+    /// The backend's host scopes the turn itself: the durable SQLite and
+    /// PostgreSQL lanes.
+    Host,
+    /// The turn runs inside a handler on the Restate server double, where a
+    /// Restate deployment runs one. Restate re-runs the handler from the top
+    /// on every replay, so a turn that suspends runs again under its turn id.
+    RestateHandler(lash_restate_test::RestateTestBackend),
+}
+
+impl TurnEntry {
+    /// Run one turn of `session` to its report. Without a `turn_id` the host
+    /// lane lets the session name the turn; the Restate lane names it, since
+    /// its handler is keyed by the turn scope.
+    pub(crate) async fn run(
+        &self,
+        session: &lash::LashSession,
+        input: lash::TurnInput,
+        turn_id: Option<&TurnId>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> anyhow::Result<lash::TurnReport> {
+        match self {
+            Self::Host => {
+                let scope_turn_id = turn_id.cloned().unwrap_or_else(|| {
+                    TurnId::from(
+                        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
+                            .0
+                            .to_string(),
+                    )
+                });
+                let effect_host = session.effect_host();
+                let scoped_effect_controller = effect_host
+                    .scoped(
+                        lash_core::AdmittedScope::unpinned(session.turn_scope(scope_turn_id))
+                            .map_err(anyhow::Error::from)?,
+                    )
+                    .map_err(anyhow::Error::from)?;
+                let mut turn = session.turn(input).cancel(cancel);
+                if let Some(turn_id) = turn_id {
+                    turn = turn.turn_id(turn_id);
+                }
+                turn.advanced()
+                    .collect_session_events_with_scope(
+                        &lash::runtime::NoopEventSink,
+                        scoped_effect_controller,
+                    )
+                    .await
+                    .map_err(anyhow::Error::from)
+            }
+            Self::RestateHandler(restate) => {
+                let turn_id = turn_id.cloned().unwrap_or_else(|| {
+                    TurnId::from(format!("runtime-perf-turn-{}", uuid::Uuid::new_v4()))
+                });
+                let admitted =
+                    lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
+                        .map_err(anyhow::Error::from)?;
+                let report: Arc<Mutex<Option<anyhow::Result<lash::TurnReport>>>> =
+                    Arc::new(Mutex::new(None));
+                let attempt: lash_restate_test::HandlerAttempt = {
+                    let session = session.clone();
+                    let report = Arc::clone(&report);
+                    Arc::new(move |scoped| {
+                        let session = session.clone();
+                        let input = input.clone();
+                        let turn_id = turn_id.clone();
+                        let cancel = cancel.clone();
+                        let report = Arc::clone(&report);
+                        Box::pin(async move {
+                            let result = session
+                                .turn(input)
+                                .turn_id(turn_id)
+                                .cancel(cancel)
+                                .advanced()
+                                .collect_session_events_with_scope(
+                                    &lash::runtime::NoopEventSink,
+                                    scoped,
+                                )
+                                .await
+                                .map_err(anyhow::Error::from);
+                            *report.lock_recover() = Some(result);
+                        })
+                    })
+                };
+                restate
+                    .run_in_handler(admitted, attempt)
+                    .await
+                    .map_err(|err| anyhow::anyhow!("runtime perf turn handler: {err}"))?;
+                report
+                    .lock_recover()
+                    .take()
+                    .ok_or_else(|| anyhow::anyhow!("the turn's handler recorded no report"))?
+            }
+        }
+    }
+}
+
 pub(crate) struct BenchmarkRuntime {
+    turn_entry: TurnEntry,
+    /// The in-process lane's deployment worker probes; the durable lanes'
+    /// cores carry their own.
+    process_phase_probes: Option<lash::runtime::RuntimeTurnPhaseProbeSlot>,
     core: BenchmarkCore,
     session: Option<lash::LashSession>,
     store: Option<Arc<RuntimePerfStore>>,
@@ -168,10 +271,14 @@ impl BenchmarkRuntime {
 
     #[expect(
         clippy::expect_used,
-        reason = "the in-memory store is installed by set_up before measurement begins; the accessor is the panicking half of the Option field"
+        reason = "the in-process lane installs its session store before measurement begins; the accessor is the panicking half of the Option field"
     )]
     pub(crate) fn store(&self) -> Arc<RuntimePerfStore> {
-        Arc::clone(self.store.as_ref().expect("runtime perf in-memory store"))
+        Arc::clone(
+            self.store
+                .as_ref()
+                .expect("runtime perf in-process lane store"),
+        )
     }
 
     pub(crate) fn store_metrics(&self) -> Arc<RuntimePerfStoreMetrics> {
@@ -233,8 +340,8 @@ impl BenchmarkRuntime {
         if let Some(session) = self.session.take() {
             session.close().await?;
         }
-        // The perf catalog serves this runtime's one root store for the
-        // session, so the seeded state lands in `self.store()`.
+        // The session's store and `self.store()` share one SQLite memory
+        // database, so the seeded state is what `self.store()` reads.
         self.session = Some(
             self.core
                 .open_session_with_state(
@@ -284,11 +391,11 @@ impl BenchmarkRuntime {
         &self,
         probe: Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>,
     ) {
-        self.session
-            .as_ref()
-            .expect("benchmark session")
-            .set_turn_phase_probe(probe)
-            .await;
+        let session = self.session.as_ref().expect("benchmark session");
+        if let Some(slot) = &self.process_phase_probes {
+            slot.set_for_session(session.session_id(), Arc::clone(&probe));
+        }
+        session.set_turn_phase_probe(probe).await;
     }
 
     #[expect(
@@ -312,29 +419,7 @@ impl BenchmarkRuntime {
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<lash::TurnReport> {
         let session = self.session.as_ref().expect("benchmark session");
-        let effect_host = session.effect_host();
-        let scoped_effect_controller = effect_host
-            .scoped(
-                lash_core::AdmittedScope::unpinned(
-                    session.turn_scope(
-                        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
-                            .0
-                            .to_string(),
-                    ),
-                )
-                .map_err(anyhow::Error::from)?,
-            )
-            .map_err(anyhow::Error::from)?;
-        session
-            .turn(input)
-            .cancel(cancel)
-            .advanced()
-            .collect_session_events_with_scope(
-                &lash::runtime::NoopEventSink,
-                scoped_effect_controller,
-            )
-            .await
-            .map_err(anyhow::Error::from)
+        self.turn_entry.run(session, input, None, cancel).await
     }
 
     #[expect(
@@ -348,24 +433,14 @@ impl BenchmarkRuntime {
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<lash::TurnReport> {
         let session = self.session.as_ref().expect("benchmark session");
-        let effect_host = session.effect_host();
-        let scoped_effect_controller = effect_host
-            .scoped(
-                lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id))
-                    .map_err(anyhow::Error::from)?,
-            )
-            .map_err(anyhow::Error::from)?;
-        session
-            .turn(input)
-            .turn_id(turn_id)
-            .cancel(cancel)
-            .advanced()
-            .collect_session_events_with_scope(
-                &lash::runtime::NoopEventSink,
-                scoped_effect_controller,
-            )
+        self.turn_entry
+            .run(session, input, Some(turn_id), cancel)
             .await
-            .map_err(anyhow::Error::from)
+    }
+
+    /// How this runtime's turns reach their effect controller.
+    pub(crate) fn turn_entry(&self) -> TurnEntry {
+        self.turn_entry.clone()
     }
 
     #[expect(
@@ -837,22 +912,71 @@ fn benchmark_plugin_factories(
     factories
 }
 
-/// The in-process lane's backend: a SQLite memory backend whose
-/// session catalog is the perf store decorator over `store`.
-async fn perf_store_backend(store: Arc<RuntimePerfStore>) -> anyhow::Result<PerfBackend> {
-    Ok(PerfBackend::over(memory_backend().await?)
-        .with_catalog(Arc::new(RuntimePerfStoreFactory::new(store))))
+/// The in-process lane: lash-restate's engine on a fresh server double,
+/// its session catalog behind the perf store decorator.
+struct InProcessLane {
+    restate: lash_restate_test::RestateTestBackend,
+    backend: PerfBackend,
+    stores: RuntimePerfStoreFactory,
+}
+
+async fn in_process_lane() -> anyhow::Result<InProcessLane> {
+    let restate = restate_backend().await?;
+    let stores = RuntimePerfStoreFactory::decorating_without_commit_measurement(
+        lash::Backend::session_store_factory(&restate),
+    );
+    let backend = PerfBackend::over_restate(&restate).with_catalog(Arc::new(stores.clone()));
+    Ok(InProcessLane {
+        restate,
+        backend,
+        stores,
+    })
+}
+
+/// Serve the lane's process segments with `core`'s durable worker, as a
+/// Restate deployment does. The worker reads its turn-phase probes from the
+/// returned slot: the deployment's worker is not the session's runtime, so a
+/// probe the benchmark installs on a session reaches its processes only
+/// through this slot.
+fn install_process_worker(
+    restate: &lash_restate_test::RestateTestBackend,
+    core: &BenchmarkCore,
+) -> anyhow::Result<lash::runtime::RuntimeTurnPhaseProbeSlot> {
+    let probes = lash::runtime::RuntimeTurnPhaseProbeSlot::default();
+    let config = core
+        .as_lash_core()
+        .durable_process_worker_config()?
+        .with_turn_phase_probe_slot(probes.clone());
+    restate.install_process_worker(
+        lash::durability::DurableProcessWorker::new(config)
+            .map_err(|err| anyhow::anyhow!(err.to_string()))?,
+    );
+    Ok(probes)
+}
+
+/// A decorated root session store on a SQLite memory store set of its own,
+/// for the store-level scenarios that drive no engine.
+pub(crate) async fn memory_perf_store(
+    session_id: &SessionId,
+) -> anyhow::Result<Arc<RuntimePerfStore>> {
+    let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
+        memory_stores().await?.session_store_factory(),
+    );
+    Ok(factory.root_store(session_id).await?)
 }
 
 pub(crate) async fn build_embed_core(
     scenario: RuntimePerfScenario,
-    store: Arc<RuntimePerfStore>,
-) -> anyhow::Result<BenchmarkCore> {
-    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> =
-        Arc::new(perf_store_backend(store).await?);
+) -> anyhow::Result<(BenchmarkCore, RuntimePerfStoreFactory, TurnEntry)> {
+    let InProcessLane {
+        restate,
+        backend,
+        stores,
+    } = in_process_lane().await?;
+    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> = Arc::new(backend);
     let effect_host = backend.effect_host();
     let provider = benchmark_provider(scenario).into_handle();
-    match scenario.execution_mode() {
+    let core = match scenario.execution_mode() {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider)
             .with_explicit_ephemeral_facets()
             .build(runtime_perf_owner())
@@ -868,12 +992,13 @@ pub(crate) async fn build_embed_core(
         .build(runtime_perf_owner())
         .map(BenchmarkCore::Rlm)
         .map_err(anyhow::Error::from),
-    }
+    }?;
+    install_process_worker(&restate, &core)?;
+    Ok((core, stores, TurnEntry::RestateHandler(restate)))
 }
 
-pub(crate) async fn build_runtime_with_store(
+pub(crate) async fn build_runtime(
     scenario: RuntimePerfScenario,
-    store: Option<Arc<RuntimePerfStore>>,
     trace_config: Option<RuntimePerfTraceConfig>,
 ) -> anyhow::Result<BenchmarkRuntime> {
     let wiring = scenario.wiring();
@@ -904,10 +1029,11 @@ pub(crate) async fn build_runtime_with_store(
             let (provider, control) = benchmark_provider_with_control(scenario);
             (provider.into_handle(), control)
         };
-    let store = store.unwrap_or_else(|| Arc::new(RuntimePerfStore::default()));
-    // Every scenario measures the same host; the start-gate scenario layers
-    // its retry fixture over it rather than swapping the host out.
-    let mut perf_backend = perf_store_backend(Arc::clone(&store)).await?;
+    let InProcessLane {
+        restate,
+        backend: mut perf_backend,
+        stores: store_factory,
+    } = in_process_lane().await?;
     if wiring.turn_start_gate {
         perf_backend = perf_backend.with_effect_layer(Arc::new(StartGateRetryLayer::default()));
     }
@@ -943,8 +1069,8 @@ pub(crate) async fn build_runtime_with_store(
                 builder = builder.trace_level(config.trace_level);
             }
             if !wiring.queued_work {
-                // Scenarios without a queued-work lane still use the retained
-                // perf store installed above.
+                // Scenarios without a queued-work lane still use the decorated
+                // catalog installed above.
                 builder = builder.without_queued_work();
             }
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
@@ -967,18 +1093,23 @@ pub(crate) async fn build_runtime_with_store(
                 builder = builder.trace_level(config.trace_level);
             }
             if !wiring.queued_work {
-                // Scenarios without a queued-work lane still use the retained
-                // perf store installed above.
+                // Scenarios without a queued-work lane still use the decorated
+                // catalog installed above.
                 builder = builder.without_queued_work();
             }
             BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
         }
     };
-    let session = core
-        .open_session(SessionId::from(format!("runtime-perf-{}", scenario.name())))
-        .await?;
+    let process_phase_probes = install_process_worker(&restate, &core)?;
+    let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
+    let session = core.open_session(session_id.clone()).await?;
+    let store = store_factory
+        .session_store(&session_id)
+        .ok_or_else(|| anyhow::anyhow!("runtime perf session store was not opened"))?;
     Ok(BenchmarkRuntime {
-        store_metrics: store.metrics(),
+        store_metrics: store_factory.metrics(),
+        turn_entry: TurnEntry::RestateHandler(restate),
+        process_phase_probes: Some(process_phase_probes),
         core,
         session: Some(session),
         store: Some(store),
@@ -1202,6 +1333,8 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     };
     Ok(BenchmarkRuntime {
         store_metrics,
+        turn_entry: TurnEntry::Host,
+        process_phase_probes: None,
         core,
         session: Some(session),
         store: None,
@@ -1294,6 +1427,8 @@ pub(crate) async fn build_runtime_with_postgres_store(
     };
     Ok(BenchmarkRuntime {
         store_metrics,
+        turn_entry: TurnEntry::Host,
+        process_phase_probes: None,
         core,
         session: Some(session),
         store: None,
