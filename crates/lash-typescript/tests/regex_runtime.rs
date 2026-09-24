@@ -808,3 +808,26 @@ fn match_and_search_evaluate_every_argument_in_order() {
         Value::Number(1.0)
     );
 }
+
+#[test]
+fn regexp_constructor_flags_object_coercion_refuses() {
+    // `new RegExp(regexp, flags)` must apply the same guest-coercion guard to
+    // flags as the string-coercion paths do (FIG-3698).
+    let error = execute(
+        "const p=/a/g; const f={toString:function(){return 'i';}}; finish(new RegExp(p, f).flags);",
+    )
+    .expect_err("an object with a guest toString must refuse as flags");
+    assert!(
+        error.to_string().contains("TS_OBJECT_STRING_COERCION"),
+        "the refusal is the named one: {error}"
+    );
+    // String and absent flags still work.
+    assert_eq!(
+        finished("const p=/a/g; finish(new RegExp(p, 'i').flags);"),
+        Value::String("i".into())
+    );
+    assert_eq!(
+        finished("const p=/a/g; finish(new RegExp(p).flags);"),
+        Value::String("g".into())
+    );
+}
