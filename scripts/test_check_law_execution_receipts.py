@@ -531,14 +531,6 @@ class ParkedEntryTests(unittest.TestCase):
                 "--skip",
                 "tests::conformance_and_poison::turn_crash_matrix_level_1",
                 "--skip",
-                "tests::conformance_and_poison::on_the_server_double::a_diverged_tool_presentation_parks_the_turn",
-                "--skip",
-                "tests::conformance_and_poison::on_the_server_double::a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate",
-                "--skip",
-                "tests::conformance_and_poison::on_the_server_double::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration",
-                "--skip",
-                "tests::conformance_and_poison::on_the_server_double::public_signal_intent_wakes_parked_process",
-                "--skip",
                 "tests::conformance_and_poison::on_the_server_double::a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink",
                 "--skip",
                 "tests::conformance_and_poison::on_the_server_double::a_changed_presentation_environment_on_replay_does_not_change_the_recorded_presentation",
@@ -690,7 +682,7 @@ class RealTreeTests(unittest.TestCase):
         errors: list[str] = []
         manifest_set = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
-        self.assertEqual(len(manifest_set), 11)
+        self.assertEqual(len(manifest_set), 10)
         self.assertIn(
             (
                 "crates/lash-restate/src/tests/conformance_and_poison.rs",

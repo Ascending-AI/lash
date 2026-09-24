@@ -500,7 +500,12 @@ impl LiveConformanceHarness {
         let mut endpoint = Endpoint::builder()
             .bind(ScopeLivenessProbeImpl.serve())
             .bind(GroupOpenBudgetProbeImpl.serve())
-            .bind(super::live_turn_probe::ConformanceTurnProbeImpl.serve())
+            // A turn handler: a parked attempt fails retryably and the
+            // invocation pauses after its last attempt (FIG-3697).
+            .bind(crate::turn_service(
+                super::live_turn_probe::ConformanceTurnProbeImpl.serve(),
+                "run",
+            ))
             .bind(services.index)
             .bind(services.payload)
             .bind(services.dispatch)

@@ -39,6 +39,9 @@ redelivery_laws = [
   # A child whose process-env read faults fails retryably; Restate runs it
   # again once the store answers.
   "tests::conformance_and_poison::a_process_env_store_fault_is_never_the_childs_recorded_outcome",
+  # The turn crashes after its tool result's presentation; Restate redelivers
+  # it, and the redrive parks on the diverged presentation (FIG-3697).
+  "tests::conformance_and_poison::a_diverged_tool_presentation_parks_the_turn",
 ]
 
 [suites.effect-group.replay]

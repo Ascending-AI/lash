@@ -9,13 +9,22 @@
 //! back and runs it on its own controller. The tool calls of that turn open
 //! real Restate effect groups whose children run in the endpoint's dispatch
 //! invocations.
+//!
+//! One scope is one invocation, as on the in-process runner: a turn that
+//! aborts without an outcome — it parked on a replay divergence, or met a
+//! live fault — fails its attempt retryably and leaves the invocation open,
+//! and the law's next run of that scope is Restate's retry of it, replaying
+//! its journal. A parked attempt ends through
+//! [`parked_turn_failure`](crate::parked_turn_failure), exactly as a product
+//! turn handler's does: returning at the park would propose the handler's
+//! output where the journal holds its next command (FIG-3697).
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
 // access is sanctioned here (the workspace clippy ban targets production
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -27,26 +36,53 @@ use restate_sdk::serde::Json;
 
 use crate::RestateIngressClient;
 
-/// What a parked turn runs. A plain law's job runs once. A crash-redrive
-/// law's attempts are factories, because Restate re-runs the handler from the
-/// top on every replay: the crashing attempt runs until it has crashed once,
-/// then every later execution runs the redrive, which replays the crashed
-/// attempt's journal.
-enum ParkedAttempts {
+/// One attempt a law hands a turn's invocation. A plain law's job runs once;
+/// a crash-redrive law's attempts are factories, because Restate re-runs the
+/// handler from the top on every replay, so an attempt runs until one of its
+/// executions ends.
+enum AttemptRun {
     Once(Option<lash_conformance::ConformanceTurnJob>),
-    CrashThenRedrive {
-        crashing: lash_conformance::ConformanceTurnAttempt,
-        redrive: lash_conformance::ConformanceTurnAttempt,
-        crashed: bool,
-    },
+    Factory(lash_conformance::ConformanceTurnAttempt),
 }
 
-type PendingTurn = (lash_core::AdmittedScope, ParkedAttempts);
+struct QueuedAttempt {
+    run: AttemptRun,
+    /// The attempt must crash; its crash is a redelivery, not a failure.
+    crashing: bool,
+}
+
+/// How one execution of the handler ended, as the runner is told.
+#[derive(Debug)]
+enum AttemptEnd {
+    /// The crashing attempt crashed; Restate redelivers the invocation.
+    Crashed,
+    /// The turn settled; the handler returns and the invocation completes.
+    Settled,
+    /// The turn aborted without an outcome; the invocation stays open.
+    Aborted,
+}
+
+/// One scope's invocation, while the law may still run it.
+struct PendingTurn {
+    admitted: lash_core::AdmittedScope,
+    attempts: VecDeque<QueuedAttempt>,
+    ends: tokio::sync::mpsc::UnboundedSender<AttemptEnd>,
+}
 
 fn pending_turns() -> &'static Mutex<HashMap<String, PendingTurn>> {
     static TURNS: OnceLock<Mutex<HashMap<String, PendingTurn>>> = OnceLock::new();
     TURNS.get_or_init(|| Mutex::new(HashMap::new()))
 }
+
+/// Wakes a handler execution that waits for the law's next attempt.
+fn attempt_queued() -> &'static tokio::sync::Notify {
+    static QUEUED: OnceLock<tokio::sync::Notify> = OnceLock::new();
+    QUEUED.get_or_init(tokio::sync::Notify::new)
+}
+
+/// How long a retry of an open invocation waits for the law's next attempt
+/// before it fails retryably, as a parked turn's retries do.
+const NEXT_ATTEMPT_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// The workflow whose handler runs one parked conformance turn.
 #[restate_sdk::workflow]
@@ -56,74 +92,151 @@ pub(super) trait ConformanceTurnProbe {
 
 pub(super) struct ConformanceTurnProbeImpl;
 
+/// What one handler execution runs.
+enum NextAttempt {
+    Run {
+        admitted: lash_core::AdmittedScope,
+        job: lash_conformance::ConformanceTurnJob,
+        crashing: bool,
+        ends: tokio::sync::mpsc::UnboundedSender<AttemptEnd>,
+    },
+    /// A plain job an earlier execution of this attempt already took.
+    Taken,
+    /// The law has queued no attempt yet.
+    Idle,
+    /// No turn with this key is pending in this process.
+    Unknown,
+}
+
+fn next_attempt(key: &str) -> NextAttempt {
+    let mut turns = pending_turns()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(turn) = turns.get_mut(key) else {
+        return NextAttempt::Unknown;
+    };
+    let Some(front) = turn.attempts.front_mut() else {
+        return NextAttempt::Idle;
+    };
+    let job: lash_conformance::ConformanceTurnJob = match &mut front.run {
+        AttemptRun::Once(job) => match job.take() {
+            Some(job) => job,
+            None => return NextAttempt::Taken,
+        },
+        AttemptRun::Factory(attempt) => {
+            let attempt = Arc::clone(attempt);
+            Box::new(move |scoped| attempt(scoped))
+        }
+    };
+    NextAttempt::Run {
+        admitted: turn.admitted.clone(),
+        job,
+        crashing: front.crashing,
+        ends: turn.ends.clone(),
+    }
+}
+
+/// The current attempt ended: the next execution runs the next one.
+fn finish_attempt(key: &str) {
+    if let Some(turn) = pending_turns()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_mut(key)
+    {
+        turn.attempts.pop_front();
+    }
+}
+
 impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
         Json(key): Json<String>,
     ) -> HandlerResult<Json<bool>> {
-        let next = {
-            let mut turns = pending_turns()
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            turns
-                .get_mut(&key)
-                .and_then(|(admitted, attempts)| match attempts {
-                    // Taken, not borrowed: a plain job runs once.
-                    ParkedAttempts::Once(job) => {
-                        job.take().map(|job| (admitted.clone(), job, false))
+        let (admitted, job, crashing, ends) = loop {
+            let queued = attempt_queued().notified();
+            tokio::pin!(queued);
+            queued.as_mut().enable();
+            match next_attempt(&key) {
+                NextAttempt::Run {
+                    admitted,
+                    job,
+                    crashing,
+                    ends,
+                } => break (admitted, job, crashing, ends),
+                // An invocation that finds nothing to run fails terminally
+                // rather than silently succeeding without the turn it was
+                // asked to run.
+                NextAttempt::Unknown | NextAttempt::Taken => {
+                    return Err(TerminalError::new(format!(
+                        "conformance turn `{key}` has no job for this execution; the probe \
+                         handler was re-invoked after its job already ran"
+                    ))
+                    .into());
+                }
+                // A retry of an open invocation waits for the law's next
+                // attempt; one that never comes fails the retry retryably.
+                NextAttempt::Idle => {
+                    if tokio::time::timeout(NEXT_ATTEMPT_WAIT, queued)
+                        .await
+                        .is_err()
+                    {
+                        return Err(HandlerError::from(std::io::Error::other(format!(
+                            "conformance turn `{key}` has no attempt queued"
+                        ))));
                     }
-                    ParkedAttempts::CrashThenRedrive {
-                        crashing,
-                        redrive,
-                        crashed,
-                    } => {
-                        let attempt = Arc::clone(if *crashed { redrive } else { crashing });
-                        let job: lash_conformance::ConformanceTurnJob =
-                            Box::new(move |scoped| attempt(scoped));
-                        Some((admitted.clone(), job, !*crashed))
-                    }
-                })
-        };
-        // An invocation that finds nothing to run fails terminally rather
-        // than silently succeeding without the turn it was asked to run.
-        let Some((admitted, job, crashing)) = next else {
-            return Err(TerminalError::new(format!(
-                "conformance turn `{key}` is not parked in this process; the probe \
-                 handler was re-invoked after its job already ran"
-            ))
-            .into());
+                }
+            }
         };
         let controller = crate::RestateRuntimeEffectController::new_for_test(ctx);
         let scoped = controller
             .scoped_effect_controller(admitted)
             .map_err(TerminalError::from_error)?;
-        match (CatchUnwind { inner: job(scoped) }).await {
-            Ok(_) => Ok(Json(true)),
+        let (end, result) = match (CatchUnwind { inner: job(scoped) }).await {
+            Ok(lash_conformance::ConformanceTurnEnd::Settled) => {
+                (AttemptEnd::Settled, Ok(Json(true)))
+            }
+            // The turn parked: its attempt ends the way every parked turn
+            // handler's does, retryably, so the invocation keeps its journal.
+            Ok(lash_conformance::ConformanceTurnEnd::Aborted(
+                lash_core::TurnFailureCause::Parked,
+            )) => (
+                AttemptEnd::Aborted,
+                Err(crate::parked_turn_failure(format!(
+                    "conformance turn `{key}`"
+                ))),
+            ),
+            // Any other abort is a live fault: retryable, the invocation
+            // stays open for its retry.
+            Ok(lash_conformance::ConformanceTurnEnd::Aborted(cause)) => (
+                AttemptEnd::Aborted,
+                Err(HandlerError::from(std::io::Error::other(format!(
+                    "conformance turn `{key}` aborted: {cause:?}"
+                )))),
+            ),
             // The crashing attempt died as the law asked: fail retryably, so
             // Restate redelivers the invocation and the redrive replays this
             // attempt's journal — the way a deployment recovers a turn whose
             // handler died.
-            Err(()) if crashing => {
-                if let Some((_, ParkedAttempts::CrashThenRedrive { crashed, .. })) = pending_turns()
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .get_mut(&key)
-                {
-                    *crashed = true;
-                }
+            Err(()) if crashing => (
+                AttemptEnd::Crashed,
                 Err(HandlerError::from(std::io::Error::other(format!(
                     "conformance turn `{key}` crashed; Restate redelivers it to the redrive"
-                ))))
-            }
+                )))),
+            ),
             // Any other panic in the law must fail the invocation terminally:
             // an unwinding handler reads as retryable, and the retry would
             // find no job.
-            Err(()) => Err(TerminalError::new(format!(
-                "conformance turn `{key}` panicked inside the probe handler"
-            ))
-            .into()),
-        }
+            Err(()) => {
+                return Err(TerminalError::new(format!(
+                    "conformance turn `{key}` panicked inside the probe handler"
+                ))
+                .into());
+            }
+        };
+        finish_attempt(&key);
+        let _ = ends.send(end);
+        result
     }
 }
 
@@ -151,6 +264,14 @@ impl<T> Future for CatchUnwind<'_, T> {
 pub(super) struct LiveTurnRunner {
     connection: crate::RestateConnection,
     process_runner: std::sync::Arc<super::effect_group_conformance::LawProcessRunner>,
+    /// The invocations a law left open, by scope: each one's probe key and
+    /// its ingress call, which returns once the invocation completes.
+    open: tokio::sync::Mutex<HashMap<String, OpenInvocation>>,
+}
+
+struct OpenInvocation {
+    key: String,
+    call: tokio::task::JoinHandle<Result<bool, crate::RestateHttpError>>,
 }
 
 impl LiveTurnRunner {
@@ -161,40 +282,100 @@ impl LiveTurnRunner {
         std::sync::Arc::new(Self {
             connection,
             process_runner,
+            open: tokio::sync::Mutex::default(),
         })
     }
 
-    async fn run_parked(&self, admitted: lash_core::AdmittedScope, attempts: ParkedAttempts) {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let key = format!(
-            "turn-probe-{}-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock after the epoch")
-                .as_nanos(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    /// Runs `attempts` as the next attempts of `admitted`'s invocation: a new
+    /// invocation, or the retry of the one a parked or aborted run left open.
+    /// Returns once the turn settled (the invocation completed) or aborted
+    /// (the invocation stays open for the law's next run of the scope).
+    async fn run_attempts(&self, admitted: lash_core::AdmittedScope, attempts: Vec<QueuedAttempt>) {
+        let scope = format!("{:?}", admitted.scope());
+        let crash_expected = attempts.iter().any(|attempt| attempt.crashing);
+        let (ends, mut ended) = tokio::sync::mpsc::unbounded_channel();
+        let mut open = self.open.lock().await;
+        let reopened = open.remove(&scope);
+        let key = reopened.as_ref().map_or_else(
+            || {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                format!(
+                    "turn-probe-{}-{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock after the epoch")
+                        .as_nanos(),
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                )
+            },
+            |open| open.key.clone(),
         );
-        pending_turns()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(key.clone(), (admitted, attempts));
-        let ran = RestateIngressClient::new(self.connection.clone())
-            .call_workflow_json::<_, bool>("ConformanceTurnProbe", &key, "run", &key)
-            .await;
-        let parked = pending_turns()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&key);
-        assert!(
-            matches!(ran, Ok(true)),
-            "the live conformance turn `{key}` did not complete in its handler: {ran:?}"
-        );
-        if let Some((_, ParkedAttempts::CrashThenRedrive { crashed, .. })) = parked {
-            assert!(
-                crashed,
-                "the live conformance turn `{key}` completed without its crashing attempt crashing"
-            );
+        {
+            let mut turns = pending_turns()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let turn = turns.entry(key.clone()).or_insert_with(|| PendingTurn {
+                admitted: admitted.clone(),
+                attempts: VecDeque::new(),
+                ends: ends.clone(),
+            });
+            turn.admitted = admitted;
+            turn.attempts.extend(attempts);
+            turn.ends = ends;
         }
+        attempt_queued().notify_waiters();
+        let mut call = match reopened {
+            Some(open) => open.call,
+            None => {
+                let ingress = RestateIngressClient::new(self.connection.clone());
+                let key = key.clone();
+                tokio::spawn(async move {
+                    ingress
+                        .call_workflow_json::<_, bool>("ConformanceTurnProbe", &key, "run", &key)
+                        .await
+                })
+            }
+        };
+        let mut crashed = false;
+        loop {
+            tokio::select! {
+                end = ended.recv() => match end {
+                    Some(AttemptEnd::Crashed) => crashed = true,
+                    Some(AttemptEnd::Settled) => {
+                        let ran = (&mut call).await.expect("the probe's ingress call task");
+                        pending_turns()
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .remove(&key);
+                        assert!(
+                            matches!(ran, Ok(true)),
+                            "the live conformance turn `{key}` did not complete in its handler: \
+                             {ran:?}"
+                        );
+                        break;
+                    }
+                    Some(AttemptEnd::Aborted) => {
+                        open.insert(scope, OpenInvocation { key: key.clone(), call });
+                        break;
+                    }
+                    None => panic!("the live conformance turn `{key}` lost its attempt channel"),
+                },
+                ran = &mut call => {
+                    pending_turns()
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(&key);
+                    panic!(
+                        "the live conformance turn `{key}` ended before its attempt reported: \
+                         {ran:?}"
+                    );
+                }
+            }
+        }
+        assert!(
+            crashed || !crash_expected,
+            "the live conformance turn `{key}` ended without its crashing attempt crashing"
+        );
     }
 }
 
@@ -205,8 +386,14 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
         admitted: lash_core::AdmittedScope,
         job: lash_conformance::ConformanceTurnJob,
     ) {
-        self.run_parked(admitted, ParkedAttempts::Once(Some(job)))
-            .await;
+        self.run_attempts(
+            admitted,
+            vec![QueuedAttempt {
+                run: AttemptRun::Once(Some(job)),
+                crashing: false,
+            }],
+        )
+        .await;
     }
 
     async fn run_crashed_then_redriven_turn(
@@ -215,13 +402,18 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
         crashing: lash_conformance::ConformanceTurnAttempt,
         redrive: lash_conformance::ConformanceTurnAttempt,
     ) {
-        self.run_parked(
+        self.run_attempts(
             admitted,
-            ParkedAttempts::CrashThenRedrive {
-                crashing,
-                redrive,
-                crashed: false,
-            },
+            vec![
+                QueuedAttempt {
+                    run: AttemptRun::Factory(crashing),
+                    crashing: true,
+                },
+                QueuedAttempt {
+                    run: AttemptRun::Factory(redrive),
+                    crashing: false,
+                },
+            ],
         )
         .await;
     }

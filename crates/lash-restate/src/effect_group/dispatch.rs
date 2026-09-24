@@ -816,8 +816,9 @@ fn is_engine_retried_fault(error: &RuntimeEffectControllerError) -> bool {
     error.turn_failure_cause() == lash_core::TurnFailureCause::LiveFault
 }
 
-/// A child whose run ended in a live fault fails this invocation with a
-/// retryable error instead of recording a settlement.
+/// A child whose run ended in a live fault, or parked on a replay divergence,
+/// fails this invocation with a retryable error instead of recording a
+/// settlement.
 ///
 /// The fault is a fact about this attempt, never the child's outcome: a
 /// recorded `Failed` would replay it on every read of the group, so the turn
@@ -837,6 +838,17 @@ fn refuse_unrecorded_abort(
             request.group_key, request.position
         ))
         .into()),
+        // A child whose replay diverged parks: it is found mid-replay, where
+        // recording a settlement would propose a command the journal does not
+        // hold, so the attempt ends the one way a park ends (FIG-3697).
+        EffectGroupChildRunOutcome::Completed {
+            outcome: Err(error),
+        } if error.turn_failure_cause() == lash_core::TurnFailureCause::Parked => {
+            Err(crate::parked_turn_failure(format!(
+                "effect group {} child {}: {error}",
+                request.group_key, request.position
+            )))
+        }
         _ => Ok(()),
     }
 }

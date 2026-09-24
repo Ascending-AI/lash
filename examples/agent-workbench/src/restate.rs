@@ -1233,7 +1233,7 @@ pub(crate) async fn terminalize_turn_execution(
                         "error": err.message,
                     }),
                 );
-                Err(HandlerError::from(err))
+                Err(lash_restate::parked_turn_failure(err.message))
             }
             AppErrorVerdict::Terminal => {
                 let message = err.message.clone();
