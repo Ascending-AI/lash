@@ -6,6 +6,7 @@ use crate::{PluginError, ToolCatalog, TurnDriverPreamble};
 
 struct PreparedExecutionEnvironment {
     tool_catalog: Arc<ToolCatalog>,
+    tool_definitions: Vec<crate::ToolDefinition>,
     turn_driver_preamble: Arc<TurnDriverPreamble>,
     prompt: PromptLayer,
 }
@@ -81,42 +82,13 @@ impl RuntimeTurnDriver<'_> {
                 return Err((messages.clone(), run_offset));
             }
         };
-        let execution_environment = match self
-            .prepare_execution_environment(&session_policy, self.turn_index, messages.clone())
-            .await
-        {
-            Ok(surface) => surface,
-            Err(err) => {
-                emit!(make_error_event(
-                    crate::TurnFailureKind::PluginPrompt,
-                    None,
-                    err.to_string(),
-                    Some(err.to_string()),
-                ));
-                emit!(SessionStreamEvent::Done);
-                return Err((messages, run_offset));
-            }
-        };
+        // The machine starts with no environment: its protocol-start sync
+        // builds the prompt and the tool surface as a recorded step, so the
+        // drive never reads a surface a replay could not reproduce (FIG-3672
+        // P7b). Only the protocol's driver configuration is taken here, and
+        // that is host configuration, independent of the tools.
         self.mark_phase_begin(RuntimeTurnPhase::PromptBuild);
-        let prepared_prompt = execution_environment.build_prompt(
-            &self.host.core.prompt.prompt,
-            &session_policy.prompt,
-            self.turn_context.prompt_layer(),
-            Some(self.session.prompt_cache()),
-        );
-        let projector_turn_inputs = match self.projector_turn_inputs().await {
-            Ok(inputs) => inputs,
-            Err(err) => {
-                emit!(make_error_event(
-                    crate::TurnFailureKind::PluginPrompt,
-                    None,
-                    err.to_string(),
-                    Some(err.to_string()),
-                ));
-                emit!(SessionStreamEvent::Done);
-                return Err((messages, run_offset));
-            }
-        };
+        let turn_driver_preamble = self.session.protocol_driver_preamble();
         let prepared = crate::build_turn(crate::SansIoTurnInput {
             session_id: self.session_id.clone(),
             agent_frame_id: self
@@ -134,9 +106,12 @@ impl RuntimeTurnDriver<'_> {
             events: self.turn_pipeline.active_events(),
             turn_causes: self.turn_causes.clone(),
             protocol_run_offset: run_offset,
-            turn_driver_preamble: execution_environment.turn_driver_preamble,
-            prepared_prompt,
-            projector_turn_inputs,
+            turn_driver_preamble,
+            prepared_prompt: lash_sansio::PreparedPrompt {
+                context: Default::default(),
+                system_prompt: Arc::from(""),
+            },
+            projector_turn_inputs: Default::default(),
             turn_budget: session_policy.turn_budget,
             no_progress_budget: session_policy.no_progress_budget,
             model_variant: session_policy.model.variant.clone(),
@@ -145,36 +120,26 @@ impl RuntimeTurnDriver<'_> {
             emit_llm_trace: false,
             termination: self.protocol_turn_options.clone(),
         });
-        if self.host.core.tracing.trace_sink.is_some() {
-            let prompt_hash =
-                lash_trace::sha256_hex(prepared.prepared_prompt.system_prompt.as_bytes());
-            let prompt_chars = prepared.prepared_prompt.system_prompt.chars().count();
-            crate::trace::emit_trace(
-                &self.host.core.tracing.trace_sink,
-                &self.host.core.tracing.trace_context,
-                self.trace_context(run_offset),
-                lash_trace::TraceEvent::PromptBuilt {
-                    prompt_hash: prompt_hash.clone(),
-                    prompt_chars,
-                    components: vec![lash_trace::TracePromptComponent {
-                        id: "system_prompt".to_string(),
-                        kind: "rendered_prompt".to_string(),
-                        hash: prompt_hash,
-                        chars: Some(prompt_chars),
-                    }],
-                },
-                self.host.core.clock.as_ref(),
-            );
-        }
         self.policy = session_policy;
         self.mark_phase_end(RuntimeTurnPhase::PromptBuild);
         Ok(prepared.machine)
     }
 
+    /// The step body of an execution-environment sync: builds the prompt and
+    /// the tool surface over the live registry, and returns both with the
+    /// surface's definitions, which the sync records. It installs nothing: the
+    /// drive installs the surface the sync recorded.
     pub(in crate::runtime) async fn refresh_execution_environment(
         &mut self,
         messages: crate::MessageSequence,
-    ) -> Result<Option<crate::sansio::ExecutionEnvironmentSync>, SyncFailure> {
+        protocol_iteration: usize,
+    ) -> Result<
+        (
+            crate::sansio::ExecutionEnvironmentSync,
+            Vec<crate::ToolDefinition>,
+        ),
+        SyncFailure,
+    > {
         let policy = self.policy.policy.clone();
         let execution_environment = self
             .prepare_execution_environment(&policy, self.turn_index, messages)
@@ -186,19 +151,47 @@ impl RuntimeTurnDriver<'_> {
             self.turn_context.prompt_layer(),
             Some(self.session.prompt_cache()),
         );
+        self.trace_prompt_built(protocol_iteration, &prepared_prompt.system_prompt);
         let projector_turn_inputs = self
             .projector_turn_inputs()
             .await
             .map_err(SyncFailure::of_session_error)?;
 
-        Ok(Some(crate::sansio::ExecutionEnvironmentSync {
-            system_prompt: prepared_prompt.system_prompt,
-            tool_specs: execution_environment
-                .turn_driver_preamble
-                .tool_specs
-                .clone(),
-            projector_turn_inputs: Some(projector_turn_inputs),
-        }))
+        Ok((
+            crate::sansio::ExecutionEnvironmentSync {
+                system_prompt: prepared_prompt.system_prompt,
+                tool_specs: execution_environment
+                    .turn_driver_preamble
+                    .tool_specs
+                    .clone(),
+                projector_turn_inputs: Some(projector_turn_inputs),
+            },
+            execution_environment.tool_definitions,
+        ))
+    }
+
+    fn trace_prompt_built(&self, protocol_iteration: usize, system_prompt: &str) {
+        if self.host.core.tracing.trace_sink.is_none() {
+            return;
+        }
+        let prompt_hash = lash_trace::sha256_hex(system_prompt.as_bytes());
+        let prompt_chars = system_prompt.chars().count();
+        crate::trace::emit_trace(
+            &self.host.core.tracing.trace_sink,
+            &self.host.core.tracing.trace_context,
+            self.trace_context(protocol_iteration),
+            lash_trace::TraceEvent::PromptBuilt {
+                prompt_hash: prompt_hash.clone(),
+                prompt_chars,
+                components: vec![lash_trace::TracePromptComponent {
+                    id: "system_prompt".to_string(),
+                    kind: "rendered_prompt".to_string(),
+                    hash: prompt_hash,
+                    chars: Some(prompt_chars),
+                }],
+            },
+            self.host.core.clock.as_ref(),
+        );
     }
 
     /// The projector inputs derived from recorded turn state.
@@ -238,6 +231,7 @@ impl RuntimeTurnDriver<'_> {
             state.authority.subagent.as_ref(),
         )?;
         let tool_catalog = tool_surface.tool_catalog();
+        let tool_definitions = tool_surface.definitions();
         let turn_driver_preamble = tool_surface.preamble();
         let plugin_prompt_contributions = self
             .session
@@ -272,6 +266,7 @@ impl RuntimeTurnDriver<'_> {
         }
         Ok(PreparedExecutionEnvironment {
             tool_catalog,
+            tool_definitions,
             turn_driver_preamble,
             prompt,
         })

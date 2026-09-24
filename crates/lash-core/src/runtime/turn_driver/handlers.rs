@@ -399,7 +399,11 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &TurnObserver,
         cancel: &CancellationToken,
     ) -> Result<(), RuntimeError> {
-        let (result, cell_replay_grammar) = match self
+        let crate::runtime::effect::ServedExecutionEnvironmentSync {
+            result,
+            cell_replay_grammar,
+            tool_surface,
+        } = match self
             .invoke_turn_execution_environment_sync_effect(machine, id, event_tx, cancel)
             .await
         {
@@ -409,6 +413,26 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
+        // The surface the sync recorded is the one the iteration's tool calls
+        // resolve against, whether the sync ran here or was served from the
+        // journal (FIG-3672 P7b). Only a sync that built an environment
+        // recorded one.
+        if matches!(result, Ok(Some(_))) {
+            let authority = &self.turn_pipeline.state().authority;
+            self.session
+                .install_recorded_tool_surface(
+                    &self.session_id,
+                    &authority.tool_access,
+                    authority.subagent.as_ref(),
+                    &tool_surface,
+                )
+                .map_err(|error| {
+                    RuntimeError::new(
+                        RuntimeErrorCode::ToolCatalogResolutionFailed,
+                        format!("the recorded tool surface could not be installed: {error}"),
+                    )
+                })?;
+        }
         self.handle_machine_response(
             machine,
             Response::ExecutionEnvironmentSynced {

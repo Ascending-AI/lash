@@ -1176,6 +1176,12 @@ pub enum RuntimeEffectOutcome {
         /// cells are refused rather than re-issued live.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cell_replay_grammar: Option<u32>,
+        /// The tool surface the sync built: every tool of the catalog the
+        /// iteration's calls resolve against, as its definition. The drive
+        /// installs it as the catalog, on the live pass and on every replay,
+        /// and judges each tool against the live registry on its own (FIG-3672
+        /// P7b). Empty when the sync failed.
+        tool_surface: Vec<crate::ToolDefinition>,
     },
     Sleep,
     AwaitEvent {
@@ -1322,12 +1328,15 @@ async fn durable_attachment_source(
     Ok(source)
 }
 
-/// A journaled execution-environment sync as served: its result, and the cell
-/// replay-key grammar its record names (FIG-3586).
-pub type ServedExecutionEnvironmentSync = (
-    Result<Option<ExecutionEnvironmentSync>, String>,
-    Option<u32>,
-);
+/// A journaled execution-environment sync as served: its result, the cell
+/// replay-key grammar its record names (FIG-3586), and the tool surface it
+/// recorded (FIG-3672).
+#[derive(Debug)]
+pub struct ServedExecutionEnvironmentSync {
+    pub result: Result<Option<ExecutionEnvironmentSync>, String>,
+    pub cell_replay_grammar: Option<u32>,
+    pub tool_surface: Vec<crate::ToolDefinition>,
+}
 
 impl RuntimeEffectOutcome {
     pub fn into_llm_call(self) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
@@ -1543,7 +1552,12 @@ impl RuntimeEffectOutcome {
             Self::SyncExecutionEnvironment {
                 result,
                 cell_replay_grammar,
-            } => Ok((result, cell_replay_grammar)),
+                tool_surface,
+            } => Ok(ServedExecutionEnvironmentSync {
+                result,
+                cell_replay_grammar,
+                tool_surface,
+            }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::SyncExecutionEnvironment,
                 other.kind(),
@@ -1799,6 +1813,7 @@ mod cell_replay_grammar_tests {
         let stamped = RuntimeEffectOutcome::SyncExecutionEnvironment {
             result: Ok(None),
             cell_replay_grammar: Some(2),
+            tool_surface: Vec::new(),
         };
         let mut wire = serde_json::to_value(&stamped).expect("encode the stamped sync");
         let decoded: RuntimeEffectOutcome =
@@ -1807,7 +1822,7 @@ mod cell_replay_grammar_tests {
             decoded
                 .into_sync_execution_environment()
                 .expect("a sync outcome")
-                .1,
+                .cell_replay_grammar,
             Some(2)
         );
 
@@ -1827,7 +1842,7 @@ mod cell_replay_grammar_tests {
             legacy
                 .into_sync_execution_environment()
                 .expect("a sync outcome")
-                .1,
+                .cell_replay_grammar,
             None,
             "a pre-stamp sync names no grammar"
         );

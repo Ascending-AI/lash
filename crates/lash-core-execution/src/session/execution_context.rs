@@ -13,6 +13,11 @@ use crate::{TurnActivity, TurnActivityId, TurnEvent};
 pub struct RuntimeExecutionContext<'run> {
     pub(super) session_id: SessionId,
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
+    /// The catalog the live registry resolves to, when the dispatch catalog
+    /// is a turn's recorded surface: what a code cell's journaled binding set
+    /// is judged against, tool by tool (FIG-3587). `None` means the dispatch
+    /// catalog is live.
+    live_tool_catalog: Option<Arc<crate::ToolCatalog>>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     chronological_projection: Arc<crate::ChronologicalProjection>,
@@ -471,6 +476,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             chronological_projection,
             protocol_extension,
             turn_context,
+            live_tool_catalog: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -505,6 +511,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         Some(RuntimeExecutionContext {
             session_id: self.session_id.clone(),
             dispatch: Arc::new(self.dispatch.to_static()?),
+            live_tool_catalog: self.live_tool_catalog.clone(),
             process_env_store: Arc::clone(&self.process_env_store),
             attachment_store: Arc::clone(&self.attachment_store),
             chronological_projection: Arc::clone(&self.chronological_projection),
@@ -1564,6 +1571,20 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn tool_catalog(&self) -> Arc<crate::ToolCatalog> {
         Arc::clone(&self.dispatch.tool_catalog)
+    }
+
+    /// The catalog the live registry resolves to now. It is
+    /// [`Self::tool_catalog`] unless that is a turn's recorded surface.
+    pub fn live_tool_catalog(&self) -> Arc<crate::ToolCatalog> {
+        self.live_tool_catalog
+            .clone()
+            .unwrap_or_else(|| Arc::clone(&self.dispatch.tool_catalog))
+    }
+
+    #[must_use]
+    pub(crate) fn with_live_tool_catalog(mut self, live: Arc<crate::ToolCatalog>) -> Self {
+        self.live_tool_catalog = Some(live);
+        self
     }
 
     pub fn trigger_actor(&self) -> crate::ProcessOriginator {

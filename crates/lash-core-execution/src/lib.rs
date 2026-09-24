@@ -843,7 +843,10 @@ pub(crate) use runtime::{
     settle_started_process_execution_env,
 };
 pub(crate) use session::Session;
-pub use session::{ExecRequest, RuntimeExecutionContext, SessionError};
+pub use session::{
+    ExecRequest, RuntimeExecutionContext, SessionError, ToolDispatchSurface, ToolSurfaceDrift,
+    ToolSurfaceDriftKind, tool_dispatch_surface,
+};
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
     SessionGraphScopeError, SessionNodePayload, SessionNodeRecord,

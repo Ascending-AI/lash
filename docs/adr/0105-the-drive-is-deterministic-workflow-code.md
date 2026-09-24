@@ -368,9 +368,31 @@ worker. `SessionServices` has no members yet; P10a defines them.
   - Trace ids for model calls are named by their effect, not by a counter
     carried between steps.
   - Effect-journal generation 2.
-  - Held for a ruling: the tool surface (the sync body's catalog cache, the
-    drive-side machine preparation, catalog drift checks and plugin tool
-    overlays).
+- **Implemented (P7b): the tool surface is recorded and judged per tool.**
+  - Every execution-environment sync records the tool surface it built, as
+    the definitions of its catalog. The sync body installs nothing; the drive
+    installs the recorded surface after each sync, on the live pass and on
+    every replay. The recorded definitions are the catalog: membership,
+    manifests and contracts are what the pass that wrote the journal saw, so
+    availability and the manifests pinned into tool-group children never read
+    the live registry. The live registry supplies only executors.
+  - Each recorded tool is judged against the live registry on its own, on
+    what decides how a call links and dispatches (identity, binding,
+    activation, argument projection, retry policy, schemas, output contract):
+    the FIG-3587 rule. A reworded description is not drift. A call on a
+    drifted tool is prepared under its recorded definition and served from
+    its recorded result; one the journal does not hold would reach the
+    drifted tool live, so the turn parks before anything is dispatched. There
+    is no whole-catalog digest.
+  - A code cell's journaled binding set is judged against the live catalog as
+    before, and links against the recorded one.
+  - The turn machine starts with no environment and always opens with its
+    protocol-start sync; the drive builds no prompt and pins no surface of its
+    own.
+  - Restate replays by position and cannot say ahead of the replay whether a
+    call's result is recorded, so there a call on a drifted tool parks either
+    way, as a cell's does (FIG-3587).
+  - Effect-journal generation 3.
 
 ### 11. Validation and laws
 

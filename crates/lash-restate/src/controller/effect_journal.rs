@@ -30,7 +30,10 @@ use serde::{Deserialize, Serialize};
 /// left for later steps (the published reasoning and each plugin's stream-hook
 /// end state), and the assistant-response step's command carries those
 /// stream-hook states.
-pub const EFFECT_JOURNAL_VERSION: u32 = 2;
+/// 3: every execution-environment sync records the tool surface it built,
+/// which the drive installs as the turn's catalog (FIG-3672 P7b); a turn
+/// machine always opens with its protocol-start sync.
+pub const EFFECT_JOURNAL_VERSION: u32 = 3;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

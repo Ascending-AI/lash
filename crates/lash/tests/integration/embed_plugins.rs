@@ -247,13 +247,10 @@ async fn prompt_hook_and_tool_provider_read_typed_session_config() {
         .expect("turn");
 
     assert_eq!(assistant_prose(&result), "done");
-    // The prompt is built at turn start, then by the protocol-start and the
-    // second iteration's execution-environment syncs, each journaled so a
-    // redrive replays it (FIG-3587).
-    assert_eq!(
-        prompt_seen.lock_recover().as_slice(),
-        ["page-a", "page-a", "page-a"]
-    );
+    // The prompt is built only by the protocol-start and the second
+    // iteration's execution-environment syncs, each journaled so a redrive
+    // replays it (FIG-3587); the drive builds none of its own (FIG-3672).
+    assert_eq!(prompt_seen.lock_recover().as_slice(), ["page-a", "page-a"]);
     assert_eq!(tool_seen.lock_recover().as_slice(), ["page-a"]);
 }
 

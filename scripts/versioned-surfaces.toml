@@ -353,6 +353,13 @@ kind = "rust_items"
 paths = ["crates/lash-lashlang-runtime/src/cell_bindings.rs"]
 symbols = ["CELL_TOOL_BINDINGS_SUFFIX", "CELL_TOOL_BINDINGS_OPERATION", "resolve_ambient_bindings", "compare"]
 
+# What a recorded binding is judged against the live registry on (FIG-3587),
+# shared with the turn's recorded tool surface (FIG-3672 P7b).
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/session.rs"]
+symbols = ["ToolDispatchSurface", "tool_dispatch_surface"]
+
 [[surface]]
 constant = "LASHLANG_REPLAY_KEY_GRAMMAR_VERSION"
 constant_path = "crates/lash-lashlang-runtime/src/replay_run.rs"
