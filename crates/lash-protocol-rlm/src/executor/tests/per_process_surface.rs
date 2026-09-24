@@ -107,8 +107,8 @@ const main = async () => "ok";
 
 #[tokio::test]
 async fn trigger_fired_process_runs_under_session_contributed_event_type() {
-    let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+    let backend = crate::testing::memory_backend().await;
+    let artifact_store = lashlang::LashlangArtifactBackend::lashlang_artifact_store(&backend);
     let factory = Arc::new(crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
             .channel(crate::RlmChannel::Cell)
@@ -116,7 +116,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
             .wall_clock(crate::WallClockBound::secs(30))
             .memory_limit(crate::MemoryBound::mebibytes(64))
             .build(),
-        Arc::clone(&artifact_store),
+        &backend,
     ));
     let plugin_host = PluginHost::new(vec![
         Arc::clone(&factory) as Arc<dyn lash_core::facade_support::PluginFactory>,

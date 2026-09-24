@@ -137,13 +137,13 @@ pub(super) fn explicit_durable_test_facets(data_dir: &std::path::Path) -> lash::
 pub(super) fn explicit_durable_test_facets_over(
     backend: Arc<lash_sqlite_store::SqliteBackend>,
 ) -> lash::LashCoreBuilder {
-    let artifact_store = backend.process_env_store();
-    explicit_durable_test_facets_on(backend, artifact_store)
+    explicit_durable_test_facets_on(backend)
 }
 
+/// A durable test core over `backend`, whose RLM factory keeps its Lashlang
+/// artifacts in that same backend.
 pub(super) fn explicit_durable_test_facets_on(
-    backend: Arc<dyn lash::Backend>,
-    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
+    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
 ) -> lash::LashCoreBuilder {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
@@ -153,9 +153,13 @@ pub(super) fn explicit_durable_test_facets_on(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        artifact_store,
+        backend.as_ref(),
     );
-    lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+    lash::LashCore::rlm_builder(
+        backend as Arc<dyn lash::Backend>,
+        lash::TurnBudget::Unbounded,
+        factory,
+    )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         // The `processes` module is catalogue presence, not an ability bit
@@ -1233,7 +1237,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        backend.process_env_store(),
+        backend.as_ref(),
     );
     let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -1651,7 +1655,7 @@ async fn assert_no_active_lash_restate_invocations(state: &AppState, timeout: Du
 struct LiveWorkbenchRestateHarness {
     state: AppState,
     process_worker: lash::durability::DurableProcessWorker,
-    backend: Arc<lash_restate::RestateBackend>,
+    backend: Arc<WorkbenchRestateBackend>,
     process_env_store: Arc<dyn lash::persistence::ProcessExecutionEnvStore>,
     trace_path: PathBuf,
 }
@@ -1725,7 +1729,6 @@ async fn live_workbench_restate_state_with_provider_and_database(
     }
     let trigger_store = store_set.trigger_store();
     let process_env_store = store_set.process_env_store();
-    let artifact_store = Arc::clone(&stores.artifact_store);
     let trace_path = data_dir.join("trace.jsonl");
     let lashlang_execution_path = data_dir.join("lashlang-execution.jsonl");
     let trace_sink = Arc::new(JsonlTraceSink::new(trace_path.clone())) as Arc<dyn TraceSink>;
@@ -1769,7 +1772,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        artifact_store,
+        backend.as_ref(),
     )
     .with_lashlang_execution_sink(lashlang_execution_sink);
     let core = LashCore::rlm_builder(
@@ -2011,7 +2014,7 @@ fn test_workbench_core(backend: Arc<lash_sqlite_store::SqliteBackend>) -> LashCo
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        backend.process_env_store(),
+        backend.as_ref(),
     );
     LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

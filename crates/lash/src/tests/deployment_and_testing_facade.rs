@@ -70,7 +70,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
     // memory backend.
     let backends: Vec<Arc<dyn lash_core::Backend>> = vec![
         Arc::new(
-            DecoratedBackend::over(memory_backend().await).session_store_factory(|_| {
+            DecoratedBackend::over_sqlite(memory_backend().await).session_store_factory(|_| {
                 Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new())
             }),
         ),

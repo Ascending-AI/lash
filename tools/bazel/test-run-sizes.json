@@ -454,7 +454,7 @@
     "peak_bytes": 17076224,
     "samples": 3
   },
-  "//crates/lash-provider-google:block_identity__test__fv_287ddcdb": {
+  "//crates/lash-provider-google:block_identity__test__fv_e37ad574": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
@@ -468,7 +468,7 @@
     "peak_bytes": 16035840,
     "samples": 3
   },
-  "//crates/lash-provider-google:charge_safety__test__fv_287ddcdb": {
+  "//crates/lash-provider-google:charge_safety__test__fv_e37ad574": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
@@ -482,7 +482,7 @@
     "peak_bytes": 17448960,
     "samples": 3
   },
-  "//crates/lash-provider-google:lash-provider-google__unit_test__fv_287ddcdb": {
+  "//crates/lash-provider-google:lash-provider-google__unit_test__fv_e37ad574": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
@@ -496,7 +496,7 @@
     "peak_bytes": 19738624,
     "samples": 3
   },
-  "//crates/lash-provider-google:property__test__fv_287ddcdb": {
+  "//crates/lash-provider-google:property__test__fv_e37ad574": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
@@ -517,7 +517,7 @@
     "peak_bytes": 17846272,
     "samples": 3
   },
-  "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_2ab5aefa": {
+  "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_fc51fc0e": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,
@@ -531,7 +531,7 @@
     "peak_bytes": 18980864,
     "samples": 3
   },
-  "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_2ab5aefa": {
+  "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_fc51fc0e": {
     "cpu_count": 1,
     "memory_kb": 1048576,
     "p95_cores": 0.0,

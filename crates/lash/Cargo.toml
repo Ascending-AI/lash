@@ -73,7 +73,10 @@ rlm = [
 sqlite = ["dep:lash-sqlite-store"]
 postgres = ["dep:lash-postgres-store"]
 s3 = ["dep:lash-s3-store"]
-restate = ["dep:lash-restate"]
+# A Restate backend over a store set that keeps Lashlang artifacts is a
+# `LashlangArtifactBackend`, so an RLM host can run on it. The SQL store sets it
+# runs over compile lashlang by default already.
+restate = ["dep:lash-restate", "lash-restate/lashlang"]
 openai = ["dep:lash-provider-openai"]
 anthropic = ["dep:lash-provider-anthropic"]
 google = ["dep:lash-provider-google"]

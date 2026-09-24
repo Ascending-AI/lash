@@ -50,6 +50,11 @@ lash_conformance::cell_binding_drift_tests!({
         return;
     };
     reset(storage.pool()).await;
+    // The law's host is a bare effect host with no backend; the RLM factory
+    // keeps its Lashlang artifacts in a memory backend of its own.
+    let artifacts = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open the artifact backend");
     let host = Arc::new(storage.effect_host());
     let faults = host.effect_journal_faults();
     let host = host as Arc<dyn EffectHost>;
@@ -59,7 +64,7 @@ lash_conformance::cell_binding_drift_tests!({
         Arc::clone(&host),
         faults,
         lash_conformance::HostTurnRunner::shared(host),
-        vec![rlm_factory(false)],
+        vec![rlm_factory(&artifacts, false)],
     )
 });
 
@@ -71,13 +76,18 @@ lash_conformance::model_call_drift_park_tests!({
         return;
     };
     reset(storage.pool()).await;
+    // The law's host is a bare effect host with no backend; the RLM factory
+    // keeps its Lashlang artifacts in a memory backend of its own.
+    let artifacts = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open the artifact backend");
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
     (
         database_lock,
         "postgres",
         Arc::clone(&host),
         lash_conformance::HostTurnRunner::shared(host),
-        vec![rlm_factory(false)],
+        vec![rlm_factory(&artifacts, false)],
     )
 });
 
@@ -91,6 +101,11 @@ lash_conformance::tool_batch_parallelism_tests!({
     reset(storage.pool()).await;
     let host = Arc::new(storage.effect_host()) as Arc<dyn EffectHost>;
     let storage = Arc::new(storage);
+    // The law's host is a bare effect host with no backend; the RLM factories
+    // keep their Lashlang artifacts in a memory backend of their own.
+    let artifacts = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open the artifact backend");
     (
         database_lock,
         "postgres",
@@ -100,10 +115,10 @@ lash_conformance::tool_batch_parallelism_tests!({
         // on the process bridge.
         vec![
             lash_conformance::parallel_model_tool_calls_producer(),
-            lash_conformance::rlm_promise_all_producer(vec![rlm_factory(false)]),
+            lash_conformance::rlm_promise_all_producer(vec![rlm_factory(&artifacts, false)]),
             lash_conformance::lashlang_process_aggregate_producer(
                 vec![
-                    rlm_factory(true),
+                    rlm_factory(&artifacts, true),
                     Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
                 ],
                 Arc::new(move || {
@@ -121,6 +136,7 @@ lash_conformance::tool_batch_parallelism_tests!({
 /// a cell start a process here", and it differs between the cell-bridge and
 /// process-bridge producers.
 fn rlm_factory(
+    artifacts: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
     process_lifecycle: bool,
 ) -> Arc<dyn lash_core_execution::facade_support::PluginFactory> {
     Arc::new(
@@ -131,7 +147,7 @@ fn rlm_factory(
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new()),
+            artifacts,
         )
         .with_process_lifecycle(process_lifecycle),
     )

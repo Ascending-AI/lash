@@ -404,6 +404,12 @@ async fn commit_one_turn(
             })
             .build()
             .into_handle();
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        storage,
+        Arc::new(lash::persistence::FileAttachmentStore::new(
+            attachments.path().to_path_buf(),
+        )),
+    ));
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -411,14 +417,8 @@ async fn commit_one_turn(
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(storage.lashlang_artifact_store()),
+        backend.as_ref(),
     );
-    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
-        storage,
-        Arc::new(lash::persistence::FileAttachmentStore::new(
-            attachments.path().to_path_buf(),
-        )),
-    ));
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .provider(provider)
         .model(

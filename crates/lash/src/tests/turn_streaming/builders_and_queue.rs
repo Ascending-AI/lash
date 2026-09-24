@@ -46,7 +46,7 @@ pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effect
 pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_points() -> Result<()> {
     let effect_host = Arc::new(DurableNoopEffectHost::default());
     let host = Arc::clone(&effect_host);
-    let backend = DecoratedBackend::over(memory_backend().await).effect_host(move |_| host);
+    let backend = DecoratedBackend::over_sqlite(memory_backend().await).effect_host(move |_| host);
     let core = LashCore::standard_builder(Arc::new(backend), crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))

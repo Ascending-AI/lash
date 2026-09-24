@@ -90,4 +90,4 @@ pub use lash_core::testing::store_fixtures;
 #[cfg(feature = "rlm")]
 mod rebuild;
 #[cfg(feature = "rlm")]
-pub use rebuild::{RuntimeRebuildBackend, runtime_rebuild_and_worker_recovery};
+pub use rebuild::runtime_rebuild_and_worker_recovery;

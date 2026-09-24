@@ -25,7 +25,7 @@ pub(super) struct AgentContractExecution {
 async fn contract_backend(
     clock: Arc<crate::clock::SimClock>,
     effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
-) -> Result<Arc<dyn lash::Backend>, FixedScriptRunnerError> {
+) -> Result<Arc<dyn lash::persistence::LashlangArtifactBackend>, FixedScriptRunnerError> {
     let collector = CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| slot.borrow().clone());
     let mut backend =
         crate::backend::DecoratedBackend::over(crate::backend::sim_memory_backend(clock).await?);
@@ -595,6 +595,7 @@ async fn facade_final_value_execution_inner(
 ) -> Result<Value, FixedScriptRunnerError> {
     let clock = crate::clock::SimClock::new();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
+    let backend = contract_backend(clock, None).await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -602,9 +603,8 @@ async fn facade_final_value_execution_inner(
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+        backend.as_ref(),
     );
-    let backend = contract_backend(clock, None).await?;
     let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -927,6 +927,7 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
 ) -> Result<(lash::LashCore, Arc<lash::tracing::TraceLashlangGraphStore>), FixedScriptRunnerError> {
     let clock = crate::clock::SimClock::new();
     let graph_store = Arc::new(lash::tracing::TraceLashlangGraphStore::default());
+    let backend = contract_backend(clock, effect_layer).await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -934,10 +935,9 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+        backend.as_ref(),
     )
     .with_lashlang_execution_sink(Arc::clone(&graph_store) as Arc<dyn lash::tracing::TraceSink>);
-    let backend = contract_backend(clock, effect_layer).await?;
     let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         // The process surface is rendered from the tool catalogue, so a host that
         // wants `processes.*` inside a cell installs the plugin that supplies it.

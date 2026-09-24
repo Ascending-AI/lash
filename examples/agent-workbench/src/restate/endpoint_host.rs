@@ -6,7 +6,7 @@ use super::*;
 pub(crate) fn spawn_restate_endpoint(
     addr: SocketAddr,
     state: AppState,
-    backend: Arc<lash_restate::RestateBackend>,
+    backend: Arc<crate::WorkbenchRestateBackend>,
     process_worker: lash::durability::DurableProcessWorker,
 ) {
     tokio::spawn(async move {
@@ -27,7 +27,7 @@ pub(crate) fn spawn_restate_endpoint(
 pub(crate) fn spawn_owned_restate_endpoint(
     listener: tokio::net::TcpListener,
     state: AppState,
-    backend: Arc<lash_restate::RestateBackend>,
+    backend: Arc<crate::WorkbenchRestateBackend>,
     process_worker: lash::durability::DurableProcessWorker,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
@@ -43,7 +43,7 @@ pub(crate) fn spawn_owned_restate_endpoint(
 
 async fn endpoint(
     state: AppState,
-    backend: Arc<lash_restate::RestateBackend>,
+    backend: Arc<crate::WorkbenchRestateBackend>,
     process_worker: lash::durability::DurableProcessWorker,
 ) -> Endpoint {
     let endpoint = Endpoint::builder()

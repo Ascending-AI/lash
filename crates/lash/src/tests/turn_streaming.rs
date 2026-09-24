@@ -568,7 +568,7 @@ impl EffectRecorder {
     async fn backend(&self) -> Arc<DecoratedBackend> {
         let layer = Arc::new(self.clone());
         Arc::new(
-            DecoratedBackend::over(memory_backend().await).effect_host(move |inner| {
+            DecoratedBackend::over_sqlite(memory_backend().await).effect_host(move |inner| {
                 Arc::new(lash_core::testing::LayeredEffectHost::new(inner, layer))
             }),
         )

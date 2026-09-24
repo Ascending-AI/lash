@@ -40,7 +40,7 @@ impl RlmRuntimeState {
     ) -> Result<Self, SessionError> {
         let services = crate::dialect::RlmDialectServices {
             projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
-            artifact_store: lashlang::global_in_memory_lashlang_artifact_store(),
+            artifact_store: crate::testing::memory_artifact_store_blocking(),
             deferred_tool_resolver,
             deferred_trigger_resolver: None,
             execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),

@@ -34,7 +34,7 @@ async fn approval_test_core(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        backend.process_env_store(),
+        backend.as_ref(),
     );
     LashCore::rlm_builder(backend.clone(), lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

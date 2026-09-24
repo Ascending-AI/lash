@@ -154,9 +154,11 @@ impl LashCore {
     /// stack.
     ///
     /// The host configures the factory (projection resolver, separate deferred
-    /// tool and trigger-definition resolvers, execution sink/jsonl path, and —
-    /// required at construction — the Lashlang artifact store) before passing
-    /// it in.
+    /// tool and trigger-definition resolvers, execution sink/jsonl path) before
+    /// passing it in. The factory is built over this same `backend`
+    /// ([`RlmProtocolPluginFactory::new`](crate::rlm::RlmProtocolPluginFactory::new)),
+    /// which supplies its Lashlang artifact store; a factory built over any
+    /// other backend is refused when the core is built.
     #[cfg(feature = "rlm")]
     pub fn rlm_builder(
         backend: Arc<dyn Backend>,
@@ -660,10 +662,12 @@ impl LashCore {
         &self,
         extra_plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
     ) -> Result<DurableProcessWorkerConfig> {
+        let extra_plugin_factories: Vec<_> = extra_plugin_factories.into_iter().collect();
+        refuse_foreign_backend_factories(self.backend.as_ref(), &extra_plugin_factories)?;
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
-            extra_plugin_factories.into_iter().collect(),
+            extra_plugin_factories,
         )?;
         let process_work = self.substrate_slot.configured_worker_process_work();
         let queued_work: Arc<dyn QueuedWorkSubstrate> = match &self.substrate_slot.setup.queued {
@@ -1112,6 +1116,10 @@ impl LashCoreBuilder {
             factories.extend(self.plugin_stack.into_factories());
             factories
         };
+        refuse_foreign_backend_factories(
+            backend.as_ref(),
+            protocol_factory.iter().chain(plugin_factories.iter()),
+        )?;
         let default_plugin_host = Arc::new(build_plugin_host(
             protocol_factory.as_ref(),
             &plugin_factories,
@@ -1352,6 +1360,27 @@ impl LashCoreBuilder {
         self.queued_work_source = QueuedWorkSource::Disabled;
         self
     }
+}
+
+/// Refuses a plugin factory bound to a backend other than `backend`
+/// ([`PluginFactory::bound_backend`]): its state would live in a substrate
+/// this core neither reopens nor sweeps (ADR 0102, D2).
+pub(crate) fn refuse_foreign_backend_factories<'a>(
+    backend: &dyn Backend,
+    factories: impl IntoIterator<Item = &'a Arc<dyn PluginFactory>>,
+) -> Result<()> {
+    for factory in factories {
+        if let Some(bound) = factory.bound_backend()
+            && bound != backend.binding_identity()
+        {
+            return Err(EmbedError::PluginBackendMismatch {
+                plugin_id: factory.id().to_string(),
+                plugin_backend: bound.to_string(),
+                backend: backend.binding_identity().to_string(),
+            });
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn build_plugin_host(

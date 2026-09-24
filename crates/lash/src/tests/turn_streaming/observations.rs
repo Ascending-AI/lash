@@ -605,17 +605,13 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         const MARKER: &str = "retry observer single-copy marker";
         let transport_calls = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(StdMutex::new(Vec::new()));
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-            memory_backend().await,
-            crate::TurnBudget::Unbounded,
-            rlm_factory(),
-        ))
-        .provider(output_then_failing_rlm_prose_provider(
-            Arc::clone(&transport_calls),
-            Arc::clone(&requests),
-        ))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+            .provider(output_then_failing_rlm_prose_provider(
+                Arc::clone(&transport_calls),
+                Arc::clone(&requests),
+            ))
+            .model(mock_model_spec())
+            .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-provider-retry-prose").open().await?;
 
         let first = session
@@ -742,14 +738,10 @@ pub(super) fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> R
     run_async_test_on_stack_budget("rlm-natural-prose-single-copy-test", || async {
         const MARKER: &str = "natural completion single-copy marker";
         let requests = Arc::new(StdMutex::new(Vec::new()));
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-            memory_backend().await,
-            lash_core::TurnBudget::Unbounded,
-            rlm_factory(),
-        ))
-        .provider(natural_prose_reasoning_provider(Arc::clone(&requests)))
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+            .provider(natural_prose_reasoning_provider(Arc::clone(&requests)))
+            .model(mock_model_spec())
+            .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-natural-prose-single-copy").open().await?;
 
         let first = session

@@ -19,7 +19,7 @@ A protocol acquires runtime capabilities only through the uniform plugin contrac
 ## Consequences
 
 - The facade's `runtime_host_installer` plumbing, `RlmCore`, `RlmCoreBuilder`, `RlmSessionBuilder`, and the `forward_core_builder_methods!` macro are deleted. There is exactly one builder type (`LashCoreBuilder`); `StandardCore::builder()`-style entry points become sugar functions returning a pre-seeded `LashCoreBuilder` (protocol factory + default runtime stack applied).
-- `RlmProtocolPluginFactory` requires the Lashlang artifact store at construction, making the previously build-time `MissingLashlangArtifactStore` error unrepresentable.
+- `RlmProtocolPluginFactory` requires the backend its Lashlang artifacts live in at construction (`LashlangArtifactBackend`, [ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md)), making the previously build-time `MissingLashlangArtifactStore` error unrepresentable.
 - The Lashlang compile APIs (`lashlang_compile_surface`, `compile_lashlang_module`) move to `lash-protocol-rlm` as operations over the factory and a plugin host; they had no production consumers outside facade tests.
 - RLM per-session options are set through a facade sugar trait over the generic Session Plugin Options setter on `SessionBuilder`; every other plugin gets open-time options for free through the same seam.
 - A durable rebuild (e.g. a Restate worker) reconstitutes process engines by installing the same plugins — consistent with ADR-0004's direction that plugins reconstitute their own capabilities.

@@ -849,7 +849,8 @@ pub(super) async fn recovery_worker_with_plugins_and_trace(
     .with_process_env_store(process_env_store)
     .with_process_engine_registration(
         lash_lashlang_runtime::lashlang_process_engine_registration(
-            lash_lashlang_runtime::LashlangProcessEngine::in_memory(
+            lash_lashlang_runtime::LashlangProcessEngine::new(
+                recovery_artifact_store(),
                 lash_lashlang_runtime::LashlangSurface::default(),
             )
             .with_execution_trace(trace_sink, lash_trace::TraceContext::default()),
@@ -932,7 +933,7 @@ pub(super) async fn segmented_child_await_registration(
     )
     .expect("link segmented child-await law");
     lashlang::LashlangArtifactStore::publish_module_artifact(
-        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        recovery_artifact_store().as_ref(),
         &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked.artifact,
     )
@@ -1234,7 +1235,7 @@ pub(super) async fn snapshot_lashlang_registration(
     )
     .expect("link snapshot lashlang module");
     lashlang::LashlangArtifactStore::publish_module_artifact(
-        lashlang::global_in_memory_lashlang_artifact_store().as_ref(),
+        recovery_artifact_store().as_ref(),
         &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked_module.artifact,
     )

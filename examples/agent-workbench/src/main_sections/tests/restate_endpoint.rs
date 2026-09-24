@@ -12,7 +12,7 @@ impl LiveRestateEndpoint {
     pub(crate) async fn start(
         admin_url: &str,
         state: AppState,
-        backend: Arc<lash_restate::RestateBackend>,
+        backend: Arc<crate::WorkbenchRestateBackend>,
         process_worker: lash::durability::DurableProcessWorker,
     ) -> Self {
         let listener = std::net::TcpListener::bind("127.0.0.1:0")
@@ -23,7 +23,7 @@ impl LiveRestateEndpoint {
     pub(crate) async fn restart(
         addr: SocketAddr,
         state: AppState,
-        backend: Arc<lash_restate::RestateBackend>,
+        backend: Arc<crate::WorkbenchRestateBackend>,
         process_worker: lash::durability::DurableProcessWorker,
         deployment_id: String,
     ) -> Self {
@@ -38,7 +38,7 @@ impl LiveRestateEndpoint {
         admin_url: &str,
         addr: SocketAddr,
         state: AppState,
-        backend: Arc<lash_restate::RestateBackend>,
+        backend: Arc<crate::WorkbenchRestateBackend>,
         process_worker: lash::durability::DurableProcessWorker,
     ) -> Self {
         let listener = std::net::TcpListener::bind(addr)
@@ -56,7 +56,7 @@ impl LiveRestateEndpoint {
         admin_url: &str,
         listener: std::net::TcpListener,
         state: AppState,
-        backend: Arc<lash_restate::RestateBackend>,
+        backend: Arc<crate::WorkbenchRestateBackend>,
         process_worker: lash::durability::DurableProcessWorker,
         register: bool,
     ) -> Self {

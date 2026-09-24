@@ -457,7 +457,7 @@ impl OracleRun {
 /// Builds a core whose provider replays `cells` and whose only leaf tool is
 /// the oracle's, over `backend`.
 fn oracle_core(
-    backend: Arc<dyn lash_core::Backend>,
+    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
     session_id: &str,
     cells: Vec<String>,
     theatre: Arc<OracleTheatre>,
@@ -469,7 +469,7 @@ fn oracle_core(
 
 /// [`oracle_core`]'s builder, for a case that swaps one of its parts.
 fn oracle_builder(
-    backend: Arc<dyn lash_core::Backend>,
+    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
     session_id: &str,
     cells: Vec<String>,
     theatre: Arc<OracleTheatre>,

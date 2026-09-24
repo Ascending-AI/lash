@@ -1276,15 +1276,11 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
             })
             .build()
             .into_handle();
-        let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-            memory_backend().await,
-            crate::TurnBudget::Unbounded,
-            rlm_factory(),
-        ))
-        .provider(provider)
-        .model(mock_model_spec())
-        .without_queued_work()
-        .build(crate::testing::runtime_lease_owner())?;
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+            .provider(provider)
+            .model(mock_model_spec())
+            .without_queued_work()
+            .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session("rlm-active-input-next-iteration")
             .open()

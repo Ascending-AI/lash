@@ -367,7 +367,7 @@ pub(super) async fn run_cell(
             language: "typescript".to_string(),
             code: code.to_string(),
         },
-        lashlang::global_in_memory_lashlang_artifact_store(),
+        crate::testing::memory_artifact_store().await,
         surface,
         None,
         RlmProjectedBindings::default(),

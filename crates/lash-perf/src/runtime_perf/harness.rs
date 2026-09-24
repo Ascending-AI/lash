@@ -744,7 +744,7 @@ fn preview(value: &str, max_chars: usize) -> String {
 }
 
 fn benchmark_rlm_protocol_factory(
-    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
+    backend: &dyn lash::persistence::LashlangArtifactBackend,
 ) -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -753,7 +753,7 @@ fn benchmark_rlm_protocol_factory(
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        artifact_store,
+        backend,
     )
 }
 
@@ -848,7 +848,8 @@ pub(crate) async fn build_embed_core(
     scenario: RuntimePerfScenario,
     store: Arc<RuntimePerfStore>,
 ) -> anyhow::Result<BenchmarkCore> {
-    let backend: Arc<dyn lash::Backend> = Arc::new(perf_store_backend(store).await?);
+    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> =
+        Arc::new(perf_store_backend(store).await?);
     let effect_host = backend.effect_host();
     let provider = benchmark_provider(scenario).into_handle();
     match scenario.execution_mode() {
@@ -858,11 +859,9 @@ pub(crate) async fn build_embed_core(
             .map(BenchmarkCore::Standard)
             .map_err(anyhow::Error::from),
         ExecutionMode::Rlm => benchmark_rlm_builder(
-            backend,
+            backend.clone(),
             provider,
-            benchmark_rlm_protocol_factory(Arc::new(
-                lash::persistence::InMemoryLashlangArtifactStore::new(),
-            )),
+            benchmark_rlm_protocol_factory(backend.as_ref()),
         )
         .with_explicit_ephemeral_facets()
         .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
@@ -912,7 +911,7 @@ pub(crate) async fn build_runtime_with_store(
     if wiring.turn_start_gate {
         perf_backend = perf_backend.with_effect_layer(Arc::new(StartGateRetryLayer::default()));
     }
-    let backend: Arc<dyn lash::Backend> = Arc::new(perf_backend);
+    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> = Arc::new(perf_backend);
     let effect_host = backend.effect_host();
     let settlement_control = scenario
         .settlement_children()
@@ -951,9 +950,7 @@ pub(crate) async fn build_runtime_with_store(
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
         ExecutionMode::Rlm => {
-            let mut factory = benchmark_rlm_protocol_factory(Arc::new(
-                lash::persistence::InMemoryLashlangArtifactStore::new(),
-            ));
+            let mut factory = benchmark_rlm_protocol_factory(backend.as_ref());
             if let Some(path) = trace_config
                 .as_ref()
                 .and_then(|config| config.lashlang_execution_jsonl_path.clone())
@@ -1180,21 +1177,14 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         let metrics = factory.metrics();
         (Arc::new(factory), metrics)
     };
-    let artifact_store = sqlite.process_env_store();
-    let backend: Arc<dyn lash::Backend> =
+    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> =
         Arc::new(PerfBackend::over(sqlite).with_catalog(Arc::clone(&store_factory)));
     let effect_host = backend.effect_host();
     for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
         plugin_stack.push(factory);
     }
-    let core = durable_benchmark_core(
-        backend,
-        mode_id,
-        provider,
-        artifact_store,
-        plugin_stack,
-        wiring.queued_work,
-    )?;
+    let core =
+        durable_benchmark_core(backend, mode_id, provider, plugin_stack, wiring.queued_work)?;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let session = core.open_session(session_id.clone()).await?;
     let persistence = if wiring.session_store_handle {
@@ -1225,20 +1215,18 @@ pub(crate) async fn build_runtime_with_sqlite_store(
 
 /// A benchmark core on a durable backend, with the lane's plugin stack.
 fn durable_benchmark_core(
-    backend: Arc<dyn lash::Backend>,
+    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
     mode_id: ExecutionMode,
     provider: ProviderHandle,
-    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
     plugin_stack: lash::PluginStack,
     queued_work: bool,
 ) -> anyhow::Result<BenchmarkCore> {
     let builder = match mode_id {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider),
-        ExecutionMode::Rlm => benchmark_rlm_builder(
-            backend,
-            provider,
-            benchmark_rlm_protocol_factory(artifact_store),
-        ),
+        ExecutionMode::Rlm => {
+            let factory = benchmark_rlm_protocol_factory(backend.as_ref());
+            benchmark_rlm_builder(backend, provider, factory)
+        }
     };
     let mut builder = builder
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -1275,8 +1263,7 @@ pub(crate) async fn build_runtime_with_postgres_store(
     let factory = RuntimePerfStoreFactory::decorating(postgres_backend.session_store_factory());
     let store_metrics = factory.metrics();
     let store_factory: Arc<dyn lash_core::SessionStoreFactory> = Arc::new(factory);
-    let artifact_store = postgres_backend.process_env_store();
-    let backend: Arc<dyn lash::Backend> =
+    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> =
         Arc::new(PerfBackend::over(postgres_backend).with_catalog(Arc::clone(&store_factory)));
     let effect_host = backend.effect_host();
     let mut plugin_stack =
@@ -1284,14 +1271,8 @@ pub(crate) async fn build_runtime_with_postgres_store(
     for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
         plugin_stack.push(factory);
     }
-    let core = durable_benchmark_core(
-        backend,
-        mode_id,
-        provider,
-        artifact_store,
-        plugin_stack,
-        wiring.queued_work,
-    )?;
+    let core =
+        durable_benchmark_core(backend, mode_id, provider, plugin_stack, wiring.queued_work)?;
     let session_id = SessionId::from(format!(
         "runtime-perf-{}-{}",
         scenario.name(),

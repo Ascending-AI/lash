@@ -70,7 +70,7 @@ trait E2eTurnWorkflow {
 struct AppState {
     worker_id: String,
     storage: PostgresStorage,
-    backend: Arc<lash_restate::RestateBackend>,
+    backend: Arc<lash_restate_postgres_workers_e2e::E2eBackend>,
     restate_ingress_url: String,
     restate_authority_id: lash_restate::RestateAuthorityId,
     mock_provider_base_url: String,

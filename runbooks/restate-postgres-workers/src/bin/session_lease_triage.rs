@@ -258,10 +258,10 @@ impl<S: tracing::Subscriber> Layer<S> for LeaseTraceCapture {
 /// requires the same observations from both.
 struct Backend {
     name: &'static str,
-    /// The one substrate every core of the phase runs on.
-    backend: Arc<dyn lash::Backend>,
+    /// The one substrate every core of the phase runs on, its RLM factory's
+    /// Lashlang artifacts included.
+    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
     factory: Arc<dyn SessionStoreFactory>,
-    artifacts: Arc<dyn lash::persistence::LashlangArtifactStore>,
     /// Held so the SQLite root (and the PostgreSQL attachment root) outlive
     /// the phase.
     _scratch: tempfile::TempDir,
@@ -289,7 +289,6 @@ impl Backend {
         Ok(Self {
             name: "sqlite",
             factory: backend.session_store_factory(),
-            artifacts: backend.process_env_store(),
             backend,
             _scratch: scratch,
         })
@@ -309,7 +308,6 @@ impl Backend {
         Ok(Self {
             name: "postgres",
             factory: backend.session_store_factory(),
-            artifacts: backend.process_env_store(),
             backend,
             _scratch: scratch,
         })
@@ -330,10 +328,10 @@ impl Backend {
                 .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::clone(&self.artifacts),
+            self.backend.as_ref(),
         );
         let core = lash::LashCore::rlm_builder(
-            Arc::clone(&self.backend),
+            Arc::clone(&self.backend) as Arc<dyn lash::Backend>,
             lash::TurnBudget::Unbounded,
             factory,
         )

@@ -235,51 +235,52 @@ async fn race_recovery_worker() -> Result<()> {
         })
         .build()
         .into_handle();
-    let (backend, lease_timings): (Arc<dyn lash_core::Backend>, _) = match database_url {
-        // The durable execution-environment store is the backend's own:
-        // the loser's retained request names the environment its dead worker
-        // published, and a recovered child never invents one (ADR 0099 §3).
-        None => (
-            Arc::new(
-                lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
-                    directory.join("sessions"),
-                    lash_sqlite_store::SqliteBackendOptions::default(),
-                    Arc::clone(&clock),
-                )
-                .await
-                .unwrap(),
-            ),
-            None,
-        ),
-        Some(url) => {
-            let storage = lash_postgres_store::PostgresStorage::connect(&url)
-                .await
-                .unwrap();
-            let lease_timings = lash_core::facade_support::LeaseTimings::from_ttl(
-                std::time::Duration::from_secs(3),
-            )
-            .expect("a three-second lease holds three renew intervals");
-            (
+    let (backend, lease_timings): (Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>, _) =
+        match database_url {
+            // The durable execution-environment store is the backend's own:
+            // the loser's retained request names the environment its dead worker
+            // published, and a recovered child never invents one (ADR 0099 §3).
+            None => (
                 Arc::new(
-                    lash_postgres_store::PostgresBackend::with_options_and_clock(
-                        &storage,
-                        Arc::new(crate::persistence::FileAttachmentStore::new(
-                            directory.join("attachments"),
-                        )),
-                        lash_postgres_store::PostgresBackendOptions {
-                            effect_replay: lash_postgres_store::PostgresEffectReplayOptions {
-                                lease_timings,
-                                drain_budget: Default::default(),
-                            },
-                            ..Default::default()
-                        },
+                    lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+                        directory.join("sessions"),
+                        lash_sqlite_store::SqliteBackendOptions::default(),
                         Arc::clone(&clock),
-                    ),
+                    )
+                    .await
+                    .unwrap(),
                 ),
-                Some(lease_timings),
-            )
-        }
-    };
+                None,
+            ),
+            Some(url) => {
+                let storage = lash_postgres_store::PostgresStorage::connect(&url)
+                    .await
+                    .unwrap();
+                let lease_timings = lash_core::facade_support::LeaseTimings::from_ttl(
+                    std::time::Duration::from_secs(3),
+                )
+                .expect("a three-second lease holds three renew intervals");
+                (
+                    Arc::new(
+                        lash_postgres_store::PostgresBackend::with_options_and_clock(
+                            &storage,
+                            Arc::new(crate::persistence::FileAttachmentStore::new(
+                                directory.join("attachments"),
+                            )),
+                            lash_postgres_store::PostgresBackendOptions {
+                                effect_replay: lash_postgres_store::PostgresEffectReplayOptions {
+                                    lease_timings,
+                                    drain_budget: Default::default(),
+                                },
+                                ..Default::default()
+                            },
+                            Arc::clone(&clock),
+                        ),
+                    ),
+                    Some(lease_timings),
+                )
+            }
+        };
     let registry = backend.process_registry();
     register_intent_target(registry.as_ref()).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))

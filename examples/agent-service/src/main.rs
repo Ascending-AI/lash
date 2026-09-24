@@ -90,13 +90,13 @@ use lash_restate::{
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 
-/// The backend the service runs on, with the handles on its stores that the
-/// service's own retention pass and RLM factory use.
+/// The backend the service runs on, which also keeps its RLM factory's
+/// Lashlang artifacts, with the handles on its stores that the service's own
+/// retention pass uses.
 struct ServiceBackend {
-    backend: Arc<dyn lash::Backend>,
+    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
     store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-    artifact_store: Arc<dyn lash::persistence::LashlangArtifactStore>,
 }
 
 /// Ask the store whether its durable data opens under this build, before a
@@ -270,12 +270,11 @@ async fn async_main() -> anyhow_like::Result<()> {
     // effect journal beside the stores; Restate durability puts the Restate
     // engine host over the same store set.
     #[cfg(feature = "restate")]
-    let mut restate_backend: Option<Arc<RestateBackend>> = None;
+    let mut restate_backend: Option<Arc<RestateBackend<lash_sqlite_store::SqliteStoreSet>>> = None;
     let ServiceBackend {
         backend,
         store_factory,
         attachment_store,
-        artifact_store,
     } = match durability {
         AgentServiceDurability::Local => {
             let backend = Arc::new(
@@ -286,7 +285,6 @@ async fn async_main() -> anyhow_like::Result<()> {
             ServiceBackend {
                 store_factory: backend.session_store_factory(),
                 attachment_store: backend.attachment_store(),
-                artifact_store: backend.process_env_store(),
                 backend,
             }
         }
@@ -299,8 +297,6 @@ async fn async_main() -> anyhow_like::Result<()> {
                 let store_factory = stores.session_store_factory();
                 let attachment_store =
                     stores.attachment_store() as Arc<dyn lash::persistence::AttachmentStore>;
-                let artifact_store =
-                    stores.process_env_store() as Arc<dyn lash::persistence::LashlangArtifactStore>;
                 let backend = Arc::new(RestateBackend::new(
                     restate_ingress_url.clone(),
                     restate_authority_id
@@ -328,7 +324,6 @@ async fn async_main() -> anyhow_like::Result<()> {
                     backend,
                     store_factory,
                     attachment_store,
-                    artifact_store,
                 }
             }
             #[cfg(not(feature = "restate"))]
@@ -363,10 +358,10 @@ async fn async_main() -> anyhow_like::Result<()> {
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        artifact_store,
+        backend.as_ref(),
     );
     let mut core_builder = lash::LashCore::rlm_builder(
-        backend,
+        backend as Arc<dyn lash::Backend>,
         lash::TurnBudget::Unbounded,
         factory,
     )

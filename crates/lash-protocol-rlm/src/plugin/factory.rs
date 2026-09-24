@@ -7,8 +7,8 @@ use lash_core::plugin::{
 };
 use lash_core::{TraceContext, facade_support::PluginHost, facade_support::TraceSink};
 use lash_lashlang_runtime::{
-    LashlangArtifactStore, LashlangHostEnvironment, LashlangProcessEngine, LashlangSurface,
-    SharedDeferredToolResolver, SharedDeferredTriggerResolver,
+    LashlangArtifactBackend, LashlangArtifactStore, LashlangHostEnvironment, LashlangProcessEngine,
+    LashlangSurface, SharedDeferredToolResolver, SharedDeferredTriggerResolver,
 };
 
 use super::registration::register_rlm_protocol_plugin;
@@ -63,6 +63,9 @@ pub struct RlmProtocolPluginFactory {
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     artifact_store: Arc<dyn LashlangArtifactStore>,
+    /// The binding identity of the backend `artifact_store` belongs to: a
+    /// runtime over any other backend refuses this factory.
+    artifact_backend: Arc<str>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     /// Whether this deployment has process lifecycle available. Recorded once —
     /// by core installing process-engine contributions (before any session is
@@ -76,19 +79,23 @@ pub struct RlmProtocolPluginFactory {
 }
 
 impl RlmProtocolPluginFactory {
-    /// The Lashlang artifact store is a required argument: there is no valid RLM deployment
-    /// without one, so the previously build-time "missing artifact store" error is now
-    /// unrepresentable.
-    pub fn new(
-        config: RlmProtocolPluginConfig,
-        artifact_store: Arc<dyn LashlangArtifactStore>,
-    ) -> Self {
+    /// An RLM protocol over `backend`, the substrate its Lashlang module
+    /// artifacts live in (ADR 0102, D2).
+    ///
+    /// The artifact store comes from the backend, never beside it: a session
+    /// resumed after a restart reopens the same backend and finds the modules
+    /// it published, and the backend's artifact cleanup sweeps the store the
+    /// sessions wrote. Pass the backend the runtime is built over; a runtime
+    /// over another backend refuses this factory
+    /// ([`PluginFactory::bound_backend`]).
+    pub fn new(config: RlmProtocolPluginConfig, backend: &dyn LashlangArtifactBackend) -> Self {
         Self {
             config,
             projection_resolver: Arc::new(ProjectionRegistry::default()),
             deferred_tool_resolver: None,
             deferred_trigger_resolver: None,
-            artifact_store,
+            artifact_store: backend.lashlang_artifact_store(),
+            artifact_backend: Arc::from(backend.binding_identity()),
             lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig::default(),
             process_lifecycle: OnceLock::new(),
         }
@@ -305,6 +312,13 @@ impl PluginFactory for RlmProtocolPluginFactory {
         RLM_PROTOCOL_PLUGIN_ID
     }
 
+    /// The backend this factory's Lashlang artifacts live in: a runtime over
+    /// another backend would resume sessions whose modules it cannot find and
+    /// sweep an artifact store nobody wrote.
+    fn bound_backend(&self) -> Option<&str> {
+        Some(&self.artifact_backend)
+    }
+
     fn process_engine_contributions(
         &self,
         ctx: &ProcessEngineContributionContext<'_>,
@@ -507,8 +521,8 @@ mod label_annotation_tests {
             .expect("default surface links label annotations");
     }
 
-    #[test]
-    fn typescript_parse_failure_keeps_its_own_source_span() {
+    #[tokio::test]
+    async fn typescript_parse_failure_keeps_its_own_source_span() {
         // FIG-3268: the factory used to hand `parse_failure` only
         // `span.start`, so the diagnostic's `span` stayed `None` and the
         // end of the offending token was lost.
@@ -520,7 +534,7 @@ mod label_annotation_tests {
                     .wall_clock(crate::WallClockBound::secs(30))
                     .memory_limit(crate::MemoryBound::mebibytes(64))
                     .build(),
-                lashlang::global_in_memory_lashlang_artifact_store(),
+                &crate::testing::memory_backend().await,
             )
             .with_process_lifecycle(false),
         );

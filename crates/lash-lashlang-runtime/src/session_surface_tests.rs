@@ -120,7 +120,7 @@ fn surface_plugin_factory() -> Arc<dyn lash_core::facade_support::PluginFactory>
 /// the per-process plugin options the session plugin reads.
 async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput {
     let artifact_store: Arc<dyn LashlangArtifactStore> =
-        Arc::new(InMemoryLashlangArtifactStore::new());
+        crate::lib_tests::memory_artifact_store().await;
     let environment = lashlang::LashlangHostEnvironment::new(
         session_surface_resources(),
         lashlang::LashlangAbilities::default(),
@@ -361,7 +361,7 @@ impl lash_trace::TraceSink for CrashAfterFirstNodeCompleted {
 #[tokio::test]
 async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes_effect_once() {
     let artifact_store: Arc<dyn LashlangArtifactStore> =
-        Arc::new(InMemoryLashlangArtifactStore::new());
+        crate::lib_tests::memory_artifact_store().await;
     let environment = lashlang::LashlangHostEnvironment::new(
         recovery_echo_catalog(),
         lashlang::LashlangAbilities::default(),
@@ -589,7 +589,7 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
 #[tokio::test]
 async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal() {
     let artifact_store: Arc<dyn LashlangArtifactStore> =
-        Arc::new(InMemoryLashlangArtifactStore::new());
+        crate::lib_tests::memory_artifact_store().await;
     let environment = lashlang::LashlangHostEnvironment::new(
         recovery_echo_catalog(),
         lashlang::LashlangAbilities::default(),
@@ -826,7 +826,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
         Vec::new(),
     );
     let artifact_store: Arc<dyn LashlangArtifactStore> =
-        Arc::new(InMemoryLashlangArtifactStore::new());
+        crate::lib_tests::memory_artifact_store().await;
     let linked = lashlang::LinkedModule::link(
         module,
         lashlang::LashlangHostEnvironment::new(

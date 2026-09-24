@@ -1113,10 +1113,12 @@ async fn run_seed_probe_inner(
     // The RLM protocol plugin (which compiles + stores the parent turn's process
     // artifacts) and the process engine that the worker runs those artifacts
     // through must share ONE artifact store; otherwise the worker cannot load the
-    // module the parent wrote. This mirrors the pre-ADR-0013 wiring where both
-    // defaulted to the global in-memory store.
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        Arc::new(lash_lashlang_runtime::InMemoryLashlangArtifactStore::new());
+    // module the parent wrote. Both take it from one memory backend.
+    let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open the artifact backend");
+    let artifact_store =
+        lash_lashlang_runtime::LashlangArtifactBackend::lashlang_artifact_store(&artifact_backend);
 
     let factories: Vec<Arc<dyn PluginFactory>> = vec![
         Arc::new(
@@ -1128,7 +1130,7 @@ async fn run_seed_probe_inner(
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                     .build()
                     .with_lashlang_language_features(language_features),
-                Arc::clone(&artifact_store),
+                &artifact_backend,
             )
             .with_lashlang_execution_trace(execution_sink.clone(), trace_context.clone())
             // This harness assembles the plugin host and process engine by hand

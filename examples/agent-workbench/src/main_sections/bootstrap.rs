@@ -171,7 +171,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     eprintln!("agent-workbench durable store: {}", stores.backend);
     let core_store_factory = stores.stores.session_store_factory();
     let trigger_store = stores.stores.trigger_store();
-    let artifact_store = Arc::clone(&stores.artifact_store);
     let subagent_registry = Arc::new(lash_subagents::default_registry(&BTreeMap::new()));
     let mail_world = mail::MailWorld::new();
     let sessions = WorkbenchSessions::persistent(data_dir.join("session-id"))?;
@@ -283,7 +282,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        Arc::clone(&artifact_store),
+        backend.as_ref(),
     )
     .with_deferred_tool_resolver(deferred_tools.resolver())
     .with_lashlang_execution_sink(Arc::clone(&lashlang_execution_sink));

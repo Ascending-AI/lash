@@ -178,6 +178,9 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
     let seed_before_alloc = allocator_stats();
     let seed_started = Instant::now();
     let mut fixtures = Vec::with_capacity(points.len());
+    // The fixtures' cells keep their Lashlang artifacts in one memory backend;
+    // the state they capture is what the curve measures.
+    let artifacts = lash_sqlite_store::SqliteBackend::memory().await?;
     for point in points {
         let session_id = SessionId::from(format!(
             "runtime-perf-{}-{run_id}-{}-{}",
@@ -192,6 +195,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             .admit_and_bind_session(&lash_core::SessionBinding::root(session_id.clone()))
             .await?;
         let mut fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
+            &artifacts,
             point.component_count,
             point.transcript_bytes,
         )?;

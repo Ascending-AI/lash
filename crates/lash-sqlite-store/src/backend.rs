@@ -620,6 +620,22 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
     }
 }
 
+/// The durable-core store that keeps this backend's process execution
+/// environments keeps its Lashlang module artifacts too.
+#[cfg(feature = "lashlang")]
+impl lashlang::LashlangArtifactBackend for SqliteBackend {
+    fn lashlang_artifact_store(&self) -> Arc<dyn lashlang::LashlangArtifactStore> {
+        SqliteBackend::process_env_store(self)
+    }
+}
+
+#[cfg(feature = "lashlang")]
+impl lashlang::LashlangArtifactStoreSet for SqliteStoreSet {
+    fn lashlang_artifact_store(&self) -> Arc<dyn lashlang::LashlangArtifactStore> {
+        SqliteStoreSet::process_env_store(self)
+    }
+}
+
 impl std::fmt::Debug for SqliteStoreSet {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter

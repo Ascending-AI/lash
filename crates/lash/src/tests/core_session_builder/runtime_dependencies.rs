@@ -146,6 +146,89 @@ async fn a_backend_whose_host_binds_elsewhere_is_refused_at_build() {
     }
 }
 
+/// FIG-3633: the RLM protocol keeps its Lashlang artifacts in the backend it
+/// was built over, so a core over any other backend refuses it at build, and
+/// a session refuses one supplied as a per-session factory. Otherwise a
+/// resumed session would look for its modules in a substrate that never held
+/// them, and the core's artifact cleanup would sweep a store nobody wrote.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()> {
+    let artifacts = memory_backend().await;
+    let core_backend = memory_backend().await;
+    // Precondition: two memory backends are two substrates.
+    assert_ne!(
+        lash_core::Backend::binding_identity(artifacts.as_ref()),
+        lash_core::Backend::binding_identity(core_backend.as_ref()),
+        "two memory backends must name two substrates"
+    );
+    let build = |factory_backend: &lash_sqlite_store::SqliteBackend| {
+        LashCore::rlm_builder(
+            core_backend.clone(),
+            crate::TurnBudget::Unbounded,
+            rlm_factory(factory_backend),
+        )
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .without_queued_work()
+        .build(crate::testing::runtime_lease_owner())
+    };
+
+    // Control: the same factory over the core's own backend builds.
+    let core = build(core_backend.as_ref())?;
+
+    let error = expect_build_error(
+        build(artifacts.as_ref()),
+        "an RLM factory over another backend must be refused",
+    );
+    match error {
+        EmbedError::PluginBackendMismatch {
+            plugin_id,
+            plugin_backend,
+            backend,
+        } => {
+            assert_eq!(plugin_id, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
+            assert_eq!(
+                plugin_backend,
+                lash_core::Backend::binding_identity(artifacts.as_ref())
+            );
+            assert_eq!(
+                backend,
+                lash_core::Backend::binding_identity(core_backend.as_ref())
+            );
+        }
+        other => panic!("expected PluginBackendMismatch, got {other}"),
+    }
+
+    // A per-session factory and a worker's extra factory are held to the
+    // same backend.
+    let mut session = core.session("foreign-rlm-plugin");
+    session
+        .plugin_factories
+        .push(Arc::new(rlm_factory(artifacts.as_ref())));
+    let session_error = match session.open().await {
+        Ok(_) => panic!("a per-session RLM factory over another backend must be refused"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(session_error, EmbedError::PluginBackendMismatch { .. }),
+        "expected PluginBackendMismatch, got {session_error}"
+    );
+    let worker_error = expect_build_error(
+        core.durable_process_worker_config_with_plugins([
+            Arc::new(rlm_factory(artifacts.as_ref())) as Arc<dyn PluginFactory>,
+        ]),
+        "a worker's RLM factory over another backend must be refused",
+    );
+    assert!(
+        matches!(worker_error, EmbedError::PluginBackendMismatch { .. }),
+        "expected PluginBackendMismatch, got {worker_error}"
+    );
+    Ok(())
+}
+
 /// The backend's process registry stamps wake deliveries from the
 /// backend's clock: the one clock the core and every store share.
 #[tokio::test]
@@ -340,7 +423,7 @@ impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
 /// A backend that runs its processes in `NoopProcessWork`, wired over the
 /// backend's own registry.
 async fn backend_with_external_process_work() -> DecoratedBackend {
-    DecoratedBackend::over(memory_backend().await).process_work(|registry| {
+    DecoratedBackend::over_sqlite(memory_backend().await).process_work(|registry| {
         lash_core::ProcessWorkWiring::new(
             lash_core::facade_support::watch_process_registry(registry),
             Arc::new(NoopProcessWork),
@@ -628,8 +711,8 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     // failure below; no SQLite registry seam reaches that read.
     let registry = Arc::new(TestLocalProcessRegistry::default());
     let fault_registry = Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>;
-    let backend =
-        DecoratedBackend::over(memory_backend().await).process_registry(move |_| fault_registry);
+    let backend = DecoratedBackend::over_sqlite(memory_backend().await)
+        .process_registry(move |_| fault_registry);
     let factory = lash_core::Backend::session_store_factory(&backend);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         Arc::new(backend),

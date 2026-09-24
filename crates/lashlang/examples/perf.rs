@@ -10,9 +10,8 @@ use bench_support::{
     linked_benchmark_program, projected_bindings, seeded_state_for,
 };
 use lashlang::{
-    CompiledProcessCache, ExecutionEnvironment, ExecutionOutcome, ExecutionScratch,
-    InMemoryLashlangArtifactStore, LashlangArtifactStore, LinkedModule, LinkedProgramCache,
-    ProjectedBindings, Snapshot, State, execute, prewarm,
+    CompiledProcessCache, ExecutionEnvironment, ExecutionOutcome, ExecutionScratch, LinkedModule,
+    LinkedProgramCache, ProjectedBindings, Snapshot, State, execute, prewarm,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;
@@ -96,7 +95,6 @@ enum Mode {
     LinkArtifact,
     CompiledExecute,
     Snapshot,
-    ArtifactRoundtrip,
     CompiledProcessCache,
     LinkedProgramCache,
     PhaseBreakdown,
@@ -128,7 +126,6 @@ fn main() {
             Mode::OneShot | Mode::PrewarmedOneShot => 25_000,
             Mode::CompiledExecute | Mode::Snapshot | Mode::CompiledProcessCache => 100_000,
             Mode::LinkArtifact => 25_000,
-            Mode::ArtifactRoundtrip => 10_000,
             Mode::LinkedProgramCache => 25_000,
             Mode::PhaseBreakdown => 10_000,
         });
@@ -148,7 +145,7 @@ fn main() {
 
 #[expect(
     clippy::expect_used,
-    reason = "each mode's step is a checked benchmark fact: snapshot round trip, store put/get, process export and cache miss compile, per each message"
+    reason = "each mode's step is a checked benchmark fact: snapshot round trip, process export and cache miss compile, per each message"
 )]
 fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterations: usize) {
     let cache_key = scenario.to_string();
@@ -157,7 +154,6 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
     let mut scratch = ExecutionScratch::new();
     let mut process_cache_stats = None;
     let mut linked_cache_stats = None;
-    let mut artifact_bytes = None;
     let mut phase_breakdown = None;
 
     reset_alloc_counters();
@@ -241,27 +237,6 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                 expect_finished(outcome);
             }
         }
-        Mode::ArtifactRoundtrip => {
-            let linked = linked_benchmark_program(scenario);
-            artifact_bytes = Some(
-                linked
-                    .artifact
-                    .to_store_bytes()
-                    .expect("artifact should encode")
-                    .len(),
-            );
-            let store = InMemoryLashlangArtifactStore::new();
-            let owner = lash_core_execution::ArtifactOwner::host("artifact-roundtrip-benchmark");
-            for _ in 0..iterations {
-                rt.block_on(store.publish_module_artifact(&owner, &linked.artifact))
-                    .expect("artifact store put should succeed");
-                let artifact = rt
-                    .block_on(store.get_module_artifact(linked.artifact.module_ref()))
-                    .expect("artifact store get should succeed")
-                    .expect("artifact should exist");
-                std::hint::black_box(artifact);
-            }
-        }
         Mode::CompiledProcessCache => {
             let linked = linked_benchmark_program(scenario);
             let process_ref = linked
@@ -330,9 +305,6 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
     println!("scenario: {scenario}");
     println!("iterations: {iterations}");
     println!("program_expressions: {}", benchmark_main(scenario).len());
-    if let Some(bytes) = artifact_bytes {
-        println!("artifact_bytes: {bytes}");
-    }
     println!("elapsed_ms: {:.3}", elapsed.as_secs_f64() * 1_000.0);
     println!(
         "ns_per_iter: {:.1}",
@@ -514,12 +486,11 @@ fn parse_mode(value: &str) -> Mode {
         "link_artifact" => Mode::LinkArtifact,
         "compiled_execute" => Mode::CompiledExecute,
         "snapshot" => Mode::Snapshot,
-        "artifact_roundtrip" => Mode::ArtifactRoundtrip,
         "compiled_process_cache" => Mode::CompiledProcessCache,
         "linked_program_cache" => Mode::LinkedProgramCache,
         "phase_breakdown" => Mode::PhaseBreakdown,
         other => panic!(
-            "unknown mode `{other}`; expected one_shot, prewarmed_one_shot, link_artifact, compiled_execute, snapshot, artifact_roundtrip, compiled_process_cache, linked_program_cache, or phase_breakdown"
+            "unknown mode `{other}`; expected one_shot, prewarmed_one_shot, link_artifact, compiled_execute, snapshot, compiled_process_cache, linked_program_cache, or phase_breakdown"
         ),
     }
 }

@@ -11,16 +11,18 @@ use std::sync::Arc;
 
 use lash_core::{Backend, EffectHost, SessionStoreFactory};
 
-/// `inner` with its session catalog or its effect host decorated.
+/// `inner` with its session catalog or its effect host decorated. It keeps
+/// the inner backend's Lashlang artifacts, so an RLM factory built over it
+/// keeps them there too.
 pub(super) struct PerfBackend {
-    inner: Arc<dyn Backend>,
+    inner: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
     catalog: Arc<dyn SessionStoreFactory>,
     effect_host: Arc<dyn EffectHost>,
 }
 
 impl PerfBackend {
     /// `inner`, undecorated.
-    pub(super) fn over(inner: Arc<dyn Backend>) -> Self {
+    pub(super) fn over(inner: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>) -> Self {
         Self {
             catalog: inner.session_store_factory(),
             effect_host: inner.effect_host(),
@@ -90,6 +92,12 @@ impl Backend for PerfBackend {
 
     fn queued_work(&self) -> lash_core::BackendQueuedWork {
         self.inner.queued_work()
+    }
+}
+
+impl lash_lashlang_runtime::LashlangArtifactBackend for PerfBackend {
+    fn lashlang_artifact_store(&self) -> Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> {
+        self.inner.lashlang_artifact_store()
     }
 }
 

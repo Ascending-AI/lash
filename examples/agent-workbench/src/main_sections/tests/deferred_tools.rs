@@ -14,7 +14,7 @@ fn deferred_tools_test_core(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        backend.process_env_store(),
+        backend.as_ref(),
     )
     .with_deferred_tool_resolver(deferred.resolver());
     LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)

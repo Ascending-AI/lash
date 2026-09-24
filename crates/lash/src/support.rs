@@ -46,7 +46,7 @@ pub(crate) use lash_core::{TurnActivity, TurnInput};
 pub(crate) use lash_core::{TurnActivityId, TurnEvent};
 
 pub(crate) use crate::admin::{PluginOperations, SessionAdmin};
-pub(crate) use crate::core::{LashCore, build_plugin_host};
+pub(crate) use crate::core::{LashCore, build_plugin_host, refuse_foreign_backend_factories};
 #[cfg(test)]
 pub(crate) use crate::error::SelectedQueuedWorkDrainRefusalCause;
 pub(crate) use crate::error::{EmbedError, Result};

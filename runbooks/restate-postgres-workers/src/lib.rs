@@ -4,7 +4,7 @@ mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;
 use anyhow::{Context, Result, bail};
-use lash::persistence::{AttachmentStore, LashlangArtifactStore, LeaseOwnerIdentity};
+use lash::persistence::{AttachmentStore, LeaseOwnerIdentity};
 use lash::plugins::{
     PluginExtensionContribution, PluginFactory, PluginRegistrar, PluginSessionContext,
     SessionPlugin,
@@ -444,6 +444,11 @@ pub async fn record_turn_activity(
     Ok(())
 }
 
+/// The harness's Restate backend: the Restate engine host over the
+/// PostgreSQL store set, which also keeps the RLM factory's Lashlang
+/// artifacts.
+pub type E2eBackend = lash_restate::RestateBackend<lash_postgres_store::PostgresStoreSet>;
+
 /// The Restate backend every worker and runner core of the harness runs on:
 /// the Restate engine host over the PostgreSQL store set, whose attachment
 /// bytes live in `attachment_store`.
@@ -452,7 +457,7 @@ pub fn e2e_backend(
     attachment_store: Arc<dyn AttachmentStore>,
     restate_ingress_url: impl Into<lash_restate::RestateConnection>,
     restate_authority_id: lash_restate::RestateAuthorityId,
-) -> Arc<lash_restate::RestateBackend> {
+) -> Arc<E2eBackend> {
     Arc::new(lash_restate::RestateBackend::new(
         restate_ingress_url,
         restate_authority_id,
@@ -472,7 +477,7 @@ pub fn e2e_backend(
 pub struct E2eCoreConfig {
     pub worker_id: String,
     pub storage: lash_postgres_store::PostgresStorage,
-    pub backend: Arc<lash_restate::RestateBackend>,
+    pub backend: Arc<E2eBackend>,
     pub restate_ingress_url: String,
     pub restate_authority_id: lash_restate::RestateAuthorityId,
     pub mock_provider_base_url: String,
@@ -485,8 +490,6 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         config.worker_id.clone(),
         format!("{}:{}", config.worker_id, process_incarnation_id()),
     );
-    let artifact_store =
-        Arc::new(config.storage.lashlang_artifact_store()) as Arc<dyn LashlangArtifactStore>;
     let provider = lash_core::facade_support::ProviderHandle::new(
         OpenAiCompatibleProvider::new(
             "e2e-key",
@@ -502,7 +505,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             .memory_limit(MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(LashlangAbilities::default().with_sleep()),
-        artifact_store,
+        config.backend.as_ref(),
     );
     if let Some(trace_dir) = config.trace_dir.as_ref() {
         factory = factory.with_lashlang_execution_jsonl_path(

@@ -17,7 +17,7 @@ use lash_core::testing::store_fixtures::durable_admission;
 #[tokio::test]
 pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomness() {
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
-        Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
+        crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let process_env_store = backend.process_env_store();

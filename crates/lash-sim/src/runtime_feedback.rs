@@ -335,6 +335,9 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
         })
         .build()
         .into_handle();
+    let backend = crate::backend::memory_backend()
+        .await
+        .expect("SQLite memory backend");
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -342,11 +345,8 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
             .wall_clock(lash_protocol_rlm::WallClockBound::secs(30))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+        backend.as_ref(),
     );
-    let backend = crate::backend::memory_backend()
-        .await
-        .expect("SQLite memory backend");
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))

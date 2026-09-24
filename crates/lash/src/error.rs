@@ -27,6 +27,21 @@ pub enum EmbedError {
         /// The effect host's `turn_control_binding_id()`.
         effect_host_binding: String,
     },
+    #[error(
+        "plugin `{plugin_id}` keeps its state in backend `{plugin_backend}`, but this core runs on backend `{backend}`; build the plugin over the core's own backend"
+    )]
+    /// Returned when a plugin factory bound to one backend's stores
+    /// ([`PluginFactory::bound_backend`](lash_core::plugin::PluginFactory::bound_backend))
+    /// is installed into a core over another backend: its state would live in
+    /// a substrate the core neither reopens nor sweeps (ADR 0102, D2).
+    PluginBackendMismatch {
+        /// The factory's [`PluginFactory::id`](lash_core::plugin::PluginFactory::id).
+        plugin_id: String,
+        /// The binding identity of the backend the factory is bound to.
+        plugin_backend: String,
+        /// The binding identity of this core's backend.
+        backend: String,
+    },
     #[error("model spec is required; hosts must supply explicit model metadata")]
     /// Returned when the session has no explicit model specification.
     MissingModelSpec,
@@ -230,6 +245,7 @@ impl EmbedError {
             }
             | Self::MissingProtocolPlugin
             | Self::BackendBindingMismatch { .. }
+            | Self::PluginBackendMismatch { .. }
             | Self::UnknownSession { .. }
             | Self::MissingModelSpec
             | Self::MissingTurnBudget
@@ -286,6 +302,7 @@ impl EmbedError {
         match self {
             Self::MissingProtocolPlugin
             | Self::BackendBindingMismatch { .. }
+            | Self::PluginBackendMismatch { .. }
             | Self::MissingModelSpec
             | Self::MissingTurnBudget
             | Self::MissingCommitBudget
@@ -463,6 +480,11 @@ mod tests {
             EmbedError::BackendBindingMismatch {
                 binding_identity: "backend".to_string(),
                 effect_host_binding: "other".to_string(),
+            },
+            EmbedError::PluginBackendMismatch {
+                plugin_id: "plugin".to_string(),
+                plugin_backend: "other".to_string(),
+                backend: "backend".to_string(),
             },
             EmbedError::MissingTurnBudget,
             runtime_error(RuntimeErrorCode::MissingExecutionScopeId),

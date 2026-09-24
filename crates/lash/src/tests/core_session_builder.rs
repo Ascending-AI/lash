@@ -1,8 +1,6 @@
 use super::*;
 #[cfg(feature = "rlm")]
 use crate::rlm::{RlmFinalAnswerFormat, RlmTurnBuilderExt as _};
-#[cfg(feature = "rlm")]
-use lash_lashlang_runtime::LashlangArtifactStore as _;
 use lash_sansio::sync::MutexExt;
 
 #[cfg(test)]

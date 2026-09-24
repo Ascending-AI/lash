@@ -655,7 +655,7 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
     let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
 
-    let restate: Arc<lash_restate::RestateBackend> = Arc::new(lash_restate::RestateBackend::new(
+    let restate = Arc::new(lash_restate::RestateBackend::new(
         lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
         lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
         Arc::new(
@@ -681,7 +681,8 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     ));
 
     let provider_calls = Arc::new(AtomicUsize::new(0));
-    let ownership_core = |backend: Arc<dyn lash::Backend>, name: &str| {
+    let ownership_core = |backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
+                          name: &str| {
         let provider_calls = Arc::clone(&provider_calls);
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-effect-replay-ownership")
@@ -703,20 +704,24 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
                 .wall_clock(lash::rlm::WallClockBound::secs(30))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash::persistence::InMemoryLashlangArtifactStore::new()),
+            backend.as_ref(),
         );
-        lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-            .provider(provider)
-            .model(
-                lash::ModelSpec::builder("test-model")
-                    .context_window_tokens(4096)
-                    .build()
-                    .expect("model spec"),
-            )
-            .build(crate::test_core_owner())
-            .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
+        lash::LashCore::rlm_builder(
+            backend as Arc<dyn lash::Backend>,
+            lash::TurnBudget::Unbounded,
+            factory,
+        )
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .provider(provider)
+        .model(
+            lash::ModelSpec::builder("test-model")
+                .context_window_tokens(4096)
+                .build()
+                .expect("model spec"),
+        )
+        .build(crate::test_core_owner())
+        .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
     };
 
     let controller_owned = ownership_core(restate, "Restate");

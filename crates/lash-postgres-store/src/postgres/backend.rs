@@ -354,6 +354,22 @@ impl lash_core_execution::Backend for PostgresBackend {
     }
 }
 
+/// The store that keeps this backend's process execution environments keeps
+/// its Lashlang module artifacts too.
+#[cfg(feature = "lashlang")]
+impl lashlang::LashlangArtifactBackend for PostgresBackend {
+    fn lashlang_artifact_store(&self) -> Arc<dyn lashlang::LashlangArtifactStore> {
+        PostgresBackend::process_env_store(self)
+    }
+}
+
+#[cfg(feature = "lashlang")]
+impl lashlang::LashlangArtifactStoreSet for PostgresStoreSet {
+    fn lashlang_artifact_store(&self) -> Arc<dyn lashlang::LashlangArtifactStore> {
+        PostgresStoreSet::process_env_store(self)
+    }
+}
+
 impl std::fmt::Debug for PostgresStoreSet {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
