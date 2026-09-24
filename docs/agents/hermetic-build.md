@@ -389,7 +389,7 @@ recipes for these correctness contracts:
   nested Cargo target cache.
 - nextest profiles own workspace filtering, retries, and scheduling; the
   fault-matrix and simulation fixtures invoke nested Cargo builds.
-- PostgreSQL, MinIO/S3, Restate, browser, Test262, judged-runbook, and other
+- PostgreSQL, S3 (Garage), Restate, browser, Test262, judged-runbook, and other
   named live recipes own their services, environment, ignored-test selection,
   and runtime assets.
 - fuzzing keeps its nightly `cargo fuzz` toolchain and corpus workflow.
@@ -490,12 +490,12 @@ shared cache; only their execution is Cargo-free. `scripts/ci/store-tests.sh`
 owns both paths for every suite in the `Test Postgres store` and `Test S3 store`
 jobs and dispatches on `BAZEL_TRUSTED`. Two properties hold on the Bazel path:
 
-- The PostgreSQL major, the connection URL, and the MinIO settings reach the
+- The PostgreSQL major, the connection URL, and the S3 settings reach the
   binaries only through `--test_env`, which is part of the test spawn and of
   nothing else. Every compile action key is identical across the PG 14/16/18
   matrix legs, so the three jobs reuse one set of compiled outputs from the
   shared cache. `tools/bazel/postgres_test_labels.txt` and
-  `tools/bazel/minio_test_labels.txt` are generated, so a new service-gated
+  `tools/bazel/s3_test_labels.txt` are generated, so a new service-gated
   binary reaches its service job without a hand edit.
 - A cached green for a test whose verdict depends on a live service is a false
   green, so these invocations pass `--nocache_test_results` and
@@ -546,7 +546,7 @@ the exact recipe for each, so a green `with-service.sh all` is never mistaken
 for full service coverage. (Inside GitHub Actions the report is suppressed:
 each step wraps one suite, and the coverage question it answers is a local
 one.) Those are the three Cargo-owned jobs below, the `slack-clone` `e2e`
-feature, and the process-operations E2E driver, which stands up its own MinIO.
+feature, and the process-operations E2E driver, which stands up its own S3 service.
 No `justfile` recipe was converted or removed: the store suites had none, and
 the `*-soak` recipes are separate opt-in property runs that keep their Cargo
 commands.
@@ -589,7 +589,7 @@ Three jobs stay entirely Cargo-owned, and not for want of trying:
 - `Build worker release artifacts` compiles `--release` binaries. The generated
   graph is the development compilation graph; the release profile (`thin` LTO
   and stripping) stays a Cargo-owned artifact contract.
-- `Restate + Postgres + MinIO Workers` executes shell E2E drivers
+- `Restate + Postgres + S3 Workers` executes shell E2E drivers
   (`scripts/restate-postgres-workers-e2e.sh` and the operator-flow scripts)
   over those release binaries rather than any Cargo or Bazel test label, so
   there is nothing to convert.

@@ -35,7 +35,7 @@
 packages = ["lash-internal-postgres-store", "lash-internal-s3-store"]
 kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
 tags = ["manual", "cargo-service-gate"]
-reason = "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service"
+reason = "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service"
 
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
@@ -73,7 +73,7 @@ packages = ["lash-sim"]
 kinds = ["test"]
 targets = ["cross_backend*"]
 tags = ["manual", "cargo-service-gate"]
-reason = "proves nothing without a live PostgreSQL or MinIO; the service jobs execute this label uncached against a real service"
+reason = "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service"
 
 # This binary carries the generated-simulation and minimizer fixture replays
 # (measured 182-418 s each under Cargo). The whole binary ran 227-300 s on the
@@ -405,7 +405,7 @@ contention_floor = { cpu_count = 4, packages = ["lash-perf", "lash-sim"] }
 # (`tools/bazel/<service>_test_labels.txt`).
 [service_packages]
 postgres = ["lash-internal-postgres-store"]
-minio = ["lash-internal-s3-store"]
+s3 = ["lash-internal-s3-store"]
 
 # --- Feature-lane variants ---------------------------------------------------
 

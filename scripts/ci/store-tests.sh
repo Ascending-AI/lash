@@ -78,12 +78,12 @@ bazel_test() {
     --test_output=errors \
     --test_env=LASH_POSTGRES_DATABASE_URL \
     --test_env=LASH_REQUIRE_POSTGRES \
-    --test_env=LASH_REQUIRE_MINIO \
-    --test_env=LASH_MINIO_ENDPOINT \
-    --test_env=LASH_MINIO_REGION \
-    --test_env=LASH_MINIO_BUCKET \
-    --test_env=LASH_MINIO_ACCESS_KEY \
-    --test_env=LASH_MINIO_SECRET_KEY \
+    --test_env=LASH_REQUIRE_S3 \
+    --test_env=LASH_S3_ENDPOINT \
+    --test_env=LASH_S3_REGION \
+    --test_env=LASH_S3_BUCKET \
+    --test_env=LASH_S3_ACCESS_KEY \
+    --test_env=LASH_S3_SECRET_KEY \
     --test_env=LASH_CROSS_BACKEND_CASES \
     "$@"
 }
@@ -265,9 +265,9 @@ case "${suite}" in
   s3-store)
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046
-      bazel_test $(labels minio)
+      bazel_test $(labels s3)
       python3 scripts/check_law_execution_receipts.py \
-        --labels tools/bazel/minio_test_labels.txt \
+        --labels tools/bazel/s3_test_labels.txt \
         --crate-root crates/lash-s3-store \
         --receipts-root bazel-testlogs/crates/lash-s3-store
     else

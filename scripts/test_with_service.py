@@ -89,11 +89,15 @@ class WithServiceContract(unittest.TestCase):
     def test_images_are_declared_once_and_only_in_the_wrapper(self) -> None:
         """CI starts nothing itself, so it names no image."""
         workflow = workflow_text()
-        for image in ("postgres:", "quay.io/minio/"):
+        for image in ("postgres:", "dxflrs/garage"):
             self.assertNotIn(image, workflow, f"ci.yml still names {image}")
         table = wrapper_text()
-        self.assertIn("quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z", table)
-        self.assertIn("quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z", table)
+        # The S3 service's image is Garage, pinned by digest in the file the
+        # runbooks and gates share, and the wrapper takes it from there.
+        s3_service = (ROOT / "scripts" / "ci" / "s3-service.sh").read_text(encoding="utf-8")
+        self.assertRegex(s3_service, r'LASH_S3_IMAGE="dxflrs/garage:v[0-9.]+@sha256:[0-9a-f]{64}"')
+        self.assertIn('source "$(dirname "${BASH_SOURCE[0]}")/s3-service.sh"', table)
+        self.assertIn('echo "$LASH_S3_IMAGE"', table)
         # The settings CI's `services:` block used to pass.
         self.assertIn("shared_preload_libraries=pg_stat_statements", table)
         self.assertIn("POSTGRES_USER=lash", table)

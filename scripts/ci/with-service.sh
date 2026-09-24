@@ -33,8 +33,10 @@ readonly PROGRAM="scripts/ci/with-service.sh"
 # longer starts its own containers, so there is no second copy to drift from.
 # scripts/test_with_service.py holds this table to ci.yml and to store-tests.sh.
 # ---------------------------------------------------------------------------
-readonly MINIO_IMAGE="quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
-readonly MC_IMAGE="quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z"
+# The S3 service's facts (Garage, pinned by digest) live in s3-service.sh,
+# which the runbooks and gates share.
+# shellcheck source=scripts/ci/s3-service.sh
+source "$(dirname "${BASH_SOURCE[0]}")/s3-service.sh"
 readonly SERVICES=(pg14 pg16 pg18 s3)
 # Databases a PostgreSQL service carries beside the default `lash`, one per
 # test that `scripts/ci/store-tests.sh pg-store` runs at once. Each is named
@@ -47,7 +49,7 @@ service_description() {
     pg14) echo "PostgreSQL 14 compatibility lane (catalog artifact + version stamp)" ;;
     pg16) echo "PostgreSQL 16 primary lane (conformance, pool-wait, agent scenario, cross-backend)" ;;
     pg18) echo "PostgreSQL 18 compatibility lane (catalog artifact + version stamp)" ;;
-    s3) echo "MinIO object store (S3 conformance + attachment blob-store differential)" ;;
+    s3) echo "Garage S3 object store (S3 conformance + attachment blob-store differential)" ;;
   esac
 }
 
@@ -56,22 +58,14 @@ service_image() {
     pg14) echo "postgres:14-alpine" ;;
     pg16) echo "postgres:16-alpine" ;;
     pg18) echo "postgres:18-alpine" ;;
-    s3) echo "$MINIO_IMAGE" ;;
+    s3) echo "$LASH_S3_IMAGE" ;;
   esac
 }
 
 service_container_port() {
   case "$1" in
     pg*) echo 5432 ;;
-    s3) echo 9000 ;;
-  esac
-}
-
-# Extra images the probe or the setup step needs, beyond the service image.
-service_helper_images() {
-  case "$1" in
-    s3) echo "$MC_IMAGE" ;;
-    *) : ;;
+    s3) echo "$LASH_S3_CONTAINER_PORT" ;;
   esac
 }
 
@@ -105,11 +99,8 @@ service_run_spec() {
       )
       ;;
     s3)
-      RUN_ARGS=(
-        --env MINIO_ROOT_USER=minioadmin
-        --env MINIO_ROOT_PASSWORD=minioadmin
-      )
-      RUN_COMMAND=(server /data)
+      mapfile -t RUN_ARGS < <(lash_s3_run_args)
+      mapfile -t RUN_COMMAND < <(lash_s3_command)
       ;;
   esac
 }
@@ -128,16 +119,12 @@ service_test_env() {
       )
       ;;
     s3)
-      TEST_ENV=(
-        "LASH_REQUIRE_MINIO=1"
-        "LASH_MINIO_ENDPOINT=http://127.0.0.1:${port}"
-      )
+      mapfile -t TEST_ENV < <(lash_s3_test_env "$port")
       ;;
   esac
 }
 
-# The same readiness budget CI's `services:` health check and the MinIO loop
-# used: 30 x 2s for PostgreSQL, 60 x 1s for MinIO.
+# The readiness budget: 30 x 2s for PostgreSQL, 60 x 1s for the S3 service.
 service_ready_attempts() {
   case "$1" in
     pg*) echo 30 ;;
@@ -160,9 +147,7 @@ service_ready_probe() {
       docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1
       ;;
     s3)
-      docker run --rm --network host "$MC_IMAGE" \
-        alias set with-service "http://127.0.0.1:${port}" minioadmin minioadmin \
-        >/dev/null 2>&1
+      lash_s3_ready "$container"
       ;;
   esac
 }
@@ -177,10 +162,6 @@ service_setup() {
         docker exec "$container" psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
           -c "CREATE DATABASE lash_slot_${index}" >/dev/null
       done
-      ;;
-    s3)
-      docker run --rm --network host --entrypoint /bin/sh "$MC_IMAGE" -c \
-        "mc alias set with-service http://127.0.0.1:${port} minioadmin minioadmin >/dev/null && mc mb --ignore-existing with-service/lash-attachments"
       ;;
     *) : ;;
   esac
@@ -201,7 +182,7 @@ NOT covered by scripts/ci/with-service.sh -- run each of these yourself:
       why: staged between jobs rather than run against a service; trusted
            events take them from the shared build cache
       run: python3 scripts/ci/restate_suite.py stage-binaries //runbooks/restate-postgres-workers <dir>
-  * Restate + Postgres + MinIO Workers
+  * Restate + Postgres + S3 Workers
       why: shell E2E drivers over release binaries rather than any Cargo or Bazel
            test label
       run: just restate-postgres-workers-e2e
@@ -210,7 +191,7 @@ NOT covered by scripts/ci/with-service.sh -- run each of these yourself:
            has no Bazel label
       run: cargo clippy -p slack-clone --all-targets --features e2e --locked --no-deps -- -D warnings
   * Functional E2E process operations
-      why: a shell driver that stands up its own MinIO on a non-9000 port
+      why: a compose runbook that stands up its own S3 service beside Restate and PostgreSQL
       run: bash scripts/process-operations-e2e.sh
 REPORT
 }
@@ -295,15 +276,12 @@ wait_ready() {
 run_with_service() {
   local name="$1"
   shift
-  local port container image helper started rc
+  local port container image started rc
   port="$(free_port)"
   container="with-service-${name}-$$-${RANDOM}"
   image="$(service_image "$name")"
 
   pull_image "$image"
-  for helper in $(service_helper_images "$name"); do
-    pull_image "$helper"
-  done
 
   service_run_spec "$name"
   containers+=("$container")

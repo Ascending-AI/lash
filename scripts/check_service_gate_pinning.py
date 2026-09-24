@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pin the ways a service-backed suite can silently stop running.
 
-A suite that needs Postgres or MinIO is worthless the moment it skips itself.
+A suite that needs Postgres or S3 is worthless the moment it skips itself.
 The mechanisms that keep it honest are one edit away from being lost, and
 losing either one is invisible: the job still reports green, having compared
 nothing.
@@ -11,7 +11,7 @@ Rule 1 -- the require flag. A workflow scope that hands a suite
 ``"1"``, in that scope or an enclosing one. The flag is what turns "the service
 is missing" from a skip into a failure, so a job that provisions a service and
 forgets the flag skips green whenever the service fails to start -- which is
-exactly what the release and perf legs did before FIG-1217. MinIO test clients
+exactly what the release and perf legs did before FIG-1217. S3 test clients
 use fixed CI configuration, so the workflow contract for them is pinned by the
 CI structure check rather than an endpoint/flag pair.
 

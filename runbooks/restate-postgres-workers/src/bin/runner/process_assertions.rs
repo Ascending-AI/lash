@@ -824,7 +824,7 @@ pub(super) async fn assert_attachments_round_trip(
         let stored = store
             .get(&id)
             .await
-            .with_context(|| format!("read worker attachment `{id}` from MinIO"))?;
+            .with_context(|| format!("read worker attachment `{id}` from S3"))?;
         anyhow::ensure!(
             stored.bytes == expected_attachment_bytes(&response.workflow_id),
             "worker attachment `{id}` bytes did not match expected content"

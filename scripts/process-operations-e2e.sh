@@ -50,14 +50,15 @@ lash_gate_acquire process-operations-e2e
 compose_project="${LASH_PROCESS_OPERATIONS_COMPOSE_PROJECT:-lash-process-operations-${LASH_GATE_WORKTREE_SLUG}}"
 compose=(docker compose -p "$compose_project" -f "$repo/runbooks/process-operations/docker-compose.yml")
 postgres_port="${LASH_PROCESS_OPERATIONS_POSTGRES_PORT:-$((LASH_E2E_PORT_BASE + 46))}"
-minio_port="${LASH_PROCESS_OPERATIONS_MINIO_PORT:-$((LASH_E2E_PORT_BASE + 41))}"
-minio_console_port="${LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT:-$((LASH_E2E_PORT_BASE + 42))}"
+s3_port="${LASH_PROCESS_OPERATIONS_S3_PORT:-$((LASH_E2E_PORT_BASE + 41))}"
 restate_admin_port="${LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT:-$((LASH_E2E_PORT_BASE + 43))}"
 restate_ingress_port="${LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT:-$((LASH_E2E_PORT_BASE + 44))}"
 restate_node_port="${LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT:-$((LASH_E2E_PORT_BASE + 45))}"
 export LASH_PROCESS_OPERATIONS_POSTGRES_PORT="$postgres_port"
-export LASH_PROCESS_OPERATIONS_MINIO_PORT="$minio_port"
-export LASH_PROCESS_OPERATIONS_MINIO_CONSOLE_PORT="$minio_console_port"
+export LASH_PROCESS_OPERATIONS_S3_PORT="$s3_port"
+# The S3 service's image, credentials and bucket, which the compose file reads.
+# shellcheck source=scripts/ci/s3-service.sh
+source "$repo/scripts/ci/s3-service.sh"
 export LASH_PROCESS_OPERATIONS_RESTATE_ADMIN_PORT="$restate_admin_port"
 export LASH_PROCESS_OPERATIONS_RESTATE_INGRESS_PORT="$restate_ingress_port"
 export LASH_PROCESS_OPERATIONS_RESTATE_NODE_PORT="$restate_node_port"
@@ -123,7 +124,7 @@ cleanup() {
 trap cleanup EXIT
 
 bash scripts/docker-pull-with-retry.sh ubuntu:24.04
-"${compose[@]}" up -d postgres minio minio-init restate
+"${compose[@]}" up -d postgres s3 restate
 
 deadline=$((SECONDS + 90))
 until docker run --rm --name "lash-process-postgres-probe-${LASH_GATE_WORKTREE_SLUG}-$$" \
@@ -135,32 +136,7 @@ until docker run --rm --name "lash-process-postgres-probe-${LASH_GATE_WORKTREE_S
   fi
   sleep 1
 done
-until curl -fsS --max-time 2 "http://127.0.0.1:${minio_port}/minio/health/live" >/dev/null; do
-  if ((SECONDS >= deadline)); then
-    echo "MinIO did not become ready" >&2
-    exit 1
-  fi
-  sleep 1
-done
-while true; do
-  minio_init_id="$("${compose[@]}" ps -a -q minio-init)"
-  if [ -n "$minio_init_id" ]; then
-    minio_init_status="$(docker inspect -f '{{.State.Status}}' "$minio_init_id")"
-    if [ "$minio_init_status" = "exited" ]; then
-      minio_init_exit="$(docker inspect -f '{{.State.ExitCode}}' "$minio_init_id")"
-      if [ "$minio_init_exit" != "0" ]; then
-        echo "minio-init exited with status $minio_init_exit" >&2
-        exit 1
-      fi
-      break
-    fi
-  fi
-  if ((SECONDS >= deadline)); then
-    echo "minio-init did not complete before timeout" >&2
-    exit 1
-  fi
-  sleep 1
-done
+lash_s3_wait "$("${compose[@]}" ps -q s3)" 60
 until curl -fsS --max-time 2 "http://127.0.0.1:${restate_admin_port}/deployments" >"$artifact_dir/restate-deployments.json"; do
   if ((SECONDS >= deadline)); then
     echo "Restate did not become ready" >&2
@@ -180,17 +156,14 @@ docker run --rm --name "lash-process-postgres-query-${LASH_GATE_WORKTREE_SLUG}-$
   psql -h 127.0.0.1 -p "$postgres_port" -U lash -d lash -Atqc \
   "SELECT json_build_object('postgres_version', current_setting('server_version'), 'port', ${postgres_port})" \
   >"$artifact_dir/00-postgres.json"
-echo "scenario 0 evidence: Restate, PostgreSQL:${postgres_port}, and MinIO are live" | tee "$test_output"
+echo "scenario 0 evidence: Restate, PostgreSQL:${postgres_port}, and S3 (Garage) are live" | tee "$test_output"
 
-LASH_MINIO_ENDPOINT="http://127.0.0.1:${minio_port}" \
-LASH_MINIO_BUCKET="lash-attachments" \
-LASH_MINIO_REGION="us-east-1" \
-LASH_MINIO_ACCESS_KEY="minioadmin" \
-LASH_MINIO_SECRET_KEY="minioadmin" \
-LASH_MINIO_PREFIX="runbooks/process-operations-${LASH_GATE_WORKTREE_SLUG}-$$" \
-LASH_REQUIRE_MINIO=1 \
+mapfile -t s3_test_env < <(lash_s3_test_env "$s3_port")
+# shellcheck disable=SC2016 # "$1" is the inner shell's argument
+env "${s3_test_env[@]}" \
+  LASH_S3_PREFIX="runbooks/process-operations-${LASH_GATE_WORKTREE_SLUG}-$$" \
   bash -c 'cd crates/lash-s3-store && exec "$1" --nocapture' _ "$s3_store_tests" \
-  2>&1 | tee "$artifact_dir/00-minio-conformance.log" | tee -a "$test_output"
+  2>&1 | tee "$artifact_dir/00-s3-conformance.log" | tee -a "$test_output"
 
 postgres_url="postgres://lash:lash@127.0.0.1:${postgres_port}/lash"
 LASH_POSTGRES_DATABASE_URL="$postgres_url" \
