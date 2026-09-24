@@ -643,13 +643,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let input = self.heap.javascript_to_string(input)?;
                 Value::Bool(!matches!(self.exec_regexp(*receiver, &input)?, Value::Null))
             }
-            ("match", [input, Value::Ref(receiver)]) => {
+            ("match", [input, pattern, ..]) => {
                 let input = self.heap.javascript_to_string(input)?;
-                self.string_match(&input, *receiver)?
+                let receiver = self.string_regexp_argument(pattern)?;
+                self.string_match(&input, receiver)?
             }
-            ("search", [input, Value::Ref(receiver)]) => {
+            ("search", [input, pattern, ..]) => {
                 let input = self.heap.javascript_to_string(input)?;
-                Value::Number(self.string_search(&input, *receiver)? as f64)
+                let receiver = self.string_regexp_argument(pattern)?;
+                Value::Number(self.string_search(&input, receiver)? as f64)
             }
             ("matchAll", [input, Value::Ref(receiver)]) => {
                 let input = self.heap.javascript_to_string(input)?;

@@ -727,3 +727,60 @@ fn regexp_dotall_property_reports_the_outer_flag() {
         )
     );
 }
+
+/// FIG-3658: `match`/`search` run RegExpCreate on a non-RegExp argument —
+/// `undefined` (or no argument) is the empty pattern, other primitives coerce
+/// through ToString, extra arguments are ignored — and an object whose own
+/// `toString`/`valueOf` would answer is refused rather than silently compiled.
+#[test]
+fn match_and_search_coerce_non_regexp_arguments() {
+    assert_eq!(
+        finished("finish('gnulluna'.match(null)[0]);"),
+        Value::String("null".into())
+    );
+    assert_eq!(
+        finished("finish('gnulluna'.search(null));"),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        finished("finish(String('undefined').search(undefined));"),
+        Value::Number(0.0)
+    );
+    assert_eq!(
+        finished("const m='1234567890'.match(3); finish([m[0],m.length,m.index,m.input]);"),
+        Value::List(
+            vec![
+                Value::String("3".into()),
+                Value::Number(1.0),
+                Value::Number(2.0),
+                Value::String("1234567890".into()),
+            ]
+            .into()
+        )
+    );
+    // Extra arguments are ignored and an absent argument is `undefined`.
+    assert_eq!(
+        finished("finish(['abc'.search('b','ignored'),'abc'.match().length,'abc'.match()[0]]);"),
+        Value::List(
+            vec![
+                Value::Number(1.0),
+                Value::Number(1.0),
+                Value::String("".into()),
+            ]
+            .into()
+        )
+    );
+    // A RegExp argument is used as-is, not recompiled from its source text.
+    assert_eq!(
+        finished("finish('xBy'.match(/b/i)[0]);"),
+        Value::String("B".into())
+    );
+    // An object whose own methods would answer ToString must refuse: the
+    // dialect cannot run guest code inside the coercion.
+    let error = execute("finish('AB'.match({ toString: function() { return 'AB'; } }));")
+        .expect_err("an object with a guest toString must refuse");
+    assert!(
+        error.to_string().contains("TS_OBJECT_STRING_COERCION"),
+        "the refusal is the named one: {error}"
+    );
+}
