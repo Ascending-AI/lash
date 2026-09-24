@@ -1096,7 +1096,7 @@ test/built-ins/Array/prototype/indexOf/15.4.4.14-9-a-6.js	refused	TS_SPARSE_ARRA
 test/built-ins/Array/prototype/indexOf/15.4.4.14-9-a-7.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/indexOf/15.4.4.14-9-a-8.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/indexOf/15.4.4.14-9-a-9.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/Array/prototype/indexOf/15.4.4.14-9-b-1.js	fail	FIG-3662
+test/built-ins/Array/prototype/indexOf/15.4.4.14-9-b-1.js	fail	FIG-3700
 test/built-ins/Array/prototype/indexOf/15.4.4.14-9-b-i-1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/indexOf/15.4.4.14-9-b-i-10.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/indexOf/15.4.4.14-9-b-i-11.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
@@ -1311,7 +1311,7 @@ test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-8-a-6.js	refused	TS_SPARSE_
 test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-8-a-7.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-8-a-8.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-8-a-9.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-8-b-1.js	fail	FIG-3662
+test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-8-b-1.js	fail	FIG-3700
 test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-8-b-i-1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-8-b-i-10.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/lastIndexOf/15.4.4.15-8-b-i-11.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
@@ -3657,7 +3657,7 @@ test/built-ins/JSON/stringify/replacer-array-order.js	fail	FIG-3653
 test/built-ins/JSON/stringify/replacer-array-string-object.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/JSON/stringify/replacer-array-undefined.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/JSON/stringify/replacer-function-abrupt.js	pass	-
-test/built-ins/JSON/stringify/replacer-function-arguments.js	fail	FIG-3662
+test/built-ins/JSON/stringify/replacer-function-arguments.js	fail	FIG-3700
 test/built-ins/JSON/stringify/replacer-function-array-circular.js	pass	-
 test/built-ins/JSON/stringify/replacer-function-object-circular.js	pass	-
 test/built-ins/JSON/stringify/replacer-function-object-deleted-property.js	refused	TS_ACCESSOR_UNSUPPORTED
@@ -9597,7 +9597,7 @@ test/built-ins/String/prototype/includes/String.prototype.includes_FailLocation.
 test/built-ins/String/prototype/includes/String.prototype.includes_FailMissingLetter.js	pass	-
 test/built-ins/String/prototype/includes/String.prototype.includes_Success.js	pass	-
 test/built-ins/String/prototype/includes/String.prototype.includes_SuccessNoLocation.js	pass	-
-test/built-ins/String/prototype/includes/String.prototype.includes_lengthProp.js	fail	FIG-3662
+test/built-ins/String/prototype/includes/String.prototype.includes_lengthProp.js	fail	FIG-3700
 test/built-ins/String/prototype/includes/coerced-values-of-position.js	pass	-
 test/built-ins/String/prototype/includes/includes.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/String/prototype/includes/length.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
@@ -10000,7 +10000,7 @@ test/built-ins/String/prototype/split/separator-colon-instance-is-string-one-1-t
 test/built-ins/String/prototype/split/separator-comma-instance-is-string-one-two-three-four-five.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/String/prototype/split/separator-empty-string-instance-is-string.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/String/prototype/split/separator-number-limit-math-pow-2-32-1-instance-is-number.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/String/prototype/split/separator-override-tostring-limit-override-valueof-throws.js	fail	FIG-3662
+test/built-ins/String/prototype/split/separator-override-tostring-limit-override-valueof-throws.js	fail	FIG-3700
 test/built-ins/String/prototype/split/separator-override-tostring-limit-override-valueof-tostring-throws.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/String/prototype/split/separator-override-tostring-limit-override-valueof-tostring.js	refused	TS_UNKNOWN_BINDING
 test/built-ins/String/prototype/split/separator-override-tostring-limit-override-valueof.js	refused	TS_UNKNOWN_BINDING
@@ -10017,7 +10017,7 @@ test/built-ins/String/prototype/split/separator-undef.js	refused	TS_METHOD_UNSUP
 test/built-ins/String/prototype/split/this-value-not-obj-coercible.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/String/prototype/split/transferred-to-custom.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/String/prototype/split/transferred-to-number-separator-override-tostring-returns-regexp.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/String/prototype/split/valueOf-is-called-for-limit-argument.js	fail	FIG-3662
+test/built-ins/String/prototype/split/valueOf-is-called-for-limit-argument.js	fail	FIG-3700
 test/built-ins/String/prototype/startsWith/coerced-values-of-position.js	pass	-
 test/built-ins/String/prototype/startsWith/length.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/String/prototype/startsWith/name.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
@@ -13728,12 +13728,12 @@ test/language/expressions/in/S11.8.7_A2.1_T1.js	fail	FIG-3656
 test/language/expressions/in/S11.8.7_A2.1_T2.js	refused	TS_UNKNOWN_BINDING
 test/language/expressions/in/S11.8.7_A2.1_T3.js	refused	TS_UNKNOWN_BINDING
 test/language/expressions/in/S11.8.7_A2.4_T1.js	refused	TS_SEQUENCE_UNSUPPORTED
-test/language/expressions/in/S11.8.7_A2.4_T2.js	fail	FIG-3662
+test/language/expressions/in/S11.8.7_A2.4_T2.js	fail	FIG-3700
 test/language/expressions/in/S11.8.7_A2.4_T3.js	refused	TS_SEQUENCE_UNSUPPORTED
-test/language/expressions/in/S11.8.7_A3.js	fail	FIG-3662
+test/language/expressions/in/S11.8.7_A3.js	fail	FIG-3700
 test/language/expressions/in/S11.8.7_A4.js	pass	-
 test/language/expressions/in/S8.12.6_A1.js	pass	-
-test/language/expressions/in/S8.12.6_A2_T1.js	fail	FIG-3662
+test/language/expressions/in/S8.12.6_A2_T1.js	fail	FIG-3700
 test/language/expressions/in/S8.12.6_A2_T2.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/language/expressions/in/S8.12.6_A3.js	pass	-
 test/language/expressions/in/rhs-yield-absent-strict.js	pass	-
@@ -16855,8 +16855,8 @@ test/language/statements/const/dstr/ary-ptrn-rest-init-obj.js	pass	-
 test/language/statements/const/dstr/ary-ptrn-rest-not-final-ary.js	pass	-
 test/language/statements/const/dstr/ary-ptrn-rest-not-final-id.js	pass	-
 test/language/statements/const/dstr/ary-ptrn-rest-not-final-obj.js	pass	-
-test/language/statements/const/dstr/ary-ptrn-rest-obj-id.js	fail	FIG-3662
-test/language/statements/const/dstr/ary-ptrn-rest-obj-prop-id.js	fail	FIG-3662
+test/language/statements/const/dstr/ary-ptrn-rest-obj-id.js	fail	FIG-3700
+test/language/statements/const/dstr/ary-ptrn-rest-obj-prop-id.js	fail	FIG-3700
 test/language/statements/const/dstr/obj-init-null.js	fail	FIG-3654
 test/language/statements/const/dstr/obj-init-undefined.js	fail	FIG-3654
 test/language/statements/const/dstr/obj-ptrn-empty.js	refused	TS_METHOD_UNSUPPORTED
@@ -18276,8 +18276,8 @@ test/language/statements/let/dstr/ary-ptrn-rest-init-obj.js	pass	-
 test/language/statements/let/dstr/ary-ptrn-rest-not-final-ary.js	pass	-
 test/language/statements/let/dstr/ary-ptrn-rest-not-final-id.js	pass	-
 test/language/statements/let/dstr/ary-ptrn-rest-not-final-obj.js	pass	-
-test/language/statements/let/dstr/ary-ptrn-rest-obj-id.js	fail	FIG-3662
-test/language/statements/let/dstr/ary-ptrn-rest-obj-prop-id.js	fail	FIG-3662
+test/language/statements/let/dstr/ary-ptrn-rest-obj-id.js	fail	FIG-3700
+test/language/statements/let/dstr/ary-ptrn-rest-obj-prop-id.js	fail	FIG-3700
 test/language/statements/let/dstr/obj-init-null.js	fail	FIG-3654
 test/language/statements/let/dstr/obj-init-undefined.js	fail	FIG-3654
 test/language/statements/let/dstr/obj-ptrn-empty.js	refused	TS_METHOD_UNSUPPORTED
@@ -18717,8 +18717,8 @@ test/language/statements/variable/dstr/ary-ptrn-rest-init-obj.js	pass	-
 test/language/statements/variable/dstr/ary-ptrn-rest-not-final-ary.js	pass	-
 test/language/statements/variable/dstr/ary-ptrn-rest-not-final-id.js	pass	-
 test/language/statements/variable/dstr/ary-ptrn-rest-not-final-obj.js	pass	-
-test/language/statements/variable/dstr/ary-ptrn-rest-obj-id.js	fail	FIG-3662
-test/language/statements/variable/dstr/ary-ptrn-rest-obj-prop-id.js	fail	FIG-3662
+test/language/statements/variable/dstr/ary-ptrn-rest-obj-id.js	fail	FIG-3700
+test/language/statements/variable/dstr/ary-ptrn-rest-obj-prop-id.js	fail	FIG-3700
 test/language/statements/variable/dstr/obj-init-null.js	fail	FIG-3654
 test/language/statements/variable/dstr/obj-init-undefined.js	fail	FIG-3654
 test/language/statements/variable/dstr/obj-ptrn-empty.js	refused	TS_METHOD_UNSUPPORTED

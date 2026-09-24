@@ -1,5 +1,5 @@
 # class	qualifier	count
-fail	*	698
+fail	*	697
 fail	FIG-3650	141
 fail	FIG-3651	139
 fail	FIG-3652	98
@@ -7,7 +7,7 @@ fail	FIG-3653	141
 fail	FIG-3654	52
 fail	FIG-3655	34
 fail	FIG-3656	77
-fail	FIG-3662	15
+fail	FIG-3700	15
 harness	*	21
 harness	nativeFunctionMatcher.js	15
 harness	program-size	6
