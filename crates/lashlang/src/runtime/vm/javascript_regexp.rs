@@ -277,7 +277,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let HeapObject::RegExpMatch(result) = self.heap.get(receiver)? else {
             return Ok(false);
         };
-        let value = javascript_regexp_match_method(method, receiver, &result.items, args)?;
+        let value =
+            javascript_regexp_match_method(&self.heap, method, receiver, &result.items, args)?;
         self.stack.push(value);
         Ok(true)
     }
