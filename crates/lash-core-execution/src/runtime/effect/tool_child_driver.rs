@@ -44,9 +44,10 @@
 //! # What the driver does not do
 //!
 //! It holds no in-process drain slot. §5 orders sibling drains by a durable
-//! per-group final-commit order: §4 commits the child's final at the attempt
-//! boundary and §5 admits its drain by the recorded `commit_seq`, which orders
-//! it against every sibling without a process-local gate.
+//! per-group final-commit order: §4 commits the child's final at the child's
+//! terminal — its final attempt's boundary or its resolved completion — and
+//! §5 admits its drain by the recorded `commit_seq`, which orders it against
+//! every sibling without a process-local gate.
 //!
 //! It projects the child's result exactly once, at its own presentation
 //! boundary: the session's ordered presentation steps run once through the
@@ -647,9 +648,10 @@ fn admitted_catalog(
 ///
 /// The ordering this provides, stated rather than assumed (§4/§5, FIG-3409):
 /// a child takes no in-process slot because the durable group owns the order —
-/// its final commits at the attempt's terminal boundary against its own
-/// replay row (`child`), and its drain is admitted by the recorded
-/// `commit_seq` barrier before the first declared intent runs.
+/// its final commits at the child's terminal — its final attempt's boundary
+/// or its resolved completion — against its own replay row (`child`), and
+/// its drain is admitted by the recorded `commit_seq` barrier before the
+/// first declared intent runs.
 pub(crate) async fn run_tool_child<'run>(
     host: &ToolChildHost,
     live: &LiveOpenerContext,

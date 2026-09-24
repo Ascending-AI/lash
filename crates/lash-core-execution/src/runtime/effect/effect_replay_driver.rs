@@ -999,8 +999,9 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         commit_seq: u64,
     ) -> Result<bool, RuntimeEffectControllerError>;
 
-    /// Commit one group child's final record at the §4 point — the
-    /// final-attempt boundary's durable half.
+    /// Commit one group child's final record at the §4 point — the durable
+    /// half of the child's terminal: its final attempt's boundary or its
+    /// resolved completion.
     ///
     /// In one transaction, in the shared lock order:
     ///
@@ -2084,7 +2085,8 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                     .map_err(|err| vocabulary.encode_error(err))?,
             },
         };
-        // A group child whose final-attempt boundary already ran arrives here
+        // A group child whose terminal — its final attempt's boundary or its
+        // resolved completion — already committed arrives here
         // `committed` with no terminal: the commit journaled the decision, the
         // position and the drain input while the lease was held, and the
         // intents drained underneath it. Its discharge is the write that seats
@@ -2133,9 +2135,9 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         }
         match self.row_store.finalize(fence, &terminal).await? {
             EffectFinalizeOutcome::Written { commit_seq: _ } => {
-                // A `pending` grouped row reaching finalize never ran the
-                // attempt boundary — a non-tool child, or a tool child that
-                // failed before its terminal attempt — so it has no drain to
+                // A `pending` grouped row reaching finalize never crossed a
+                // tool child's terminal commit — a non-tool child, or a tool
+                // child that failed before its terminal — so it has no drain to
                 // owe: finalize is its §4 point and its discharge is
                 // immediate (§5: a child with no remaining intent admission
                 // is admitted and discharged at once). The barrier still

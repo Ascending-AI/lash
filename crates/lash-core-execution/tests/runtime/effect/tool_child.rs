@@ -135,6 +135,26 @@ mod tests {
         );
     }
 
+    /// A request journaled by an older build is refused, typed and before any
+    /// effect. Version 6 moved a parked child's §4 commit ahead of its
+    /// presentation (FIG-3609), so a child whose journal an older build wrote
+    /// would replay against a different step order.
+    #[test]
+    fn a_request_journaled_by_an_older_build_is_refused() {
+        for version in 1..TOOL_CHILD_REQUEST_VERSION {
+            let mut older = request();
+            older.version = version;
+            let error = older
+                .validate()
+                .expect_err("an older-build request is refused");
+            assert_eq!(
+                error.code,
+                lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion,
+                "version {version} is refused with the typed version code"
+            );
+        }
+    }
+
     #[test]
     fn an_empty_call_id_is_refused() {
         let mut blank = request();
