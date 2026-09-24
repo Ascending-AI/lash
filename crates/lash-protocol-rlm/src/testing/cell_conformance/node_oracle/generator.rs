@@ -175,7 +175,7 @@ fn static_rejections() -> Vec<(&'static str, &'static str)> {
             .then(|| (columns[3], columns[4]))
         })
         .filter(|(diagnostic, probe)| {
-            super::link_rejection(probe, BTreeSet::new())
+            super::link_rejection(probe, BTreeSet::new(), BTreeSet::new())
                 .is_some_and(|(code, _)| code == *diagnostic)
         })
         .collect()

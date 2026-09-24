@@ -673,7 +673,10 @@ that each entry is a limit taken knowingly.
     function does not survive its cell
     ([ADR 0076](0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
     a function's index means something only inside the program that compiled
-    it. A later cell finds the name unbound where Node still holds it.
+    it. Where Node still holds the function, a later cell's reference to the
+    name is refused as `TS_FUNCTION_NOT_PERSISTED`: the session keeps the
+    names it dropped, across a durable reload too, until one is bound again,
+    so the value never degrades to an unknown or undefined name (FIG-3608).
 18. **Cross-cell redeclaration** (`cross-cell-redeclaration`). A cell's
     top-level declaration may rebind a name an earlier cell declared, where
     GlobalDeclarationInstantiation throws a `SyntaxError`; the dialect follows

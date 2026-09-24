@@ -490,9 +490,12 @@ corpus cites:
   declaration, an arrow, an array or object holding one — does not survive
   its cell ([ADR 0076](../../docs/adr/0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
   a function's index is only meaningful inside the program that compiled it,
-  so a later cell finds the name unbound, where Node still holds the function.
-  A closure used within its own cell, capturing earlier cells' globals, is
-  exact.
+  where Node still holds the function. The session remembers the name, live
+  and across a reload, so a later cell that reads it (by name, with `typeof`,
+  or as `globalThis.name` it does not write) is refused as
+  `TS_FUNCTION_NOT_PERSISTED` rather than degraded to an unknown or undefined
+  name, until something binds the name again. A closure used within its own
+  cell, capturing earlier cells' globals, is exact.
 - `cross-cell-redeclaration`: a cell's top-level declaration may rebind a name
   an earlier cell declared, whatever either declaration's kind. ECMA-262's
   GlobalDeclarationInstantiation throws a `SyntaxError` for `let`/`const` over

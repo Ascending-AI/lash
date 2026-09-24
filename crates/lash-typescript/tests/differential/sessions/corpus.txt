@@ -503,7 +503,7 @@ cell deviation global-object-aliases-lexical-bindings
 let level = 1;
 function readLevel() { return globalThis.level; }
 console.log(readLevel());
-lash {"outcome":"normal","prints":["1"],"probes":{"level":"number 1","readLevel":"unbound"}}
+lash {"outcome":"normal","prints":["1"],"probes":{"level":"number 1","readLevel":"dropped"}}
 end
 
 session global-this-read-past-a-parameter
@@ -807,4 +807,18 @@ cell
 alias.n = 2;
 holder.n = holder.n + 10;
 console.log(holder.n, alias.n, holder === alias, holder.doc.title);
+end
+
+session closure-refused-in-a-later-cell
+about a later cell's use of a function an earlier cell bound is refused by name, live and after a reload (FIG-3608)
+probe helper twice box n
+deviation closure-boundary
+cell
+const helper = (n) => n + 1;
+function twice(n) { return n * 2; }
+const box = { run: helper, n: 2 };
+console.log(helper(1), twice(2), box.n);
+cell deviation closure-boundary
+console.log(typeof helper, twice(3), box.n);
+lash {"outcome":"rejected","diagnostic":"TS_FUNCTION_NOT_PERSISTED","prints":[],"probes":{"box":"dropped","helper":"dropped","n":"unbound","twice":"dropped"}}
 end

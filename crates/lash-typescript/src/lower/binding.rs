@@ -172,36 +172,34 @@ impl super::Lowerer {
     /// binding the reads will find and dies when its scope pops.
     pub(super) fn set_role(&mut self, name: &str, role: BindingRole) -> Result<(), Diagnostic> {
         let span = self.current_span;
-        let binding = self
+        if !self.has_binding(name) {
+            return Err(self.unknown_binding(name, span));
+        }
+        let Some(binding) = self
             .scopes
             .iter_mut()
             .rev()
             .find_map(|scope| scope.bindings.get_mut(name))
-            .ok_or_else(|| {
-                Diagnostic::new(
-                    DiagnosticCode::UnknownBinding,
-                    format!("unknown binding `{name}`"),
-                    span,
-                )
-            })?;
+        else {
+            unreachable!("the binding was found above")
+        };
         binding.role = role;
         Ok(())
     }
 
     pub(super) fn clear_process_handle_role(&mut self, name: &str) -> Result<(), Diagnostic> {
         let span = self.current_span;
-        let binding = self
+        if !self.has_binding(name) {
+            return Err(self.unknown_binding(name, span));
+        }
+        let Some(binding) = self
             .scopes
             .iter_mut()
             .rev()
             .find_map(|scope| scope.bindings.get_mut(name))
-            .ok_or_else(|| {
-                Diagnostic::new(
-                    DiagnosticCode::UnknownBinding,
-                    format!("unknown binding `{name}`"),
-                    span,
-                )
-            })?;
+        else {
+            unreachable!("the binding was found above")
+        };
         if binding.role == BindingRole::ProcessHandle {
             binding.role = BindingRole::Plain;
         }
@@ -214,13 +212,7 @@ impl super::Lowerer {
             .iter()
             .rev()
             .find_map(|scope| scope.bindings.get(name))
-            .ok_or_else(|| {
-                Diagnostic::new(
-                    DiagnosticCode::UnknownBinding,
-                    format!("unknown binding `{name}`"),
-                    span,
-                )
-            })
+            .ok_or_else(|| self.unknown_binding(name, span))
     }
 
     pub(super) fn resolve(&mut self, name: &str) -> Result<String, Diagnostic> {
@@ -232,11 +224,7 @@ impl super::Lowerer {
             .find_map(|scope| scope.bindings.get(name))
             .cloned()
         else {
-            return Err(Diagnostic::new(
-                DiagnosticCode::UnknownBinding,
-                format!("unknown binding `{name}`"),
-                span,
-            ));
+            return Err(self.unknown_binding(name, span));
         };
         let current_function = self.current_function();
         if current_function == binding.owner_function && !binding.initialized {
@@ -325,6 +313,15 @@ impl super::Lowerer {
 /// Every name the program addresses as `globalThis.name`: read, written,
 /// deleted, or tested with `"name" in globalThis`, at any depth.
 pub(super) fn global_this_names(statements: &[Stmt]) -> BTreeSet<String> {
+    global_this_accesses(statements, false)
+}
+
+/// Every name the program writes as `globalThis.name`, at any depth.
+pub(super) fn global_this_writes(statements: &[Stmt]) -> BTreeSet<String> {
+    global_this_accesses(statements, true)
+}
+
+fn global_this_accesses(statements: &[Stmt], writes_only: bool) -> BTreeSet<String> {
     fn global_member<'a>(object: &'a Expr, property: &'a MemberProperty) -> Option<&'a str> {
         match (object, property) {
             (Expr::Ident(root, _), MemberProperty::Field(field)) if root == "globalThis" => {
@@ -333,13 +330,9 @@ pub(super) fn global_this_names(statements: &[Stmt]) -> BTreeSet<String> {
             _ => None,
         }
     }
-    fn visit(expression: &Expr, names: &mut BTreeSet<String>) {
+    fn visit(expression: &Expr, writes_only: bool, names: &mut BTreeSet<String>) {
         let named = match expression {
-            Expr::Member {
-                object, property, ..
-            }
-            | Expr::Delete { object, property }
-            | Expr::Assign {
+            Expr::Assign {
                 target: TsAssignTarget::Member { object, property },
                 ..
             }
@@ -347,6 +340,11 @@ pub(super) fn global_this_names(statements: &[Stmt]) -> BTreeSet<String> {
                 target: TsAssignTarget::Member { object, property },
                 ..
             } => global_member(object, property),
+            _ if writes_only => None,
+            Expr::Member {
+                object, property, ..
+            }
+            | Expr::Delete { object, property } => global_member(object, property),
             Expr::Binary {
                 left,
                 op: BinaryOp::In,
@@ -363,13 +361,13 @@ pub(super) fn global_this_names(statements: &[Stmt]) -> BTreeSet<String> {
             names.insert(name.to_string());
         }
         for child in expression.children() {
-            visit(child, names);
+            visit(child, writes_only, names);
         }
     }
     let mut names = BTreeSet::new();
     for statement in statements {
         for expression in statement.child_expressions() {
-            visit(expression, &mut names);
+            visit(expression, writes_only, &mut names);
         }
     }
     names

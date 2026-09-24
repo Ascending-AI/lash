@@ -1057,6 +1057,13 @@ impl RlmExecutionState {
             .collect()
     }
 
+    /// The globals a cell boundary dropped for holding a function, which a
+    /// later cell's reference is refused by name for.
+    #[cfg(test)]
+    pub(crate) fn expired_functions(&self) -> &std::collections::BTreeSet<String> {
+        self.rlm.expired_functions()
+    }
+
     /// The live top-level variable namespace as JSON for the "Bound Variables"
     /// prompt section: the model's own scratch variables plus any seeded
     /// computed globals, which are the same kind of value and render the same

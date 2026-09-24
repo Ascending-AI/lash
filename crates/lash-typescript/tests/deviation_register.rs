@@ -45,6 +45,9 @@ enum Source {
     UnderAddressLimit(fn() -> String),
     /// Linked the way a cell is admitted, for a refusal the linker makes.
     Linked(&'static str),
+    /// Cells of one session, run in order against one state: every earlier
+    /// cell must run, and the refusal fires in the last.
+    Session(&'static [&'static str]),
 }
 
 struct Probe {
@@ -77,6 +80,14 @@ const fn readme_probe(refusal: &'static str, source: &'static str) -> Probe {
         entry: None,
         refusal,
         source: Source::Text(source),
+    }
+}
+
+const fn session_probe(entry: u32, refusal: &'static str, cells: &'static [&'static str]) -> Probe {
+    Probe {
+        entry: Some(entry),
+        refusal,
+        source: Source::Session(cells),
     }
 }
 
@@ -197,6 +208,32 @@ const PROBES: &[Probe] = &[
         12,
         "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED",
         "const a: any = [1]; a[-1] = 9; finish(a.length);",
+    ),
+    // 17. The closure boundary: a later cell's reference to a function an
+    // earlier cell bound, by name, by `typeof`, and through `globalThis`.
+    session_probe(
+        17,
+        "TS_FUNCTION_NOT_PERSISTED",
+        &[
+            "const helper = () => 1; finish(helper());",
+            "finish(helper());",
+        ],
+    ),
+    session_probe(
+        17,
+        "TS_FUNCTION_NOT_PERSISTED",
+        &[
+            "const box = { run: () => 1, n: 2 }; finish(box.n);",
+            "finish(typeof box);",
+        ],
+    ),
+    session_probe(
+        17,
+        "TS_FUNCTION_NOT_PERSISTED",
+        &[
+            "function twice(n: number) { return n * 2; } finish(twice(1));",
+            "finish(globalThis.twice);",
+        ],
     ),
     // 13. String coercion of a value whose only string is a type tag.
     probe(13, "TS_OBJECT_STRING_COERCION", "finish('' + { a: 1 });"),
@@ -489,8 +526,54 @@ fn fire(source: &str) -> Option<(String, String)> {
     }
 }
 
+/// A session's cells run in order against one state, each linked against
+/// the globals the earlier ones left, as a host runs cells: `None` if every
+/// cell ran, else the first refusal, which must be the last cell's.
+fn fire_session(cells: &[&str]) -> Option<(String, String)> {
+    let mut state = State::new();
+    for (index, source) in cells.iter().enumerate() {
+        let environment = lashlang::LashlangHostEnvironment::default()
+            .with_globals(
+                state
+                    .binding_names()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>(),
+            )
+            .with_expired_functions(state.expired_functions().iter().cloned());
+        let refusal = match lash_typescript::parse_cell(source, &environment) {
+            Err(diagnostic) => Some((diagnostic.code.as_str().to_string(), diagnostic.to_string())),
+            Ok(program) => {
+                let spans = program.spans.clone();
+                let artifact = lashlang::ModuleArtifact::from_program(program)
+                    .expect("a lowered cell forms an artifact");
+                let compiled = lashlang::compile(&artifact, lashlang::Entry::Main, Some(&spans))
+                    .expect("a lowered cell compiles");
+                match futures::executor::block_on(lashlang::execute(&compiled, &mut state, &Host)) {
+                    Ok(_) => None,
+                    Err(error) => Some((error.code().to_string(), error.to_string())),
+                }
+            }
+        };
+        if let Some((code, rendered)) = refusal {
+            return Some(if index + 1 == cells.len() {
+                (code, rendered)
+            } else {
+                (
+                    "<an earlier cell>".to_string(),
+                    format!("cell {index}: {rendered}"),
+                )
+            });
+        }
+    }
+    None
+}
+
 fn fires(refusal: &str, source: &str) -> Result<(), String> {
-    match fire(source) {
+    judge(refusal, fire(source))
+}
+
+fn judge(refusal: &str, fired: Option<(String, String)>) -> Result<(), String> {
+    match fired {
         None => Err("compiled and ran to completion".to_string()),
         Some((code, rendered)) if code == refusal || rendered.contains(&format!("{refusal}:")) => {
             Ok(())
@@ -515,18 +598,20 @@ fn link_fires(refusal: &str, source: &str) -> Result<(), String> {
 fn every_register_probe_fires_its_refusal() {
     let mut failures = Vec::new();
     for probe in PROBES {
-        let source = match &probe.source {
-            Source::Text(source) => (*source).to_string(),
-            Source::Generated(build) => build(),
-            Source::UnderAddressLimit(_) => continue,
-            Source::Linked(source) => {
-                if let Err(outcome) = link_fires(probe.refusal, source) {
-                    failures.push(format!("{} probe `{source}`: {outcome}", probe.refusal));
-                }
-                continue;
+        let (source, outcome) = match &probe.source {
+            Source::Text(source) => ((*source).to_string(), fires(probe.refusal, source)),
+            Source::Generated(build) => {
+                let source = build();
+                let outcome = fires(probe.refusal, &source);
+                (source, outcome)
             }
+            Source::Session(cells) => {
+                (cells.join(" ⏎ "), judge(probe.refusal, fire_session(cells)))
+            }
+            Source::Linked(source) => ((*source).to_string(), link_fires(probe.refusal, source)),
+            Source::UnderAddressLimit(_) => continue,
         };
-        if let Err(outcome) = fires(probe.refusal, &source) {
+        if let Err(outcome) = outcome {
             let shown = source.chars().take(120).collect::<String>();
             failures.push(format!("{} probe `{shown}`: {outcome}", probe.refusal));
         }

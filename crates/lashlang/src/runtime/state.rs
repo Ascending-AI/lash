@@ -16,6 +16,9 @@ pub(crate) use wire::child_location;
 mod durable;
 pub use durable::{DurableBaseline, DurableFragment, DurableParts};
 
+mod expired;
+use expired::expired_functions_from_wire;
+
 mod projections;
 
 mod canonical_messagepack;
@@ -23,6 +26,10 @@ pub use canonical_messagepack::{
     CanonicalMapOrder, CanonicalPathSegment, validate_canonical_messagepack_structure,
 };
 
+// v9 carries the names of the globals a cell boundary dropped for holding a
+// function (`expired_functions`), so a later cell is refused by name after a
+// reload exactly as it is live (FIG-3608). A v8 wire has no such list and would
+// decode as a session that never dropped one; the bump refuses it instead.
 // v8 writes a record's fields in property order instead of sorting them, so
 // a reload answers `Object.keys`, `JSON.stringify` and `for...in` exactly as
 // the live run did (FIG-3606). A v7 wire's sorted fields would decode, but in
@@ -32,7 +39,7 @@ pub use canonical_messagepack::{
 // while deserializing — before it ever reads `version` — and would report a
 // corrupt snapshot rather than a version boundary. The bump is what makes the
 // refusal honest.
-pub const LASHLANG_SNAPSHOT_VERSION: u32 = 8;
+pub const LASHLANG_SNAPSHOT_VERSION: u32 = 9;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
 /// The longest summary [`State::opaque_bindings`] renders, in characters.
 pub const BINDING_SUMMARY_MAX_CHARS: usize = super::heap::SUMMARY_MAX_CHARS;
@@ -113,6 +120,12 @@ impl Default for StateMode {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
     pub(super) mode: StateMode,
+    /// The globals a cell boundary dropped because their value reached a
+    /// function, and that nothing has bound since. A function's index means
+    /// something only inside the program that compiled it, so the binding
+    /// cannot survive its cell (ADR 0076); remembering its name is what lets a
+    /// later cell's reference be refused by name instead of as an unknown one.
+    pub(super) expired_functions: BTreeSet<String>,
 }
 
 impl State {
@@ -261,6 +274,7 @@ impl State {
                             if let Some(value) = host_visible(value) {
                                 staged_view.insert(name.clone(), value);
                             }
+                            self.expired_functions.remove(&name);
                             outcome.inserted.push(name);
                         }
                         GlobalPatch::Remove { name } => {
@@ -305,12 +319,16 @@ impl State {
                 }))
             }
         };
-        Snapshot { mode }
+        Snapshot {
+            mode,
+            expired_functions: self.expired_functions.clone(),
+        }
     }
 
     pub fn from_snapshot(snapshot: Snapshot) -> Self {
         Self {
             mode: snapshot.mode,
+            expired_functions: snapshot.expired_functions,
         }
     }
 
@@ -361,23 +379,7 @@ impl State {
         mut runtime_globals: Record,
         mut heap: Heap,
     ) -> Result<(), RuntimeError> {
-        // Closures do not cross a program boundary. Their function indices are
-        // program-scoped, and the next cell compiles its own program, so a
-        // rooted closure would survive collection only to fail that program's
-        // closure validation. `host_view` already drops these globals from the
-        // projection for the same reason; the runtime roots drop them too,
-        // which keeps the owner and its projection agreeing on what a global
-        // means and leaves the closure as garbage the next collection reclaims.
-        let closure_reach = heap.closure_reach();
-        let mut closure_rooted = Vec::new();
-        for entry in runtime_globals.entries.iter() {
-            if closure_reach.covers(&entry.value) {
-                closure_rooted.push(entry.symbol);
-            }
-        }
-        for symbol in closure_rooted {
-            runtime_globals.remove_symbol(symbol);
-        }
+        self.expire_function_roots(&mut runtime_globals, &heap);
         let projected = host_view(&runtime_globals, &mut heap)?;
         // A run that leaves no roots and never allocated never went
         // heap-backed: the projected view (which is then empty) is the record.
@@ -449,12 +451,14 @@ fn host_visible(value: Value) -> Option<Value> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Snapshot {
     mode: StateMode,
+    expired_functions: BTreeSet<String>,
 }
 
 impl Snapshot {
     pub fn new(globals: Record) -> Self {
         Self {
             mode: StateMode::Plain(Box::new(globals)),
+            expired_functions: BTreeSet::new(),
         }
     }
 
@@ -531,6 +535,9 @@ struct CanonicalSnapshot {
     globals: Option<Vec<CanonicalBinding>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     heap: Option<CanonicalHeap>,
+    /// [`State::expired_functions`], strictly sorted; absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    expired_functions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -665,6 +672,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
                             .collect::<Result<_, ContinuationError>>()?,
                     ),
                     heap: None,
+                    expired_functions: snapshot.expired_functions.iter().cloned().collect(),
                 });
             }
             StateMode::HeapBacked(backed) => (backed.runtime_globals.clone(), backed.heap.clone()),
@@ -727,6 +735,7 @@ impl TryFrom<&Snapshot> for CanonicalSnapshot {
                     })
                     .collect::<Result<_, ContinuationError>>()?,
             }),
+            expired_functions: snapshot.expired_functions.iter().cloned().collect(),
         })
     }
 }
@@ -735,9 +744,11 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
     type Error = SnapshotDecodeError;
 
     fn try_from(snapshot: CanonicalSnapshot) -> Result<Self, Self::Error> {
-        match (snapshot.globals, snapshot.heap) {
+        let expired_functions = expired_functions_from_wire(snapshot.expired_functions)?;
+        let snapshot = match (snapshot.globals, snapshot.heap) {
             (Some(globals), None) => Ok(Self {
                 mode: StateMode::Plain(Box::new(bindings_into_record(globals, "globals", false)?)),
+                expired_functions: BTreeSet::new(),
             }),
             (None, Some(heap_wire)) => {
                 let CanonicalHeap {
@@ -802,12 +813,16 @@ impl TryFrom<CanonicalSnapshot> for Snapshot {
                         heap,
                     }))
                 };
-                Ok(Self { mode })
+                Ok(Self {
+                    mode,
+                    expired_functions: BTreeSet::new(),
+                })
             }
             _ => Err(SnapshotDecodeError::InvalidEncoding(
                 "snapshot must contain exactly one of globals or heap".to_string(),
             )),
-        }
+        }?;
+        snapshot.with_expired_functions(expired_functions)
     }
 }
 
@@ -947,7 +962,7 @@ fn validate_canonical_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeErro
     Ok(())
 }
 
-const SNAPSHOT_FIELDS: &[&str] = &["version", "globals", "heap"];
+const SNAPSHOT_FIELDS: &[&str] = &["version", "globals", "heap", "expired_functions"];
 const HEAP_FIELDS: &[&str] = &[
     "reference_semantics",
     "next_id",
@@ -1033,10 +1048,12 @@ fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError
 fn validate_snapshot_globals(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
     let mut cursor = 0;
     let fields = take_map_length(bytes, &mut cursor, "snapshot", "snapshot")?;
-    if fields != 2 {
+    // The version, one representation, and the expired-function names when
+    // there are any.
+    if !(2..=3).contains(&fields) {
         return Err(non_canonical(
             "snapshot",
-            "snapshot must contain exactly two fields",
+            "snapshot must contain two or three fields",
         ));
     }
     expect_key(bytes, &mut cursor, "version", "snapshot")?;
