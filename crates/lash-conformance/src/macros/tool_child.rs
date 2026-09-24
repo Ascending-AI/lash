@@ -171,6 +171,10 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-late-completion-refused"
             ),
             (
+                a_deferred_childs_commit_point_is_its_resolution,
+                "tool-child-deferred-commit-point"
+            ),
+            (
                 a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ranks,
                 "tool-child-group-prefix-incorporation"
             ),

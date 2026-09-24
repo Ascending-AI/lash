@@ -563,8 +563,9 @@ pub enum EffectDischargeOutcome {
 
 /// The discharge request one committed child's drain completion answers.
 ///
-/// `terminal` is `Some` exactly when the child's §4 commit ran at its
-/// final-attempt boundary rather than at the older finalize path: a
+/// `terminal` is `Some` exactly when the child's §4 commit ran at the
+/// child's terminal — its final attempt's boundary or its resolved
+/// completion — rather than at the older finalize path: a
 /// boundary-committed row holds no terminal — the commit journals only the
 /// decision, its position, and the drain input — so the discharge is the
 /// write that seats the projected outcome, moves the row to its terminal,
@@ -584,7 +585,8 @@ pub struct EffectDischargeRequest {
     pub terminal: Option<EffectTerminal>,
 }
 
-/// What a tool child's final-attempt boundary asks its controller to commit.
+/// What a tool child's terminal — its final attempt's boundary or its resolved
+/// completion — asks its controller to commit.
 ///
 /// Identity and drain input only. The lease owner is the substrate's own
 /// fact, so the request does not carry it and no caller can claim another
@@ -602,7 +604,8 @@ pub struct GroupChildFinalCommit {
     pub drain_input: String,
 }
 
-/// The §4 commit request one group child's final-attempt boundary answers.
+/// The §4 commit request one group child's terminal — its final attempt's
+/// boundary or its resolved completion — answers.
 ///
 /// This is the final record's durable commit at the linearization point —
 /// deliberately *not* the finalize-time CAS the older path used. What the

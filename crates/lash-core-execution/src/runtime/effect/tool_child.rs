@@ -147,7 +147,15 @@ use super::executor::RuntimeEffectControllerError;
 /// only the driver's post-admission pin block caught it; the checked pair
 /// makes that shape unrepresentable, on the wire as everywhere else, because
 /// decoding runs `AdmittedScope::new` rather than trusting the bytes.
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 4;
+///
+/// Version 6 moves a parked child's §4 commit from its finalize to its
+/// completion resolution (FIG-3609, ADR 0099 §5): the child now commits
+/// before its presentation boundary, which adds journaled steps between the
+/// await and the presentation on every tier. The request's fields are
+/// unchanged. The version moves because a child journaled by an older build
+/// would replay against a different step order, so it is refused, typed and
+/// before any effect, at [`ToolChildRequest::validate`].
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 6;
 
 /// The authority a tool child was admitted under, pinned at formation.
 ///

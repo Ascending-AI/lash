@@ -610,95 +610,15 @@ async fn settle_terminal_attempt(
         triggers,
     } = settlement;
     let mut recorded_call_id = recorded_call_id.map(str::to_string);
-    // The §4 boundary: a group child's final record commits *before* any
-    // declared intent runs, because the durable final-commit order — not
-    // drain-completion order — is the order children may emit nested
-    // semantic commands. Only a group child carries the address of its own
-    // replay row into settlement; every other attempt leaves `group_child`
-    // `None` and pays no boundary work at all. A `CancelDecided` answer is
-    // the group's arbitration losing this child's final — the typed refusal
-    // is the whole record, and no intent mints beneath it.
     let controller = context.effect_controller.controller();
-    let drain_admission = match group_child.as_ref().map(|child| &child.child) {
-        Some(address) => {
-            let scope_id = address
-                .execution_scope
-                .journal_identity()
-                .map_err(crate::RuntimeEffectControllerError::from)?
-                .key()
-                .to_string();
-            let drain_input = serde_json::to_string(&GroupChildDrainInput {
-                record: &record,
-                intents: &intents,
-                recorded_call_id: recorded_call_id.as_deref(),
-            })
-            .map_err(|error| {
-                crate::RuntimeEffectControllerError::new(
-                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                    format!(
-                        "sealed drain input for {} does not encode: {error}",
-                        address.replay_key
-                    ),
-                )
-            })?;
-            match controller
-                .commit_group_child_final(crate::runtime::effect::GroupChildFinalCommit {
-                    scope_id,
-                    replay_key: address.replay_key.clone(),
-                    drain_input,
-                })
-                .await?
-            {
-                crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped => None,
-                crate::runtime::effect::EffectGroupChildCommitOutcome::Committed {
-                    group_key,
-                    commit_seq,
-                } => Some((group_key, commit_seq)),
-                crate::runtime::effect::EffectGroupChildCommitOutcome::AlreadyCommitted {
-                    group_key,
-                    commit_seq,
-                    drain_input: sealed,
-                } => {
-                    // The §4 point already holds this child's settlement: the
-                    // sealed drain input the winner committed is the durable
-                    // fact this drain owes, so it replaces whatever the
-                    // re-execution re-derived (W6/W7 — a recovered drain must
-                    // not depend on the replay re-declaring identical intents).
-                    if let Some(sealed) = sealed {
-                        let sealed: SealedGroupChildDrainInput = serde_json::from_str(&sealed)
-                            .map_err(|error| {
-                                crate::RuntimeEffectControllerError::new(
-                                    crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-                                    format!(
-                                        "committed drain input for {} does not decode: {error}",
-                                        address.replay_key
-                                    ),
-                                )
-                            })?;
-                        *record = sealed.record;
-                        intents = sealed.intents;
-                        recorded_call_id = sealed.recorded_call_id;
-                    }
-                    Some((group_key, commit_seq))
-                }
-                crate::runtime::effect::EffectGroupChildCommitOutcome::CancelDecided {
-                    group_key,
-                    ..
-                } => {
-                    return Err(crate::RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
-                        format!(
-                            "the final record of `{}` reached durable effect group {group_key} \
-                             after its cancel disposition committed; the refusal is the whole \
-                             record and no declared intent may mint beneath it",
-                            address.replay_key
-                        ),
-                    ));
-                }
-            }
-        }
-        None => None,
-    };
+    let drain_admission = commit_group_child_boundary(
+        context,
+        group_child.as_ref(),
+        &mut record,
+        &mut intents,
+        &mut recorded_call_id,
+    )
+    .await?;
     // The §5 barrier: admitted drains emit their nested semantic commands in
     // final-commit order, so a committed sibling below this child that still
     // owes its drain holds this drain back until it finishes.
@@ -728,6 +648,106 @@ async fn settle_terminal_attempt(
         captures,
         triggers,
     })
+}
+
+/// The §4 boundary: a group child's final record commits the moment the child
+/// reaches its terminal, *before* any declared intent runs and before its
+/// result is presented.
+///
+/// Every terminal of a group child crosses this one boundary — an attempt that
+/// finished inline (`settle_terminal_attempt`) and a parked attempt whose
+/// deferred completion resolved (the invocation driver's resume). The durable
+/// final-commit order it allocates is the order sibling drains are admitted in
+/// and the order ranks are seated in (§5), so a child that deferred its
+/// boundary to a later step would take its place in the settlement order by
+/// when that step ran, not by when it settled.
+///
+/// Only a group child carries the address of its own replay row into
+/// settlement; every other caller passes `None` and pays no boundary work at
+/// all. `AlreadyCommitted` replaces the re-derived settlement with the sealed
+/// drain input the winner committed — the committed settlement is the durable
+/// fact, not the replay (W6/W7). A `CancelDecided` answer is the group's
+/// arbitration losing this child's final: the typed refusal is the whole
+/// record, and nothing mints beneath it.
+pub(crate) async fn commit_group_child_boundary(
+    context: &ToolDispatchContext<'_>,
+    group_child: Option<&GroupChildCoordination>,
+    record: &mut ToolCallRecord,
+    intents: &mut crate::ToolIntents,
+    recorded_call_id: &mut Option<String>,
+) -> Result<Option<(String, u64)>, crate::RuntimeEffectControllerError> {
+    let Some(address) = group_child.map(|child| &child.child) else {
+        return Ok(None);
+    };
+    let scope_id = address
+        .execution_scope
+        .journal_identity()
+        .map_err(crate::RuntimeEffectControllerError::from)?
+        .key()
+        .to_string();
+    let drain_input = serde_json::to_string(&GroupChildDrainInput {
+        record,
+        intents,
+        recorded_call_id: recorded_call_id.as_deref(),
+    })
+    .map_err(|error| {
+        crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+            format!(
+                "sealed drain input for {} does not encode: {error}",
+                address.replay_key
+            ),
+        )
+    })?;
+    match context
+        .effect_controller
+        .controller()
+        .commit_group_child_final(crate::runtime::effect::GroupChildFinalCommit {
+            scope_id,
+            replay_key: address.replay_key.clone(),
+            drain_input,
+        })
+        .await?
+    {
+        crate::runtime::effect::EffectGroupChildCommitOutcome::Ungrouped => Ok(None),
+        crate::runtime::effect::EffectGroupChildCommitOutcome::Committed {
+            group_key,
+            commit_seq,
+        } => Ok(Some((group_key, commit_seq))),
+        crate::runtime::effect::EffectGroupChildCommitOutcome::AlreadyCommitted {
+            group_key,
+            commit_seq,
+            drain_input: sealed,
+        } => {
+            if let Some(sealed) = sealed {
+                let sealed: SealedGroupChildDrainInput =
+                    serde_json::from_str(&sealed).map_err(|error| {
+                        crate::RuntimeEffectControllerError::new(
+                            crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                            format!(
+                                "committed drain input for {} does not decode: {error}",
+                                address.replay_key
+                            ),
+                        )
+                    })?;
+                *record = sealed.record;
+                *intents = sealed.intents;
+                *recorded_call_id = sealed.recorded_call_id;
+            }
+            Ok(Some((group_key, commit_seq)))
+        }
+        crate::runtime::effect::EffectGroupChildCommitOutcome::CancelDecided {
+            group_key, ..
+        } => Err(crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided,
+            format!(
+                "the final record of `{}` reached durable effect group {group_key} \
+                 after its cancel disposition committed; the refusal is the whole \
+                 record and no declared intent may mint beneath it",
+                address.replay_key
+            ),
+        )),
+    }
 }
 
 fn project_recorded_intent_outcomes(

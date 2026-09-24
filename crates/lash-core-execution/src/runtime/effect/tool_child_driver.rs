@@ -44,9 +44,10 @@
 //! # What the driver does not do
 //!
 //! It holds no in-process drain slot. §5 orders sibling drains by a durable
-//! per-group final-commit order: §4 commits the child's final at the attempt
-//! boundary and §5 admits its drain by the recorded `commit_seq`, which orders
-//! it against every sibling without a process-local gate.
+//! per-group final-commit order: §4 commits the child's final at the child's
+//! terminal — its final attempt's boundary or its resolved completion — and
+//! §5 admits its drain by the recorded `commit_seq`, which orders it against
+//! every sibling without a process-local gate.
 //!
 //! It projects the child's result exactly once, at its own presentation
 //! boundary: the session's ordered presentation steps run once through the
@@ -647,9 +648,10 @@ fn admitted_catalog(
 ///
 /// The ordering this provides, stated rather than assumed (§4/§5, FIG-3409):
 /// a child takes no in-process slot because the durable group owns the order —
-/// its final commits at the attempt's terminal boundary against its own
-/// replay row (`child`), and its drain is admitted by the recorded
-/// `commit_seq` barrier before the first declared intent runs.
+/// its final commits at the child's terminal — its final attempt's boundary
+/// or its resolved completion — against its own replay row (`child`), and
+/// its drain is admitted by the recorded `commit_seq` barrier before the
+/// first declared intent runs.
 pub(crate) async fn run_tool_child<'run>(
     host: &ToolChildHost,
     live: &LiveOpenerContext,
@@ -908,15 +910,16 @@ async fn drive(
 
     let executor_context = tool_context.clone();
     let executor_dispatch = Arc::clone(dispatch);
+    let group_child = crate::tool_dispatch::GroupChildCoordination {
+        completion_routing: request.completion_routing.clone(),
+        child,
+    };
     let coordinated = Box::pin(crate::tool_dispatch::coordinate_tool_invocation(
         dispatch.as_ref(),
         request.call.clone(),
         request.admission.grant().cloned().map(Box::new),
         request.admission.retry_policy(),
-        Some(crate::tool_dispatch::GroupChildCoordination {
-            completion_routing: request.completion_routing.clone(),
-            child,
-        }),
+        Some(group_child.clone()),
         request.attempt_identity.clone(),
         &turn_cancel_wait,
         None::<ToolChildExecutionTraceHook>,
@@ -935,8 +938,28 @@ async fn drive(
         // (§2), so the driver arms the resolver the call named and parks on its
         // own journaled await rather than handing a parked child back to a
         // group that can only read settlements.
+        //
+        // The resolved completion is this child's terminal, so its final
+        // record crosses the §4 boundary here — before presentation, exactly
+        // where an inline terminal crosses it. Left to the child's finalize,
+        // the commit would land only after the presentation boundary, and a
+        // sibling that settled later but committed at its own attempt boundary
+        // would take the earlier commit position and lead the settlement order
+        // (FIG-3609). A parked attempt declares no intents, so there is no
+        // drain to admit behind the barrier: the discharge seats the rank.
         ToolCallLaunch::Pending(pending) => {
-            Ok(await_child_completion(dispatch, request, *pending, &turn_cancel_wait).await)
+            let mut outcome =
+                await_child_completion(dispatch, request, *pending, &turn_cancel_wait).await;
+            let mut recorded_call_id = outcome.record.call_id.clone();
+            crate::tool_dispatch::commit_group_child_boundary(
+                dispatch.as_ref(),
+                Some(&group_child),
+                &mut outcome.record,
+                &mut outcome.intents,
+                &mut recorded_call_id,
+            )
+            .await?;
+            Ok(outcome)
         }
         // A refusal, not a settlement: a fabricated terminal here would journal
         // an outcome no effect ever produced.

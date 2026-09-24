@@ -615,7 +615,8 @@ scheduler.**
 
 *Status.* **Implemented** (FIG-3409, FIG-3397): commit order (`next_commit_seq`),
 durable discharge and the journaled observation prefix replace the source-ordered
-in-process gate, which FIG-3397 deleted.
+in-process gate, which FIG-3397 deleted. A deferred child's §4 point is its
+completion resolution; it releases at discharge after projection (FIG-3609).
 
 ---
 
