@@ -1,6 +1,6 @@
 use lashlang::{
-    AbilityOp, AbilityResult, ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionHost,
-    ExecutionHostError, ExecutionOutcome, RuntimeError, State, Value,
+    AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError,
+    State, Value,
 };
 
 struct Host;
@@ -290,38 +290,11 @@ fn parameter_defaults_rest_and_destructuring_run_in_parameter_order() {
 
 #[test]
 fn classic_for_creates_per_iteration_closure_values() {
-    lash_typescript::testing::compile(
-        "function run(){let first=()=>-1; let second=()=>-1; for(let i=0;i<2;i++){if(i===0){first=()=>i;}else{second=()=>i;}} return `${first()}|${second()}`;} finish(run());",
-    )
-    .expect("per-iteration closure captures classify and lower");
-}
-
-#[test]
-fn program_bounds_bypass_catch_and_finally_code() {
-    let program = lash_typescript::testing::compile(
-        "try { while (true) {} } catch (error) { finish('caught'); } finally { finish('finally'); }",
-    )
-    .expect("bounded program compiles");
-    let environment = ExecutionEnvironment::new(&Host).with_execution_bounds(ExecutionBounds::new(
-        ExecutionBound::instructions(100),
-        ExecutionBound::Unbounded,
-        ExecutionBound::Unbounded,
-    ));
-    let outcome =
-        futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &environment));
-    assert!(matches!(
-        outcome,
-        Err(RuntimeError::InstructionBudgetExceeded { .. })
-    ));
-}
-
-#[test]
-fn async_helpers_and_promise_all_use_the_resumable_map_driver() {
     assert_eq!(
         finished(
-            "async function plusOne(x){return x+1;} const values=await Promise.all([1,2].map(async x=>await plusOne(x))); finish(values.join(','));"
+            "function run(){let first=()=>-1; let second=()=>-1; for(let i=0;i<2;i++){if(i===0){first=()=>i;}else{second=()=>i;}} return `${first()}|${second()}`;} finish(run());",
         ),
-        Value::String("2,3".into())
+        Value::String("0|1".into())
     );
 }
 

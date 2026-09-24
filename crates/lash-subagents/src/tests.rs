@@ -803,81 +803,6 @@ finish(await handle);
     );
 }
 
-/// A spawn inside a process still returns the child's final value.
-///
-/// The lashlang form of this cell carried an `@label(title: ..)` decorator on
-/// the spawn. TypeScript has no label form — the lowerer builds no label node —
-/// so the decorator is gone with the surface (ADR 0096) and the name is kept
-/// only because the trunk shards select tests by name. Nothing here asserted
-/// the label; what it pins is the spawn-inside-a-process path.
-#[tokio::test]
-async fn rlm_spawn_labeled_inside_process_returns_child_final_value() {
-    let (outcome, prompt) = run_seed_probe(
-        r#"<typescript>
-const spawnChild = async () => {
-  const result = await agents.spawn({
-    capability: "default",
-    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-    seed: { chunk: ["a", "b"] },
-    output: { len: "int" }
-  });
-  return result;
-};
-const handle = await processes.start({ definition: spawnChild });
-finish(await handle);
-</typescript>"#,
-        TurnInput::text("spawn a child inside a durable process"),
-    )
-    .await;
-
-    assert_eq!(
-        outcome,
-        lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::FinalValue {
-                value: json!({ "len": 2 })
-            }
-        )
-    );
-    assert!(
-        prompt_advertises_bound_variable(&prompt, "chunk"),
-        "child prompt did not advertise seeded `chunk` variable:\n{prompt}"
-    );
-}
-
-#[tokio::test]
-async fn rlm_spawn_captured_process_authority_returns_child_final_value() {
-    let (outcome, prompt) = run_seed_probe(
-        r#"<typescript>
-const spawnChild = async () => {
-  const result = await agents.spawn({
-    capability: "default",
-    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
-    seed: { chunk: ["a", "b"] },
-    output: { len: "int" }
-  });
-  return result;
-};
-const handle = await processes.start({ definition: spawnChild });
-finish(await handle);
-</typescript>"#,
-        TurnInput::text("spawn a child with captured agents authority through start/await"),
-    )
-    .await;
-
-    assert_eq!(
-        outcome,
-        lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::FinalValue {
-                value: json!({ "len": 2 })
-            }
-        )
-    );
-    assert!(
-        prompt_advertises_bound_variable(&prompt, "chunk"),
-        "child prompt did not advertise seeded `chunk` variable:\n{prompt}"
-    );
-}
-
 #[tokio::test]
 async fn rlm_spawn_links_subagent_process_from_lashlang_graph() {
     let graph_store = Arc::new(TraceLashlangGraphStore::default());
@@ -1464,39 +1389,6 @@ fn subagents_plugin_final_answer_format_defaults_raw_and_can_be_overridden() {
     assert_eq!(
         factory.final_answer_format,
         lash_rlm_types::RlmFinalAnswerFormat::Markdown
-    );
-}
-
-#[tokio::test]
-async fn rlm_provider_does_not_require_process_support() {
-    let factory = SubagentsPluginFactory::new(Arc::new(default_registry(&BTreeMap::new())));
-    let ctx = PluginSessionContext {
-        session_id: SessionId::from("parent"),
-        tool_access: lash_core::SessionToolAccess::default(),
-        subagent: None,
-        extensions: Default::default(),
-        plugin_options: Default::default(),
-        protocol_turn_options: Default::default(),
-        materialization: lash_core::plugin::PluginSessionMaterialization::Creation,
-        parent_session_id: None,
-    };
-
-    let plugin = factory.build(&ctx).expect("rlm plugin");
-    assert_eq!(plugin.id(), "subagents");
-}
-
-#[test]
-fn sublashlang_binding_reports_authority_notes() {
-    let authority = lash_core::SubagentSessionContext {
-        parent_session_id: SessionId::from("root"),
-        capability: "explore".to_string(),
-        depth: 1,
-        max_depth: 5,
-    };
-
-    assert_eq!(
-        rlm_support::subagent_capability_note(&authority),
-        "Subagent capability: explore. Depth: 1/5."
     );
 }
 

@@ -18,6 +18,15 @@ fn a_memory_limit_cannot_be_an_instruction_budget() {
         .build();
 }
 
+fn an_instruction_limit_cannot_be_a_memory_bound() {
+    let _ = RlmProtocolPluginConfig::builder()
+        .channel(lash::rlm::RlmChannel::Cell)
+        .instruction_limit(MemoryBound::mebibytes(64))
+        .wall_clock(WallClockBound::secs(30))
+        .memory_limit(MemoryBound::mebibytes(64))
+        .build();
+}
+
 fn bounds_cannot_be_transposed() {
     let _ = ExecutionBounds::new(
         MemoryBound::mebibytes(64),
@@ -28,5 +37,6 @@ fn bounds_cannot_be_transposed() {
 
 fn main() {
     let _ = a_memory_limit_cannot_be_an_instruction_budget;
+    let _ = an_instruction_limit_cannot_be_a_memory_bound;
     let _ = bounds_cannot_be_transposed;
 }

@@ -142,6 +142,17 @@ fn undefined_follows_json_container_rules() {
 }
 
 #[test]
+fn non_finite_numbers_follow_json_container_rules() {
+    // Inside a container a non-finite number is JSON's `null`; alone it keeps
+    // its ECMA string (FIG-3608).
+    assert_eq!(
+        printed_line("console.log([NaN, Infinity, -Infinity]);"),
+        "[null,null,null]"
+    );
+    assert_eq!(printed_line("console.log({ a: NaN });"), r#"{"a":null}"#);
+}
+
+#[test]
 fn every_console_method_renders_the_same_way() {
     for method in ["log", "info", "warn", "error", "debug"] {
         assert_eq!(

@@ -52,3 +52,37 @@ impl BatchResultRow {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_names_each_missing_required_field() {
+        let missing_tool = serde_json::from_value::<BatchResultRow>(serde_json::json!({
+            "index": 0,
+            "success": true,
+            "duration_ms": 0,
+            "result": "ok"
+        }))
+        .expect_err("row without tool must fail");
+        assert!(
+            missing_tool.to_string().contains("missing field `tool`"),
+            "{missing_tool}"
+        );
+
+        let missing_duration = serde_json::from_value::<BatchResultRow>(serde_json::json!({
+            "index": 0,
+            "tool": "probe",
+            "success": true,
+            "result": "ok"
+        }))
+        .expect_err("row without duration_ms must fail");
+        assert!(
+            missing_duration
+                .to_string()
+                .contains("missing field `duration_ms`"),
+            "{missing_duration}"
+        );
+    }
+}

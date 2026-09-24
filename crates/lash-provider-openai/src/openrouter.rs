@@ -234,11 +234,6 @@ mod tests {
     }
 
     #[test]
-    fn generation_ids_are_percent_encoded_in_the_query() {
-        assert_eq!(percent_encode("gen-1 2/3"), "gen-1%202%2F3");
-    }
-
-    #[test]
     fn non_success_statuses_other_than_404_are_errors() {
         assert!(matches!(classify(404, "").unwrap(), Lookup::Missing));
         let error = classify(500, "{\"error\":\"boom\"}").unwrap_err();

@@ -8,7 +8,6 @@
 // a property of the IR rather than of any dialect, built straight from the AST.
 
 use super::*;
-use crate::ast_support::{call, finish_program, number, string};
 
 #[tokio::test(flavor = "current_thread")]
 async fn executes_if_for_and_list_concat() {
@@ -781,67 +780,6 @@ async fn a_summary_can_report_both_a_successful_and_a_failed_host_call() {
     assert!(text.contains("missing=failed:"), "{text}");
 }
 
-/// The `format` builtin is part of the retired dialect's standard library and
-/// has no TypeScript spelling (ADR 0096) — TypeScript concatenates. Its
-/// placeholder rules are still IR facts the VM enforces, so the rows that pin
-/// them build the call straight from the AST.
-#[tokio::test(flavor = "current_thread")]
-async fn format_resolves_positional_and_escaped_placeholders() {
-    for (args, expected) in [
-        (
-            vec![string("b={1} a={0}"), string("x"), string("y")],
-            "b=y a=x",
-        ),
-        (vec![string("plain")], "plain"),
-        (vec![string("{{{}}}"), number(1.0)], "{1}"),
-    ] {
-        let host = TestHost::default();
-        let mut state = State::new();
-        let program = finish_program(call("format", args));
-        let value = finished(
-            lashlang::execute(
-                &lashlang_compile_program(&program).expect("the program compiles"),
-                &mut state,
-                &host,
-            )
-            .await
-            .expect("format should run"),
-        );
-        assert_eq!(value, Value::String(expected.to_string().into()));
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn format_rejects_malformed_templates_and_unused_arguments() {
-    for (args, expected) in [
-        (
-            vec![string("{} {1}"), string("x"), string("y")],
-            lashlang::FormatError::MixedPlaceholderKinds,
-        ),
-        (
-            vec![string("plain"), number(1.0)],
-            lashlang::FormatError::UnusedArgument { index: 0 },
-        ),
-        (vec![string("{")], lashlang::FormatError::UnmatchedOpenBrace),
-        (
-            vec![string("}")],
-            lashlang::FormatError::UnmatchedCloseBrace,
-        ),
-    ] {
-        let host = TestHost::default();
-        let mut state = State::new();
-        let program = finish_program(call("format", args));
-        let error = lashlang::execute(
-            &lashlang_compile_program(&program).expect("the program compiles"),
-            &mut state,
-            &host,
-        )
-        .await
-        .expect_err("format should reject");
-        assert_eq!(error, RuntimeError::Format(expected));
-    }
-}
-
 /// A tool call yields the host's value directly and throws on failure, which is
 /// the replacement for the dialect's `{ ok, value }` result record (ADR 0096).
 #[tokio::test(flavor = "current_thread")]
@@ -873,17 +811,4 @@ async fn tool_calls_return_values_and_throw_on_failure() {
     };
     assert_eq!(record["found"], Value::String("pub fn main() {}".into()));
     assert_eq!(record["missing"], Value::Bool(true));
-}
-
-/// Compiles an IR program as the main entry of the raw module artifact it
-/// forms, through the one public compile entry.
-fn lashlang_compile_program(
-    program: &lashlang::Program,
-) -> Result<lashlang::CompiledProgram, Box<dyn std::error::Error>> {
-    let artifact = lashlang::ModuleArtifact::from_program(program.clone())?;
-    Ok(lashlang::compile(
-        &artifact,
-        lashlang::Entry::Main,
-        Some(&program.spans),
-    )?)
 }

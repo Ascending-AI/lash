@@ -410,6 +410,31 @@ mod tests {
         assert_eq!(chat_usage.cache_read_input_tokens, 6);
         assert_eq!(chat_usage.cache_write_input_tokens, 4);
         assert_eq!(chat_usage.reasoning_output_tokens, 4);
+
+        // A production OpenRouter/Gemini payload reports the detail buckets
+        // explicitly zeroed and carries a foreign `cost` key the parser must
+        // ignore.
+        let zeroed = openai_usage_from_usage_value(&serde_json::json!({
+            "prompt_tokens": 6370,
+            "completion_tokens": 7,
+            "prompt_tokens_details": {
+                "audio_tokens": 0,
+                "cache_write_tokens": 0,
+                "cached_tokens": 0,
+                "video_tokens": 0
+            },
+            "cost": 0.003206
+        }));
+        assert_eq!(
+            zeroed,
+            lash_core::llm::types::LlmUsage {
+                input_tokens: 6370,
+                output_tokens: 7,
+                cache_read_input_tokens: 0,
+                cache_write_input_tokens: 0,
+                reasoning_output_tokens: 0,
+            }
+        );
     }
 
     #[test]

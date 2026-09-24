@@ -521,55 +521,6 @@ fn compile_elicitation_response_validator(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::model::{FormElicitationCapability, UrlElicitationCapability};
-
-    struct ElicitationModes;
-
-    #[async_trait]
-    impl McpElicitationHandler for ElicitationModes {
-        fn capability(&self) -> ElicitationCapability {
-            ElicitationCapability {
-                form: Some(FormElicitationCapability::default()),
-                url: Some(UrlElicitationCapability::default()),
-            }
-        }
-
-        async fn create_elicitation(
-            &self,
-            _request: McpElicitationRequest<'_>,
-        ) -> Result<CreateElicitationResult, ErrorData> {
-            unreachable!("capability test does not issue requests")
-        }
-
-        async fn url_elicitation_complete(&self, _notification: McpUrlElicitationComplete<'_>) {
-            unreachable!("capability test does not issue notifications")
-        }
-    }
-
-    #[test]
-    #[allow(deprecated, reason = "MCP 2025-11-25 still defines sampling and roots")]
-    fn capabilities_are_derived_only_from_wired_host_services() {
-        let absent = McpHostServices::default().capabilities();
-        assert!(absent.sampling.is_none());
-        assert!(absent.elicitation.is_none());
-        assert!(absent.roots.is_none());
-
-        let elicitation_only = McpHostServices {
-            elicitation: Some(McpElicitationService {
-                handler: Arc::new(ElicitationModes),
-                capability: ElicitationModes.capability(),
-            }),
-            ..Default::default()
-        }
-        .capabilities();
-        assert!(elicitation_only.sampling.is_none());
-        assert!(elicitation_only.roots.is_none());
-        let elicitation = elicitation_only
-            .elicitation
-            .expect("wired elicitation capability");
-        assert!(elicitation.form.is_some());
-        assert!(elicitation.url.is_some());
-    }
 
     #[test]
     fn protocol_version_is_known_to_the_pinned_rmcp_sdk() {

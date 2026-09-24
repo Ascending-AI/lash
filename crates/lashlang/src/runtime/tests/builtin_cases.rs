@@ -851,6 +851,13 @@ async fn builtin_error_matrix_is_covered() {
             ),
         ),
         (
+            "finish range(0, 5, 1.5)",
+            finish_builtin(
+                "range",
+                vec![builders::num(0.0), builders::num(5.0), builders::num(1.5)],
+            ),
+        ),
+        (
             "finish range(0, 1000001)",
             finish_builtin(
                 "range",
@@ -876,6 +883,10 @@ async fn builtin_error_matrix_is_covered() {
         (
             "finish ceil_div(1, 0)",
             finish_builtin("ceil_div", vec![builders::num(1.0), builders::num(0.0)]),
+        ),
+        (
+            "finish floor_div(1, 0)",
+            finish_builtin("floor_div", vec![builders::num(1.0), builders::num(0.0)]),
         ),
         (
             "finish floor_div(\"1\", 1)",

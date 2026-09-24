@@ -533,22 +533,6 @@ fn long_user_message_gets_full_history_reference() {
 }
 
 #[test]
-fn truncated_lashlang_step_output_emits_full_reference() {
-    // The render half of the re-fetch contract: a truncated step output
-    // shows a preview plus a `full: history[0].output[0]` handle. The
-    // resolve half — that the handle returns the full untruncated value —
-    // is covered by `history_step_output_resolves_full_untruncated_value`
-    // in projection::context.
-    let projector = projector(10);
-    let output = "x".repeat(60 * 1024);
-    let history = projector.format_history(&[step_event(0, "print big", &output)]);
-
-    assert!(history.contains("re-run `console.log(history[0].output[0])`"));
-    assert!(history.contains("full value retained"));
-    assert!(history.contains("...truncated..."));
-}
-
-#[test]
 fn truncated_step_output_states_value_is_retained_not_lost() {
     // A truncated preview must read as display-only, not lost state — the
     // inference gpt-5.5 got wrong when it stopped a /spring-cleaning
@@ -564,6 +548,8 @@ fn truncated_step_output_states_value_is_retained_not_lost() {
         history.contains("re-run `console.log(history[0].output[0])`"),
         "{history}"
     );
+    // The lashlang `TRUNCATED_MARKER` surfaces literally in the preview.
+    assert!(history.contains("...truncated..."), "{history}");
     // The bare, easily-misread "chars, full: <ref>" framing is gone.
     assert!(!history.contains("chars, full: history"), "{history}");
 }

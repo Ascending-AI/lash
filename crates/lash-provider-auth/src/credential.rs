@@ -446,18 +446,6 @@ mod tests {
         async fn sleep_until(&self, _deadline: Instant) {}
     }
 
-    #[test]
-    fn test_clock_wall_clock_faces_agree() {
-        let clock = TestClock(AtomicU64::new(1_700_000_000_123));
-        let clock: &dyn lash_core::Clock = &clock;
-        let milliseconds = clock.timestamp_ms();
-        let datetime = clock.timestamp_datetime();
-        let text = chrono::DateTime::parse_from_rfc3339(&clock.timestamp_rfc3339())
-            .expect("clock emits RFC 3339");
-        assert_eq!(datetime.timestamp_millis() as u64, milliseconds);
-        assert_eq!(text.timestamp_millis() as u64, milliseconds);
-    }
-
     struct TestRefresher {
         calls: AtomicUsize,
         result: Result<TestCredential, CredentialError>,

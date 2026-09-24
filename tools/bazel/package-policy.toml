@@ -447,7 +447,6 @@ harness = "ui"
 rlm_gated = [
   "rlm_config_builder_requires_channel",
   "rlm_config_builder_requires_every_bound",
-  "rlm_execution_bounds_are_not_swappable",
   "rlm_memory_limit_cannot_take_an_instruction_budget",
   "rlm_turn_options_cannot_name_a_dialect",
 ]

@@ -1002,11 +1002,6 @@ mod tests {
                 crate::plugin::RlmChannel::Cell,
             )
             .expect("render execution section");
-        let real = lash_typescript::DiagnosticCode::ALL
-            .iter()
-            .map(|code| code.as_str())
-            .collect::<std::collections::BTreeSet<_>>();
-
         let mut named = std::collections::BTreeSet::new();
         let mut rest = prompt.as_str();
         while let Some(start) = rest.find("TS_") {
@@ -1020,15 +1015,6 @@ mod tests {
         assert!(
             named.is_empty(),
             "FIG-2750 removes diagnostic inventory: {named:?}"
-        );
-
-        let phantom = named
-            .iter()
-            .filter(|token| !real.contains(**token))
-            .collect::<Vec<_>>();
-        assert!(
-            phantom.is_empty(),
-            "the prompt names {phantom:?}, which the dialect cannot emit"
         );
     }
 

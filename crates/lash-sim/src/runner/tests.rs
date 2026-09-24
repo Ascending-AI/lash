@@ -2279,11 +2279,14 @@ fn is_scheduler_owned_runtime_completion_matches_kinds() {
 
 #[test]
 fn script_bundle_hash_is_stable_for_current_bundle() {
+    // A literal pin: any change to the canonical bundle's paths or contents
+    // turns this red, so the update is a deliberate act in the diff.
     let scripts = script_hash_manifest().expect("scripts");
-    let hash = script_bundle_hash(&scripts);
 
-    assert_eq!(hash.len(), 64);
-    assert_eq!(hash, script_bundle_hash(&scripts));
+    assert_eq!(
+        script_bundle_hash(&scripts),
+        "56d92b184abc621e0fcdc25baa72e64936aa491bac8bef04b7b0db6dad14cfad"
+    );
 }
 
 fn test_delivered(

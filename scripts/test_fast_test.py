@@ -152,18 +152,6 @@ class ClassifierTest(unittest.TestCase):
 
 
 class InvocationTest(unittest.TestCase):
-    def test_full_fallback_runs_the_unnarrowed_workspace_suite(self) -> None:
-        source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn(
-            "cargo nextest run --workspace --all-targets --locked)",
-            source,
-            "the fallback must be the unnarrowed workspace suite",
-        )
-
-    def test_zero_selection_is_a_failure_not_a_pass(self) -> None:
-        source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('if [ "$selected_tests" -eq 0 ]; then', source)
-
     def test_unknown_flag_is_rejected(self) -> None:
         result = subprocess.run(
             [str(SCRIPT), "--nope"],
@@ -186,28 +174,13 @@ class InvocationTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("--classify takes paths, not flags", result.stderr)
 
-    def test_the_metadata_temp_file_is_removed_before_every_exec(self) -> None:
-        # `exec` replaces the shell image, so the EXIT trap never fires on the
-        # two paths that actually run tests; without an explicit cleanup each
-        # real run leaks its ~220 KB `cargo metadata` dump.
-        lines = [
-            line.strip()
-            for line in SCRIPT.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        execs = [index for index, line in enumerate(lines) if line.startswith("exec ")]
-        self.assertEqual(len(execs), 2, "expected exactly two exec hand-offs")
-        for index in execs:
-            self.assertEqual(lines[index - 1], "cleanup", lines[index])
 
+class FixtureRepo:
+    """A throwaway two-crate workspace the real script runs against.
 
-class CrossCrateRenameTest(unittest.TestCase):
-    """A file moved between crates must select the crate it left, too.
-
-    Under git's default rename detection a move is reported as a single
-    destination path, so the source crate loses code and is never selected.
-    This drives the real script over a throwaway two-crate workspace, so the
-    behavior is pinned end to end rather than by grepping for a flag.
+    A stub `cargo` on PATH answers `metadata` from a fixed package list and
+    lets `nextest` be scripted, so tests observe what the script would run
+    rather than grep its text.
     """
 
     def _git(self, repo: Path, *args: str) -> str:
@@ -268,6 +241,146 @@ class CrossCrateRenameTest(unittest.TestCase):
         self._git(repo, "init", "--quiet", "-b", "main")
         self._git(repo, "add", "-A")
         self._git(repo, "commit", "--quiet", "-m", "fixture")
+
+    def _stub_cargo(self, repo: Path, nextest_listing: str = "") -> None:
+        # The script shells out to `cargo metadata` and `cargo nextest`; the
+        # stub answers both so a run never depends on a host toolchain. The
+        # files are committed so `git ls-files --others` does not report them
+        # as unowned changes.
+        import json
+
+        (repo / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "packages": [
+                        {
+                            "name": name,
+                            "manifest_path": str(
+                                repo / "crates" / name / "Cargo.toml"
+                            ),
+                        }
+                        for name in ("alpha", "beta")
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        (repo / "nextest-listing.txt").write_text(nextest_listing, encoding="utf-8")
+        bin_dir = repo / "bin"
+        bin_dir.mkdir()
+        cargo = bin_dir / "cargo"
+        cargo.write_text(
+            textwrap.dedent(
+                f"""\
+                #!/bin/sh
+                case "$1" in
+                  metadata) cat "{repo / 'metadata.json'}" ;;
+                  nextest)
+                    case "$2" in
+                      list) cat "{repo / 'nextest-listing.txt'}" ;;
+                      run) exit 0 ;;
+                    esac ;;
+                esac
+                """
+            ),
+            encoding="utf-8",
+        )
+        cargo.chmod(0o755)
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "--quiet", "-m", "stub cargo")
+
+    def _run(self, repo: Path, *args: str, tmpdir: Path | None = None) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        env["PATH"] = f"{repo / 'bin'}:{env['PATH']}"
+        if tmpdir is not None:
+            env["TMPDIR"] = str(tmpdir)
+        return subprocess.run(
+            [str(repo / "scripts" / "fast-test.sh"), *args],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+
+class ScriptRunTest(unittest.TestCase, FixtureRepo):
+    """What a run does with the verdict, pinned end to end on the stub repo."""
+
+    def test_full_fallback_runs_the_unnarrowed_workspace_suite(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self._fixture_repo(repo)
+            self._stub_cargo(repo)
+            # A manifest is a shared input: the verdict must widen to FULL.
+            with open(repo / "Cargo.toml", "a", encoding="utf-8") as handle:
+                handle.write("# a manifest change\n")
+
+            result = self._run(repo, "--base", "HEAD", "--dry-run")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("fast-test: full workspace suite", result.stdout)
+            self.assertIn(
+                "cargo nextest run --workspace --all-targets --locked",
+                result.stdout,
+            )
+            self.assertNotIn(
+                "-E", result.stdout, "the full fallback must not narrow the suite"
+            )
+
+    def test_zero_selection_is_a_failure_not_a_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self._fixture_repo(repo)
+            self._stub_cargo(repo, nextest_listing="")
+            with open(repo / "crates" / "alpha" / "src" / "lib.rs", "a") as handle:
+                handle.write("// a crate-local change\n")
+
+            result = self._run(repo, "--base", "HEAD")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("refusing to report a pass", result.stderr)
+
+    def test_the_metadata_temp_file_is_removed_before_every_exec(self) -> None:
+        # `exec` replaces the shell image, so the EXIT trap never fires on the
+        # two paths that actually run tests; without an explicit cleanup each
+        # real run leaks its `cargo metadata` dump into TMPDIR.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp) / "tmpdir"
+            tmpdir.mkdir()
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self._fixture_repo(repo)
+            self._stub_cargo(repo, nextest_listing="alpha-tests alpha::works\n")
+
+            # The narrowed path: list reports one test, then `exec` runs it.
+            with open(repo / "crates" / "alpha" / "src" / "lib.rs", "a") as handle:
+                handle.write("// a crate-local change\n")
+            result = self._run(repo, "--base", "HEAD", tmpdir=tmpdir)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                list(tmpdir.iterdir()), [], "the narrowed exec leaked a temp file"
+            )
+
+            # The full-suite path execs the unnarrowed suite directly.
+            self._git(repo, "add", "-A")
+            self._git(repo, "commit", "--quiet", "-m", "alpha change")
+            with open(repo / "Cargo.toml", "a", encoding="utf-8") as handle:
+                handle.write("# a manifest change\n")
+            result = self._run(repo, "--base", "HEAD", tmpdir=tmpdir)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                list(tmpdir.iterdir()), [], "the full-suite exec leaked a temp file"
+            )
+
+
+class CrossCrateRenameTest(unittest.TestCase, FixtureRepo):
+    """A file moved between crates must select the crate it left, too.
+
+    Under git's default rename detection a move is reported as a single
+    destination path, so the source crate loses code and is never selected.
+    This drives the real script over a throwaway two-crate workspace, so the
+    behavior is pinned end to end rather than by grepping for a flag.
+    """
 
     def test_cross_crate_rename_selects_both_crates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

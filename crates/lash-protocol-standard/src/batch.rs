@@ -117,22 +117,6 @@ mod tests {
     }
 
     #[test]
-    fn batch_result_row_decode_names_missing_required_field() {
-        let error = serde_json::from_value::<BatchResultRow>(serde_json::json!({
-            "index": 0,
-            "success": true,
-            "duration_ms": 0,
-            "result": "ok"
-        }))
-        .expect_err("row without tool must fail");
-
-        assert!(
-            error.to_string().contains("missing field `tool`"),
-            "{error}"
-        );
-    }
-
-    #[test]
     fn batch_contract_uses_only_surviving_tool_examples() {
         let definition = batch_tool_definition();
         let description =

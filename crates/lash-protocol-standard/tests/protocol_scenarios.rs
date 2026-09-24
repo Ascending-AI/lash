@@ -79,6 +79,11 @@ const STREAMED_TEXT_TERMINATION: StandardProtocolScenarioCoverage = standard_pro
     "streamed text termination",
     "Streaming text projection emits a clean final response without duplicate deltas."
 );
+const BUFFERED_TEXT_TERMINATION: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
+    standard_protocol_scenario_buffered_text_finishes_with_the_response_text,
+    "buffered text termination",
+    "A non-streamed provider response finishes through the completion checkpoint with its text as the assistant message."
+);
 const MAX_TURN_TERMINATION: StandardProtocolScenarioCoverage = standard_protocol_coverage!(
     standard_protocol_scenario_max_turns_terminates_after_tool_result,
     "max turn termination",
@@ -94,12 +99,13 @@ const STANDARD_PROTOCOL_SCENARIO_COVERAGE: &[StandardProtocolScenarioCoverage] =
     TOOL_FAILURE_FEEDBACK,
     TOOL_INTENT_FEEDBACK,
     STREAMED_TEXT_TERMINATION,
+    BUFFERED_TEXT_TERMINATION,
     MAX_TURN_TERMINATION,
 ];
 
 #[test]
 fn standard_protocol_scenario_coverage_metadata_is_unique_and_complete() {
-    assert_eq!(STANDARD_PROTOCOL_SCENARIO_COVERAGE.len(), 9);
+    assert_eq!(STANDARD_PROTOCOL_SCENARIO_COVERAGE.len(), 10);
     let mut names = BTreeSet::new();
     for coverage in STANDARD_PROTOCOL_SCENARIO_COVERAGE {
         let _declared_test = coverage.declared_test;
@@ -1111,6 +1117,27 @@ fn standard_protocol_scenario_streamed_text_finishes_without_duplicate_delta() {
             turn_outcome: Some(TurnOutcome::Finished(
                 lash_core::facade_support::TurnFinish::AssistantMessage {
                     text: "streamed done".to_string(),
+                },
+            )),
+            ..StandardProtocolExpectations::default()
+        })
+        .run();
+}
+
+#[test]
+fn standard_protocol_scenario_buffered_text_finishes_with_the_response_text() {
+    StandardProtocolScenario::new(BUFFERED_TEXT_TERMINATION.display_name)
+        .user_message("answer directly")
+        .llm_response(false, vec![text_part("final answer")])
+        .checkpoint()
+        .expect(StandardProtocolExpectations {
+            initial_request_contains: vec!["answer directly"],
+            checkpoints: vec![CheckpointKind::BeforeCompletion],
+            llm_call_count: Some(1),
+            done: Some(true),
+            turn_outcome: Some(TurnOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage {
+                    text: "final answer".to_string(),
                 },
             )),
             ..StandardProtocolExpectations::default()

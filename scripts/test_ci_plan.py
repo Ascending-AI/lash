@@ -1285,15 +1285,6 @@ class ProducerConclusionTests(unittest.TestCase):
     def test_dispatch_main_producer_skipped_rejected(self):
         self.assert_producer_rejected("workflow_dispatch", "skipped")
 
-    def test_dispatch_producer_failure_rejected(self):
-        self.assert_producer_rejected("workflow_dispatch", "failure")
-
-    def test_dispatch_producer_cancelled_rejected(self):
-        self.assert_producer_rejected("workflow_dispatch", "cancelled")
-
-    def test_dispatch_producer_skipped_rejected(self):
-        self.assert_producer_rejected("workflow_dispatch", "skipped")
-
     def test_labeled_pr_producer_failure_rejected(self):
         self.assert_producer_rejected("pull_request", "failure")
 

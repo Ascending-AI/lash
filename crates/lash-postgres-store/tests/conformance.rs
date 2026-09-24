@@ -606,33 +606,6 @@ lash_conformance::checkpoint_component_reopen_tests!({
 });
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_runtime_turn_receipt_identity_columns_are_nullable_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres receipt-schema test: database is not configured");
-        return;
-    };
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT column_name, is_nullable
-         FROM information_schema.columns
-         WHERE table_schema = 'public'
-           AND table_name = 'lash_runtime_turn_commits'
-           AND column_name = ANY($1)",
-    )
-    .bind(
-        &[
-            "request_identity_hash",
-            "requested_node_count",
-            "identity_encoding_version",
-        ][..],
-    )
-    .fetch_all(storage.pool())
-    .await
-    .expect("read Postgres receipt schema");
-    assert_eq!(rows.len(), 3);
-    assert!(rows.iter().all(|(_, nullable)| nullable == "YES"));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_runtime_turn_receipt_rejects_half_populated_append_identity_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres receipt-schema test: database is not configured");

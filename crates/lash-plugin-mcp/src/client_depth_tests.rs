@@ -352,7 +352,7 @@ impl McpElicitationHandler for UrlElicitationHost {
     fn capability(&self) -> ElicitationCapability {
         self.capability_calls.fetch_add(1, Ordering::SeqCst);
         ElicitationCapability {
-            form: None,
+            form: Some(FormElicitationCapability::default()),
             url: Some(UrlElicitationCapability::default()),
         }
     }
@@ -598,7 +598,12 @@ async fn advertised_url_elicitation_routes_its_completion_notification() {
 
     let events = read_trace(&trace);
     let capabilities = &event(&events, "initialize")["params"]["capabilities"];
-    assert_eq!(capabilities["elicitation"], json!({ "url": {} }));
+    assert_eq!(
+        capabilities["elicitation"],
+        json!({ "form": {}, "url": {} })
+    );
+    assert!(capabilities.get("sampling").is_none());
+    assert!(capabilities.get("roots").is_none());
     let result = execute_depth_tool(&factory).await;
     assert!(
         result.is_success(),

@@ -820,26 +820,6 @@ impl Part {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn prompt_char_count(&self) -> usize {
-        // Reasoning parts are not user-visible text and aren't sent to the
-        // model as flat prompt content. Provider adapters may re-emit them
-        // via structured replay metadata instead. Excluding them from the
-        // accounting keeps the standard-compaction plugin's prune decisions
-        // driven by real conversation content.
-        if matches!(self.kind(), PartKind::Reasoning) {
-            return 0;
-        }
-        if matches!(self.kind(), PartKind::Attachment) {
-            return self
-                .attachment()
-                .and_then(|attachment| attachment.source.stored_ref())
-                .map(|attachment_ref| attachment_ref.id.as_str().len())
-                .unwrap_or_else(|| self.render().len());
-        }
-        self.render().len()
-    }
-
     pub(crate) fn render(&self) -> String {
         if let Self::Attachment {
             attachment,

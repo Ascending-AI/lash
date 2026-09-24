@@ -308,6 +308,11 @@ async fn format_fills_auto_numbered_indexed_and_escaped_placeholders() {
         finish_call("format", vec![string("{{ {} }}"), string("x")]).await,
         Value::String("{ x }".into())
     );
+    // A placeholder-free template returns its literal text.
+    assert_eq!(
+        finish_call("format", vec![string("plain")]).await,
+        Value::String("plain".into())
+    );
     assert_eq!(
         finish_call(
             "format",
@@ -368,11 +373,12 @@ async fn validate_checks_a_value_against_a_type_and_aborts_on_a_bad_shape() {
     )))
     .await
     .expect_err("validate should abort on a bad shape");
+    let RuntimeError::ValidationFailed { reason } = error else {
+        panic!("expected validation failure: {error}");
+    };
     assert!(
-        error
-            .to_string()
-            .contains("$.labels[1]: expected string, got number"),
-        "unexpected error: {error}"
+        reason.contains("$.labels[1]: expected string, got number"),
+        "unexpected error: {reason}"
     );
 }
 
@@ -399,6 +405,15 @@ async fn range_and_push_build_lists() {
     assert_eq!(
         finish_call("range", vec![number(5.0), number(0.0), number(-2.0)]).await,
         list_of(&[5.0, 3.0, 1.0])
+    );
+    // A step pointing away from the bound yields an empty list.
+    assert_eq!(
+        finish_call("range", vec![number(5.0), number(0.0), number(2.0)]).await,
+        Value::List(Vec::new().into())
+    );
+    assert_eq!(
+        finish_call("range", vec![number(0.0), number(5.0), number(-2.0)]).await,
+        Value::List(Vec::new().into())
     );
 
     // `push` returns the grown list; the original binding is unchanged.
@@ -476,6 +491,15 @@ async fn shaping_builtins_order_reduce_and_rewrite_collections() {
         finish_call("upper", vec![string("abc")]).await,
         Value::String("ABC".into())
     );
+    // Case mapping follows Unicode, not ASCII.
+    assert_eq!(
+        finish_call("lower", vec![string("Straße")]).await,
+        Value::String("straße".into())
+    );
+    assert_eq!(
+        finish_call("upper", vec![string("Straße")]).await,
+        Value::String("STRASSE".into())
+    );
     assert_eq!(
         finish_call(
             "unique",
@@ -516,6 +540,39 @@ async fn shaping_builtins_order_reduce_and_rewrite_collections() {
             Value::String("third".into()),
         ],
         "equal keys keep their written order"
+    );
+
+    // The sort key may be a dotted path into a nested record.
+    let value = finish_call(
+        "sort_by",
+        vec![
+            list(vec![
+                record(vec![
+                    ("id", string("first")),
+                    ("profile", record(vec![("score", number(2.0))])),
+                ]),
+                record(vec![
+                    ("id", string("second")),
+                    ("profile", record(vec![("score", number(1.0))])),
+                ]),
+            ]),
+            string("profile.score"),
+        ],
+    )
+    .await;
+    let Value::List(rows) = value else {
+        panic!("expected sorted rows");
+    };
+    let ids = rows
+        .iter()
+        .map(|row| row.as_record().expect("row")["id"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        vec![
+            Value::String("second".into()),
+            Value::String("first".into())
+        ]
     );
 }
 

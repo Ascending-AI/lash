@@ -516,18 +516,6 @@ mod tests {
         );
     }
 
-    /// A process scope with no incarnation cannot reach this derivation —
-    /// `AdmittedScope` refuses the pair at construction, so the refusal that
-    /// used to live here has no input left to fire on. Asserted on the
-    /// constructor: there is no `for_scope` call to write.
-    #[test]
-    fn a_process_scope_without_a_pinned_incarnation_is_unconstructible() {
-        assert!(
-            AdmittedScope::unpinned(crate::ExecutionScope::process("worker")).is_err(),
-            "the reusable name alone is never admitted"
-        );
-    }
-
     /// The administrative scope kinds run no durable effects and own nothing.
     #[test]
     fn administrative_scopes_have_no_opener() {
