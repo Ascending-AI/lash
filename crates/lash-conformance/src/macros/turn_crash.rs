@@ -4,9 +4,10 @@
 //! The fixture yields `(guard, make, make_invocation, make_error_invocation)`:
 //! `make_invocation` drives the crash placements, and `make_error_invocation`
 //! — a `(scenario, scope)` factory — supplies the journaled controller the
-//! error-return sweep needs on tiers that have an effect journal.
+//! error-return sweep and the after-commit redrive law (FIG-3590) need on
+//! tiers that have an effect journal.
 //!
-//! `turn_crash_matrix_tests!` registers all three. A tier that must defer the
+//! `turn_crash_matrix_tests!` registers all four. A tier that must defer the
 //! crash-and-recover laws but can still hold the trace registers
 //! `turn_crash_trace_tests!` and `turn_crash_recovery_tests!` instead, each
 //! with its own attributes, so a deferral names exactly the laws it parks.
@@ -38,6 +39,20 @@ macro_rules! __turn_crash_matrix_register {
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
+    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, journaled) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, make, _make_invocation, make_journaled_invocation) = $fixture;
+            let _ = $label;
+            Box::pin($crate::registration_macro_support::$law(
+                make,
+                make_journaled_invocation,
+            ))
+            .await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
     ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal, error_return) => {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -54,7 +69,8 @@ macro_rules! __turn_crash_matrix_register {
     };
 }
 
-/// Register the level-one turn crash checks: trace, matrix and error return.
+/// Register the level-one turn crash checks: trace, matrix, error return and
+/// after-commit redrive.
 #[macro_export]
 macro_rules! turn_crash_matrix_tests {
     ($(#[$attr:meta])* $fixture:block) => {
@@ -70,6 +86,11 @@ macro_rules! turn_crash_matrix_tests {
                 turn_crash_matrix_error_return_fail_stop,
                 "turn-crash-matrix-error-return-fail-stop",
                 error_return
+            ),
+            (
+                turn_crash_after_commit_redrive_replays_the_committed_receipt,
+                "turn-crash-after-commit-redrive",
+                journaled
             ),
         ]);
     };
@@ -95,8 +116,8 @@ macro_rules! turn_crash_trace_tests {
     };
 }
 
-/// Register only the crash-and-recover laws: the level-one matrix and the
-/// error-return sweep.
+/// Register only the crash-and-recover laws: the level-one matrix, the
+/// error-return sweep and the after-commit redrive.
 #[macro_export]
 macro_rules! turn_crash_recovery_tests {
     ($(#[$attr:meta])* $fixture:block) => {
@@ -111,6 +132,11 @@ macro_rules! turn_crash_recovery_tests {
                 turn_crash_matrix_error_return_fail_stop,
                 "turn-crash-matrix-error-return-fail-stop",
                 error_return
+            ),
+            (
+                turn_crash_after_commit_redrive_replays_the_committed_receipt,
+                "turn-crash-after-commit-redrive",
+                journaled
             ),
         ]);
     };

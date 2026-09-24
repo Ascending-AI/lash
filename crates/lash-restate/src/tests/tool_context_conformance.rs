@@ -778,3 +778,182 @@ async fn a_pre_cutover_in_progress_cell_row_does_not_wedge_the_drain_end() {
         "the retry re-issues no provider call"
     );
 }
+
+/// Lets the drain's turn-final commit land, then never returns: the worker
+/// dies after its commit, before the drain ends.
+struct DiesAfterFinalCommit {
+    inner: Arc<dyn lash_core::RuntimePersistence>,
+    armed: AtomicBool,
+    committed: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::store::RuntimePersistenceDecorator for DiesAfterFinalCommit {
+    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn commit_runtime_state(
+        &self,
+        commit: lash_core::store::RuntimeCommit,
+    ) -> Result<lash_core::store::RuntimeCommitReceipt, lash_core::StoreError> {
+        let dies =
+            commit.turn_commit.operation.key == "final" && self.armed.swap(false, Ordering::SeqCst);
+        let receipt = self.inner.commit_runtime_state(commit).await?;
+        if dies {
+            self.committed.notify_one();
+            return std::future::pending().await;
+        }
+        Ok(receipt)
+    }
+}
+
+/// Expire the lane a crashed worker still holds, so the redrive's claim
+/// displaces it instead of waiting out its term.
+async fn expire_crashed_worker_lane(
+    store: &dyn lash_core::RuntimePersistence,
+    session_id: &SessionId,
+) {
+    if let Some(lease) = store
+        .get_session_execution_lease(session_id)
+        .await
+        .expect("read the crashed worker's lane")
+        .lease
+    {
+        store
+            .renew_session_execution_lease(&lease.authority(), 1)
+            .await
+            .expect("shorten the crashed worker's lane to its minimum term");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// FIG-3590: a worker that dies after its drain's turn-final commit and
+/// before the drain ends is redriven, in strict replay on the same store,
+/// with the same drain identity. The redrive replays the settled run's
+/// receipt: the committed execution state stays byte-identical to a clean
+/// run's, and no tool or provider call is issued again.
+///
+/// `from_head` restores the redriven runtime from the durable head; otherwise
+/// it starts from the pre-turn state the crashed worker started from.
+async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: bool) {
+    async fn seed_drain_input(cell: &ProductionToolCell) {
+        cell.runtime_store
+            .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+                cell.session_id.clone(),
+                lash_core::TurnInputIngress::NextTurn,
+                replay_test_input(&cell.turn_id),
+            ))
+            .await
+            .expect("seed the drain's turn input");
+    }
+    let drain_id = "after-commit-cell-drain";
+
+    let (control, control_host) = ProductionToolCell::sqlite("llm_query").await;
+    seed_drain_input(&control).await;
+    let control_scope =
+        lash_core::ExecutionScope::queue_drain(control.session_id.clone(), drain_id);
+    let mut control_runtime = control.runtime_on(Arc::clone(&control.runtime_store)).await;
+    drive_drain(&mut control_runtime, control_host.as_ref(), &control_scope)
+        .await
+        .expect("the control drain commits");
+    drop(control_runtime);
+    let live_head = control.committed_execution_state().await;
+    assert!(live_head.is_some(), "an RLM turn leaves execution state");
+
+    let (cell, host) = ProductionToolCell::sqlite("llm_query").await;
+    seed_drain_input(&cell).await;
+    let drain_scope = lash_core::ExecutionScope::queue_drain(cell.session_id.clone(), drain_id);
+    let committed = Arc::new(tokio::sync::Notify::new());
+    let dying: Arc<dyn lash_core::RuntimePersistence> = Arc::new(DiesAfterFinalCommit {
+        inner: Arc::clone(&cell.runtime_store),
+        armed: AtomicBool::new(true),
+        committed: Arc::clone(&committed),
+    });
+    let mut crashed = cell.runtime_on(dying).await;
+    let crashed_host = Arc::clone(&host);
+    let crashed_scope = drain_scope.clone();
+    let worker = tokio::spawn(async move {
+        let _ = drive_drain(&mut crashed, crashed_host.as_ref(), &crashed_scope).await;
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(60), committed.notified())
+        .await
+        .expect("the drain reaches its turn-final commit");
+    worker.abort();
+    let _ = worker.await;
+    assert_eq!(
+        cell.committed_execution_state().await,
+        live_head,
+        "the crashed worker's commit is durable"
+    );
+    assert!(
+        !lash_core::SessionCommitStore::drain_end_exists(cell.runtime_store.as_ref(), drain_id)
+            .await
+            .expect("read the drain-end receipt"),
+        "the worker died before its drain ended"
+    );
+    let tool_executions = cell.tool_executions.load(Ordering::SeqCst);
+    assert_eq!(tool_executions, 1, "the live pass ran the tool once");
+    assert_eq!(cell.llm_provider_calls.load(Ordering::SeqCst), 2);
+
+    expire_crashed_worker_lane(cell.runtime_store.as_ref(), &cell.session_id).await;
+    host.start_replay();
+    let mut redrive = if from_head {
+        cell.runtime_from_head().await
+    } else {
+        cell.runtime_on(Arc::clone(&cell.runtime_store)).await
+    };
+    let scope = host
+        .scoped(durable_admission(&drain_scope))
+        .expect("scope the redriven drain");
+    let drain = redrive
+        .stream_next_queued_work(lash_core::facade_support::TurnOptions::new(
+            tokio_util::sync::CancellationToken::new(),
+            scope,
+        ))
+        .await
+        .expect("the after-commit redrive completes");
+    let lash_core::facade_support::QueuedTurnDrain::Replayed(receipt) = drain else {
+        panic!("the redrive must replay the settled run's receipt");
+    };
+    assert!(
+        matches!(
+            receipt.terminal,
+            Some(lash_core::store::QueuedRunTerminal::Completed { .. })
+        ),
+        "the receipt is the committed turn's terminal: {:?}",
+        receipt.terminal
+    );
+    drop(redrive);
+    assert_eq!(
+        cell.committed_execution_state().await,
+        live_head,
+        "the committed execution state is byte-identical after the redrive"
+    );
+    assert_eq!(
+        cell.tool_executions.load(Ordering::SeqCst),
+        tool_executions,
+        "the redrive runs no tool"
+    );
+    assert_eq!(
+        cell.llm_provider_calls.load(Ordering::SeqCst),
+        2,
+        "the redrive re-issues neither an outer generation nor a nested llm_query call"
+    );
+}
+
+#[tokio::test]
+async fn an_after_commit_drain_redrive_from_the_pre_turn_state_keeps_the_committed_state() {
+    Box::pin(assert_after_commit_drain_redrive_keeps_the_committed_state(
+        false,
+    ))
+    .await;
+}
+
+#[tokio::test]
+async fn an_after_commit_drain_redrive_from_the_head_keeps_the_committed_state() {
+    Box::pin(assert_after_commit_drain_redrive_keeps_the_committed_state(
+        true,
+    ))
+    .await;
+}
