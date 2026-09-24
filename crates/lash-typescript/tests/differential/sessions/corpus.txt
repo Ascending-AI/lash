@@ -664,13 +664,12 @@ end
 session for-of-shadowed-iterable
 about a for...of body may declare a binding of its iterable's name (FIG-3625)
 probe items item
-cell defect for-of-shadowed-iterable
+cell
 const items = [1, 2];
 for (const item of items) {
   const items = [item];
   console.log(items.length);
 }
-lash {"outcome":"rejected","diagnostic":"TS_FOR_OF_UNSUPPORTED","prints":[],"probes":{"item":"unbound","items":"unbound"}}
 end
 
 session spread-built-object-fields
@@ -759,7 +758,7 @@ end
 session for-of-aliased-iterable
 about a for...of loop visits what its body appends through an alias made before the loop (FIG-3625)
 probe items same item
-cell defect for-of-aliased-iterable
+cell
 const items = [1];
 const same = items;
 for (const item of items) {
@@ -768,7 +767,49 @@ for (const item of items) {
   }
 }
 console.log(same);
-lash {"outcome":"normal","prints":["[1,2]"],"probes":{"item":"unbound","items":"object [1,2]","same":"object [1,2]"}}
+end
+
+session for-of-appends-during-the-loop
+about a for...of loop visits what its body appends, and stops short of what it removes (FIG-3625)
+probe queue seen item
+cell
+const queue = [1];
+const seen = [];
+for (const item of queue) {
+  seen.push(item);
+  if (item < 4) {
+    queue.push(item * 2);
+  }
+}
+console.log(seen, queue);
+cell
+for (const item of queue) {
+  queue.pop();
+  seen.push(item);
+}
+console.log(seen, queue);
+end
+
+session for-of-map-and-set-are-live
+about a for...of over a Map or a Set visits entries added during the loop and skips ones deleted before their turn (FIG-3625)
+probe counts tags key value tag
+cell
+const counts = new Map([['a', 1], ['b', 2], ['c', 3]]);
+for (const [key, value] of counts) {
+  if (key === 'a') {
+    counts.delete('b');
+    counts.set('d', 4);
+    counts.set('c', 30);
+  }
+  console.log(key, value);
+}
+const tags = new Set(['x']);
+for (const tag of tags) {
+  if (tags.size < 3) {
+    tags.add(tag + 'y');
+  }
+  console.log(tag);
+}
 end
 
 session sibling-block-binding-types

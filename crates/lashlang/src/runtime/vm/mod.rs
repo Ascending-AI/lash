@@ -888,7 +888,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let Some(iter_state) = self.iter_stack.last_mut() else {
                     return Err(RuntimeError::MissingLoopState);
                 };
-                let Some(value) = iter_state.cursor.next_value() else {
+                let Some(value) = iter_state.cursor.next_value(&self.heap)? else {
                     self.ip = jump_to;
                     return Ok(Some(VmStep::Continue));
                 };
@@ -1200,8 +1200,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             }
             Instruction::BeginIter(binding) => {
                 let iterable = self.pop_stack()?;
-                let values = self.iterable_values_for_dialect(iterable).await?;
-                if !values.is_empty() {
+                let cursor = self.iteration_cursor(iterable).await?;
+                if cursor.has_next(&self.heap)? {
                     self.slots.ensure_assignable(
                         binding,
                         slot_names_for(self.chunk, self.active_function),
@@ -1209,7 +1209,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     )?;
                 }
                 self.iter_stack.push(IterState {
-                    cursor: IterCursor::List { values, index: 0 },
+                    cursor,
                     binding,
                     restore: self.slots.capture_temporary(binding),
                     heapified: false,

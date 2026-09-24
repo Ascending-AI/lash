@@ -185,11 +185,14 @@ Mutually recursive function declarations reject with
 and call itself by that name, and self-recursive declarations are unaffected.
 
 The canonical classic `for` lowering rejects a `continue` that crosses a
-`finally`, because the current loop epilogue would otherwise run before the
-`finally`. `for...of` snapshots arrays and strings before iteration; until a
-resumable iterator protocol exists, a loop body that mutates, aliases, or
-passes the iterable itself rejects with `TS_FOR_OF_UNSUPPORTED`. Calls that do
-not touch the iterable are unaffected.
+`finally` with `TS_FOR_UNSUPPORTED`, because the current loop epilogue would
+otherwise run before the `finally`. `for...of` follows its iterable live, as
+ECMA-262 does (FIG-3625): an array or a `URLSearchParams` is read at the
+iterator's index on every step, so a body that appends to, removes from or
+rewrites the iterable (through any name, a function, or a pattern default)
+changes what the loop visits next; a `Map` or a `Set` visits entries added
+during the loop and skips ones deleted before their turn. A string iterates its
+code points.
 
 ## Conformance
 
@@ -534,15 +537,6 @@ to an ordinary row. The session generator draws none of their shapes until
 then, each exclusion naming its entry here. They are listed so no divergence
 is silent while its fix is owed.
 
-- `for-of-shadowed-iterable` (FIG-3625): the `for...of` iterable check is by
-  name, so a body that declares its own binding of the iterable's name and
-  then uses it is refused as touching the iterable (`TS_FOR_OF_UNSUPPORTED`).
-- `for-of-aliased-iterable` (FIG-3625): the same check misses an alias made
-  before the loop, so a body that appends to its array through the alias is
-  accepted, and the loop, which walks a snapshot, misses what Node visits:
-  `const same = items; for (const item of items) { same.push(item); }` visits
-  the items the loop started with, where Node also visits the appended ones
-  (and, unbounded, never ends).
 - `builtin-call-spread` (FIG-3627): a spread argument to a builtin is not
   passed as the array's items. A static function (`Math.max(...items)`,
   `String.fromCharCode(...codes)`) is refused as `TS_METHOD_UNSUPPORTED`,

@@ -3,6 +3,8 @@ use super::*;
 pub(super) trait IteratorRootView {
     fn restore_value(&self) -> Option<&Value>;
     fn cursor_values(&self) -> Option<&[Value]>;
+    /// The collection or array a live cursor reads through.
+    fn cursor_source(&self) -> Option<&Value>;
 }
 
 impl IteratorRootView for IterState {
@@ -13,8 +15,12 @@ impl IteratorRootView for IterState {
     fn cursor_values(&self) -> Option<&[Value]> {
         match &self.cursor {
             IterCursor::List { values, .. } => Some(values),
-            IterCursor::Range { .. } => None,
+            IterCursor::Live { .. } | IterCursor::Range { .. } => None,
         }
+    }
+
+    fn cursor_source(&self) -> Option<&Value> {
+        self.cursor.source()
     }
 }
 
@@ -26,6 +32,14 @@ impl IteratorRootView for VmIteratorContinuation {
     fn cursor_values(&self) -> Option<&[Value]> {
         match &self.cursor {
             VmIteratorCursor::List { values, .. } => Some(values),
+            VmIteratorCursor::Live { .. } | VmIteratorCursor::Range { .. } => None,
+        }
+    }
+
+    fn cursor_source(&self) -> Option<&Value> {
+        match &self.cursor {
+            VmIteratorCursor::List { collection, .. } => collection.as_ref(),
+            VmIteratorCursor::Live { source, .. } => Some(source),
             VmIteratorCursor::Range { .. } => None,
         }
     }
@@ -308,6 +322,9 @@ pub(super) fn visit_vm_roots<'a, V: VmRootView>(view: &'a V, visitor: &mut impl 
                 visitor.transient(value);
             }
         }
+        if let Some(value) = iterator.cursor_source() {
+            visitor.transient(value);
+        }
     }
 
     for frame in view.frames() {
@@ -325,6 +342,9 @@ pub(super) fn visit_vm_roots<'a, V: VmRootView>(view: &'a V, visitor: &mut impl 
                 for value in values {
                     visitor.transient(value);
                 }
+            }
+            if let Some(value) = iterator.cursor_source() {
+                visitor.transient(value);
             }
         }
         if let Some((function, calls, results)) = frame.callback_roots() {

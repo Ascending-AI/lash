@@ -661,13 +661,15 @@ that each entry is a limit taken knowingly.
     now answers at its first consumed rejection, and the leaves still in
     flight run on as losers under their opener (ADR 0099 §0, §10). The number
     stays reserved so later entries keep their names.
-16. **`for...of` snapshots.** Arrays and strings are snapshotted before
-    iteration, strings by code point. Until a resumable iterator protocol
-    exists, a body that mutates, aliases, or passes the iterable itself rejects
-    with `TS_FOR_OF_UNSUPPORTED`; calls that do not touch the iterable are
-    unaffected, because the restriction is about reaching the snapshotted
-    source, not about calling. A classic-loop `continue` that crosses a
-    `finally` rejects rather than running the loop epilogue early.
+16. **`for...of` snapshots** — *retired by FIG-3625.* `for...of` used to walk
+    a snapshot and refuse, by the iterable's name, a body that might mutate
+    it. That check was unsound both ways: it refused a shadowing binding that
+    never touched the iterable, and it missed an alias made before the loop,
+    whose writes the snapshot then hid. The loop now follows its iterable live,
+    as ECMA-262's iterators do: an array or a `URLSearchParams` is read at the
+    iterator's index on every step, and a `Map` or a `Set` visits entries added
+    during the loop and skips ones deleted before their turn. The number stays
+    reserved. The classic-loop `continue` refusal it also carried is entry 23.
 
 17. **Closure boundary** (`closure-boundary`). A binding whose value reaches a
     function does not survive its cell
@@ -704,6 +706,10 @@ that each entry is a limit taken knowingly.
     cell, and an open object reads a missing field as JavaScript does. A shape
     a host schema declares closed (`additionalProperties: false`) is guarded
     the same way.
+23. **Classic-loop `continue` across `finally`.** A `continue` in a classic
+    `for` loop that crosses a `finally` rejects with `TS_FOR_UNSUPPORTED`
+    rather than running the loop's update expression before the `finally`
+    body, which is the order the lowering would otherwise produce.
 
 ## Consequences
 

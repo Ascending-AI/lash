@@ -405,6 +405,11 @@ pub(super) fn iterable_item_type(
     match target {
         TypeExpr::List(item) => Ok(*item.clone()),
         TypeExpr::Any | TypeExpr::Dict | TypeExpr::Ref(_) => Ok(TypeExpr::Any),
+        // A loop over a string walks its code points (FIG-3625).
+        TypeExpr::Str | TypeExpr::Enum(_) => Ok(TypeExpr::Str),
+        // `Null` alone is the element type of an empty list (`union_type`'s
+        // sentinel): a loop over one of its elements never runs.
+        TypeExpr::Null => Ok(TypeExpr::Any),
         TypeExpr::Union(items) => {
             let mut item_types = Vec::new();
             let mut has_non_list = false;
