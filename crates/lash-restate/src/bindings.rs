@@ -19,6 +19,12 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use restate_sdk::endpoint::Endpoint;
 
+/// The discovery manifest version asked for: the newest the pinned SDK serves.
+/// Without an `Accept` the SDK answers with its oldest manifest, which cannot
+/// carry per-handler options such as a turn handler's retry policy, and it
+/// refuses the request outright once one is set.
+const DISCOVERY_MANIFEST_V4: &str = "application/vnd.restate.endpointmanifest.v4+json";
+
 /// The endpoint's own discovery document could not be produced or decoded.
 ///
 /// The discovery request runs through [`Endpoint::handle`], so a rejection the
@@ -91,6 +97,7 @@ pub async fn bound_service_names(
 ) -> Result<BTreeSet<String>, RestateEndpointDiscoveryError> {
     let request = http::Request::builder()
         .uri("/discover")
+        .header(http::header::ACCEPT, DISCOVERY_MANIFEST_V4)
         .body(Full::new(Bytes::new()))
         .map_err(|error| {
             RestateEndpointDiscoveryError::new(format!(

@@ -40,6 +40,23 @@ async fn bound_service_names_reports_what_the_endpoint_bound() {
     );
 }
 
+/// A turn handler carries a retry policy, which only discovery manifest v4
+/// can express; the binding check must ask for it, as the Restate runtime does,
+/// instead of taking the SDK's oldest manifest and a refusal.
+#[tokio::test]
+async fn bound_service_names_reads_a_service_whose_handler_carries_a_retry_policy() {
+    let endpoint = Endpoint::builder()
+        .bind(crate::turn_service(
+            LashDurableWaitWorkflowImpl.serve(),
+            "await_resolution",
+        ))
+        .build();
+    let bound = bound_service_names(&endpoint)
+        .await
+        .expect("discovery answers for a handler with a retry policy");
+    assert!(bound.contains("LashDurableWaitWorkflow"));
+}
+
 #[tokio::test]
 async fn assert_services_bound_passes_on_a_complete_surface() {
     let endpoint = Endpoint::builder()
