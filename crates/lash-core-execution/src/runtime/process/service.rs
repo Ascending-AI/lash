@@ -60,6 +60,14 @@ pub trait ProcessService: Send + Sync {
     /// Issues the single process-start command for a recorded tool intent.
     /// Implementations must not consult live visibility, existence, terminal,
     /// or host policy state before crossing the effect-controller boundary.
+    ///
+    /// The drain calls this from drive code, so an engine that replays its
+    /// drive calls it again for an intent it already landed: Restate re-runs
+    /// the handler from the top of its journal on every resumption. The
+    /// repeat carries the same recorded identity (the request's derived
+    /// process id) and the effect controller answers it with the recorded
+    /// outcome, so the start lands once. An implementation keys anything it
+    /// does outside that boundary by the same identity.
     async fn start_from_recorded_intent(
         &self,
         session_id: &SessionId,
@@ -252,6 +260,12 @@ pub trait ProcessService: Send + Sync {
     }
 
     /// Journal-first event emission used only by the recorded intent protocol.
+    ///
+    /// Called from drive code, so a replaying engine calls it again for an
+    /// event the drain already landed, under the same `replay_key`; the effect
+    /// controller answers the repeat with the recorded event. As for
+    /// [`Self::start_from_recorded_intent`], anything an implementation does
+    /// outside that boundary is keyed by the replay key.
     async fn emit_event_recorded_intent(
         &self,
         session_id: &SessionId,

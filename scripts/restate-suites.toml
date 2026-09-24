@@ -54,13 +54,6 @@ redelivery_laws = [
 report_only = "tool-result durations reach journaled identities (FIG-3672); see scripts/restate-suites.toml"
 
 [suites.effect-group.replay.divergent]
-# A dispatch child that suspends inside its drain re-lands the drain's first
-# intent on resumption and never lands the second: the drain's landing is not
-# replay-stable.
-"tests::conformance_and_poison::a_committed_childs_final_is_protected_and_its_drain_is_finished" = "drain re-lands `start` and drops `event` when the child resumes (FIG-3681)"
-"tests::conformance_and_poison::drains_are_admitted_in_recorded_commit_order" = "drain re-lands `start` and drops `event` when the child resumes (FIG-3681)"
-"tests::conformance_and_poison::a_drain_held_at_the_barrier_parks_under_a_frozen_dispatch_clock" = "drain re-lands `start` when the held child resumes (FIG-3681)"
-"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "the retried step never reports its first retryable failure once the child resumes from its retry sleep (FIG-3681)"
 # The replayed redrive computes a different turn index than the attempt that
 # journaled it: `turn:1:0:llm_call:1` recorded, `turn:2:0:llm_call:1` replayed.
 "tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes" = "journal mismatch: the replayed turn derives turn index 2 where the journal recorded 1 (FIG-3682)"
@@ -83,6 +76,7 @@ report_only = "tool-result durations reach journaled identities (FIG-3672); see 
 # the journal recorded a `run`.
 "tests::conformance_and_poison::a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate" = "ConformanceTurnProbe runs a run-once job, which a replayed handler no longer has (FIG-3684)"
 "tests::conformance_and_poison::public_signal_intent_wakes_parked_process" = "ConformanceTurnProbe runs a run-once job, which a replayed handler no longer has (FIG-3684)"
+"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "ConformanceTurnProbe runs a run-once job, which a replayed handler no longer has (FIG-3684)"
 
 [suites.agent-workbench]
 label = "//examples/agent-workbench:agent-workbench__unit_test"
