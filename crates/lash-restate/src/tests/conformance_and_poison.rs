@@ -445,6 +445,17 @@ lash_conformance::effect_group_host_tests!(
     }
 );
 
+// A closed group serves its caller nothing further. Parked: Restate serves a
+// closed group's settlements to a restored handle (FIG-3676).
+lash_conformance::effect_group_closed_caller_tests!(
+    #[ignore = "FIG-3676: Restate serves a closed group's settlements to its caller instead of refusing"]
+    {
+        let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+        let factory = harness.group_host_factory();
+        (harness, factory)
+    }
+);
+
 // The session-config settlement laws on the Restate backend: its engine host
 // over one SQLite memory store set per law.
 lash_conformance::session_config_settlement_tests!(
