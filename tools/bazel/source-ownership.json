@@ -167,6 +167,19 @@
       "provider-scripts/**/*"
     ]
   },
+  "crates/lash-typescript": {
+    "test_data": {
+      "corpus_laws": [
+        "tests/test262/test/**/*.js"
+      ],
+      "test262": [
+        "tests/test262/test/**/*.js"
+      ],
+      "test262_full": [
+        "tests/test262/test/**/*.js"
+      ]
+    }
+  },
   "examples/agent-workbench": {
     "compile_data": [
       "assets/index.html"

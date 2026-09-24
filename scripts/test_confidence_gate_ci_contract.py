@@ -2802,10 +2802,12 @@ derive_mutation_jobs() {{
             self.assertIn("::warning", result.stdout)
             self.assertIn("Check versioned surface bumps", result.stdout)
             self.assertIn("green manual run does not prove it passed", result.stdout)
+            self.assertIn("Check the Test262 outcome ratchet", result.stdout)
             summary_text = summary.read_text(encoding="utf-8")
             self.assertIn("Manual CI run is incomplete", summary_text)
             self.assertIn("Check versioned surface bumps", summary_text)
             self.assertIn("green manual run does not prove that gate passed", summary_text)
+            self.assertIn("Check the Test262 outcome ratchet", summary_text)
 
     def test_the_transcript_gate_can_read_a_queued_pull_request(self) -> None:
         gate = (ROOT / "scripts" / "check-transcript-diff.py").read_text(

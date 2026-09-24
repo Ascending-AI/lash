@@ -16,8 +16,8 @@ use std::collections::BTreeSet;
 use lashlang::{LashlangHostEnvironment, TypeExpr};
 
 use super::goldens;
-use super::ingest::{data_path, source_for};
-use super::metadata::{self, Phase};
+use super::ingest::{data_path, harness_bindings, test_script};
+use super::metadata::{self, Phase, TestFlag};
 
 /// One program of one corpus.
 #[derive(Clone, Debug)]
@@ -130,31 +130,50 @@ fn differential() -> Vec<CorpusProgram> {
         .collect()
 }
 
-/// The Test262 slice's selected tests that compile, ingested exactly as the
-/// slice runner ingests them. A ratcheted skip and a parse-phase negative
-/// test are rejections, not programs.
+/// The Test262 PR sample's passing tests, each as the Script that runs after
+/// its harness: the test bridged exactly as the conformance runner bridges
+/// it, linked against the global names its harness binds, as a later cell
+/// links against an earlier one's. The laws hold over the test's own code;
+/// the harness is the runner's, not the corpus's. The sample, not the whole
+/// selection, keeps this law's cost in the PR lane; a parse-phase negative
+/// test is a rejection, not a program.
 fn test262() -> Vec<CorpusProgram> {
-    let manifest = std::fs::read_to_string(data_path("manifest.tsv")).expect("read the manifest");
-    manifest
-        .lines()
-        .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+    let rows = |file: &str| {
+        std::fs::read_to_string(data_path(file))
+            .unwrap_or_else(|error| panic!("read {file}: {error}"))
+            .lines()
+            .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let passing = rows("outcomes.tsv")
+        .into_iter()
         .filter_map(|line| {
             let fields = line.split('\t').collect::<Vec<_>>();
-            let [path, _area, disposition, _expectation] = fields.as_slice() else {
-                panic!("malformed manifest row: {line}")
+            let [path, class, _qualifier] = fields.as_slice() else {
+                panic!("malformed outcomes row: {line}")
             };
-            if *disposition != "pass" {
-                return None;
-            }
-            let file = data_path(path);
+            (*class == "pass").then(|| (*path).to_owned())
+        })
+        .collect::<BTreeSet<_>>();
+    rows("sample.tsv")
+        .into_iter()
+        .filter(|path| passing.contains(path))
+        .filter_map(|path| {
+            let file = data_path(&path);
             let meta =
                 metadata::read_metadata(&file).unwrap_or_else(|error| panic!("{path}: {error}"));
             let source = match &meta.negative {
                 Some(negative) if negative.phase != Phase::Runtime => return None,
-                Some(_) => source_for(&file, &meta, false),
-                None => source_for(&file, &meta, true),
+                Some(_) => test_script(&file, &meta, false),
+                None if meta.flags.contains(&TestFlag::Async) => test_script(&file, &meta, false),
+                None => test_script(&file, &meta, true),
             };
-            Some(CorpusProgram::new(format!("test262:{path}"), source))
+            Some(CorpusProgram {
+                id: format!("test262:{path}"),
+                source,
+                globals: harness_bindings(&meta),
+            })
         })
         .collect()
 }

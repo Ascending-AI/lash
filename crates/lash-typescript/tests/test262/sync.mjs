@@ -1,5 +1,14 @@
 #!/usr/bin/env node
 
+// Derives the executable Test262 selection from the pinned upstream checkout
+// and the census, and vendors it. Nothing here is hand-picked: a test is
+// selected exactly when every census row it touches is `accepted` (see
+// README.md, "Selection"). `inventory` refreshes only inventory.tsv; `sync`
+// rewrites every derived file and the vendored tree; `check` rewrites nothing
+// and fails when any derived file or vendored byte differs from what `sync`
+// would write.
+
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
@@ -7,6 +16,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmdirSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -15,6 +25,11 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PINNED_COMMIT = "3655e7464de3d52643ecddd4b5f9f4f3e7f62398";
+// The PR lane's sample size. Each second-level directory contributes
+// round(count * SAMPLE_TARGET / selected), at least one test, chosen in
+// SHA-256 order of the path, so the sample is stable across runs and moves
+// only when the selection does.
+const SAMPLE_TARGET = 500;
 const root = dirname(fileURLToPath(import.meta.url));
 const [mode, sourceArgument] = process.argv.slice(2);
 if (!new Set(["inventory", "sync", "check"]).has(mode) || !sourceArgument) {
@@ -79,7 +94,26 @@ const featureNames = readFileSync(join(source, "features.txt"), "utf8")
 const directoryNames = readdirSync(join(source, "test"))
   .filter((name) => statSync(join(source, "test", name)).isDirectory())
   .sort();
+// Every flag INTERPRETING.md defines. A test carrying any other flag stops the
+// sync: an unknown flag has no ruling.
+const flagNames = [
+  "CanBlockIsFalse",
+  "CanBlockIsTrue",
+  "async",
+  "generated",
+  "module",
+  "noStrict",
+  "non-deterministic",
+  "onlyStrict",
+  "raw",
+];
+// Dialect decisions no upstream feature tag carries. Most are TypeScript-only
+// syntax; the rest are ECMAScript constructs whose refusal no tag names (ES5
+// syntax carries no feature tag at all), so the census needs a row of its own
+// for each refusal the selection shows.
 const typescriptNames = [
+  // Object-literal `get`/`set` (FIG-3646): ES5 syntax, so no feature tag.
+  "accessors",
   "annotations",
   "as-casts",
   // Not TypeScript syntax: a dialect decision with no upstream feature tag.
@@ -99,15 +133,50 @@ const typescriptNames = [
   "Promise.race",
   "satisfies",
   "type-aliases",
+  // ECMAScript constructs and operations the dialect refuses with no
+  // upstream feature tag to hang the ruling on (FIG-3646). Each names the
+  // refusal the selection shows, so every `refused` outcome maps to a row.
+  "array-holes",
+  "array-index-delete",
+  "array-named-properties",
+  "async-calls-unawaited",
+  "binding-reassignment",
+  "builtin-arity",
+  "classic-for-forms",
+  "closed-shape-field-guard",
+  "date-mutation",
+  "date-string-coercion",
+  "debugger",
+  "direct-eval",
+  "function-constructor",
+  "instanceof-arbitrary",
+  "labels",
+  "lone-surrogate-values",
+  "matchall-iterator-position",
+  "mutable-captures",
+  "new-arbitrary",
+  "object-string-coercion",
+  "private-names-outside-classes",
+  "reserved-identifiers",
+  "comma-operator",
+  "source-nesting",
+  "tagged-templates",
+  "temporal-dead-zone",
+  "this",
+  "unresolvable-references",
+  "with",
+  "source-size",
 ];
-const inventory = [
-  ...directoryNames.map((name) => ["directory", name]),
-  ...featureNames.map((name) => ["feature", name]),
-  ...typescriptNames.map((name) => ["typescript", name]),
-]
-  .sort(([kindA, nameA], [kindB, nameB]) => kindA.localeCompare(kindB) || nameA.localeCompare(nameB))
-  .map((fields) => fields.join("\t"))
-  .join("\n") + "\n";
+const inventory =
+  [
+    ...directoryNames.map((name) => ["directory", name]),
+    ...featureNames.map((name) => ["feature", name]),
+    ...flagNames.map((name) => ["flag", name]),
+    ...typescriptNames.map((name) => ["typescript", name]),
+  ]
+    .sort(([kindA, nameA], [kindB, nameB]) => kindA.localeCompare(kindB) || nameA.localeCompare(nameB))
+    .map((fields) => fields.join("\t"))
+    .join("\n") + "\n";
 
 function compareOrWrite(path, contents) {
   if (mode === "check") {
@@ -130,109 +199,135 @@ if (census.size !== inventoryKeys.size || [...inventoryKeys].some((key) => !cens
   throw new Error("census.tsv does not exactly cover inventory.tsv; classify every row before syncing");
 }
 
-const manifest = rows(join(root, "manifest.tsv"), 4).map(([path, area, disposition, expectation]) => ({
-  path,
-  area,
-  disposition,
-  expectation,
-}));
-const manifestByPath = new Map(manifest.map((entry) => [entry.path, entry]));
-if (manifestByPath.size !== manifest.length) throw new Error("manifest.tsv has duplicate paths");
-
 const allTests = walk(join(source, "test"))
   .filter((path) => path.endsWith(".js") && !path.endsWith("FIXTURE.js"))
   .map((path) => relative(source, path).replaceAll("\\", "/"))
   .sort();
-const allTestSet = new Set(allTests);
-for (const entry of manifest) {
-  if (!allTestSet.has(entry.path)) throw new Error(`manifest path does not exist upstream: ${entry.path}`);
-}
 
-const supportedHarness = new Set(["assert.js", "sta.js", "compareArray.js", "propertyHelper.js"]);
-function inferredReason(testPath, code, meta) {
-  const manifestEntry = manifestByPath.get(testPath);
-  if (manifestEntry?.disposition === "skip") return `expected-rejection:${manifestEntry.expectation}`;
-  const top = testPath.split("/")[1];
-  const directory = census.get(`directory:${top}`);
-  if (directory.status !== "accepted") return `${directory.status}:${directory.reason}`;
+// The census row that keeps a test out of the selection, or null when every
+// row it touches is accepted. Rules apply in this order, and the first
+// non-accepted row names the exclusion:
+// 1. its top-level directory;
+// 2. for `test/built-ins/<X>/...`, the feature row named `<X>` when there is
+//    one: upstream tags are incomplete, and an untagged test under
+//    `built-ins/Promise` exercises Promise all the same;
+// 3. each of its flags, in file order;
+// 4. each of its features, in file order.
+function exclusion(testPath, meta) {
+  const [, top, builtIn] = testPath.split("/");
+  const rules = [`directory:${top}`];
+  if (top === "built-ins" && census.has(`feature:${builtIn}`)) rules.push(`feature:${builtIn}`);
+  for (const flag of meta.flags) {
+    if (!census.has(`flag:${flag}`)) throw new Error(`${testPath} carries uncensused flag ${flag}`);
+    rules.push(`flag:${flag}`);
+  }
   for (const feature of meta.features) {
-    const entry = census.get(`feature:${feature}`);
-    if (!entry) throw new Error(`${testPath} uses uncensused feature ${feature}`);
-    if (entry.status !== "accepted") return `${entry.status}:${entry.reason}`;
+    if (!census.has(`feature:${feature}`)) throw new Error(`${testPath} uses uncensused feature ${feature}`);
+    rules.push(`feature:${feature}`);
   }
-  const unsupportedInclude = meta.includes.find((include) => !supportedHarness.has(include));
-  if (unsupportedInclude) return `harness-uses:${unsupportedInclude}`;
-  const patterns = [
-    [/\bvar\b/, "out-of-dialect:TS_VAR_UNSUPPORTED"],
-    [/\bclass\b/, "out-of-dialect:TS_CLASS_UNSUPPORTED"],
-    [/\b(?:function\s*\*|yield\b)/, "out-of-dialect:TS_GENERATOR_UNSUPPORTED"],
-    [/\basync\b/, "out-of-dialect:TS_ASYNC_UNSUPPORTED"],
-    [/\?\./, "out-of-dialect:TS_OPTIONAL_CHAINING_UNSUPPORTED"],
-    [/\.\.\./, "out-of-dialect:TS_SPREAD_UNSUPPORTED"],
-    [/\bnew\s+/, "out-of-dialect:TS_NEW_UNSUPPORTED"],
-    [/\bswitch\s*\(/, "out-of-dialect:TS_SWITCH_UNSUPPORTED"],
-    [/(?:\+\+|--)/, "out-of-dialect:TS_UPDATE_UNSUPPORTED"],
-    [/(?:\+=|-=|\*=|\/=|%=|&&=|\|\|=|\?\?=)/, "out-of-dialect:TS_ASSIGNMENT_OPERATOR_UNSUPPORTED"],
-    [/\bfor\s*\([^;]*\bin\b/, "out-of-dialect:TS_FOR_IN_UNSUPPORTED"],
-    [/\bdebugger\b/, "out-of-dialect:TS_DEBUGGER_UNSUPPORTED"],
-  ];
-  for (const [pattern, reason] of patterns) if (pattern.test(code)) return reason;
-  return "skip:ticket-ruling:FIG-1413-initial-subset";
+  return rules.find((rule) => census.get(rule).status !== "accepted") ?? null;
 }
 
+const selected = [];
 const skips = [];
+const includes = new Set(["assert.js", "sta.js", "doneprintHandle.js"]);
 for (const testPath of allTests) {
-  const manifestEntry = manifestByPath.get(testPath);
-  if (manifestEntry?.disposition === "pass") continue;
-  const code = readFileSync(join(source, testPath), "utf8");
-  skips.push([testPath, inferredReason(testPath, code, frontmatter(code))]);
-}
-for (const entry of manifest.filter((candidate) => candidate.disposition === "pass")) {
-  const meta = frontmatter(readFileSync(join(source, entry.path), "utf8"));
-  if (!meta.flags.some((flag) => new Set(["noStrict", "onlyStrict", "raw"]).has(flag))) {
-    skips.push([`${entry.path}#strict`, "strict-mode-variant:n.a."]);
+  const top = testPath.split("/")[1];
+  if (census.get(`directory:${top}`).status !== "accepted") {
+    skips.push([testPath, `directory:${top}`]);
+    continue;
+  }
+  const meta = frontmatter(readFileSync(join(source, testPath), "utf8"));
+  const rule = exclusion(testPath, meta);
+  if (rule) {
+    skips.push([testPath, rule]);
+  } else {
+    selected.push(testPath);
+    for (const include of meta.includes) includes.add(include);
   }
 }
-skips.sort(([pathA], [pathB]) => pathA.localeCompare(pathB));
-const skipRegister = "# test262-path\treason\n" + skips.map((row) => row.join("\t")).join("\n") + "\n";
-compareOrWrite(join(root, "skip-register.tsv"), skipRegister);
+
+const strata = new Map();
+for (const testPath of selected) {
+  const stratum = testPath.split("/").slice(1, 3).join("/");
+  if (!strata.has(stratum)) strata.set(stratum, []);
+  strata.get(stratum).push(testPath);
+}
+const sample = [];
+for (const [, paths] of [...strata].sort(([a], [b]) => a.localeCompare(b))) {
+  const take = Math.max(1, Math.round((paths.length * SAMPLE_TARGET) / selected.length));
+  sample.push(
+    ...paths
+      .map((path) => [createHash("sha256").update(path).digest("hex"), path])
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(0, take)
+      .map(([, path]) => path),
+  );
+}
+sample.sort();
+
+compareOrWrite(
+  join(root, "skip-register.tsv"),
+  "# test262-path\texcluding-census-row\n" + skips.map((row) => row.join("\t")).join("\n") + "\n",
+);
+compareOrWrite(join(root, "sample.tsv"), "# test262-path\n" + sample.join("\n") + "\n");
 compareOrWrite(join(root, "upstream-test-count.txt"), `${allTests.length}\n`);
 
+const vendoredRoot = join(root, "test");
+const vendored = existsSync(vendoredRoot)
+  ? walk(vendoredRoot).map((path) => `test/${relative(vendoredRoot, path).replaceAll("\\", "/")}`)
+  : [];
+const wanted = new Set(selected);
+const harnessRoot = join(root, "harness");
+const vendoredHarness = existsSync(harnessRoot) ? readdirSync(harnessRoot).sort() : [];
 if (mode === "sync") {
-  const vendoredRoot = join(root, "test");
-  const wanted = new Set(manifest.map((entry) => entry.path));
-  if (existsSync(vendoredRoot)) {
-    for (const path of walk(vendoredRoot).filter((path) => path.endsWith(".js"))) {
-      const relativePath = `test/${relative(vendoredRoot, path).replaceAll("\\", "/")}`;
-      if (!wanted.has(relativePath)) unlinkSync(path);
-    }
+  for (const path of vendored.filter((path) => !wanted.has(path))) unlinkSync(join(root, path));
+  for (const directory of walkDirectories(vendoredRoot).reverse()) {
+    if (readdirSync(directory).length === 0) rmdirSync(directory);
   }
-  for (const entry of manifest) {
-    const destination = join(root, entry.path);
+  for (const testPath of selected) {
+    const destination = join(root, testPath);
     mkdirSync(dirname(destination), { recursive: true });
-    copyFileSync(join(source, entry.path), destination);
+    copyFileSync(join(source, testPath), destination);
   }
-  mkdirSync(join(root, "harness"), { recursive: true });
-  for (const harness of supportedHarness) {
-    copyFileSync(join(source, "harness", harness), join(root, "harness", harness));
-  }
+  mkdirSync(harnessRoot, { recursive: true });
+  for (const name of vendoredHarness.filter((name) => !includes.has(name))) unlinkSync(join(harnessRoot, name));
+  for (const harness of includes) copyFileSync(join(source, "harness", harness), join(harnessRoot, harness));
   copyFileSync(join(source, "LICENSE"), join(root, "LICENSE"));
 } else {
-  for (const entry of manifest) {
-    const vendored = join(root, entry.path);
-    if (!existsSync(vendored) || readFileSync(vendored, "utf8") !== readFileSync(join(source, entry.path), "utf8")) {
-      throw new Error(`${entry.path} does not match pinned upstream`);
+  const extra = vendored.filter((path) => !wanted.has(path));
+  if (extra.length) throw new Error(`vendored tests outside the selection: ${extra.slice(0, 5).join(", ")}`);
+  for (const testPath of selected) {
+    const copy = join(root, testPath);
+    if (!existsSync(copy) || !readFileSync(copy).equals(readFileSync(join(source, testPath)))) {
+      throw new Error(`${testPath} does not match pinned upstream`);
     }
   }
-  for (const harness of supportedHarness) {
-    if (readFileSync(join(root, "harness", harness), "utf8") !== readFileSync(join(source, "harness", harness), "utf8")) {
+  const expectedHarness = [...includes].sort();
+  if (vendoredHarness.join("\n") !== expectedHarness.join("\n")) {
+    throw new Error(`harness/ must hold exactly ${expectedHarness.join(", ")}`);
+  }
+  for (const harness of includes) {
+    if (!readFileSync(join(harnessRoot, harness)).equals(readFileSync(join(source, "harness", harness)))) {
       throw new Error(`harness/${harness} does not match pinned upstream`);
     }
   }
+  if (!readFileSync(join(root, "LICENSE")).equals(readFileSync(join(source, "LICENSE")))) {
+    throw new Error("LICENSE does not match pinned upstream");
+  }
 }
 
-const strictVariantSkips = skips.filter(([, reason]) => reason === "strict-mode-variant:n.a.").length;
+function walkDirectories(directory) {
+  if (!existsSync(directory)) return [];
+  const directories = [directory];
+  for (const name of readdirSync(directory).sort()) {
+    const path = join(directory, name);
+    if (statSync(path).isDirectory()) directories.push(...walkDirectories(path));
+  }
+  return directories;
+}
+
 console.log(
-  `test262 ${mode}: ${allTests.length} upstream, ${manifest.length} vendored, ` +
-    `${skips.length - strictVariantSkips} path skips, ${strictVariantSkips} strict variants`,
+  `test262 ${mode}: ${allTests.length} upstream, ${selected.length} selected, ` +
+    `${sample.length} sampled, ${skips.length} excluded by census rows`,
 );

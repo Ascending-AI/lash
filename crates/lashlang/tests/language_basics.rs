@@ -3,7 +3,7 @@
 // ADR 0096 makes TypeScript the sole authored dialect, and the TypeScript front-end brings its
 // own grammar, lexing and rejection suites
 // (`crates/lash-typescript/tests/{grammar_coverage,ecma_regressions,rejections,
-// test262_conformance}.rs`), so those rows are not re-spelled here — a TypeScript program
+// test262_sample,test262_full}.rs`), so those rows are not re-spelled here — a TypeScript program
 // cannot express the syntax they pinned, and re-authoring them would duplicate the front-end's
 // own coverage.
 //

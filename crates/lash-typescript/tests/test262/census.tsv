@@ -204,15 +204,55 @@ feature	WeakMap	skip	ticket-ruling:FIG-1413:WeakMap — weak references answer t
 feature	WeakRef	skip	ticket-ruling:FIG-1413:WeakRef	-
 feature	WeakSet	skip	ticket-ruling:FIG-1413:WeakSet	-
 feature	well-formed-json-stringify	rejected	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED	JSON.stringify('\ud800');
+flag	async	accepted	-	-
+flag	CanBlockIsFalse	accepted	-	-
+flag	CanBlockIsTrue	skip	ticket-ruling:FIG-3646:the host agent never blocks ([[CanBlock]] is false), so a test that requires blocking has no host to run on	-
+flag	generated	accepted	-	-
+flag	module	skip	ticket-ruling:FIG-3646:a cell is a Script, never module code (ADR 0062), so a test that must run as a module has no goal symbol to run under	-
+flag	non-deterministic	skip	ticket-ruling:FIG-3646:such a test may pass by more than one path, so its outcome cannot be pinned by a ratchet	-
+flag	noStrict	skip	ticket-ruling:FIG-3646:the dialect is strict-mode only (ADR 0062: every cell is one strict script), and Test262 forbids running a noStrict test in strict mode	-
+flag	onlyStrict	accepted	-	-
+flag	raw	skip	ticket-ruling:FIG-3646:the dialect is strict-mode only (ADR 0062: every cell is one strict script), and Test262 runs a raw test once, in non-strict mode only	-
+typescript	accessors	rejected	TS_ACCESSOR_UNSUPPORTED	const o = { get x() { return 1; } };
 typescript	annotations	accepted	-	-
+typescript	array-holes	rejected	TS_SPARSE_ARRAY_UNSUPPORTED	const a = [1]; a[3] = 9;
+typescript	array-index-delete	rejected	TS_DELETE_ARRAY_INDEX_UNSUPPORTED	const a = [1, 2]; delete a[0];
+typescript	array-named-properties	rejected	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED	const a = [1, 2]; a[-1] = 9;
 typescript	as-casts	accepted	-	-
 typescript	async-array-callbacks	skip	registered-deviation:TS_ASYNC_MAP_SEQUENTIAL_V1	-
+typescript	async-calls-unawaited	rejected	TS_AWAIT_REQUIRED	async function f() { return 1; } f();
+typescript	binding-reassignment	rejected	TS_ASSIGN_CONST	var v = 1; v = 2;
+typescript	builtin-arity	rejected	TS_EXPRESSION_UNSUPPORTED	isNaN(1, 2);
+typescript	classic-for-forms	rejected	TS_FOR_UNSUPPORTED	for (let i = 0; i < 3; i += 2) { }
+typescript	closed-shape-field-guard	rejected	TS_LINK_ERROR	const o = { a: 1 }; const c = o.c;
+typescript	comma-operator	rejected	TS_SEQUENCE_UNSUPPORTED	const x = (1, 2);
+typescript	date-mutation	rejected	TS_DATE_IMMUTABLE	const d = new Date(0); d.setUTCHours(1);
+typescript	date-string-coercion	rejected	TS_DATE_STRING_COERCION_PENDING	const s = '' + new Date(0);
+typescript	debugger	rejected	TS_DEBUGGER_UNSUPPORTED	debugger;
 typescript	decorators	rejected	TS_DECORATOR_UNSUPPORTED	@dec class A { }
+typescript	direct-eval	rejected	TS_EVAL_UNSUPPORTED	eval('1');
 typescript	enum	accepted	-	-
+typescript	function-constructor	rejected	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED	const f = Function('return 1');
 typescript	generics	accepted	-	-
+typescript	instanceof-arbitrary	rejected	TS_INSTANCEOF_UNSUPPORTED	const b = 'a' instanceof String;
 typescript	interfaces	accepted	-	-
+typescript	labels	rejected	TS_LABEL_UNSUPPORTED	outer: while (true) { break outer; }
+typescript	lone-surrogate-values	rejected	TS_LONE_SURROGATE_UNSUPPORTED	const s = '😀'[0];
+typescript	matchall-iterator-position	rejected	TS_REGEX_ITERATOR_POSITION	const it = 'a'.matchAll(/a/g);
+typescript	mutable-captures	rejected	TS_MUTABLE_CAPTURE_UNSUPPORTED	let n = 0; const f = () => { n = 1; };
 typescript	namespaces	rejected	TS_NAMESPACE_UNSUPPORTED	namespace N { }
+typescript	new-arbitrary	rejected	TS_NEW_UNSUPPORTED	function F() { } const o = new F();
 typescript	non-null-assertion	accepted	-	-
+typescript	object-string-coercion	rejected	TS_OBJECT_STRING_COERCION	const s = '' + { a: 1 };
+typescript	private-names-outside-classes	rejected	TS_PRIVATE_NAME_UNSUPPORTED	function f(o: any) { return #x in o; }
 typescript	Promise.race	accepted	-	-
+typescript	reserved-identifiers	rejected	TS_RESERVED_IDENTIFIER	const __typescript_x = 1;
 typescript	satisfies	accepted	-	-
+typescript	source-nesting	rejected	TS_SOURCE_NESTING_LIMIT	const x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]];
+typescript	source-size	rejected	TS_SOURCE_TOO_LARGE	repeat:65537:;
+typescript	tagged-templates	rejected	TS_TAGGED_TEMPLATE_UNSUPPORTED	const s = String.raw`a`;
+typescript	temporal-dead-zone	rejected	TS_TEMPORAL_DEAD_ZONE	const x = x;
+typescript	this	rejected	TS_THIS_UNSUPPORTED	const x = this;
 typescript	type-aliases	accepted	-	-
+typescript	unresolvable-references	rejected	TS_UNKNOWN_BINDING	const x = notDeclaredAnywhere;
+typescript	with	rejected	TS_WITH_UNSUPPORTED	with ({}) { }

@@ -1,30 +1,61 @@
-# area	selected	pass	skip
-array	1	1	0
-array-copy-methods	1	1	0
-block-scope	20	16	4
-coercion	3	3	0
-compound-assignment	1	0	1
-control-flow	2	2	0
-date	1	1	0
-destructuring	1	1	0
-error	1	0	1
-expressions	6	6	0
-functions	1	1	0
-global-code	7	0	7
-json	2	2	0
-let-const	10	4	6
-map	2	1	1
-math	3	3	0
-number	3	3	0
-object	3	3	0
-optional-chaining	1	0	1
-parameter-rest	1	0	1
-per-iteration-bindings	18	5	13
-regexp	1	1	0
-set	1	1	0
-spread	1	0	1
-string	4	4	0
-switch	1	0	1
-tdz	21	0	21
-update	1	0	1
-TOTAL	118	59	59
+# class	qualifier	count
+fail	*	763
+fail	FIG-3650	141
+fail	FIG-3651	139
+fail	FIG-3652	105
+fail	FIG-3653	153
+fail	FIG-3654	52
+fail	FIG-3655	34
+fail	FIG-3656	77
+fail	FIG-3657	5
+fail	FIG-3658	29
+fail	FIG-3661	8
+fail	FIG-3662	20
+harness	*	21
+harness	nativeFunctionMatcher.js	15
+harness	program-size	6
+pass	*	4062
+refused	*	14124
+refused	TS_ACCESSOR_UNSUPPORTED	191
+refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED	6
+refused	TS_ASSIGN_CONST	1864
+refused	TS_AWAIT_REQUIRED	6
+refused	TS_BIGINT_UNSUPPORTED	8
+refused	TS_CLASS_UNSUPPORTED	1174
+refused	TS_DATE_IMMUTABLE	4
+refused	TS_DATE_STRING_COERCION_PENDING	3
+refused	TS_DEBUGGER_UNSUPPORTED	1
+refused	TS_DELETE_ARRAY_INDEX_UNSUPPORTED	2
+refused	TS_EVAL_UNSUPPORTED	349
+refused	TS_EXPRESSION_UNSUPPORTED	6
+refused	TS_FOR_OF_UNSUPPORTED	14
+refused	TS_FOR_UNSUPPORTED	651
+refused	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED	96
+refused	TS_GENERATOR_UNSUPPORTED	49
+refused	TS_IMPORT_EXPORT_UNSUPPORTED	2
+refused	TS_INSTANCEOF_UNSUPPORTED	20
+refused	TS_LABEL_UNSUPPORTED	63
+refused	TS_LINK_ERROR	26
+refused	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED	19
+refused	TS_LONE_SURROGATE_UNSUPPORTED	439
+refused	TS_META_PROPERTY_UNSUPPORTED	8
+refused	TS_METHOD_UNSUPPORTED	2877
+refused	TS_MUTABLE_CAPTURE_UNSUPPORTED	61
+refused	TS_NEW_UNSUPPORTED	1120
+refused	TS_OBJECT_STRING_COERCION	30
+refused	TS_PRIVATE_NAME_UNSUPPORTED	1
+refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED	3672
+refused	TS_REGEX_ITERATOR_POSITION	3
+refused	TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED	12
+refused	TS_RESERVED_IDENTIFIER	4
+refused	TS_SEQUENCE_UNSUPPORTED	182
+refused	TS_SOURCE_NESTING_LIMIT	12
+refused	TS_SOURCE_TOO_LARGE	10
+refused	TS_SPARSE_ARRAY_UNSUPPORTED	16
+refused	TS_SUPER_UNSUPPORTED	34
+refused	TS_TAGGED_TEMPLATE_UNSUPPORTED	38
+refused	TS_TEMPORAL_DEAD_ZONE	39
+refused	TS_THIS_UNSUPPORTED	285
+refused	TS_UNKNOWN_BINDING	721
+refused	TS_WITH_UNSUPPORTED	6
+selected	-	18970

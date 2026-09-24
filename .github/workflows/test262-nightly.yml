@@ -1,0 +1,89 @@
+name: Test262 nightly
+
+# FIG-3646: the whole Test262 selection, uncached, once a day. The PR lane
+# runs a stratified sample (`//crates/lash-typescript:test262__test`, in
+# `//:dev_tests`) and the merge group runs the full target in the
+# `//:workspace_tests` tail, where an unchanged input set is a cache hit. This
+# run executes it regardless, so a nondeterministic outcome, or one that only
+# a cold run shows, surfaces within a day rather than on the next change to
+# the dialect. The corpus is vendored at the pinned commit; nothing here
+# touches the network beyond the build pool (ADR 0062).
+on:
+  schedule:
+    - cron: "43 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: test262-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test262-full:
+    name: Test262 full selection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: build-cache
+    steps:
+      - name: Check out repository
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git config gc.auto 0
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          auth_header="$(printf 'x-access-token:%s' "${CHECKOUT_TOKEN}" | base64 -w 0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${auth_header}"
+          # Bounded and retried: a fetch that hangs used to hold the runner until the
+          # job timeout. CHECKOUT_TAGS=--tags on the step fetches tags as well.
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10 180 git fetch "${CHECKOUT_TAGS:---no-tags}" --prune --depth=1 origin "${GITHUB_SHA}"; then
+              break
+            fi
+            [ "${attempt}" -lt 3 ] || exit 1
+            echo "::warning::git fetch attempt ${attempt} failed; retrying"
+            sleep $((attempt * 5))
+          done
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+          git checkout --detach --force FETCH_HEAD
+
+      - name: Configure Bazel shared cache
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Run the full Test262 selection uncached
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          bazel --output_user_root="$BAZEL_OUTPUT_USER_ROOT" test \
+            ${BAZEL_SHARED_CACHE_FLAGS} \
+            --remote_download_outputs=minimal \
+            --remote_download_regex='.*/testlogs/.*/test[.]log$' \
+            --nocache_test_results --test_output=errors --test_arg=--nocapture \
+            //crates/lash-typescript:test262_full__test
+
+      - name: Report the figures
+        if: always()
+        shell: bash
+        run: |
+          log=bazel-testlogs/crates/lash-typescript/test262_full__test/test.log
+          if [ -f "$log" ]; then
+            grep -h '^Test262:' "$log" >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"

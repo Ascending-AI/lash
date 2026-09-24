@@ -237,18 +237,21 @@ def compile_data_argument(directory: str) -> str:
 def data_exclude_argument(directory: str, owner: str | None) -> str:
     """Package files owned by a test target other than `owner`.
 
-    A `test_data` entry names files only one test target reads (trybuild pins,
+    A `test_data` entry names files only its test targets read (trybuild pins,
     say). Every other target of the package -- library, binaries, unit test and
     sibling tests -- leaves them out of its inputs and runfiles, so editing them
-    re-runs only their owner.
+    re-runs only their owners. A pattern several targets name is data of each
+    of them (the vendored Test262 tree, read by the sample, the full run and
+    the corpus laws).
     """
     owned = SOURCE_OWNERSHIP.get(directory, {}).get("test_data", {})
+    mine = set(owned.get(owner, [])) if owner is not None else set()
     patterns = sorted({
         pattern
         for target, target_patterns in owned.items()
         if target != owner
         for pattern in target_patterns
-    })
+    } - mine)
     return f"    data_exclude = {string_list(patterns)},\n" if patterns else ""
 
 

@@ -193,25 +193,40 @@ not touch the iterable are unaffected.
 
 ## Conformance
 
-`kiln test //crates/lash-typescript:lash-typescript__unit_test //crates/lash-typescript:integration__test` runs an official, commit-pinned Test262 subset
-through the same parse -> normalized AST -> shared AST -> heap VM pipeline as a
-real cell. This proves spec agreement for the selected accepted constructs; it
-does not claim that the bounded dialect accepts all of ECMAScript. The Node
-differential oracle independently pins agreement with the deployed Node
-version, while Test262 pins agreement with ECMA-262.
+Test262 runs every upstream test the census accepts at a pinned commit (18,970
+of 53,578) through the same lower → link → compile → heap VM path as a real
+cell. Each has one ratcheted outcome:
 
-The inventory/census pair is the exhaustive policy index: every upstream
-feature tag and top-level directory is accepted, rejected by a real `TS_*`
-code, or skipped by an explicit ticket/deviation ruling. A rejected row also
-carries a **probe** — a source that must reject with exactly the diagnostic the
-row names — or an explicit `probe-exempt:` reason. Naming a diagnostic is a
-claim about the code, and until the probes existed the claim and the code were
-connected by nothing. The path-level skip
-register accounts for every non-passing upstream test. Counts are pinned by
-area, and executable skips are negative ratchets: a new failure, a changed
-rejection, or an unexpectedly compiling skip fails CI. Tests use no network or
-wall clock. See [`tests/test262/README.md`](tests/test262/README.md) for the
-pinned commit, harness shims, and deliberate inventory-first sync procedure.
+- 4,062 pass;
+- 14,124 are refused by a named `TS_*` code;
+- 763 fail, each owned by a ticket;
+- 21 wait on a harness capability.
+
+That is a pass rate of 21.4% of the selection and 84.2% of the tests that run.
+`//crates/lash-typescript:test262__test` checks a stratified 515-test sample in
+the developer loop. `//crates/lash-typescript:test262_full__test` runs the whole
+selection in the workspace partition and nightly. This proves spec agreement
+for what the dialect accepts. It does not claim that the bounded dialect
+accepts all of ECMAScript. The Node differential oracle independently pins
+agreement with the deployed Node version, while Test262 pins agreement with
+ECMA-262.
+
+The inventory/census pair is the exhaustive policy index. Every upstream
+feature tag, top-level directory and flag is one of:
+
+- accepted;
+- rejected by a real `TS_*` code;
+- skipped by an explicit ticket or deviation ruling.
+
+The same holds for each tagless dialect decision. A rejected row also carries a
+**probe**, a source that must reject with exactly the diagnostic the row names,
+or an explicit `probe-exempt:` reason. Naming a diagnostic is a claim about the
+code, and until the probes existed the claim and the code were connected by
+nothing. Every refusal code the selection shows must be named by a rejected
+row. Tests use no network or wall clock. See
+[`tests/test262/README.md`](tests/test262/README.md) for the selection rule,
+the outcome classes, the ratchet, the harness renderings and the
+inventory-first sync procedure.
 
 Sequences of cells are checked against Node too (FIG-3599, FIG-3608): a
 hand-written session corpus, sessions a seeded generator draws from the
@@ -768,5 +783,5 @@ this paragraph is pinned against the table by
 own row count, so neither this paragraph nor a lane can drift from the corpus in
 silence.
 
-The curated test262-derived slice and its selection rule live under
-`tests/test262/`.
+The census-derived Test262 selection, its outcome record and its selection
+rule live under `tests/test262/`.
