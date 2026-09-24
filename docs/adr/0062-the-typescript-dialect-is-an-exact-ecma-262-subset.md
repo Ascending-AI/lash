@@ -686,6 +686,19 @@ that each entry is a limit taken knowingly.
     top-level `const`-bound uncalled `async` arrow is a `Process` value
     ([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md)),
     so `typeof` answers `"object"`.
+22. **Closed-shape field guard** (`closed-shape-field-guard`, FIG-3626). A
+    read or write of a field that a statically closed object literal lacks is
+    refused at link with `TS_LINK_ERROR`, naming the field and the literal's
+    fields, where Node answers `undefined` or adds the field. `tsc` refuses the
+    same program, so the guard is TypeScript-faithful, and it catches the typo
+    a model writes into code it cannot step through. A literal is closed only
+    while nothing can have given it a field the linker cannot see: a spread, a
+    computed key, a computed-key write (`o[k] = v`), or an escape (its
+    reference reaching anything but a field read: a call argument, another
+    binding, a container, a return value, `globalThis`) opens it for the whole
+    cell, and an open object reads a missing field as JavaScript does. A shape
+    a host schema declares closed (`additionalProperties: false`) is guarded
+    the same way.
 
 ## Consequences
 

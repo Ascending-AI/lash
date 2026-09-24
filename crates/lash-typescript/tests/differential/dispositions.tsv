@@ -46,14 +46,13 @@
 # binding is reassigned refuses rather than reading the stale copy (register
 # entry 5, the read path).
 "(() => { let x = 1; const f = () => x; x = 2; return f(); })()"	reject	TS_MUTABLE_CAPTURE_UNSUPPORTED
-# The linker infers an object literal's type and refuses a read or write of
-# a field the type lacks, as TypeScript's checker does. These rows still run
-# Node-exact through the VM (a value whose type is not a literal's — parsed
-# JSON, a tool result — reaches the same paths), and a cell refuses them at
-# link by name.
+# The closed-shape field guard (FIG-3626, ADR 0062 register entry 22): a read
+# or write of a field a statically closed object literal lacks is refused at
+# link, as TypeScript's checker refuses it. These rows still run Node-exact
+# through the VM (an open object reaches the same paths), and a cell refuses
+# them at link by name. A literal that a spread, a computed key, a
+# computed-key write or an escape opens reads as JavaScript does: those rows
+# are ordinary `accept` rows.
 "({a:1}).b"	accept-unlinked	TS_LINK_ERROR
 "({a:1}).missing"	accept-unlinked	TS_LINK_ERROR
-"(() => { const k='x'; const n=2; const o={n,[k]:1,f(){return this;}}; return `${o.n}|${o.x}`; })()"	accept-unlinked	TS_LINK_ERROR
-"(() => { const a={x:1}; const b=Object.assign(a,{y:2},{x:3}); return `${a.x}|${a.y}|${a===b}`; })()"	accept-unlinked	TS_LINK_ERROR
-"(() => { try { const a={}; a.self=a; JSON.stringify(a); } catch(e) { return `${e.name}: ${e.message}`; } })()"	accept-unlinked	TS_LINK_ERROR
-"(() => { const o={}; o['\\0lash.regexp.match']=true; o.length=1e100; return `${Array.isArray(o)}|${Object.keys(o).includes('\\0lash.regexp.match')}`; })()"	accept-unlinked	TS_LINK_ERROR
+"(() => { const o = { a: 1, b: 2 }; return `${o.c}`; })()"	accept-unlinked	TS_LINK_ERROR

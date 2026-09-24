@@ -154,13 +154,15 @@ fn update_type_path(
     };
     match (ty, step) {
         (TypeExpr::Object(mut fields), AssignPathStep::Field(field)) => {
-            let Some(existing) = fields.iter_mut().find(|candidate| candidate.name == *field)
+            let Some(position) = fields.iter().position(|candidate| candidate.name == *field)
             else {
                 return Err(LinkError::UnknownObjectField {
                     field: field.to_string(),
+                    known: known_fields(&[TypeExpr::Object(fields)]),
                     span,
                 });
             };
+            let existing = &mut fields[position];
             existing.ty = update_type_path(existing.ty.clone(), rest, value_ty, span)?;
             Ok(TypeExpr::Object(fields))
         }
@@ -168,6 +170,7 @@ fn update_type_path(
             update_type_path(*item, rest, value_ty, span)?,
         ))),
         (TypeExpr::Union(items), AssignPathStep::Field(field)) => {
+            let known = known_fields(items.as_slice());
             let mut updated = false;
             let mut missing_error = None;
             let items = items
@@ -195,6 +198,7 @@ fn update_type_path(
                 Err(
                     missing_error.unwrap_or_else(|| LinkError::UnknownObjectField {
                         field: field.to_string(),
+                        known,
                         span,
                     }),
                 )
@@ -210,6 +214,32 @@ fn update_type_path(
         (TypeExpr::Dict, _) => Ok(TypeExpr::Dict),
         (other, _) => Ok(other),
     }
+}
+
+/// The field names the object shapes among `types` declare, in order and
+/// without repeats: what a missing-field refusal names as the object's own.
+fn known_fields(types: &[TypeExpr]) -> Vec<String> {
+    let mut known = Vec::new();
+    for ty in types {
+        match ty {
+            TypeExpr::Object(fields) => {
+                for field in fields {
+                    if !known.iter().any(|name| name == field.name.as_str()) {
+                        known.push(field.name.to_string());
+                    }
+                }
+            }
+            TypeExpr::Union(items) => {
+                for name in known_fields(items.as_slice()) {
+                    if !known.contains(&name) {
+                        known.push(name);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    known
 }
 
 fn type_has_field(ty: &TypeExpr, field: &str) -> bool {
@@ -296,6 +326,7 @@ pub(super) fn field_type(
             .map(|field| field.ty.clone())
             .ok_or_else(|| LinkError::UnknownObjectField {
                 field: field.to_string(),
+                known: known_fields(std::slice::from_ref(target)),
                 span,
             }),
         TypeExpr::Union(items) => {
@@ -311,6 +342,7 @@ pub(super) fn field_type(
             if fields.is_empty() {
                 Err(LinkError::UnknownObjectField {
                     field: field.to_string(),
+                    known: known_fields(items.as_slice()),
                     span,
                 })
             } else if missing {

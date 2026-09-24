@@ -57,9 +57,6 @@ pub(super) const OPEN_DEFECT_EXCLUSIONS: &[(&str, &str)] = &[
     // A `for...of` body that declares a binding of its iterable's name is
     // refused as touching the iterable. The body declares no such name.
     ("for-of-shadowed-iterable", "FIG-3625"),
-    // An object literal built by a spread is typed `{}`, so reading or
-    // writing its fields is refused. A spread copy is read whole.
-    ("spread-object-field-check", "FIG-3626"),
     // A spread argument to a builtin function or method is refused or
     // faults. Spread arguments go to the session's own functions.
     ("builtin-call-spread", "FIG-3627"),
@@ -821,7 +818,8 @@ impl Generator {
                 }
                 Ty::Match => format!("{} === null ? 'none' : {}[0]", binding.name, binding.name),
                 Ty::Obj(_) if self.prng.chance(30) => {
-                    // A spread copy, printed whole (`spread-object-field-check`).
+                    // A spread copy with a field the original lacks, printed
+                    // whole.
                     self.uses(OBJECT_SPREAD);
                     format!("{{ ...{}, z: 0 }}", binding.name)
                 }
@@ -1799,6 +1797,10 @@ impl Generator {
 
     fn object_with(&mut self, fields: &[(String, Ty)], depth: usize) -> String {
         let computed = self.prng.chance(10);
+        // Some objects are built by a spread of a literal holding their
+        // leading fields, so the fields of a spread-built object are read and
+        // written like any other's (FIG-3626).
+        let spread = !fields.is_empty() && self.prng.chance(15);
         let parts = fields
             .iter()
             .map(|(key, ty)| {
@@ -1815,6 +1817,19 @@ impl Generator {
         }
         if parts.is_empty() {
             return "{}".to_string();
+        }
+        if spread {
+            self.uses(OBJECT_SPREAD);
+            let split = self.prng.range(1, parts.len());
+            let (spread, rest) = parts.split_at(split);
+            let spread = format!("...{{ {} }}", spread.join(", "));
+            return format!(
+                "{{ {} }}",
+                std::iter::once(spread)
+                    .chain(rest.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
         format!("{{ {} }}", parts.join(", "))
     }
@@ -2215,8 +2230,8 @@ impl Generator {
                 let value = self.prng.pick(&json).clone();
                 self.uses(BUILT_INS);
                 if matches!(value.ty, Ty::Obj(_)) && self.prng.chance(40) {
-                    // A spread copy, read whole: a field of a spread-built
-                    // object is not read (`spread-object-field-check`).
+                    // A spread copy with a field the original lacks,
+                    // stringified whole.
                     self.uses(OBJECT_SPREAD);
                     let extra = self.expr(&Ty::Num, next);
                     return format!("JSON.stringify({{ ...{}, z: {extra} }})", value.name);

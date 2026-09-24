@@ -298,6 +298,7 @@ impl<'module> Linker<'module> {
     ) -> Result<(Expr, Binding), LinkError> {
         self.reject_function_name_binding(name.as_str(), scope.span)?;
         Ok(if let Some(binding) = scope.get(name) {
+            let binding = self.open_binding(name.as_str(), binding);
             (Expr::Variable(name.clone()), binding)
         } else if let Some(process_ty) = self.process_types.get(name.as_str()) {
             (
@@ -537,6 +538,7 @@ impl<'module> Linker<'module> {
             scope.bind(target.root.as_str(), binding.clone());
         } else {
             let value_ty = binding_type(&binding);
+            self.open_scope_binding(&target.root, scope);
             scope.update_path(&lowered_target, &value_ty)?;
         }
         Ok((
