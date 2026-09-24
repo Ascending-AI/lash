@@ -36,7 +36,7 @@ rows and does not change the judged-row arithmetic.
 
 ## Stack ownership
 
-The row needs three things and Phase 0 creates all three: an isolated Restate 1.7.0 container,
+The row needs three things and Phase 0 creates all three: an isolated Restate 1.7.12 container,
 a fresh agent-service in Restate durability mode, and that host's endpoint registered with
 that container. There is no prebooted stack to inherit and no external owner to ask; the
 recipe below is the whole lifecycle, and Phase 4 is the other half of it.
@@ -84,7 +84,7 @@ docker run -d --name "$container" --network host \
   -e RESTATE_ADMIN__BIND_PORT="$admin_port" \
   -e RESTATE_INGRESS__BIND_PORT="$ingress_port" \
   -e RESTATE_BIND_PORT="$node_port" \
-  restatedev/restate:1.7.0 | tee "$run_root/container-id.txt"
+  restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b | tee "$run_root/container-id.txt"
 ```
 
 Poll the admin and ingress ports with a 90-second deadline; on failure save only

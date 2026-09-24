@@ -75,15 +75,15 @@ REGISTRY = ROOT / "scripts" / "restate-suites.toml"
 # The pinned server. The version matches the `restatedev/restate` image the
 # compose-based harnesses use; bump them together.
 # ---------------------------------------------------------------------------
-RESTATE_VERSION = "1.7.0"
+RESTATE_VERSION = "1.7.12"
 RESTATE_ARCHIVES = {
     "x86_64": (
         "restate-server-x86_64-unknown-linux-musl",
-        "323eff8d4f98658a009dba4c94343e37145c5f043f14ee2ff957be06c6535749",
+        "6e0fe06b730a64c3690c8611800cb01ddd09812b8de603566c01b7b63f5f6868",
     ),
     "aarch64": (
         "restate-server-aarch64-unknown-linux-musl",
-        "3135f1252e54d743d8cea932f38e31463248af5f1ed63b8d7bbd73fb30ed65ff",
+        "b6cb7c107f9e15635fd9840c78028201382e4f11b5a5de1610dee2c343d821e5",
     ),
 }
 RELEASE_URL = "https://github.com/restatedev/restate/releases/download/v{version}/{name}.tar.xz"

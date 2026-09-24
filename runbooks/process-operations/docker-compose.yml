@@ -36,7 +36,7 @@ services:
       - "127.0.0.1:${LASH_PROCESS_OPERATIONS_S3_PORT:?run via the e2e script}:3900"
 
   restate:
-    image: restatedev/restate:1.7.0
+    image: restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
     labels: *gate-labels
     environment:
       RESTATE_ADMIN__BIND_PORT: "9070"

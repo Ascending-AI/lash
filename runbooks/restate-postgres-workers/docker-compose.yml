@@ -49,7 +49,7 @@ services:
 
   restate:
     labels: *gate-labels
-    image: restatedev/restate:1.7.0
+    image: restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
     environment:
       RESTATE_ADMIN__BIND_PORT: "9070"
       RESTATE_INGRESS__BIND_PORT: "8080"

@@ -27,7 +27,7 @@ trap cleanup EXIT
 
 bash scripts/docker-pull-with-retry.sh postgres:16-alpine
 bash scripts/docker-pull-with-retry.sh "$LASH_S3_IMAGE"
-bash scripts/docker-pull-with-retry.sh restatedev/restate:1.7.0
+bash scripts/docker-pull-with-retry.sh restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
 
 docker run -d --name "$postgres_container" \
   --label "$LASH_GATE_LABEL" \
@@ -46,7 +46,7 @@ docker run -d --name "$restate_container" \
   -e RESTATE_ADMIN__BIND_PORT="$restate_admin_port" \
   -e RESTATE_INGRESS__BIND_PORT="$restate_ingress_port" \
   -e RESTATE_BIND_PORT="$restate_node_port" \
-  restatedev/restate:1.7.0 >/dev/null
+  restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b >/dev/null
 
 deadline=$((SECONDS + 60))
 until docker exec "$postgres_container" pg_isready -U lash -d lash >/dev/null 2>&1; do

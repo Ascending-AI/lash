@@ -98,7 +98,7 @@ For the app run, start Restate on the host network, run the feature-gated binary
 then register the endpoint:
 
 ```bash
-docker run --rm --network host restatedev/restate:1.7.0
+docker run --rm --network host restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
 OPENROUTER_API_KEY=... \
 AGENT_SERVICE_DURABILITY=restate \
 AGENT_SERVICE_RESTATE_ADDR=127.0.0.1:9080 \
@@ -124,7 +124,7 @@ outbox/message persistence, and removes the container on exit:
 just agent-service-restate-e2e
 ```
 
-The recipe starts `restatedev/restate:1.7.0` with host networking on admin
+The recipe starts `restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b` with host networking on admin
 `19070`, ingress `18080`, and node `15122`. Override
 `AGENT_SERVICE_RESTATE_IMAGE`, `AGENT_SERVICE_RESTATE_CONTAINER`,
 `RESTATE_ADMIN_PORT`, `RESTATE_INGRESS_PORT`, `RESTATE_NODE_PORT`,
