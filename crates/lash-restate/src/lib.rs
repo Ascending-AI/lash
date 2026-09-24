@@ -101,8 +101,8 @@ pub use bindings::{
     bound_service_names,
 };
 pub use controller::{
-    PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, RestateEffectControllerOptions, RestateEffectError,
-    RestateRuntimeEffectController,
+    EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
+    RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
 };
 pub use durable_wait::{
     DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION, LashDurableWaitIndex,

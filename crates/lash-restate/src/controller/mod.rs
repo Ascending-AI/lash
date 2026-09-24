@@ -8,6 +8,7 @@
 
 use lash_sansio::SessionId;
 pub(crate) mod context;
+pub(crate) mod effect_journal;
 mod group_commit;
 mod group_read;
 pub(crate) mod journal_budget;
@@ -35,7 +36,6 @@ use lash_core::{
 };
 use restate_sdk::context::RunRetryPolicy;
 use restate_sdk::errors::TerminalError;
-use serde::Serialize;
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitResolveRequest,
@@ -180,11 +180,8 @@ impl fmt::Debug for RestateEffectControllerOptions {
             .finish()
     }
 }
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub(crate) struct RecordedRuntimeEffect {
-    pub(crate) envelope: Arc<CanonicalRuntimeEffectEnvelope>,
-    pub(crate) outcome: Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
-}
+pub use effect_journal::EFFECT_JOURNAL_VERSION;
+pub(crate) use effect_journal::RecordedRuntimeEffect;
 
 /// Error raised while bridging a Lash effect to Restate.
 #[derive(Debug, thiserror::Error)]
@@ -195,6 +192,21 @@ pub enum RestateEffectError {
         effect: String,
         terminal: TerminalError,
     },
+    /// The journal slot holds an entry this build refuses to replay, such as
+    /// one another effect-journal generation wrote.
+    #[error(transparent)]
+    Refused(RuntimeEffectControllerError),
+}
+
+impl From<RestateEffectError> for RuntimeEffectControllerError {
+    fn from(error: RestateEffectError) -> Self {
+        match error {
+            RestateEffectError::Terminal { .. } => {
+                Self::new(RuntimeErrorCode::RestateEffectController, error.to_string())
+            }
+            RestateEffectError::Refused(refusal) => refusal,
+        }
+    }
 }
 
 async fn resolve_restate_await_event<'ctx, C>(
@@ -1336,10 +1348,7 @@ where
                                 status: lash_trace::TraceJournaledEffectStatus::Failed,
                             }
                         });
-                        return Err(RuntimeEffectControllerError::new(
-                            RuntimeErrorCode::RestateEffectController,
-                            error.to_string(),
-                        ));
+                        return Err(error.into());
                     }
                 };
                 let outcome = validate_recorded_effect_envelope(

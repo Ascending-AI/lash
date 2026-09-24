@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::controller::context::guard_restate_context_future;
-use crate::controller::journal_budget::JournaledEffectRecord;
+use crate::controller::effect_journal::JournaledEffectRecord;
 use crate::controller::{
     RecordedRuntimeEffect, RestateEffectExecution, restate_await_event_turn_cancel_wait_request,
     restate_effect_execution, restate_effect_name, restate_timer_turn_cancel_wait_request,
@@ -1207,6 +1207,13 @@ trait Fig793LlmGateRedrive {
     async fn run(input: Json<Fig793LlmGateRedriveInput>) -> HandlerResult<Json<bool>>;
 }
 
+/// A recorded effect as its `ctx.run` journal entry holds it: stamped with
+/// this build's effect-journal generation.
+fn journal_entry_value(recorded: RecordedRuntimeEffect) -> serde_json::Value {
+    serde_json::to_value(JournaledEffectRecord::Recorded(recorded))
+        .expect("encode a recorded effect's journal entry")
+}
+
 fn fig793_llm_envelope() -> RuntimeEffectEnvelope {
     RuntimeEffectEnvelope::new(
         runtime_invocation(RuntimeEffectKind::LlmCall, "fig793-llm"),
@@ -1463,6 +1470,8 @@ trait Fig1142ReplayDivergence {
 
 struct Fig1142ReplayDivergenceImpl {
     model_version: Arc<AtomicUsize>,
+    /// How many times the model call actually ran.
+    executions: Arc<AtomicUsize>,
 }
 
 fn fig1142_llm_envelope(model_version: usize) -> RuntimeEffectEnvelope {
@@ -1493,7 +1502,10 @@ impl Fig1142ReplayDivergence for Fig1142ReplayDivergenceImpl {
         RestateRuntimeEffectController::new_for_test(ctx)
             .execute_effect(
                 fig1142_llm_envelope(model_version),
-                RuntimeEffectLocalExecutor::testing(|_| async { Ok(fig793_llm_outcome()) }),
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    self.executions.fetch_add(1, Ordering::SeqCst);
+                    Ok(fig793_llm_outcome())
+                }),
             )
             .await
             .map_err(|error| -> HandlerError {
