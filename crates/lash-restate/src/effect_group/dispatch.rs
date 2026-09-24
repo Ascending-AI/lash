@@ -501,6 +501,7 @@ impl EffectGroupDispatch {
                     EffectGroupChildRunOutcome::Completed { outcome }
                 }
             };
+            refuse_unrecorded_abort(&request, &outcome)?;
             return record_child_settlement(controller.context(), &request, outcome).await;
         }
 
@@ -547,6 +548,7 @@ impl EffectGroupDispatch {
                     outcome = &mut wait => EffectGroupChildRunOutcome::Completed { outcome },
                 }
             };
+            refuse_unrecorded_abort(&request, &outcome)?;
             // A cancelled wait child does not release its own promise: the
             // index handler that decided the cancel, the close or the
             // retirement, released it before it resolved this cancel wait
@@ -575,6 +577,19 @@ impl EffectGroupDispatch {
                         EffectGroupChildRunOutcome::Completed { outcome }
                     }
                 };
+                if let EffectGroupChildRunOutcome::Completed {
+                    outcome: Err(error),
+                } = &outcome
+                    && is_engine_retried_fault(error)
+                {
+                    // Failing the run step is what keeps the fault out of
+                    // its journal: the step's retry policy runs it again.
+                    return Err(std::io::Error::other(format!(
+                        "effect group {group_key} child {position} aborted with a live fault, \
+                         which is never its recorded outcome; the step retries: {error}"
+                    ))
+                    .into());
+                }
                 Ok(Json(outcome))
             })
             .name(format!(
@@ -782,6 +797,43 @@ fn attach_expired_error(request: &EffectGroupChildRequest) -> RuntimeEffectContr
             request.group_key, request.position
         ),
     )
+}
+
+/// Whether the engine retries a child that failed with `error` rather than
+/// recording it: a live fault only (FIG-3575).
+///
+/// A live fault is a fact about this attempt, which a retry under a healthy
+/// substrate repairs. A park is not: every run by this build refuses the same
+/// replay again (FIG-3586), so an engine retry would spin forever. A parked
+/// child records its refusal as its settlement, which hands the park to the
+/// waiting turn, and the turn parks.
+fn is_engine_retried_fault(error: &RuntimeEffectControllerError) -> bool {
+    error.turn_failure_cause() == lash_core::TurnFailureCause::LiveFault
+}
+
+/// A child whose run ended in a live fault fails this invocation with a
+/// retryable error instead of recording a settlement.
+///
+/// The fault is a fact about this attempt, never the child's outcome: a
+/// recorded `Failed` would replay it on every read of the group, so the turn
+/// could only abort again. Failing retryably leaves the index untouched and
+/// hands the child to the engine, which re-runs the invocation — replaying
+/// every step it already journaled under the same keys — until it settles.
+fn refuse_unrecorded_abort(
+    request: &EffectGroupChildRequest,
+    outcome: &EffectGroupChildRunOutcome,
+) -> Result<(), restate_sdk::errors::HandlerError> {
+    match outcome {
+        EffectGroupChildRunOutcome::Completed {
+            outcome: Err(error),
+        } if is_engine_retried_fault(error) => Err(std::io::Error::other(format!(
+            "effect group {} child {} aborted with a live fault, which is never its \
+             recorded outcome; the engine retries the child: {error}",
+            request.group_key, request.position
+        ))
+        .into()),
+        _ => Ok(()),
+    }
 }
 
 /// Records one child's terminal in the index, writing its payload first when

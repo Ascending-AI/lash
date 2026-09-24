@@ -632,25 +632,61 @@ pub async fn publish_process_execution_env(
     Ok(env_ref)
 }
 
+/// Why a recorded process execution environment did not load.
+///
+/// The halves are distinct because they classify differently (FIG-3575). The
+/// store failing to answer — a pool that timed out, a lost connection — is a
+/// fact about this attempt, and a retry under a healthy store reads the
+/// environment. Every other variant is a fact about what the store durably
+/// holds under the reference, which every retry by this build meets again.
+#[derive(Debug, thiserror::Error)]
+pub enum ProcessExecutionEnvLoadError {
+    /// The store did not answer the read; its own error says why.
+    #[error(transparent)]
+    Store(crate::PluginError),
+    /// Nothing is stored under the reference.
+    #[error("missing process execution env `{0}`")]
+    Missing(ProcessExecutionEnvRef),
+    /// The stored bytes are not the ones the reference names under this
+    /// build's reference family.
+    #[error(
+        "unsupported or mismatched process execution env reference `{0}`; recreate the environment"
+    )]
+    Mismatched(ProcessExecutionEnvRef),
+    /// The stored bytes do not decode as this build's environment.
+    #[error("failed to decode process execution env `{env_ref}`: {message}")]
+    Undecodable {
+        env_ref: ProcessExecutionEnvRef,
+        message: String,
+    },
+}
+
+impl From<ProcessExecutionEnvLoadError> for crate::PluginError {
+    fn from(error: ProcessExecutionEnvLoadError) -> Self {
+        match error {
+            ProcessExecutionEnvLoadError::Store(error) => error,
+            unresolved => Self::Session(unresolved.to_string()),
+        }
+    }
+}
+
 pub async fn load_process_execution_env(
     env_store: &dyn ProcessExecutionEnvStore,
     env_ref: &ProcessExecutionEnvRef,
-) -> Result<ProcessExecutionEnvSpec, crate::PluginError> {
+) -> Result<ProcessExecutionEnvSpec, ProcessExecutionEnvLoadError> {
     let bytes = env_store
         .get_process_execution_env(env_ref)
-        .await?
-        .ok_or_else(|| {
-            crate::PluginError::Session(format!("missing process execution env `{env_ref}`"))
-        })?;
+        .await
+        .map_err(ProcessExecutionEnvLoadError::Store)?
+        .ok_or_else(|| ProcessExecutionEnvLoadError::Missing(env_ref.clone()))?;
     if process_execution_env_ref_for_bytes(&bytes) != *env_ref {
-        return Err(crate::PluginError::Session(format!(
-            "unsupported or mismatched process execution env reference `{env_ref}`; recreate the environment"
-        )));
+        return Err(ProcessExecutionEnvLoadError::Mismatched(env_ref.clone()));
     }
     ProcessExecutionEnvSpec::from_store_bytes(&bytes).map_err(|err| {
-        crate::PluginError::Session(format!(
-            "failed to decode process execution env `{env_ref}`: {err}"
-        ))
+        ProcessExecutionEnvLoadError::Undecodable {
+            env_ref: env_ref.clone(),
+            message: err.to_string(),
+        }
     })
 }
 

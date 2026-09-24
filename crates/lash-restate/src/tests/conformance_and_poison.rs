@@ -464,6 +464,16 @@ lash_conformance::tool_child_invocation_tests!(
     }
 );
 
+lash_conformance::tool_child_live_fault_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let fixture = harness.tool_child_law_fixture();
+        (harness, "restate", fixture)
+    }
+);
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
 async fn live_restate_effect_group_design_witnesses() {

@@ -1011,3 +1011,131 @@ async fn a_nested_retry_sleep_observes_no_host_turn_gate() {
         "the nested retry sleep must not attach the host's turn-cancel gate"
     );
 }
+
+/// A process-execution-env store that fails every read with `error`.
+struct FailingEnvStore(fn() -> crate::PluginError);
+
+#[async_trait::async_trait]
+impl crate::ProcessExecutionEnvStore for FailingEnvStore {
+    async fn publish_process_execution_env(
+        &self,
+        _owner: &crate::ArtifactOwner,
+        _env_ref: &ProcessExecutionEnvRef,
+        _bytes: &[u8],
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    async fn transfer_process_execution_env(
+        &self,
+        _from: &crate::ArtifactOwner,
+        _to: &crate::ArtifactOwner,
+        _env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    async fn release_process_execution_env(
+        &self,
+        _owner: &crate::ArtifactOwner,
+        _env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    async fn retire_process_execution_env_owner(
+        &self,
+        _owner: &crate::ArtifactOwner,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    async fn get_process_execution_env(
+        &self,
+        _env_ref: &ProcessExecutionEnvRef,
+    ) -> Result<Option<Vec<u8>>, crate::PluginError> {
+        Err((self.0)())
+    }
+}
+
+/// How a child whose recorded environment does not load settles, per cause
+/// (FIG-3575): a store that did not answer is the attempt's live fault, and
+/// an environment the store holds but this build cannot use is the request's
+/// outcome.
+#[tokio::test]
+async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
+    let request = request();
+    async fn settle(
+        request: &ToolChildRequest,
+        store: &dyn crate::ProcessExecutionEnvStore,
+    ) -> RuntimeEffectControllerError {
+        let error = crate::runtime::load_process_execution_env(store, &request.execution_env)
+            .await
+            .expect_err("the environment does not load");
+        unresolved_execution_env(request, error)
+    }
+
+    // Store I/O: an opaque session-seam error is a live fault.
+    let timed_out = settle(
+        &request,
+        &FailingEnvStore(|| {
+            crate::PluginError::Session(
+                "pool timed out while waiting for an open connection".into(),
+            )
+        }),
+    )
+    .await;
+    assert_eq!(
+        timed_out.turn_failure_cause(),
+        crate::TurnFailureCause::LiveFault,
+        "a store that did not answer is this attempt's fault: {timed_out}"
+    );
+    assert!(timed_out.message.contains("pool timed out"));
+
+    // A carried code keeps its own cause.
+    let parked = settle(
+        &request,
+        &FailingEnvStore(|| {
+            crate::PluginError::RuntimeEffectController(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::LashlangCellReplayDivergence,
+                "diverged",
+            ))
+        }),
+    )
+    .await;
+    assert_eq!(
+        parked.code,
+        crate::RuntimeErrorCode::LashlangCellReplayDivergence
+    );
+    assert_eq!(parked.turn_failure_cause(), crate::TurnFailureCause::Parked);
+
+    // A refusal the store answers with is the request's outcome.
+    let invalid = settle(
+        &request,
+        &FailingEnvStore(|| {
+            crate::PluginError::Invoke("invalid process execution environment reference".into())
+        }),
+    )
+    .await;
+    assert_eq!(
+        invalid.code,
+        crate::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion
+    );
+    assert_eq!(
+        invalid.turn_failure_cause(),
+        crate::TurnFailureCause::Outcome
+    );
+
+    // Nothing stored under the reference: the request's outcome.
+    let empty = crate::InMemoryProcessExecutionEnvStore::new();
+    let missing = settle(&request, &empty).await;
+    assert_eq!(
+        missing.code,
+        crate::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion
+    );
+    assert_eq!(
+        missing.turn_failure_cause(),
+        crate::TurnFailureCause::Outcome
+    );
+    assert!(missing.message.contains("missing process execution env"));
+}
