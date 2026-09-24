@@ -1782,3 +1782,54 @@ fn taking_the_runtime_leaves_the_host_view_as_a_plain_state() {
         "a second take hands out a fresh heap, not the live one"
     );
 }
+
+/// Rebinding a reload's projection placeholders writes inside the objects that
+/// hold them: two bindings that shared an object before still share it, and
+/// both see the live projection (FIG-3628).
+#[test]
+fn rebinding_projections_keeps_every_binding_on_the_same_object() {
+    let placeholder = ProjectedValue::unavailable_after_restore_with_projection_ref(
+        "report",
+        "object",
+        Some(serde_json::json!({"kind": "memory", "key": "k"})),
+    );
+    let mut heap = Heap::default();
+    let mut holder = Record::new();
+    holder.insert("doc".to_string(), Value::Projected(placeholder));
+    holder.insert("n".to_string(), Value::Number(1.0));
+    let holder = heap.allocate_record(holder).expect("holder");
+    let mut roots = Record::new();
+    roots.insert("alias".to_string(), holder.clone());
+    roots.insert("holder".to_string(), holder.clone());
+    let mut state = State::new();
+    state
+        .install_runtime(roots, heap)
+        .expect("install the shared holder");
+
+    let found = state.unavailable_projections();
+    assert_eq!(
+        found
+            .iter()
+            .map(|(name, projected)| (name.as_str(), projected.name()))
+            .collect::<Vec<_>>(),
+        [("alias", "report"), ("holder", "report")],
+        "both bindings depend on the one placeholder"
+    );
+
+    let live = ProjectedValue::scalar("report", Value::String("live".into()));
+    state
+        .rebind_projections(|placeholder| (placeholder.name() == "report").then(|| live.clone()))
+        .expect("rebind in place");
+    let roots = heap_backed_roots(&state);
+    assert_eq!(roots["alias"], holder, "`alias` still names the holder");
+    assert_eq!(roots["holder"], holder, "`holder` still names the holder");
+    assert!(state.unavailable_projections().is_empty());
+    let Some(Value::Record(view)) = state.globals().get("holder") else {
+        panic!("the holder is in the host view")
+    };
+    assert_eq!(
+        view["doc"],
+        Value::Projected(live),
+        "the view is re-derived from the rebound object"
+    );
+}

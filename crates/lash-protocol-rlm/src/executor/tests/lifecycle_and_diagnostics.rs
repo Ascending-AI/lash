@@ -5,7 +5,6 @@ enum HostSetupFailureSite {
     DeferredResolution,
     HostEnvironment,
     ArtifactStore,
-    RehydrateProjectedGlobals,
     ResolveProjectedBindings,
     CancelledSetup,
 }
@@ -161,50 +160,6 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
                 lashlang::LashlangHostCatalog::new(),
             );
         }
-        HostSetupFailureSite::RehydrateProjectedGlobals => {
-            request.code = "finish(restored.length);".to_string();
-            let registry = Arc::new(ProjectionRegistry::new());
-            let descriptor = Arc::new(SnapshotProjectedToolText::default());
-            let reference = registry.register_memory(descriptor.clone());
-            state
-                .rlm
-                .insert_global(
-                    "restored",
-                    FlowValue::List(
-                        (0..256)
-                            .map(|index| {
-                                FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
-                                    format!("restored[{index}]"),
-                                    descriptor.clone(),
-                                    serde_json::json!(reference),
-                                ))
-                            })
-                            .collect::<Vec<_>>()
-                            .into(),
-                    ),
-                )
-                .expect("insert projected values before heap activation");
-            let first = execute_code_with_channel_and_bounds(
-                &mut state,
-                context.clone(),
-                request.clone(),
-                artifact_store.clone(),
-                surface.clone(),
-                None,
-                RlmProjectedBindings::default(),
-                registry.clone(),
-                RlmLashlangExecutionTraceConfig::default(),
-                lashlang::ExecutionBounds::new(
-                    lashlang::ExecutionBound::Unbounded,
-                    lashlang::ExecutionBound::Unbounded,
-                    lashlang::ExecutionBound::logical_bytes(40 * 1024),
-                ),
-                crate::plugin::RlmChannel::Cell,
-            )
-            .await;
-            assert_eq!(first.error, None, "activate a bounded heap");
-            projection_resolver = registry;
-        }
         HostSetupFailureSite::ResolveProjectedBindings => {
             projected_bindings = RlmProjectedBindings::new()
                 .bind_lazy(
@@ -239,11 +194,16 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
 #[test]
 pub(super) fn every_host_setup_failure_is_classified_as_host() {
     block_on(async {
-        // The seventh `Host` classification in `executor/mod.rs` is the
-        // `LinkedProgramCacheError` catch-all. It intentionally has no row:
-        // the cache currently constructs only `Parse` and `Link`, which are
+        // The `LinkedProgramCacheError` catch-all among the `Host`
+        // classifications in `executor/mod.rs` intentionally has no row: the
+        // cache currently constructs only `Parse` and `Link`, which are
         // classified by the preceding arms, so no host-classified variant can
-        // be injected through its public API.
+        // be injected through its public API. Projection rehydration has none
+        // either: it rebinds placeholders in place and allocates nothing
+        // (FIG-3628), so the memory bound it used to be able to cross while
+        // re-inserting a copy is gone, and its only remaining failure —
+        // re-deriving a host view the install path already derived — has no
+        // input that reaches it.
         let cases = [
             (
                 HostSetupFailureSite::DeferredResolution,
@@ -256,10 +216,6 @@ pub(super) fn every_host_setup_failure_is_classified_as_host() {
             (
                 HostSetupFailureSite::ArtifactStore,
                 "injected artifact store failure",
-            ),
-            (
-                HostSetupFailureSite::RehydrateProjectedGlobals,
-                "logical memory limit",
             ),
             (
                 HostSetupFailureSite::ResolveProjectedBindings,

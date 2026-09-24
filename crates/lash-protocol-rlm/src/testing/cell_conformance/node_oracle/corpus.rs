@@ -7,6 +7,8 @@
 //! states the lash answer, which must differ from Node's (the ratchet) and
 //! ends its session.
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 use super::super::harness::{HarnessMode, Session};
@@ -24,6 +26,10 @@ struct Corpus {
 #[derive(Deserialize)]
 struct SessionCase {
     id: String,
+    /// The host's read-only projected bindings: plain globals of the Node
+    /// realm, lazy projections on the lash side.
+    #[serde(default)]
+    host: BTreeMap<String, serde_json::Value>,
     probe: Vec<String>,
     deviations: Vec<String>,
     cells: Vec<CellCase>,
@@ -94,7 +100,7 @@ fn every_session_observes_what_node_observes() {
     let mut failures = Vec::new();
     for mode in HarnessMode::ALL {
         for case in &corpus.sessions {
-            let mut session = Session::open(*mode);
+            let mut session = Session::open_with_host(*mode, &case.host);
             for (index, cell) in case.cells.iter().enumerate() {
                 let context = format!("{mode:?} session `{}` cell {index}", case.id);
                 let lash = run_cells(&mut session, &case.probe, [cell.source.as_str()])

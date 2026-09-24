@@ -26,6 +26,9 @@ pub(crate) struct Corpus {
 #[derive(Deserialize)]
 pub(crate) struct Session {
     pub(crate) id: String,
+    /// The host's read-only bindings, global in every cell of the session.
+    #[serde(default)]
+    pub(crate) host: BTreeMap<String, serde_json::Value>,
     pub(crate) probe: Vec<String>,
     pub(crate) deviations: Vec<String>,
     pub(crate) cells: Vec<Cell>,
@@ -193,8 +196,13 @@ fn every_session_binder_is_probed() {
     let mut failures = Vec::new();
     for session in &corpus.sessions {
         let probed = session.probe.iter().cloned().collect::<BTreeSet<_>>();
+        let visible = probed
+            .iter()
+            .cloned()
+            .chain(session.host.keys().cloned())
+            .collect::<BTreeSet<_>>();
         for cell in &session.cells {
-            let Ok(program) = lash_typescript::parse_with_globals(&cell.source, &probed) else {
+            let Ok(program) = lash_typescript::parse_with_globals(&cell.source, &visible) else {
                 continue;
             };
             let unprobed = super::binders(&program)

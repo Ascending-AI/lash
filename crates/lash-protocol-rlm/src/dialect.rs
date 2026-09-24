@@ -202,7 +202,8 @@ impl DialectSession {
         self.state.patch_globals(patch, protected_names)
     }
 
-    /// The bound-variable prompt: the session's globals. A front end's private
+    /// The bound-variable prompt: the session's globals, including the ones
+    /// with no host view, by summary. A front end's private
     /// slots never reach them (the VM drops every private binding at the end
     /// of its cell), so every global is a binding the model wrote.
     pub(crate) fn prepare_bound_variables_prompt(
@@ -210,12 +211,18 @@ impl DialectSession {
         exclude: &BTreeSet<String>,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
         let globals = self.state.bound_variable_values(exclude);
+        let opaque = self.state.opaque_bound_variables(exclude);
         let cache = Arc::clone(&self.bound_variable_render_cache);
         Ok(BoundVariablesPromptRender::new(move || {
             let mut cache = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            render_bound_variables(&mut cache, &globals, DialectPromptVocabulary::default())
+            render_bound_variables(
+                &mut cache,
+                &globals,
+                &opaque,
+                DialectPromptVocabulary::default(),
+            )
         }))
     }
 }

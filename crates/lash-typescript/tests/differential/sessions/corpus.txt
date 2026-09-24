@@ -762,3 +762,16 @@ if (true) {
 }
 lash {"outcome":"rejected","diagnostic":"TS_LINK_ERROR","prints":[],"probes":{"label":"unbound"}}
 end
+
+session projected-value-shared-across-a-reload
+about an object holding a host projection, bound under two names, stays one object in later cells
+host report {"n":1,"title":"t"}
+probe holder alias
+cell
+const holder = { doc: report, n: 1 };
+const alias = holder;
+cell
+alias.n = 2;
+holder.n = holder.n + 10;
+console.log(holder.n, alias.n, holder === alias, holder.doc.title);
+end

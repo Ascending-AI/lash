@@ -87,8 +87,10 @@ const SETUP = `(() => {
   host.reach((value) => reach(value, new Set()));
 })();`;
 
-/// A fresh realm with the lash host surface installed.
-export function realm() {
+/// A fresh realm with the lash host surface installed, and `host`'s bindings:
+/// read-only globals the host supplies (a lazy projection on the lash side, a
+/// plain value here).
+export function realm(host = {}) {
   const state = { prints: [], finish: undefined, sentinel: undefined, reach: undefined };
   const context = vm.createContext({
     __lashOracleHost: {
@@ -107,6 +109,14 @@ export function realm() {
     },
   });
   new vm.Script(SETUP).runInContext(context);
+  for (const [name, value] of Object.entries(host)) {
+    Object.defineProperty(context, name, {
+      value: JSON.parse(JSON.stringify(value)),
+      writable: false,
+      configurable: false,
+      enumerable: false,
+    });
+  }
   return { context, state };
 }
 
@@ -168,8 +178,8 @@ function probe({ context, state }, name) {
 ///
 /// `cells` are `{ source, reject }`: a cell the dialect rejects statically
 /// (`reject` set) never enters the realm and is observed as `rejected`.
-export function observeSession(probeNames, cells) {
-  const engine = realm();
+export function observeSession(probeNames, cells, host = {}) {
+  const engine = realm(host);
   return cells.map((cell) => {
     const node = cell.reject ? { outcome: 'rejected', prints: [] } : runCell(engine, cell.source);
     node.probes = {};

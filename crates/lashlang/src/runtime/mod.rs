@@ -117,12 +117,12 @@ pub(crate) use json::*;
 pub(crate) use ops::*;
 pub use state::LASHLANG_SNAPSHOT_VERSION;
 pub use state::{
-    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
-    validate_canonical_messagepack_structure,
+    BINDING_SUMMARY_MAX_CHARS, DurableBaseline, DurableFragment, DurableParts, GlobalPatch,
+    GlobalPatchOutcome, Snapshot, SnapshotDecodeError, State,
 };
 pub use state::{
-    DurableBaseline, DurableFragment, DurableParts, GlobalPatch, GlobalPatchOutcome, Snapshot,
-    SnapshotDecodeError, State,
+    CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
+    validate_canonical_messagepack_structure,
 };
 pub use value::{
     ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY,

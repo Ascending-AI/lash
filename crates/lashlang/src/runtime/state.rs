@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use super::{
     CANONICAL_NAN_BITS, CompiledProgram, ContinuationError, DateObject, ErrorKind, ErrorObject,
-    Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots, Record,
-    RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject, UrlSearchParamsObject, Value,
-    record_with_capacity,
+    Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots,
+    ProjectedValue, Record, RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject,
+    UrlSearchParamsObject, Value, record_with_capacity,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,6 +15,8 @@ pub(crate) use wire::child_location;
 
 mod durable;
 pub use durable::{DurableBaseline, DurableFragment, DurableParts};
+
+mod projections;
 
 mod canonical_messagepack;
 pub use canonical_messagepack::{
@@ -32,6 +34,8 @@ pub use canonical_messagepack::{
 // refusal honest.
 pub const LASHLANG_SNAPSHOT_VERSION: u32 = 8;
 pub(crate) const MAX_SNAPSHOT_VALUE_DEPTH: usize = 64;
+/// The longest summary [`State::opaque_bindings`] renders, in characters.
+pub const BINDING_SUMMARY_MAX_CHARS: usize = super::heap::SUMMARY_MAX_CHARS;
 // The raw-wire guard is secondary to the explicit value-depth guard below. A
 // nested heap value advances through at most four MessagePack containers (the
 // entry, tagged object, value map, and items/fields container); the root, heap,

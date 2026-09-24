@@ -1122,6 +1122,7 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
         let rendered = crate::rlm_support::render_bound_variables(
             &mut cache,
             &globals,
+            &[],
             crate::dialect::DialectPromptVocabulary::default(),
         );
 
@@ -1177,6 +1178,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
         let s = crate::rlm_support::render_bound_variables(
             &mut cache,
             &globals,
+            &[],
             crate::dialect::DialectPromptVocabulary::default(),
         )
         .to_string();

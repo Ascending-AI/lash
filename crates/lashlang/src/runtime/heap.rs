@@ -7,7 +7,9 @@ mod id;
 mod javascript_exotics;
 mod object;
 mod partition;
+mod projections;
 mod reference_assignment;
+mod summary;
 mod url_objects;
 mod validation;
 
@@ -28,14 +30,16 @@ pub(crate) use javascript_exotics::{
     RegExpObject, SetObject, canonical_regexp_flags, regexp_source, regexp_string, same_value_zero,
 };
 pub(crate) use partition::DurablePartition;
+pub(crate) use summary::SUMMARY_MAX_CHARS;
 pub(crate) use url_objects::{
     UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,
 };
 pub(crate) use validation::{PersistedRoots, ensure_value_depth};
 
 use super::{
-    CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, Record, RuntimeError,
-    Value, add_values, coerce_string, record_with_capacity, resolve_existing_list_assignment_index,
+    CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, ProjectedValue, Record,
+    RuntimeError, Value, add_values, coerce_string, record_with_capacity,
+    resolve_existing_list_assignment_index,
 };
 
 /// Which byte-charge schedule a persisted heap's `live_logical_bytes` was

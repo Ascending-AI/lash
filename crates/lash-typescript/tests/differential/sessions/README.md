@@ -46,6 +46,7 @@ classic-Script meaning, so the corpus holds no await cell.
 ```text
 session <id>
 about <one line>
+host <name> <JSON>                  (optional, repeatable: a host binding)
 probe <every binder name the session's cells declare>
 deviation closure-boundary          (the one session-wide probe rule)
 cell
@@ -57,6 +58,11 @@ cell deviation <register slug>      (or: cell defect <open-defect slug>)
 lash {"outcome": ..., "prints": [...], "probes": {...}}
 end
 ```
+
+A `host` line gives the session a read-only binding its host supplies. Node
+sees a plain, non-writable global holding the JSON value; the lash side binds
+it as a lazy projection the host re-resolves after every restart, which is how
+a host projects data it owns (a document, a record) into a session.
 
 A deviation names an entry of the crate README's deviation register; a defect
 names its open-defect list. Either states the lash answer (`lash`, or

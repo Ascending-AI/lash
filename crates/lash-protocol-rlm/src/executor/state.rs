@@ -1043,6 +1043,20 @@ impl RlmExecutionState {
         self.rlm.binding_names()
     }
 
+    /// The bindings the "Bound Variables" section shows by summary: the ones
+    /// with no host view (ADR 0076), each with its bounded runtime summary,
+    /// under the same exclusions as [`Self::bound_variable_values`].
+    pub(crate) fn opaque_bound_variables(
+        &self,
+        exclude: &BTreeSet<String>,
+    ) -> Vec<(String, String)> {
+        self.rlm
+            .opaque_bindings()
+            .into_iter()
+            .filter(|(name, _)| name != "history" && !exclude.contains(name))
+            .collect()
+    }
+
     /// The live top-level variable namespace as JSON for the "Bound Variables"
     /// prompt section: the model's own scratch variables plus any seeded
     /// computed globals, which are the same kind of value and render the same

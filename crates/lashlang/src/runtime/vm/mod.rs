@@ -16,7 +16,7 @@ mod heap_plan;
 mod javascript;
 mod javascript_array;
 mod javascript_codec;
-mod javascript_date;
+pub(crate) mod javascript_date;
 mod javascript_json;
 mod javascript_operators;
 pub(crate) mod javascript_regexp;

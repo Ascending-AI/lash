@@ -102,6 +102,7 @@ fn rendered_bound_variables(
     crate::rlm_support::render_bound_variables(
         cache,
         &globals,
+        &[],
         crate::dialect::DialectPromptVocabulary::default(),
     )
 }
