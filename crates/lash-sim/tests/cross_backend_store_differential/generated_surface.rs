@@ -1968,6 +1968,14 @@ async fn generated_cross_backend_surface_differential_agrees() {
                     operation_results,
                     observations,
                 };
+                // Minimizing replays prefixes on every backend and can outrun
+                // the test timeout, so the divergence is on record before it
+                // starts.
+                eprintln!(
+                    "cross-backend generated case seed={seed} diverged at step={} \
+                     operation={:?}; minimizing the prefix",
+                    observed.step, observed.operation,
+                );
                 let minimal = Box::pin(minimize_diverging_prefix(
                     &storage,
                     &database_url,

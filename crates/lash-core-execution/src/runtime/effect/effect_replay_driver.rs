@@ -116,6 +116,7 @@ pub use super::group_journal::{
 };
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
+use journal_wait::Finalized;
 use lease_renewal::ClaimedExecution;
 
 /// Process-wide sequence making each driver's owner id distinct.
@@ -137,14 +138,16 @@ enum EffectReplayBackend {
     Postgres,
 }
 
-/// What a caller of the shared claim loop wants a live competing claim to mean.
+/// What a caller of the shared claim loop wants a live competing claim, or the
+/// §5 barrier after its own §4 commit, to mean.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BusyPolicy {
     /// What an effect's own caller wants: it needs this outcome, and the other executor is
     /// producing it.
     Queue,
     /// What the drain wants: it has a queue, and a child someone else owns right now is the
-    /// one it should move past rather than sleep against.
+    /// one it should move past rather than sleep against — including a lower-commit sibling
+    /// the barrier holds this child's discharge behind, which the drain itself owes.
     Yield,
 }
 
@@ -152,8 +155,10 @@ enum BusyPolicy {
 enum EffectRun {
     /// The effect reached a terminal — replayed, or executed and finalized.
     Terminal(RuntimeEffectOutcome),
-    /// Another executor holds a live claim, and the caller asked to be told
-    /// rather than made to wait. Nothing was written.
+    /// Another writer holds what the run needs next, and the caller asked to
+    /// be told rather than made to wait: either a live claim, and nothing was
+    /// written, or the §5 barrier after this run's §4 commit, and the child
+    /// stays `committed` without a rank until a later pass discharges it.
     Busy,
 }
 
@@ -1758,7 +1763,10 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     /// waiting on. Queueing there turns a pass into an unbounded sleep against
     /// a live renewer while the rest of the queue goes untouched.
     ///
-    /// `Ok(None)` means the claim was busy and nothing was written. Dropping
+    /// `Ok(None)` means the claim was busy and nothing was written, or the
+    /// child reached its §4 commit and the §5 barrier holds its discharge
+    /// behind a lower-commit sibling; either way the child stays queued for
+    /// the next pass. Dropping
     /// the execution on cancellation is safe for exactly the reason the drain
     /// exists: an abandoned claim leaves an `in_progress` row whose lease stops
     /// being renewed, which is the same state a crashed executor leaves and
@@ -1956,10 +1964,13 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                         ClaimedExecution::Finished(result) => result,
                         ClaimedExecution::Relinquished(err) => return Err(err),
                     };
-                    let finalize = self.finalize_effect(&claim, command_kind, &result).await;
+                    let finalize = self
+                        .finalize_effect(&claim, command_kind, &result, busy)
+                        .await;
                     return match (result, finalize) {
-                        (Ok(outcome), Ok(())) => Ok(EffectRun::Terminal(outcome)),
-                        (Err(err), Ok(())) => Err(err),
+                        (_, Ok(Finalized::HeldAtBarrier)) => Ok(EffectRun::Busy),
+                        (Ok(outcome), Ok(Finalized::Seated)) => Ok(EffectRun::Terminal(outcome)),
+                        (Err(err), Ok(Finalized::Seated)) => Err(err),
                         (_, Err(err)) => Err(err),
                     };
                 }
@@ -2123,7 +2134,8 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         claim: &ClaimedEffect,
         command_kind: crate::RuntimeEffectKind,
         outcome: &Result<RuntimeEffectOutcome, RuntimeEffectControllerError>,
-    ) -> Result<(), RuntimeEffectControllerError> {
+        busy: BusyPolicy,
+    ) -> Result<Finalized, RuntimeEffectControllerError> {
         let fence = &claim.fence;
         let vocabulary = self.vocabulary();
         let terminal = match outcome {
@@ -2158,7 +2170,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                     // drain re-executes it, rather than discharging a
                     // terminal the protected final never produced (§4, §14).
                     if outcome.is_err() {
-                        return Ok(());
+                        return Ok(Finalized::Seated);
                     }
                     return self
                         .discharge_committed_claim(
@@ -2166,6 +2178,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                             &fence.replay_key,
                             group_key,
                             Some(terminal),
+                            busy,
                         )
                         .await;
                 }
@@ -2176,7 +2189,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
             }
         }
         if derivation::release_derivation(self, claim, command_kind, outcome).await? {
-            return Ok(());
+            return Ok(Finalized::Seated);
         }
         #[cfg(feature = "testing")]
         if let Some(err) =
@@ -2196,13 +2209,14 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 // host died mid-drain is finished by the next drain pass,
                 // whose discharge wakes this one's parked wait.
                 let Some(group_key) = &claim.group_key else {
-                    return Ok(());
+                    return Ok(Finalized::Seated);
                 };
                 self.discharge_committed_claim(
                     &fence.scope_id,
                     &fence.replay_key,
                     group_key,
                     None,
+                    busy,
                 )
                 .await
             }
@@ -2241,13 +2255,22 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     /// Discharge one committed group child: the barrier wait, the rank write,
     /// and — for a boundary-committed row — the projected terminal its §4
     /// commit deliberately did not carry.
+    ///
+    /// Under [`BusyPolicy::Yield`] a `Blocked` answer returns
+    /// [`Finalized::HeldAtBarrier`] instead of parking. The drain is the
+    /// caller that lifts the barrier for a sibling whose opener is gone, so a
+    /// pass that parked here would wait on itself: the lower-commit sibling it
+    /// skipped as lease-live is never drained while the pass is stuck on this
+    /// child. The child keeps its §4 commit; the next pass discharges it once
+    /// the sibling ahead of it has drained.
     async fn discharge_committed_claim(
         &self,
         scope_id: &str,
         replay_key: &str,
         group_key: &str,
         terminal: Option<EffectTerminal>,
-    ) -> Result<(), RuntimeEffectControllerError> {
+        busy: BusyPolicy,
+    ) -> Result<Finalized, RuntimeEffectControllerError> {
         // Subscribed on the first `Blocked` and re-tried at once, so an
         // unblocked discharge never touches the notifier table; after that
         // each attempt listens from before its read and parks on the group,
@@ -2267,7 +2290,12 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
                 .await?
             {
                 EffectDischargeOutcome::Discharged { .. }
-                | EffectDischargeOutcome::AlreadyDischarged { .. } => return Ok(()),
+                | EffectDischargeOutcome::AlreadyDischarged { .. } => {
+                    return Ok(Finalized::Seated);
+                }
+                EffectDischargeOutcome::Blocked if busy == BusyPolicy::Yield => {
+                    return Ok(Finalized::HeldAtBarrier);
+                }
                 EffectDischargeOutcome::Blocked => match armed {
                     Some(armed) => {
                         armed.park(&*self.clock, None).await;

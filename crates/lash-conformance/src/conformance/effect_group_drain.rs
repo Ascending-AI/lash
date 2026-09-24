@@ -128,6 +128,7 @@ pub async fn store_effect_group_drain_conformance(make: DrainWorldFactory) {
     orphaned_losers_settle_exactly_once_across_a_restart(&make, &prefix).await;
     a_cancelled_pass_stops_at_the_child_it_was_running(&make, &prefix).await;
     a_child_another_drain_holds_is_reported_contested(&make, &prefix).await;
+    a_pass_never_parks_behind_a_sibling_at_the_commit_order_barrier(&make, &prefix).await;
     a_cancel_group_is_never_re_executed_by_the_drain(&make, &prefix).await;
     a_child_this_host_cannot_run_is_reported_not_invented(&make, &prefix).await;
     a_host_with_no_resolver_at_all_reports_the_queue_rather_than_hiding_it(&make, &prefix).await;
@@ -621,6 +622,171 @@ async fn a_child_another_drain_holds_is_reported_contested(make: &DrainWorldFact
         across_hosts,
         vec![child_replay_key(&key, 0), child_replay_key(&key, 1)],
         "two children, two executions, however the contest resolved"
+    );
+}
+
+/// A child the pass runs to its §4 commit is reported, not parked, when the §5
+/// barrier holds its discharge behind a sibling someone else owns.
+///
+/// The pass skips a committed sibling whose lease is live, then runs the next
+/// child to completion. That child's commit lands behind the skipped sibling's,
+/// so its rank waits for that sibling's drain. Parking there would make the
+/// pass wait on whoever holds the sibling. When the holder is a dead opener
+/// whose lease has not lapsed yet, nobody else drains the sibling, so the pass
+/// would wait on itself forever. The pass reports the child `Contested` and
+/// returns. The child keeps its commit, and a later pass seats its rank once
+/// the sibling ahead of it has drained.
+///
+/// The sibling's holder is built rather than raced: a crashed opener commits
+/// child 1 at the §4 boundary, and after the leases lapse, host B's pass takes
+/// child 1 and parks inside its execution. Host C's pass then finds child 1
+/// live-leased, runs child 0, and must return while B still holds child 1.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn a_pass_never_parks_behind_a_sibling_at_the_commit_order_barrier(
+    make: &DrainWorldFactory,
+    prefix: &str,
+) {
+    let key = group_key(prefix, "barrier");
+    let scope = scope(prefix, "barrier");
+    crashed_process(make, {
+        let key = key.clone();
+        let scope = scope.clone();
+        move |world| {
+            Box::pin(async move {
+                let scoped = world.host.scoped(admit(scope.clone())).expect("scope");
+                let entered = Arc::new(AtomicUsize::new(0));
+                let handle = open(
+                    &scoped,
+                    &key,
+                    2,
+                    RUN,
+                    vec![blocking(&entered), blocking(&entered)],
+                )
+                .await;
+                until(|| entered.load(Ordering::SeqCst) == 2).await;
+                let committed = scoped
+                    .controller()
+                    .commit_group_child_final(
+                        lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit {
+                            scope_id: scope
+                                .journal_identity()
+                                .expect("runtime-operation scopes form durable journal identities")
+                                .key()
+                                .to_string(),
+                            replay_key: child_replay_key(&key, 1),
+                            drain_input: format!("{key}:child:1:drain-input"),
+                        },
+                    )
+                    .await
+                    .expect("child 1 commits at the §4 boundary");
+                assert!(
+                    matches!(
+                        committed,
+                        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome::Committed {
+                            commit_seq: 1,
+                            ..
+                        }
+                    ),
+                    "child 1 takes the first commit position: {committed:?}"
+                );
+                close(&scoped, handle, RUN)
+                    .await
+                    .expect("the caller closes and releases its losers");
+            })
+        }
+    })
+    .await;
+    until_leases_lapse(make, &key).await;
+
+    // Host B takes child 1, the committed sibling, and holds it under a live
+    // lease. Its pass reads child 1 first because committed children queue in
+    // commit order.
+    let b_entered = Arc::new(AtomicUsize::new(0));
+    let b_release = CancellationToken::new();
+    let b_executors = RecordingExecutors::by_position(
+        vec![
+            ExecutorAnswer::Refuse,
+            ExecutorAnswer::Hold {
+                entered: Arc::clone(&b_entered),
+                release: b_release.clone(),
+            },
+        ],
+        ExecutorAnswer::Refuse,
+    );
+    let b = make(spec(LIVE_LEASE_MS, &b_executors)).await;
+    let b_pass = {
+        let drain = Arc::clone(&b.drain);
+        let key = key.clone();
+        crate::task::spawn(async move { drain.drain_group(&key, &CancellationToken::new()).await })
+    };
+    until(|| b_entered.load(Ordering::SeqCst) >= 1).await;
+
+    let c_executors = RecordingExecutors::settling();
+    let c = make(spec(LIVE_LEASE_MS, &c_executors)).await;
+    let report = tokio::time::timeout(AWAIT_BUDGET, pass(&c, &key))
+        .await
+        .expect(
+            "a pass whose child is held at the commit-order barrier returns instead of \
+             waiting for the sibling ahead of it to drain",
+        )
+        .expect("a held discharge is a reported outcome, not a failed pass");
+    assert!(
+        matches!(
+            outcome_of(&report, &child_replay_key(&key, 1)),
+            ChildDrainOutcome::LeaseLive { .. }
+        ),
+        "the sibling host B holds is left to it: {report:?}"
+    );
+    assert_eq!(
+        outcome_of(&report, &child_replay_key(&key, 0)),
+        ChildDrainOutcome::Contested,
+        "the child this pass ran is committed behind child 1 and holds no rank yet: \
+         {report:?}"
+    );
+    assert!(!report.is_complete());
+    assert_eq!(
+        c_executors.executions(),
+        vec![child_replay_key(&key, 0)],
+        "host C ran child 0 once and never reached for the live-leased sibling"
+    );
+
+    b_release.cancel();
+    let b_report = tokio::time::timeout(AWAIT_BUDGET, b_pass)
+        .await
+        .expect("host B's pass finishes once its child is released")
+        .expect("the pass task is not cancelled")
+        .expect("host B's pass reports");
+    assert_eq!(
+        outcome_of(&b_report, &child_replay_key(&key, 1)),
+        ChildDrainOutcome::Settled,
+        "the committed sibling drains on the host that held it: {b_report:?}"
+    );
+
+    // The held child's commit survived the pass that returned: the next pass
+    // discharges it rather than running it again.
+    let discharged = pass(&c, &key).await.expect("a discharging pass runs");
+    assert_eq!(
+        outcome_of(&discharged, &child_replay_key(&key, 0)),
+        ChildDrainOutcome::Decided,
+        "once the sibling ahead has drained, the held child takes its rank: {discharged:?}"
+    );
+    let settled = pass(&c, &key).await.expect("a final pass runs");
+    assert!(
+        settled.is_complete(),
+        "the group drained to completion: {settled:?}"
+    );
+    assert_eq!(
+        c_executors.executions(),
+        vec![child_replay_key(&key, 0)],
+        "the final pass seats child 0's rank without running it again"
+    );
+    assert_eq!(
+        b_executors.executions(),
+        vec![child_replay_key(&key, 1)],
+        "child 1 ran once, on host B"
     );
 }
 
