@@ -334,45 +334,8 @@ impl Lowerer {
         }))
     }
 
-    fn iterable_copy(value: LashExpr) -> LashExpr {
+    pub(super) fn iterable_copy(value: LashExpr) -> LashExpr {
         Self::stdlib_call("Lash.ArrayFromIterable", vec![value])
-    }
-
-    pub(super) fn lower_array_literal(
-        &mut self,
-        elements: &[ArrayElement],
-    ) -> Result<LashExpr, Diagnostic> {
-        if elements
-            .iter()
-            .all(|element| matches!(element, ArrayElement::Value(_)))
-        {
-            return Ok(LashExpr::List(
-                elements
-                    .iter()
-                    .map(|element| match element {
-                        ArrayElement::Value(value) => self.lower_expr(value),
-                        ArrayElement::Spread(_) => unreachable!(),
-                    })
-                    .collect::<Result<_, _>>()?,
-            ));
-        }
-        let result = self.temporary("array_spread");
-        let mut expressions = vec![Self::temp_assignment(&result, LashExpr::List(Vec::new()))];
-        for element in elements {
-            let next = match element {
-                ArrayElement::Value(value) => LashExpr::List(vec![self.lower_expr(value)?]),
-                ArrayElement::Spread(value) => {
-                    let value = self.lower_iterable_sink(value)?;
-                    Self::iterable_copy(value)
-                }
-            };
-            expressions.push(Self::temp_assignment(
-                &result,
-                Self::stdlib_call("concat", vec![Self::variable(&result), next]),
-            ));
-        }
-        expressions.push(Self::variable(&result));
-        Ok(LashExpr::Block(expressions))
     }
 
     pub(super) fn lower_for_each(
@@ -1167,9 +1130,13 @@ impl Lowerer {
                     args: vec![LashExpr::String(name.as_str().into())],
                 });
             }
+            // `key in receiver` asks HasProperty: the left operand evaluates
+            // first, a primitive receiver is a TypeError, and inherited
+            // built-in names (`valueOf` on `{}`) count as present — none of
+            // which `Object.hasOwn` models.
             return Ok(Self::stdlib_call(
-                "Object.hasOwn",
-                vec![self.lower_expr(right)?, self.lower_expr(left)?],
+                "Lash.HasProperty",
+                vec![self.lower_expr(left)?, self.lower_expr(right)?],
             ));
         }
         let left = self.lower_expr(left)?;

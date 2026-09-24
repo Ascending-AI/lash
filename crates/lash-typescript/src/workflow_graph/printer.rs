@@ -507,6 +507,7 @@ impl<'p> Printer<'p> {
             Expr::Bool(value) => Ok(value.to_string()),
             Expr::Number(value) => number_literal(*value),
             Expr::String(value) => Ok(string_literal(value.as_str())),
+            Expr::Variable(name) if name.as_str() == "this" => Ok("this".to_string()),
             Expr::Variable(name) => self.identifier("variable", name.as_str()),
             Expr::List(items) => {
                 let items = items

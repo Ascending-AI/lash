@@ -206,7 +206,6 @@ pub(crate) enum FunctionBody {
 
 #[derive(Clone, Debug)]
 pub(crate) enum Expr {
-    Undefined,
     Null,
     Bool(bool),
     Number(f64),
@@ -288,6 +287,9 @@ pub(crate) enum Expr {
 #[derive(Clone, Debug)]
 pub(crate) enum ArrayElement {
     Value(Expr),
+    /// An elision: the slot counts toward `length` but has no property, which
+    /// `indexOf`, `lastIndexOf` and `in` answer differently from `undefined`.
+    Hole,
     Spread(Expr),
 }
 
@@ -1168,7 +1170,7 @@ impl Adapter {
                     .iter()
                     .map(|element| {
                         let Some(element) = element else {
-                            return Ok(ArrayElement::Value(Expr::Undefined));
+                            return Ok(ArrayElement::Hole);
                         };
                         let value = self.convert_expr(&element.expr)?;
                         Ok(if element.spread.is_some() {

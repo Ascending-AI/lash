@@ -156,21 +156,31 @@ impl Lowerer {
                 condition: Box::new(stdlib("__jsonHasOwnToJSON", vec![current_value()])),
                 then_block: Box::new(assign(
                     &current,
-                    LashExpr::Call {
-                        function: Box::new(LashExpr::Field {
-                            target: Box::new(current_value()),
-                            field: "toJSON".into(),
-                        }),
-                        args: vec![variable(&key)],
+                    // ECMA calls `toJSON` with the value as `this`.
+                    LashExpr::BuiltinCall {
+                        name: "__typescript_call_this".into(),
+                        args: vec![
+                            LashExpr::Field {
+                                target: Box::new(current_value()),
+                                field: "toJSON".into(),
+                            },
+                            current_value(),
+                            LashExpr::List(vec![variable(&key)]),
+                        ],
                     },
                 )),
                 else_block: Box::new(LashExpr::Undefined),
             },
             assign(
                 &current,
-                LashExpr::Call {
-                    function: Box::new(variable(&replacer_name)),
-                    args: vec![variable(&key), current_value()],
+                // ECMA calls the replacer with the holder as `this`.
+                LashExpr::BuiltinCall {
+                    name: "__typescript_call_this".into(),
+                    args: vec![
+                        variable(&replacer_name),
+                        variable(&holder),
+                        LashExpr::List(vec![variable(&key), current_value()]),
+                    ],
                 },
             ),
             assign(&kind, stdlib("__jsonContainerKind", vec![current_value()])),

@@ -7,8 +7,8 @@ use lashlang::{
 };
 
 use crate::adapter::{
-    self, ArrayElement, AssignOp, AssignTarget as TsAssignTarget, BinaryOp, CallArg, Expr,
-    Function, FunctionBody, LogicalOp, MemberProperty, ObjectProperty, OptionalOperation, Pattern,
+    self, AssignOp, AssignTarget as TsAssignTarget, BinaryOp, CallArg, Expr, Function,
+    FunctionBody, LogicalOp, MemberProperty, ObjectProperty, OptionalOperation, Pattern,
     PropertyKey, Stmt, UnaryOp, VarKind,
 };
 use crate::node_label::NodeLabel;
@@ -20,6 +20,7 @@ use stdlib::*;
 mod loops;
 use loops::*;
 mod array_callbacks;
+mod array_literal;
 mod array_map;
 mod attribute_update;
 mod await_expr;
@@ -953,7 +954,6 @@ impl Lowerer {
 
     fn lower_expr_inner(&mut self, expr: &Expr) -> Result<LashExpr, Diagnostic> {
         Ok(match expr {
-            Expr::Undefined => LashExpr::Undefined,
             Expr::Null => LashExpr::Null,
             Expr::Bool(value) => LashExpr::Bool(*value),
             Expr::Number(value) => LashExpr::Number(*value),
@@ -995,7 +995,11 @@ impl Lowerer {
                     None,
                 ));
             }
-            Expr::This if !self.functions.is_empty() => LashExpr::Undefined,
+            // Every compiled function reserves a `this` slot bound at call
+            // entry: `undefined` for ordinary calls, the receiver when the
+            // call goes through `__typescript_call_this`. `this` never names
+            // a source binding, so it bypasses scope resolution.
+            Expr::This if !self.functions.is_empty() => LashExpr::Variable("this".into()),
             Expr::This => {
                 return Err(Diagnostic::new(
                     DiagnosticCode::ThisUnsupported,
@@ -1360,6 +1364,25 @@ impl Lowerer {
         if names_the_retired_trigger_event(object, property) && !self.has_binding("trigger") {
             return Err(retired_trigger_event_diagnostic());
         }
+        // An extracted built-in method (`'word'.includes`) is a function
+        // value in ECMA: it answers `length`, reports `typeof "function"`,
+        // and can be called. The dialect has no prototype objects to host
+        // one, so the read lowers to a generated closure that forwards `this`
+        // to the same stdlib row a member call would — `f.length` is the
+        // declared length, and `f(arg)` with no receiver fails the way the
+        // ECMA built-in fails on `undefined`. Only a literal receiver is
+        // provably method-shaped; anything else keeps the ordinary field
+        // read, where an own property must win over the prototype anyway.
+        if let MemberProperty::Field(field) = property
+            && let Some(kind) = literal_receiver_kind(object)
+            && let Some(signature) = lashlang::instance_method_signature(field)
+            && signature.receivers.contains(kind)
+            && let Some(shim) = self.builtin_method_value(signature)
+        {
+            // The receiver still evaluates first — `[f()].includes` must run
+            // `f()` even though the method value does not read it.
+            return Ok(LashExpr::Block(vec![self.lower_expr(object)?, shim]));
+        }
         let target = Box::new(self.lower_expr(object)?);
         Ok(match property {
             MemberProperty::Field(field) => LashExpr::Field {
@@ -1371,6 +1394,63 @@ impl Lowerer {
                 index: Box::new(self.lower_expr(index)?),
             },
         })
+    }
+
+    /// The function value an extracted built-in method stands for.
+    ///
+    /// The generated closure declares the signature's full parameter list but
+    /// the ECMA `length` (its pre-optional count), and its body re-enters the
+    /// same stdlib dispatch a member call uses with `this` as the receiver —
+    /// so `f.call`-style receivers, were they ever spelled, and the bare
+    /// `f()` TypeError both fall out of the one row. Variadic rows
+    /// (`...rest`) have no fixed parameter list to declare and stay
+    /// unreadable, as before.
+    fn builtin_method_value(&mut self, signature: &lashlang::StdlibSignature) -> Option<LashExpr> {
+        let arity = lashlang::instance_method_declared_arity(signature.method)?;
+        let params: Vec<String> = (0..arity)
+            .map(|_| self.temporary("method_argument"))
+            .collect();
+        let mut call_args = Vec::with_capacity(arity + 2);
+        call_args.push(LashExpr::String(signature.method.into()));
+        call_args.push(LashExpr::Variable("this".into()));
+        call_args.extend(
+            params
+                .iter()
+                .map(|param| LashExpr::Variable(param.as_str().into())),
+        );
+        let function = LashExpr::Function(Box::new(FunctionExpr {
+            name: None,
+            params: params.iter().map(|param| param.as_str().into()).collect(),
+            captures: Vec::new(),
+            body: Box::new(LashExpr::Return(Box::new(LashExpr::BuiltinCall {
+                name: "__typescript_stdlib".into(),
+                args: call_args,
+            }))),
+        }));
+        Some(LashExpr::BuiltinCall {
+            name: "__typescript_closure".into(),
+            args: vec![
+                function,
+                LashExpr::Number(lashlang::signature_length(signature.arguments) as f64),
+                LashExpr::Bool(false),
+            ],
+        })
+    }
+}
+
+/// The [`LiteralReceivers`] kind a literal expression provably belongs to, so
+/// an extracted-method read can resolve against the signature's receiver
+/// column. `null`/`undefined` and computed receivers are excluded: the first
+/// must keep its read-time TypeError, and the second can shadow any method
+/// name with an own property.
+fn literal_receiver_kind(expr: &Expr) -> Option<lashlang::LiteralReceivers> {
+    use lashlang::LiteralReceivers as Kind;
+    match expr {
+        Expr::String(_) => Some(Kind::STRING),
+        Expr::Number(_) => Some(Kind::NUMBER),
+        Expr::Array(_) => Some(Kind::ARRAY),
+        Expr::Bool(_) => Some(Kind::OTHER),
+        _ => None,
     }
 }
 

@@ -60,8 +60,9 @@ impl Expr {
     pub(crate) fn children(&self) -> Box<dyn Iterator<Item = &Expr> + '_> {
         let mut children = Vec::new();
         match self {
-            Expr::Array(items) => children.extend(items.iter().map(|item| match item {
-                ArrayElement::Value(value) | ArrayElement::Spread(value) => value,
+            Expr::Array(items) => children.extend(items.iter().filter_map(|item| match item {
+                ArrayElement::Value(value) | ArrayElement::Spread(value) => Some(value),
+                ArrayElement::Hole => None,
             })),
             Expr::Object(properties) => {
                 for property in properties {
@@ -140,8 +141,7 @@ impl Expr {
                 }
             }
             Expr::Update { target, .. } => children.extend(target.child_expressions()),
-            Expr::Undefined
-            | Expr::Null
+            Expr::Null
             | Expr::Bool(_)
             | Expr::Number(_)
             | Expr::String(_)
