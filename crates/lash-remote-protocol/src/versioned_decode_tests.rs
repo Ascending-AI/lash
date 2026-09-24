@@ -152,7 +152,7 @@ fn process_node_record() -> lash_trace::TraceRecord {
 /// event record are typed trace shapes, not opaque JSON.
 fn published_observation_item_schema() -> jsonschema::JSONSchema {
     let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/host/remote-process-observation-item/v97.schema.json"
+        "../../../schemas/host/remote-process-observation-item/v98.schema.json"
     ))
     .expect("published observation item schema parses");
     assert_eq!(
