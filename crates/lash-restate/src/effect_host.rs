@@ -1235,7 +1235,10 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "EffectGroupIndex",
                 handle.group_key(),
                 "read_rank",
-                &EffectGroupReadRankRequest { rank },
+                &EffectGroupReadRankRequest {
+                    rank,
+                    for_caller: true,
+                },
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
@@ -1285,7 +1288,10 @@ impl RuntimeEffectController for RestateEffectHostController {
                     "EffectGroupIndex",
                     handle.group_key(),
                     "read_rank",
-                    &EffectGroupReadRankRequest { rank },
+                    &EffectGroupReadRankRequest {
+                        rank,
+                        for_caller: true,
+                    },
                 )
                 .await
                 .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
@@ -1366,7 +1372,10 @@ impl RuntimeEffectController for RestateEffectHostController {
                 "EffectGroupIndex",
                 group_key,
                 "read_rank",
-                &EffectGroupReadRankRequest { rank },
+                &EffectGroupReadRankRequest {
+                    rank,
+                    for_caller: false,
+                },
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;

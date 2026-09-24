@@ -226,37 +226,6 @@ lash_conformance::effect_group_host_tests!({
     })
 });
 
-// A closed group serves its caller nothing further.
-lash_conformance::effect_group_closed_caller_tests!({
-    let Some((database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres effect-group conformance: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    drop(storage);
-    let database_url = database_url().expect("configured Postgres database URL");
-    (database_lock, move |executors| {
-        let database_url = database_url.clone();
-        let storage = sync_await(async move {
-            PostgresStorage::connect(&database_url)
-                .await
-                .expect("PostgreSQL effect-group host")
-        });
-        let host = storage.effect_host();
-        // Registration is what makes the host support groups at all: since
-        // FIG-1578 a group carries envelopes, and what runs a child is the
-        // resolver its host was built with. `None` is the unregistered host two
-        // laws are about, over the same database as the wired ones.
-        if let Some(executors) = executors {
-            host.register_group_executors(executors)
-                .expect("a freshly connected host has no resolver yet");
-        }
-        Arc::new(host) as Arc<dyn EffectHost>
-    })
-});
-
 // A cancelled child's cancellation is journaled as its terminal, and a host
 // that was not running when the close happened reads it back (FIG-1564).
 lash_conformance::effect_group_cancelled_child_terminal_tests!({

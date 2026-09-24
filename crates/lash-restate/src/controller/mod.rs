@@ -797,7 +797,10 @@ where
             .context
             .effect_group_read_rank(
                 handle.group_key().to_string(),
-                EffectGroupReadRankRequest { rank },
+                EffectGroupReadRankRequest {
+                    rank,
+                    for_caller: true,
+                },
             )
             .await
             .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
@@ -842,7 +845,10 @@ where
                 .context
                 .effect_group_read_rank(
                     handle.group_key().to_string(),
-                    EffectGroupReadRankRequest { rank },
+                    EffectGroupReadRankRequest {
+                        rank,
+                        for_caller: true,
+                    },
                 )
                 .await
                 .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
