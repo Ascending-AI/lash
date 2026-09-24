@@ -638,3 +638,92 @@ fn regexp_modifiers_scope_flags_to_their_group() {
         Value::List(vec![Value::Bool(true), Value::Bool(true), Value::Bool(false)].into())
     );
 }
+
+/// FIG-3658: `new RegExp(regexp)` clones the pattern's own source and flags;
+/// an explicit flags argument overrides them, and `undefined` flags — spelled
+/// or defaulted — inherit the pattern's (ECMA-262 RegExpInitialize).
+#[test]
+fn regexp_constructor_clones_regexp_patterns() {
+    assert_eq!(
+        finished(
+            "const p=/./i; const r=new RegExp(p); finish([r.source,r.ignoreCase,r.global,r.multiline]);"
+        ),
+        Value::List(
+            vec![
+                Value::String(".".into()),
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished(
+            "const p=/\\t/m; let x; const r=new RegExp(p,x); finish([r.source,r.multiline,r.global]);"
+        ),
+        Value::List(
+            vec![
+                Value::String("\\t".into()),
+                Value::Bool(true),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished("const r=new RegExp(new RegExp(),'g'); finish([r.source,r.global,r.ignoreCase]);"),
+        Value::List(
+            vec![
+                Value::String("(?:)".into()),
+                Value::Bool(true),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished("const r=new RegExp(new RegExp('a','gi'),undefined); finish(r.flags);"),
+        Value::String("gi".into())
+    );
+    assert_eq!(
+        finished("const p=/a+/; const r=new RegExp(p,'y'); finish([r.source,r.flags]);"),
+        Value::List(vec![Value::String("a+".into()), Value::String("y".into())].into())
+    );
+}
+
+/// FIG-3658: a RegExp instance has no [[Call]], so calling one raises a
+/// catchable TypeError — `e instanceof TypeError` must hold in the guest.
+#[test]
+fn calling_a_regexp_instance_throws_a_catchable_type_error() {
+    assert_eq!(
+        finished(
+            "let verdict='uncaught'; try { /[^a]*/(); } catch (e) { verdict = e instanceof TypeError; } finish(verdict);"
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        finished(
+            "let name='none'; try { new RegExp('x')(); } catch (e) { name = e.name; } finish(name);"
+        ),
+        Value::String("TypeError".into())
+    );
+}
+
+/// FIG-3658: `dotAll` reports the RegExp's own `s` flag — a local `(?-s:`
+/// group narrows `.` without touching the flag the property reads.
+#[test]
+fn regexp_dotall_property_reports_the_outer_flag() {
+    assert_eq!(
+        finished("finish([/a./s.dotAll,/a./.dotAll,/(?-s:^.$)/s.dotAll,/(?s:.)/.dotAll]);"),
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+}

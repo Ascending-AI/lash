@@ -284,7 +284,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     pub(super) fn construct_regexp(&mut self, args: &[Value]) -> Result<Value, RuntimeError> {
         let (pattern, flags) = match args {
-            [] | [Value::Undefined] => (String::new(), String::new()),
+            [] | [Value::Undefined] | [Value::Undefined, Value::Undefined] => {
+                (String::new(), String::new())
+            }
+            // A RegExp pattern clones its own source text; flags come from the
+            // RegExp itself unless an explicit flags argument overrides them
+            // (ECMA-262 RegExpAlloc/RegExpInitialize).
+            [Value::Ref(id), ..]
+                if args.len() <= 2 && matches!(self.heap.get(*id)?, HeapObject::RegExp(_)) =>
+            {
+                let HeapObject::RegExp(regexp) = self.heap.get(*id)? else {
+                    unreachable!("guard matched a RegExp heap object");
+                };
+                let pattern = regexp.pattern.clone();
+                match args.get(1) {
+                    None | Some(Value::Undefined) => (pattern, regexp.flags.clone()),
+                    Some(Value::String(flags)) => (pattern, flags.to_string()),
+                    Some(flags) => (pattern, self.heap.javascript_to_string(flags)?),
+                }
+            }
             [Value::String(pattern)] => (pattern.to_string(), String::new()),
             [Value::String(pattern), Value::Undefined] => (pattern.to_string(), String::new()),
             [Value::Undefined, Value::String(flags)] => (String::new(), flags.to_string()),

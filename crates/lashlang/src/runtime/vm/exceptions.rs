@@ -312,6 +312,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .heap
                 .allocate_error(ErrorKind::TypeError, error.to_string(), None, None);
         }
+        // Calling a value without [[Call]] raises a TypeError in ECMA-262; the
+        // message keeps the substrate's naming ("attempted to call a
+        // non-function value") inside the guest-visible error.
+        if matches!(error, RuntimeError::NonFunctionCall { .. }) {
+            return self
+                .heap
+                .allocate_error(ErrorKind::TypeError, error.to_string(), None, None);
+        }
         let mut details = record_with_capacity(3);
         details.insert(
             "kind".to_string(),
