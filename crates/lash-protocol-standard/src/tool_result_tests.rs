@@ -89,7 +89,7 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         .push(ModelToolReturnPart::text(notice_placeholder.clone()));
     noticed.attachment_notices.push(notice);
 
-    let returns = vec![
+    let returns = [
         ModelToolReturn::from_output(
             "call-array".to_string(),
             "shot".to_string(),

@@ -99,16 +99,6 @@ fn turn_outcomes(effects: &[Effect]) -> Vec<TurnOutcome> {
         .collect()
 }
 
-fn text_response(text: &str) -> LlmResponse {
-    LlmResponse {
-        parts: vec![LlmOutputPart::Text {
-            text: text.to_string(),
-            response_meta: None,
-        }],
-        ..LlmResponse::default()
-    }
-}
-
 fn tool_call_response(call_id: &str, tool_name: &str) -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
