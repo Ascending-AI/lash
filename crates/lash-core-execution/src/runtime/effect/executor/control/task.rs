@@ -75,10 +75,10 @@ pub enum EffectControllerTaskRequest {
             >,
         >,
     },
-    GroupChildDrainBlocked {
+    AwaitGroupChildDrainAdmission {
         group_key: String,
         commit_seq: u64,
-        response: oneshot::Sender<Result<bool, RuntimeEffectControllerError>>,
+        response: oneshot::Sender<Result<(), RuntimeEffectControllerError>>,
     },
     ReadRecordedJournal {
         range: crate::RecordedKeyRange,
@@ -183,14 +183,14 @@ impl EffectControllerTaskRequest {
             Self::CommitGroupChildFinal { commit, response } => Box::pin(async move {
                 let _ = response.send(controller.commit_group_child_final(commit).await);
             }),
-            Self::GroupChildDrainBlocked {
+            Self::AwaitGroupChildDrainAdmission {
                 group_key,
                 commit_seq,
                 response,
             } => Box::pin(async move {
                 let _ = response.send(
                     controller
-                        .group_child_drain_blocked(&group_key, commit_seq)
+                        .await_group_child_drain_admission(&group_key, commit_seq)
                         .await,
                 );
             }),
@@ -576,14 +576,14 @@ impl RuntimeEffectController for EffectTaskController {
         })?
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
+    ) -> Result<(), RuntimeEffectControllerError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.requests
-            .send(EffectControllerTaskRequest::GroupChildDrainBlocked {
+            .send(EffectControllerTaskRequest::AwaitGroupChildDrainAdmission {
                 group_key: group_key.to_string(),
                 commit_seq,
                 response: response_tx,

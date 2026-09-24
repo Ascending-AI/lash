@@ -524,6 +524,20 @@ impl PostgresEffectHost {
     pub fn effect_journal_faults(&self) -> effect_replay_driver::EffectJournalFaults {
         self.inner.journal_faults()
     }
+
+    /// Testing seam (FIG-3598): this journal's §5 barrier read — whether a
+    /// committed sibling below `commit_seq` in `group_key` still owes its
+    /// drain — straight from the row store.
+    #[cfg(feature = "testing")]
+    pub async fn drain_blocked_for_testing(
+        &self,
+        group_key: &str,
+        commit_seq: u64,
+    ) -> Result<bool, lash_core_execution::RuntimeEffectControllerError> {
+        self.inner
+            .drain_blocked_for_testing(group_key, commit_seq)
+            .await
+    }
 }
 
 fn hex_digest(bytes: &[u8]) -> String {

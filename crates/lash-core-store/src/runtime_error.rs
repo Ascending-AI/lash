@@ -273,6 +273,10 @@ pub enum RuntimeErrorCode {
     /// A Restate DirectProcess journal entry has an unsupported version or a
     /// shape this build cannot decode exactly.
     RestateProcessJournalPayloadIncompatible,
+    /// A Restate effect-group index holds state written under another
+    /// effect-group protocol version; the index refuses it at handler entry,
+    /// before any effect.
+    RestateEffectGroupProtocolRetired,
     RestateProcessIngressSubmit,
     /// The ingress target names an unbound service; retry cannot change that
     /// deployment fact, so this code is terminal.
@@ -630,6 +634,7 @@ impl RuntimeErrorCode {
             Self::RestateProcessJournalPayloadIncompatible => {
                 "restate_process_journal_payload_incompatible"
             }
+            Self::RestateEffectGroupProtocolRetired => "restate_effect_group_protocol_retired",
             Self::RestateProcessIngressSubmit => "restate_process_ingress_submit",
             Self::RestateServiceUnregistered => "restate_service_unregistered",
             Self::RestateProcessAwaitAfterTurnCancel => "restate_process_await_after_turn_cancel",
@@ -906,6 +911,7 @@ impl RuntimeErrorCode {
         Self::RestateProcessCancel,
         Self::RestateProcessJournalIdentityDrift,
         Self::RestateProcessJournalPayloadIncompatible,
+        Self::RestateEffectGroupProtocolRetired,
         Self::RestateProcessIngressSubmit,
         Self::RestateServiceUnregistered,
         Self::RestateProcessAwaitAfterTurnCancel,
@@ -1122,6 +1128,7 @@ impl RuntimeErrorCode {
             "restate_process_journal_payload_incompatible" => {
                 Self::RestateProcessJournalPayloadIncompatible
             }
+            "restate_effect_group_protocol_retired" => Self::RestateEffectGroupProtocolRetired,
             "restate_process_ingress_submit" => Self::RestateProcessIngressSubmit,
             "restate_service_unregistered" => Self::RestateServiceUnregistered,
             "restate_process_await_after_turn_cancel" => Self::RestateProcessAwaitAfterTurnCancel,

@@ -218,6 +218,12 @@ pub(super) struct RecordingContext {
     revoked_sessions: Mutex<HashSet<SessionId>>,
     pub(super) session_revocation_checks: AtomicUsize,
     pub(super) turn_cancel_gate: TestTurnCancelGate,
+    /// What the index's `drain_blockers` answers; `Admitted` when unset.
+    pub(super) drain_blockers:
+        Mutex<Option<Result<crate::effect_group::EffectGroupDrainBlockersResponse, TerminalError>>>,
+    /// Every effect-group wake awaited, in order, and what each resolves to.
+    pub(super) group_waits: Mutex<Vec<RestateDurableWaitAwaitRequest>>,
+    pub(super) group_wait_resolution: Mutex<Option<Resolution>>,
 }
 
 #[derive(Default)]
@@ -421,6 +427,44 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         'ctx: 'run,
     {
         Box::pin(async { Ok(None) })
+    }
+
+    fn effect_group_drain_blockers<'run>(
+        &'run self,
+        _group_key: String,
+        _commit_seq: u64,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        crate::effect_group::EffectGroupDrainBlockersResponse,
+                        TerminalError,
+                    >,
+                > + Send
+                + 'run,
+        >,
+    >
+    where
+        'ctx: 'run,
+    {
+        let answer = self.drain_blockers.lock_recover().clone().unwrap_or(Ok(
+            crate::effect_group::EffectGroupDrainBlockersResponse::Admitted,
+        ));
+        Box::pin(async move { answer })
+    }
+
+    fn await_effect_group_wait<'run>(
+        &'run self,
+        request: RestateDurableWaitAwaitRequest,
+        _replay_key: String,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>
+    where
+        'ctx: 'run,
+    {
+        self.group_waits.lock_recover().push(request);
+        let resolution = self.group_wait_resolution.lock_recover().clone();
+        Box::pin(async move { Ok(resolution) })
     }
 
     fn sleep_send<'run>(

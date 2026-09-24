@@ -42,10 +42,10 @@ use crate::durable_wait::{
 use crate::effect_group::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupCloseRequest,
     EffectGroupCloseResponse, EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
-    EffectGroupDispatchClient, EffectGroupDispatchRequest, EffectGroupDrainBlockedRequest,
-    EffectGroupIndexClient, EffectGroupOpenRequest, EffectGroupOpenResponse,
-    EffectGroupPayloadClient, EffectGroupPayloadGetResponse, EffectGroupProbeResponse,
-    EffectGroupReadRankRequest, EffectGroupReadRankResponse,
+    EffectGroupDispatchClient, EffectGroupDispatchRequest, EffectGroupDrainBlockersRequest,
+    EffectGroupDrainBlockersResponse, EffectGroupIndexClient, EffectGroupOpenRequest,
+    EffectGroupOpenResponse, EffectGroupPayloadClient, EffectGroupPayloadGetResponse,
+    EffectGroupProbeResponse, EffectGroupReadRankRequest, EffectGroupReadRankResponse,
 };
 use crate::process::{
     LashProcessWorkflowClient, RestateProcessAwaitRequest, RestateProcessCancelRequest,
@@ -628,17 +628,23 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         unregistered_group_index("EffectGroupIndex/admit_semantic")
     }
 
-    /// Whether a lower-commit sibling still owes its settlement seat — the
+    /// The lower-commit siblings that still owe their settlement seats — the
     /// durable §5 barrier read.
-    fn effect_group_drain_blocked<'run>(
+    fn effect_group_drain_blockers<'run>(
         &'run self,
         _group_key: String,
         _commit_seq: u64,
-    ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<EffectGroupDrainBlockersResponse, TerminalError>>
+                + Send
+                + 'run,
+        >,
+    >
     where
         'ctx: 'run,
     {
-        unregistered_group_index("EffectGroupIndex/drain_blocked")
+        unregistered_group_index("EffectGroupIndex/drain_blockers")
     }
 
     fn await_effect_group_wait<'run>(
@@ -1438,19 +1444,19 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move { call.await.map(|Json(response)| response) })
                 }
 
-                fn effect_group_drain_blocked<'run>(
+                fn effect_group_drain_blockers<'run>(
                     &'run self,
                     group_key: String,
                     commit_seq: u64,
-                ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>
+                ) -> Pin<Box<dyn Future<Output = Result<EffectGroupDrainBlockersResponse, TerminalError>> + Send + 'run>>
                 where
                     'ctx: 'run,
                 {
                     let call = self
                         .object_client::<EffectGroupIndexClient>(group_key)
-                        .drain_blocked(Json(EffectGroupDrainBlockedRequest { commit_seq }))
+                        .drain_blockers(Json(EffectGroupDrainBlockersRequest { commit_seq }))
                         .call();
-                    Box::pin(async move { call.await.map(|Json(blocked)| blocked) })
+                    Box::pin(async move { call.await.map(|Json(response)| response) })
                 }
 
                 fn await_effect_group_wait<'run>(

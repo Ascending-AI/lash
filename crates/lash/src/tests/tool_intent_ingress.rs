@@ -731,13 +731,13 @@ impl lash_core::RuntimeEffectController for KeyJournalController {
         self.inner.commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> std::result::Result<bool, lash_core::RuntimeEffectControllerError> {
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 }
@@ -956,13 +956,13 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
         self.inner.commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> std::result::Result<bool, lash_core::RuntimeEffectControllerError> {
+    ) -> std::result::Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 }

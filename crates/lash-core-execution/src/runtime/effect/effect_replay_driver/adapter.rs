@@ -472,14 +472,15 @@ impl<T: StoreReplayController> RuntimeEffectController for T {
         self.replay_driver().commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    /// The §5 barrier, waited out on the same driver's journal notification
+    /// for the group rather than on any clock.
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
+    ) -> Result<(), RuntimeEffectControllerError> {
         self.replay_driver()
-            .row_store
-            .drain_blocked(group_key, commit_seq)
+            .await_drain_admission(group_key, commit_seq)
             .await
     }
 

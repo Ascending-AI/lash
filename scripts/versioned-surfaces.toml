@@ -2138,6 +2138,41 @@ symbols = [
   "DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX",
 ]
 
+[[surface]]
+constant = "EFFECT_GROUP_INDEX_PROTOCOL_VERSION"
+constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
+description = "Restate effect-group protocol: the EffectGroupIndex handlers' request and response wire, the dispatch workflow's wire, and the index record Restate retains"
+manifest = "RestateEffectGroupIndexProtocol"
+
+# Index state survives a deployment, and an in-flight invocation replays the
+# journal of the handlers it called. Every index record carries the version
+# that wrote it, and each index handler refuses any other with a terminal
+# typed error before it acts. The guard projects every serde shape the group
+# services exchange or retain, and the key the index record lives under.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = [
+  "crates/lash-restate/src/effect_group.rs",
+  "crates/lash-restate/src/effect_group/index_record.rs",
+  "crates/lash-restate/src/effect_group/shape.rs",
+  "crates/lash-restate/src/effect_group/wire.rs",
+  "crates/lash-restate/src/effect_group/dispatch.rs",
+]
+must_cover = [
+  "EffectGroupIndexRecord",
+  "EffectGroupIndexLiveRecord",
+  "EffectGroupShape",
+  "EffectGroupOpenRequest",
+  "EffectGroupCommitChildResponse",
+  "EffectGroupDrainBlockersResponse",
+  "EffectGroupChildRequest",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/effect_group.rs"]
+symbols = ["INDEX_STATE_KEY"]
+
 # Hash-domain family tags. A `*_FAMILY_VERSION` names the preimage family
 # inside a content-addressed key, fingerprint, or retry identity; it is an
 # identity component, not a format stamp a reader compares. A moved tag mints

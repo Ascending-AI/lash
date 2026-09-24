@@ -6,6 +6,13 @@
 //! and execution is abandoned only once a full TTL has passed without a
 //! confirmed renewal. An abandoned execution is never finalized — its row
 //! stays reclaimable.
+//!
+//! The cadence and the budget both run on the driver clock, and neither spins
+//! on a test clock that breaks a sleep's promise (FIG-3598): the cadence
+//! sleep paces itself in real time when the clock's face does not move
+//! ([`journal_wait::cadence_sleep`]), and the budget's deadline counts as
+//! reached only once the face says so
+//! ([`journal_wait::monotonic_deadline_reached`]).
 
 use super::*;
 
@@ -40,7 +47,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         let mut missed: u32 = 0;
         let mut last_error: Option<RuntimeEffectControllerError> = None;
         loop {
-            self.clock.sleep(budget.next_wait(self.clock.now())).await;
+            journal_wait::cadence_sleep(&*self.clock, budget.next_wait(self.clock.now())).await;
             let requested_at = self.clock.now();
             let renewed = if budget.exhausted(requested_at) {
                 None
@@ -90,8 +97,9 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
     /// deadline has passed with the call still in flight. Dropping the call
     /// is safe — a renewal that still lands only extends this owner's own
     /// lease, and the fence guard refuses any later write under it once a
-    /// peer takes the row over. A deadline wake the clock does not confirm
-    /// (a clock whose sleeps return early) yields and keeps waiting.
+    /// peer takes the row over. The deadline is reached only once the
+    /// clock's face confirms it, so a clock whose sleeps return early keeps
+    /// the call running rather than spinning beside it.
     async fn renew_within_budget(
         &self,
         fence: &EffectLeaseFence,
@@ -107,18 +115,10 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         let Some(deadline) = budget.deadline() else {
             return Some(renew.await);
         };
-        tokio::pin!(renew);
-        loop {
-            tokio::select! {
-                biased;
-                renewed = &mut renew => return Some(renewed),
-                () = self.clock.sleep_until(deadline) => {
-                    if budget.exhausted(self.clock.now()) {
-                        return None;
-                    }
-                    tokio::task::yield_now().await;
-                }
-            }
+        tokio::select! {
+            biased;
+            renewed = renew => Some(renewed),
+            () = journal_wait::monotonic_deadline_reached(&*self.clock, deadline) => None,
         }
     }
 

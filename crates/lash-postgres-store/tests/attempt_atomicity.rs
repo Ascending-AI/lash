@@ -407,14 +407,14 @@ impl lash_core_execution::RuntimeEffectController for ScopedControllerAdapter {
         self.0.controller().commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, lash_core_execution::RuntimeEffectControllerError> {
+    ) -> Result<(), lash_core_execution::RuntimeEffectControllerError> {
         self.0
             .controller()
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 }
@@ -626,13 +626,13 @@ impl lash_core_execution::RuntimeEffectController for CrossingController {
         self.inner.commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, lash_core_execution::RuntimeEffectControllerError> {
+    ) -> Result<(), lash_core_execution::RuntimeEffectControllerError> {
         self.inner
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 }

@@ -32,8 +32,8 @@ use crate::effect_group::{
     EffectGroupDispatchRequest, EffectGroupOpenRequest, EffectGroupOpenResponse,
     EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
     EffectGroupReadRankResponse, EffectGroupSettlementTerminal, EffectGroupShape,
-    EffectGroupWaitResolution, decode_wait_resolution, group_shape_error, payload_key,
-    rank_wait_request, ready_wait_request, settlement_from_payload,
+    EffectGroupWaitResolution, decode_wait_resolution, drained_wait_lifted, drained_wait_request,
+    group_shape_error, payload_key, rank_wait_request, ready_wait_request, settlement_from_payload,
 };
 use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
 
@@ -662,13 +662,13 @@ impl RuntimeEffectController for FencedRestateController {
         self.controller.commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
+    ) -> Result<(), RuntimeEffectControllerError> {
         self.controller
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 
@@ -703,6 +703,9 @@ fn ingress_group_error(
     operation: &str,
     error: crate::RestateHttpError,
 ) -> RuntimeEffectControllerError {
+    if let Some(refusal) = ingress_protocol_refusal(&error) {
+        return refusal;
+    }
     let service_unregistered = error.is_service_unregistered();
     let message = format!("Restate effect-group operation {operation} failed: {error}");
     if service_unregistered {
@@ -710,6 +713,23 @@ fn ingress_group_error(
     } else {
         group_shape_error(message)
     }
+}
+
+/// The typed effect-group protocol refusal an index handler answered an
+/// ingress call with, recovered from the terminal error's message in the
+/// response body.
+pub(crate) fn ingress_protocol_refusal(
+    error: &crate::RestateHttpError,
+) -> Option<RuntimeEffectControllerError> {
+    let crate::RestateHttpError::Status { body, .. } = error else {
+        return None;
+    };
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .get("message")?
+        .as_str()?
+        .to_owned();
+    crate::effect_group::protocol_refusal_in(&message)
 }
 
 #[async_trait::async_trait]
@@ -1534,21 +1554,48 @@ impl RuntimeEffectController for RestateEffectHostController {
         })
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
-        self.await_event_ingress
-            .ingress
-            .call_object_json::<_, bool>(
+    ) -> Result<(), RuntimeEffectControllerError> {
+        // The §5 barrier on the engine's own wake, over ingress: the index
+        // names the lower-commit siblings still owed a seat, and the drain
+        // parks on each one's durable drained wake instead of polling.
+        let ingress = &self.await_event_ingress.ingress;
+        let (wait_scope, positions) = match ingress
+            .call_object_json::<_, crate::effect_group::EffectGroupDrainBlockersResponse>(
                 "EffectGroupIndex",
                 group_key,
-                "drain_blocked",
-                &crate::effect_group::EffectGroupDrainBlockedRequest { commit_seq },
+                "drain_blockers",
+                &crate::effect_group::EffectGroupDrainBlockersRequest { commit_seq },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blocked", error))
+            .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blockers", error))?
+        {
+            crate::effect_group::EffectGroupDrainBlockersResponse::Admitted => return Ok(()),
+            crate::effect_group::EffectGroupDrainBlockersResponse::Blocked {
+                wait_scope,
+                positions,
+            } => (wait_scope, positions),
+        };
+        for position in positions {
+            let request = drained_wait_request(&wait_scope, group_key, position)?;
+            let address = RestateDurableWaitAddress::for_key(&request.key);
+            let resolution = ingress
+                .call_workflow_json::<_, Resolution>(
+                    "LashDurableWaitWorkflow",
+                    &address.workflow_key,
+                    "await_resolution",
+                    &request,
+                )
+                .await
+                .map_err(|error| {
+                    ingress_group_error("LashDurableWaitWorkflow/await_resolution(DRAINED)", error)
+                })?;
+            drained_wait_lifted(group_key, position, resolution)?;
+        }
+        Ok(())
     }
 
     /// Positional, as the in-handler controller answers: this controller's

@@ -456,13 +456,13 @@ impl RuntimeEffectController for JournalController {
         self.inline.commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, lash::runtime::RuntimeEffectControllerError> {
+    ) -> Result<(), lash::runtime::RuntimeEffectControllerError> {
         self.inline
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 }

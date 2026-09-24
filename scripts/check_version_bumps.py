@@ -77,6 +77,14 @@ REGISTRATION_BASELINES = {
     "crates/lash-lashlang-runtime/src/replay_run.rs:LASHLANG_REPLAY_KEY_GRAMMAR_VERSION": (
         "sha256:5adc7518b058d7f67ab3df9579aefa05bce175f493bf8b78dd5aabde8979228f"
     ),
+    # FIG-3598: the Restate effect-group protocol -- the EffectGroupIndex
+    # handlers' wire, the dispatch workflow's wire and the index record Restate
+    # retains -- had no version, so an in-flight invocation replaying an older
+    # journal met a mismatch Restate retried without end. A new surface, not a
+    # rename: the constant arrives with the stamp and the handler-entry refusal.
+    "crates/lash-restate/src/effect_group/protocol.rs:EFFECT_GROUP_INDEX_PROTOCOL_VERSION": (
+        "sha256:fd6a71a1ea94732fbeeae9956ab0a52d45396ce0d818f5540a6a6fc73eb5900e"
+    ),
     # FIG-3464: the durable process-effect outcome is a new runtime-owned event
     # vocabulary, not a rename of an earlier versioned payload.
     "crates/lash-core-execution/src/runtime/process/effect_summary.rs:PROCESS_EVENT_VOCABULARY_VERSION": (

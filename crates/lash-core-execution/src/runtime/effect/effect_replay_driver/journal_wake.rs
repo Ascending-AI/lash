@@ -1,10 +1,11 @@
 //! Change notification over the effect journal: what a parked driver waits on.
 //!
-//! A driver parks in three places: a claim queued behind another owner's live
-//! lease, a discharge the commit-order barrier holds behind a lower-committed
-//! sibling, and a reader waiting for a group's next settlement. Each waits for
-//! another writer to change one journal fact, a [`EffectJournalSubject`], and
-//! the row store hands it an [`EffectJournalWake`] to park on
+//! A driver parks in four places: a claim queued behind another owner's live
+//! lease, a discharge and a tool child's intent drain the commit-order barrier
+//! holds behind a lower-committed sibling, and a reader waiting for a group's
+//! next settlement. Each waits for another writer to change one journal fact,
+//! a [`EffectJournalSubject`], and the row store hands it an
+//! [`EffectJournalWake`] to park on
 //! ([`EffectReplayRowStore::journal_wake`](super::EffectReplayRowStore::journal_wake)).
 //! How long to wait, and what to race the wake against, is the driver's
 //! business alone.
@@ -31,8 +32,8 @@ pub enum EffectJournalSubject<'a> {
         replay_key: &'a str,
     },
     /// The commit order and settlement ranks of group `group_key`. A discharge
-    /// held by the commit-order barrier and a reader waiting for the group's
-    /// next settlement wait on this.
+    /// or an intent drain held by the commit-order barrier, and a reader
+    /// waiting for the group's next settlement, wait on this.
     Group { group_key: &'a str },
 }
 

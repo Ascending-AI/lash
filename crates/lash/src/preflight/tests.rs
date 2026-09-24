@@ -472,9 +472,13 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             DurableFormat::RestateProcessCommandJournal,
             SurfaceRelation::Unwalkable(RESTATE_STATE),
         ),
+        (
+            DurableFormat::RestateEffectGroupIndexProtocol,
+            SurfaceRelation::Unwalkable(RESTATE_STATE),
+        ),
     ];
 
-    assert_eq!(relations.len(), 35);
+    assert_eq!(relations.len(), 36);
     for (format, expected) in relations {
         assert_eq!(
             format_surface(format),
@@ -513,6 +517,7 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             DurableFormat::RestateDurableWaitRequest,
             DurableFormat::RestateDurableWaitIndexEpoch,
             DurableFormat::RestateProcessCommandJournal,
+            DurableFormat::RestateEffectGroupIndexProtocol,
         ]);
     }
     assert_eq!(

@@ -353,13 +353,14 @@ impl RuntimeEffectController for NativeRuntimeEffectController {
         NativeEffectGroups::commit_group_child_final(&self.groups, commit)
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
+    ) -> Result<(), RuntimeEffectControllerError> {
         self.groups.registered_executors()?;
-        NativeEffectGroups::group_child_drain_blocked(&self.groups, group_key, commit_seq)
+        NativeEffectGroups::await_group_child_drain_admission(&self.groups, group_key, commit_seq)
+            .await
     }
 }
 
@@ -576,7 +577,8 @@ struct NativeEffectGroupState {
     /// the commit order is one column no matter which path wrote it.
     commits: HashMap<usize, (u64, Option<String>)>,
     /// Positions whose obligations have fully seated. A committed position not
-    /// yet here is exactly what `group_child_drain_blocked` waits behind.
+    /// yet here is exactly what `await_group_child_drain_admission` waits
+    /// behind.
     drained: HashSet<usize>,
     /// Settled children in rank order. Allocating and appending under one lock
     /// makes append order sequence order, so rank *n* is `order[n - 1]` and the
@@ -1442,19 +1444,32 @@ impl NativeEffectGroups {
         }
     }
 
-    /// Whether a committed sibling below `commit_seq` still owes its seat —
-    /// the in-memory analogue of the durable drain barrier.
-    fn group_child_drain_blocked(
+    /// Wait until no committed sibling below `commit_seq` still owes its
+    /// seat — the in-memory analogue of the durable drain barrier. A seat
+    /// marks its position drained under the group lock and then wakes
+    /// `settled`, so the wait listens before each read and parks on that
+    /// wake alone.
+    async fn await_group_child_drain_admission(
         groups: &Arc<Self>,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
+    ) -> Result<(), RuntimeEffectControllerError> {
         let state = groups.lookup(group_key)?;
-        let inner = state.state.lock_recover();
-        Ok(inner
-            .commits
-            .iter()
-            .any(|(position, (seq, _))| *seq < commit_seq && !inner.drained.contains(position)))
+        loop {
+            let settled = state.settled.notified();
+            tokio::pin!(settled);
+            settled.as_mut().enable();
+            let blocked = {
+                let inner = state.state.lock_recover();
+                inner.commits.iter().any(|(position, (seq, _))| {
+                    *seq < commit_seq && !inner.drained.contains(position)
+                })
+            };
+            if !blocked {
+                return Ok(());
+            }
+            settled.await;
+        }
     }
 
     /// Which open group owns `replay_key`, if any — the membership lookup

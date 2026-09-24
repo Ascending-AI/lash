@@ -163,6 +163,10 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-commit-order"
             ),
             (
+                a_drain_held_at_the_barrier_parks_under_a_frozen_dispatch_clock,
+                "tool-child-commit-order-frozen-clock"
+            ),
+            (
                 a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink,
                 "tool-child-admission-fence"
             ),

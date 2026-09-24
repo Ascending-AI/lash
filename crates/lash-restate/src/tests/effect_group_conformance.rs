@@ -1292,6 +1292,174 @@ async fn run_design_witnesses(ingress_url: &str, executors: &Arc<ConformanceExec
         "post-tombstone child whose mapping was never recorded must not execute"
     );
     println!("EFFECT_GROUP_WITNESS m admission-enumeration PASS");
+
+    run_drain_barrier_witnesses(&ingress).await;
+}
+
+/// FIG-3598. The §5 barrier's drained wake is released by retirement: a
+/// committed child that retirement cancels before it seats never resolves its
+/// own wake, so a sibling parked behind it — here a waiter outside the retired
+/// invocation — must be released as `Retired`. And an index whose state
+/// another protocol version wrote refuses at handler entry with the typed
+/// terminal error.
+async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient) {
+    use crate::effect_group::{
+        EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
+        EffectGroupDrainBlockersRequest, EffectGroupDrainBlockersResponse, drained_wait_request,
+    };
+
+    let group_key = witness_key("drained-retire");
+    let children = [witness_child(&group_key, 0), witness_child(&group_key, 1)];
+    let shape = witness_shape(&group_key, &children);
+    let opened: EffectGroupOpenResponse = ingress
+        .call_object_json(
+            "EffectGroupIndex",
+            &group_key,
+            "open",
+            &EffectGroupOpenRequest {
+                shape: shape.clone(),
+                content_checked: false,
+            },
+        )
+        .await
+        .expect("drained-wake witness opens");
+    assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+    let mut commit_seqs = Vec::new();
+    for child in &children {
+        let committed: EffectGroupCommitChildResponse = ingress
+            .call_object_json(
+                "EffectGroupIndex",
+                &group_key,
+                "commit_child",
+                &EffectGroupCommitChildRequest {
+                    replay_key: child.invocation.replay_key().to_owned(),
+                },
+            )
+            .await
+            .expect("drained-wake witness child commits");
+        let EffectGroupCommitChildResponse::Committed { commit_seq, .. } = committed else {
+            panic!("drained-wake witness child commits fresh, got {committed:?}");
+        };
+        commit_seqs.push(commit_seq);
+    }
+    let blockers: EffectGroupDrainBlockersResponse = ingress
+        .call_object_json(
+            "EffectGroupIndex",
+            &group_key,
+            "drain_blockers",
+            &EffectGroupDrainBlockersRequest {
+                commit_seq: commit_seqs[1],
+            },
+        )
+        .await
+        .expect("drained-wake witness reads the barrier");
+    assert_eq!(
+        blockers,
+        EffectGroupDrainBlockersResponse::Blocked {
+            wait_scope: shape.wait_scope.clone(),
+            positions: vec![0],
+        },
+        "child 1 is held behind child 0's owed seat, under the retained wait scope"
+    );
+    let waiter = tokio::spawn({
+        let ingress = ingress.clone();
+        let request =
+            drained_wait_request(&shape.wait_scope, &group_key, 0).expect("drained wake request");
+        async move { await_group_wait(&ingress, request).await }
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !waiter.is_finished(),
+        "child 0 never seated, so its drained wake is unresolved"
+    );
+    ingress
+        .call_workflow_json::<_, ()>("EffectGroupDispatch", &group_key, "retire", &group_key)
+        .await
+        .expect("retirement saga completes");
+    let released = tokio::time::timeout(Duration::from_secs(30), waiter)
+        .await
+        .expect("retirement releases the drained wake")
+        .expect("drained-wake waiter task");
+    assert_eq!(released, EffectGroupWaitResolution::Retired);
+    println!("EFFECT_GROUP_WITNESS n drained-wake-retired PASS");
+
+    let stale_group = witness_key("stale-protocol");
+    let stale_child = witness_child(&stale_group, 0);
+    let stale_shape = witness_shape(&stale_group, std::slice::from_ref(&stale_child));
+    let _: EffectGroupOpenResponse = ingress
+        .call_object_json(
+            "EffectGroupIndex",
+            &stale_group,
+            "open",
+            &EffectGroupOpenRequest {
+                shape: stale_shape.clone(),
+                content_checked: false,
+            },
+        )
+        .await
+        .expect("stale-protocol witness opens");
+    // Rewrite the group's state as a deployment that predates the stamp
+    // left it: the same record with no protocol version.
+    let stale_state = serde_json::json!({
+        "shape_digest": stale_shape.digest().expect("witness shape digest"),
+        "lifecycle": {"type": "retired", "cleanup": {"type": "complete"}},
+    });
+    overwrite_index_state(&stale_group, &stale_state).await;
+    let refused = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let probed = ingress
+                .call_object_json::<_, EffectGroupDrainBlockersResponse>(
+                    "EffectGroupIndex",
+                    &stale_group,
+                    "drain_blockers",
+                    &EffectGroupDrainBlockersRequest { commit_seq: 1 },
+                )
+                .await;
+            match probed {
+                Err(error) => break error,
+                // The admin state write lands asynchronously.
+                Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+            }
+        }
+    })
+    .await
+    .expect("the rewritten state reaches the index");
+    let typed = crate::effect_host::ingress_protocol_refusal(&refused)
+        .unwrap_or_else(|| panic!("the refusal is typed: {refused}"));
+    assert_eq!(
+        typed.code,
+        RuntimeErrorCode::RestateEffectGroupProtocolRetired
+    );
+    println!("EFFECT_GROUP_WITNESS o stale-protocol-refused-typed PASS");
+}
+
+/// Replace an effect-group index's retained state through the Restate admin
+/// API.
+async fn overwrite_index_state(group_key: &str, state: &serde_json::Value) {
+    let admin_url = required("RESTATE_ADMIN_URL");
+    let client = reqwest::Client::builder()
+        .http2_prior_knowledge()
+        .build()
+        .expect("build Restate admin client");
+    let bytes = serde_json::to_vec(state).expect("encode the index state");
+    let response = client
+        .post(format!(
+            "{}/services/EffectGroupIndex/state",
+            admin_url.trim_end_matches('/')
+        ))
+        .json(&serde_json::json!({
+            "object_key": group_key,
+            "new_state": { "effect-group/v1/state": bytes },
+        }))
+        .send()
+        .await
+        .expect("modify the effect-group index state");
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    assert!(
+        status.is_success(),
+        "Restate state modification failed: {status} {body}"
+    );
 }
 
 fn witness_child(group_key: &str, position: usize) -> RuntimeEffectEnvelope {

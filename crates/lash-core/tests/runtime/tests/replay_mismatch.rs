@@ -105,13 +105,13 @@ impl RuntimeEffectController for ProxyPumpingReplayMismatchController {
         self.rejecting.commit_group_child_final(commit).await
     }
 
-    async fn group_child_drain_blocked(
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, lash_core::RuntimeEffectControllerError> {
+    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.rejecting
-            .group_child_drain_blocked(group_key, commit_seq)
+            .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
 }

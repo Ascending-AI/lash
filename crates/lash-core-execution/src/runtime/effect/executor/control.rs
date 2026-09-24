@@ -671,20 +671,24 @@ pub trait RuntimeEffectController: AwaitEventResolver {
         ))
     }
 
-    /// Whether a committed sibling below `commit_seq` in `group_key` still
-    /// owes its drain — the durable §5 barrier drains wait behind.
+    /// Wait at the durable §5 barrier: resolve once no committed sibling
+    /// below `commit_seq` in `group_key` still owes its drain.
     ///
-    /// Drains are admitted in final-commit order: a `true` answer means the
-    /// caller waits and retries rather than emitting its nested semantic
-    /// commands ahead of a lower-commit sibling. The default refuses on the
-    /// same grounds as [`commit_group_child_final`](Self::commit_group_child_final):
-    /// a controller that cannot answer the durable barrier cannot order
-    /// drains either.
-    async fn group_child_drain_blocked(
+    /// Drains are admitted in final-commit order, so the caller emits its
+    /// nested semantic commands only once this resolves. The barrier is
+    /// lifted by a sibling's drain, never by time, and the wait is the
+    /// host's: a store-backed host parks on its journal's change
+    /// notification for the group, and an engine-backed host on the engine's
+    /// own durable wake for each blocking sibling's seat. Nothing here sleeps
+    /// on a clock. The default refuses on the same grounds as
+    /// [`commit_group_child_final`](Self::commit_group_child_final): a
+    /// controller that cannot answer the durable barrier cannot order drains
+    /// either.
+    async fn await_group_child_drain_admission(
         &self,
         group_key: &str,
         commit_seq: u64,
-    ) -> Result<bool, RuntimeEffectControllerError> {
+    ) -> Result<(), RuntimeEffectControllerError> {
         let _ = (group_key, commit_seq);
         Err(super::effect_groups_unsupported("durable drain barrier"))
     }

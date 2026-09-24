@@ -51,10 +51,19 @@ const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 static ADMISSION_WITNESSES: std::sync::OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =
     std::sync::OnceLock::new();
 
+mod drain_barrier;
 mod group_waits;
+mod protocol;
 mod reopen;
 mod wire;
+use drain_barrier::blocking_positions;
+pub(crate) use drain_barrier::{drained_wait_lifted, drained_wait_request};
 use group_waits::{fence_cancel_decided_completions, resolve_group_wait, wait_resolution};
+pub use protocol::EFFECT_GROUP_INDEX_PROTOCOL_VERSION;
+pub(crate) use protocol::protocol_refusal_in;
+#[cfg(test)]
+pub(crate) use protocol::protocol_retired_error;
+use protocol::{load_index, load_index_shared};
 pub(crate) use reopen::content_checked_shape_mismatch;
 pub(crate) use wire::btree_map_as_pairs;
 pub use wire::{
@@ -308,11 +317,28 @@ pub enum EffectGroupCommitChildResponse {
     Retired,
 }
 
-/// The §5 barrier read: whether any sibling committed below `commit_seq`
-/// still owes its settlement seat.
+/// The §5 barrier read: which siblings committed below `commit_seq` still owe
+/// their settlement seats.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupDrainBlockedRequest {
+pub struct EffectGroupDrainBlockersRequest {
     pub commit_seq: u64,
+}
+
+/// The §5 barrier as the index sees it for one committed child.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EffectGroupDrainBlockersResponse {
+    /// No sibling below the caller still owes its seat. An absent or retired
+    /// group holds no committed children, so it answers this too.
+    Admitted,
+    /// These lower-commit siblings still owe their seats. Each resolves its
+    /// drained wake under the group's retained `wait_scope` when it seats, so
+    /// the caller builds the wake keys from the scope the index resolves them
+    /// under rather than re-deriving it.
+    Blocked {
+        wait_scope: ExecutionScope,
+        positions: Vec<usize>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -541,24 +567,6 @@ fn phase(lifecycle: &EffectGroupLifecycle) -> EffectGroupPhase {
     }
 }
 
-async fn load_index(
-    ctx: &ObjectContext<'_>,
-) -> Result<Option<EffectGroupIndexRecord>, TerminalError> {
-    Ok(ctx
-        .get::<Json<EffectGroupIndexRecord>>(INDEX_STATE_KEY)
-        .await?
-        .map(|Json(record)| record))
-}
-
-async fn load_index_shared(
-    ctx: &SharedObjectContext<'_>,
-) -> Result<Option<EffectGroupIndexRecord>, TerminalError> {
-    Ok(ctx
-        .get::<Json<EffectGroupIndexRecord>>(INDEX_STATE_KEY)
-        .await?
-        .map(|Json(record)| record))
-}
-
 fn store_index(ctx: &ObjectContext<'_>, record: EffectGroupIndexRecord) {
     ctx.set(INDEX_STATE_KEY, Json(record));
 }
@@ -611,6 +619,7 @@ impl EffectGroupIndex {
             store_index(
                 &ctx,
                 EffectGroupIndexRecord {
+                    protocol_version: EFFECT_GROUP_INDEX_PROTOCOL_VERSION,
                     shape_digest,
                     lifecycle: EffectGroupLifecycle::Preparing {
                         dispatch: EffectGroupDispatchState::Unadopted,
@@ -949,20 +958,6 @@ impl EffectGroupIndex {
         else {
             return Ok(Json(EffectGroupCommitChildResponse::UnknownChild));
         };
-        let blocking = |live: &EffectGroupIndexLiveRecord, below: u64| {
-            live.commit_states
-                .iter()
-                .filter_map(|(position, state)| match state {
-                    EffectGroupChildCommitState::Committed { commit_seq }
-                        if *commit_seq < below
-                            && !live.settled_positions.contains_key(position) =>
-                    {
-                        Some(*position)
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        };
         match live.commit_states.get(&position).copied() {
             Some(EffectGroupChildCommitState::CancelDecided) => {
                 let rank = live
@@ -980,7 +975,7 @@ impl EffectGroupIndex {
             Some(EffectGroupChildCommitState::Committed { commit_seq }) => {
                 return Ok(Json(EffectGroupCommitChildResponse::AlreadyCommitted {
                     commit_seq,
-                    blocking_positions: blocking(live, commit_seq),
+                    blocking_positions: blocking_positions(live, commit_seq),
                 }));
             }
             None => {}
@@ -995,7 +990,7 @@ impl EffectGroupIndex {
             position,
             EffectGroupChildCommitState::Committed { commit_seq },
         );
-        let blocking_positions = blocking(live, commit_seq);
+        let blocking_positions = blocking_positions(live, commit_seq);
         store_index(&ctx, record);
         Ok(Json(EffectGroupCommitChildResponse::Committed {
             commit_seq,
@@ -1040,26 +1035,35 @@ impl EffectGroupIndex {
         }))
     }
 
-    /// Whether the §5 barrier still holds `commit_seq`: any sibling that
-    /// committed below it and has not seated its settlement. An absent or
-    /// retired group holds no committed children, so nothing blocks.
+    /// The siblings the §5 barrier still holds `commit_seq` behind: every
+    /// one that committed below it and has not seated its settlement. The
+    /// caller parks on each one's drained wake — the engine's own durable
+    /// wake, never a poll. An absent or retired group holds no committed
+    /// children, so nothing blocks.
     #[handler]
-    async fn drain_blocked(
+    async fn drain_blockers(
         &self,
         ctx: SharedObjectContext<'_>,
-        Json(request): Json<EffectGroupDrainBlockedRequest>,
-    ) -> HandlerResult<Json<bool>> {
-        let blocked = match load_index_shared(&ctx).await? {
-            Some(record) => record.live().is_ok_and(|live| {
-                live.commit_states.iter().any(|(position, state)| {
-                    matches!(state, EffectGroupChildCommitState::Committed { commit_seq }
-                        if *commit_seq < request.commit_seq)
-                        && !live.settled_positions.contains_key(position)
-                })
-            }),
-            None => false,
+        Json(request): Json<EffectGroupDrainBlockersRequest>,
+    ) -> HandlerResult<Json<EffectGroupDrainBlockersResponse>> {
+        let response = match load_index_shared(&ctx).await? {
+            Some(record) => match record.live() {
+                Ok(live) => {
+                    let positions = blocking_positions(live, request.commit_seq);
+                    if positions.is_empty() {
+                        EffectGroupDrainBlockersResponse::Admitted
+                    } else {
+                        EffectGroupDrainBlockersResponse::Blocked {
+                            wait_scope: live.shape.wait_scope.clone(),
+                            positions,
+                        }
+                    }
+                }
+                Err(_) => EffectGroupDrainBlockersResponse::Admitted,
+            },
+            None => EffectGroupDrainBlockersResponse::Admitted,
         };
-        Ok(Json(blocked))
+        Ok(Json(response))
     }
 
     #[handler]
