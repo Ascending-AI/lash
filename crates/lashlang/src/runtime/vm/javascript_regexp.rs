@@ -126,8 +126,8 @@ fn compile_regexp(pattern: &str, flags: &str) -> Result<lash_regress::Regex, las
 }
 
 #[derive(Clone)]
-struct CapturedMatch {
-    range: std::ops::Range<usize>,
+pub(super) struct CapturedMatch {
+    pub(super) range: std::ops::Range<usize>,
     captures: Vec<Option<std::ops::Range<usize>>>,
     named: Vec<(String, Option<std::ops::Range<usize>>)>,
 }
@@ -146,7 +146,7 @@ impl From<lash_regress::Match> for CapturedMatch {
     }
 }
 
-fn collect_regress_match(
+pub(super) fn collect_regress_match(
     found: Result<lash_regress::Match, lash_regress::MatchError>,
 ) -> Result<CapturedMatch, RuntimeError> {
     found.map(CapturedMatch::from).map_err(|error| match error {
@@ -277,14 +277,33 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let HeapObject::RegExpMatch(result) = self.heap.get(receiver)? else {
             return Ok(false);
         };
-        let value = javascript_regexp_match_method(method, receiver, &result.items, args)?;
+        let value =
+            javascript_regexp_match_method(&self.heap, method, receiver, &result.items, args)?;
         self.stack.push(value);
         Ok(true)
     }
 
     pub(super) fn construct_regexp(&mut self, args: &[Value]) -> Result<Value, RuntimeError> {
         let (pattern, flags) = match args {
-            [] | [Value::Undefined] => (String::new(), String::new()),
+            [] | [Value::Undefined] | [Value::Undefined, Value::Undefined] => {
+                (String::new(), String::new())
+            }
+            // A RegExp pattern clones its own source text; flags come from the
+            // RegExp itself unless an explicit flags argument overrides them
+            // (ECMA-262 RegExpAlloc/RegExpInitialize).
+            [Value::Ref(id), ..]
+                if args.len() <= 2 && matches!(self.heap.get(*id)?, HeapObject::RegExp(_)) =>
+            {
+                let HeapObject::RegExp(regexp) = self.heap.get(*id)? else {
+                    unreachable!("guard matched a RegExp heap object");
+                };
+                let pattern = regexp.pattern.clone();
+                match args.get(1) {
+                    None | Some(Value::Undefined) => (pattern, regexp.flags.clone()),
+                    Some(Value::String(flags)) => (pattern, flags.to_string()),
+                    Some(flags) => (pattern, self.heap.javascript_to_string(flags)?),
+                }
+            }
             [Value::String(pattern)] => (pattern.to_string(), String::new()),
             [Value::String(pattern), Value::Undefined] => (pattern.to_string(), String::new()),
             [Value::Undefined, Value::String(flags)] => (String::new(), flags.to_string()),
@@ -372,7 +391,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
-    fn regexp_program(&mut self, receiver: HeapId) -> Result<lash_regress::Regex, RuntimeError> {
+    pub(super) fn regexp_program(
+        &mut self,
+        receiver: HeapId,
+    ) -> Result<lash_regress::Regex, RuntimeError> {
         let (pattern, flags, cached) = match self.heap.get(receiver)? {
             HeapObject::RegExp(regexp) => (
                 regexp.pattern.clone(),
@@ -404,7 +426,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(program)
     }
 
-    fn regexp_matches(
+    pub(super) fn regexp_matches(
         &mut self,
         receiver: HeapId,
         input: &[u16],
@@ -456,14 +478,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// Grants one regexp execution its fuel, charging the instruction budget
     /// for the whole allowance first: the allowance is spent the moment it is
     /// handed out, so the link holds even for a match that never returns.
-    fn grant_regexp_fuel(&mut self) -> u64 {
+    pub(super) fn grant_regexp_fuel(&mut self) -> u64 {
         self.instructions_executed = self.instructions_executed.saturating_add(
             TYPESCRIPT_REGEXP_EXECUTION_FUEL.div_ceil(TYPESCRIPT_REGEXP_FUEL_PER_INSTRUCTION),
         );
         TYPESCRIPT_REGEXP_EXECUTION_FUEL
     }
 
-    fn first_regexp_match(
+    pub(super) fn first_regexp_match(
         &mut self,
         receiver: HeapId,
         input: &[u16],
@@ -507,7 +529,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(found)
     }
 
-    fn allocate_match_result(
+    pub(super) fn allocate_match_result(
         &mut self,
         input: &str,
         units: &[u16],
@@ -571,7 +593,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(Value::Record(Arc::new(groups)))
     }
 
-    fn exec_regexp(&mut self, receiver: HeapId, input: &str) -> Result<Value, RuntimeError> {
+    pub(super) fn exec_regexp(
+        &mut self,
+        receiver: HeapId,
+        input: &str,
+    ) -> Result<Value, RuntimeError> {
         let units = bounded_utf16_input(&self.heap, input)?;
         let (global, sticky, start) = match self.heap.get(receiver)? {
             HeapObject::RegExp(regexp) => (
@@ -618,13 +644,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let input = self.heap.javascript_to_string(input)?;
                 Value::Bool(!matches!(self.exec_regexp(*receiver, &input)?, Value::Null))
             }
-            ("match", [input, Value::Ref(receiver)]) => {
+            ("match", [input, pattern, ..]) => {
                 let input = self.heap.javascript_to_string(input)?;
-                self.string_match(&input, *receiver)?
+                let receiver = self.string_regexp_argument(pattern)?;
+                self.string_match(&input, receiver)?
             }
-            ("search", [input, Value::Ref(receiver)]) => {
+            ("search", [input, pattern, ..]) => {
                 let input = self.heap.javascript_to_string(input)?;
-                Value::Number(self.string_search(&input, *receiver)? as f64)
+                let receiver = self.string_regexp_argument(pattern)?;
+                Value::Number(self.string_search(&input, receiver)? as f64)
             }
             ("matchAll", [input, Value::Ref(receiver)]) => {
                 let input = self.heap.javascript_to_string(input)?;
@@ -662,139 +690,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         };
         self.stack.push(result);
         Ok(())
-    }
-
-    fn string_match(&mut self, input: &str, receiver: HeapId) -> Result<Value, RuntimeError> {
-        let global =
-            matches!(self.heap.get(receiver)?, HeapObject::RegExp(re) if re.flags.contains('g'));
-        if !global {
-            return self.exec_regexp(receiver, input);
-        }
-        self.heap.set_regexp_last_index(receiver, 0)?;
-        let units = bounded_utf16_input(&self.heap, input)?;
-        let matches = self.regexp_matches(receiver, &units, 0, true, None)?;
-        let mut values = Vec::new();
-        let mut pending_bytes = 16_u64;
-        for found in &matches {
-            push_utf16_range_bounded(
-                &self.heap,
-                &mut values,
-                &units,
-                found.range.clone(),
-                &mut pending_bytes,
-            )?;
-        }
-        self.heap.set_regexp_last_index(receiver, 0)?;
-        if values.is_empty() {
-            Ok(Value::Null)
-        } else {
-            Ok(Value::List(values.into()))
-        }
-    }
-
-    fn string_search(&mut self, input: &str, receiver: HeapId) -> Result<i64, RuntimeError> {
-        let units = bounded_utf16_input(&self.heap, input)?;
-        let saved = self.heap.regexp_last_index(receiver)?.unwrap_or(0);
-        let sticky =
-            matches!(self.heap.get(receiver)?, HeapObject::RegExp(re) if re.flags.contains('y'));
-        let found = self.first_regexp_match(receiver, &units, 0, sticky)?;
-        self.heap.set_regexp_last_index(receiver, saved)?;
-        Ok(found.map_or(-1, |found| found.range.start as i64))
-    }
-
-    fn string_match_all(&mut self, input: &str, receiver: HeapId) -> Result<Value, RuntimeError> {
-        let (global, unicode, sticky, start) = match self.heap.get(receiver)? {
-            HeapObject::RegExp(regexp) => (
-                regexp.flags.contains('g'),
-                regexp.flags.contains('u'),
-                regexp.flags.contains('y'),
-                regexp.last_index as usize,
-            ),
-            _ => return Err(js_stdlib_error("matchAll requires a RegExp")),
-        };
-        if !global {
-            return Err(self.regexp_type_error(
-                "String.prototype.matchAll called with a non-global RegExp argument",
-            ));
-        }
-        let units = bounded_utf16_input(&self.heap, input)?;
-        let fuel = self.grant_regexp_fuel();
-        let program = self.regexp_program(receiver)?;
-        if unicode && sticky {
-            self.collect_match_all_values(
-                input,
-                &units,
-                program.try_find_from_utf16_anchored(&units, start, fuel),
-                unicode,
-                sticky,
-                start,
-            )
-        } else if unicode {
-            self.collect_match_all_values(
-                input,
-                &units,
-                program.try_find_from_utf16(&units, start, fuel),
-                unicode,
-                sticky,
-                start,
-            )
-        } else if sticky {
-            self.collect_match_all_values(
-                input,
-                &units,
-                program.try_find_from_ucs2_anchored(&units, start, fuel),
-                unicode,
-                sticky,
-                start,
-            )
-        } else {
-            self.collect_match_all_values(
-                input,
-                &units,
-                program.try_find_from_ucs2(&units, start, fuel),
-                unicode,
-                sticky,
-                start,
-            )
-        }
-    }
-
-    fn collect_match_all_values<I>(
-        &mut self,
-        input: &str,
-        units: &[u16],
-        matches: I,
-        unicode: bool,
-        sticky: bool,
-        start: usize,
-    ) -> Result<Value, RuntimeError>
-    where
-        I: Iterator<Item = Result<lash_regress::Match, lash_regress::MatchError>>,
-    {
-        let mut values = Vec::new();
-        let mut expected = start;
-        for found in matches {
-            let found = collect_regress_match(found)?;
-            if sticky && found.range.start != expected {
-                break;
-            }
-            self.heap.ensure_additional_logical_bytes(
-                16_u64.saturating_add((values.len() as u64 + 1).saturating_mul(24)),
-            )?;
-            values
-                .try_reserve_exact(1)
-                .map_err(|_| RuntimeError::MemoryLimitExceeded {
-                    limit: DEFAULT_HEAP_LOGICAL_BYTE_LIMIT,
-                    attempted: u64::MAX,
-                })?;
-            expected = if found.range.is_empty() {
-                advance_string_index(units, found.range.end, unicode)
-            } else {
-                found.range.end
-            };
-            values.push(self.allocate_match_result(input, units, &found)?);
-        }
-        Ok(Value::List(values.into()))
     }
 
     fn string_split(
@@ -1165,7 +1060,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         utf16_value(output)
     }
 
-    fn regexp_type_error(&mut self, message: &str) -> RuntimeError {
+    pub(super) fn regexp_type_error(&mut self, message: &str) -> RuntimeError {
         match self
             .heap
             .allocate_error(ErrorKind::TypeError, Some(message.to_string()), None, None)
@@ -1237,7 +1132,7 @@ fn regexp_match_allocation_bytes(
     Ok(groups_bytes.saturating_add(match_bytes))
 }
 
-fn bounded_utf16_input(heap: &Heap, input: &str) -> Result<Vec<u16>, RuntimeError> {
+pub(super) fn bounded_utf16_input(heap: &Heap, input: &str) -> Result<Vec<u16>, RuntimeError> {
     let units = input.encode_utf16().count();
     let bytes = units
         .checked_mul(std::mem::size_of::<u16>())
@@ -1254,7 +1149,7 @@ fn bounded_utf16_input(heap: &Heap, input: &str) -> Result<Vec<u16>, RuntimeErro
     Ok(output)
 }
 
-fn push_utf16_range_bounded(
+pub(super) fn push_utf16_range_bounded(
     heap: &Heap,
     output: &mut Vec<Value>,
     units: &[u16],
@@ -1320,7 +1215,7 @@ fn to_uint32(number: f64) -> u32 {
     number.trunc().rem_euclid(4_294_967_296.0) as u32
 }
 
-fn advance_string_index(input: &[u16], index: usize, unicode: bool) -> usize {
+pub(super) fn advance_string_index(input: &[u16], index: usize, unicode: bool) -> usize {
     if !unicode || index + 1 >= input.len() {
         return index.saturating_add(1);
     }

@@ -705,6 +705,37 @@ impl Heap {
         self.commit_object_update(id, object)
     }
 
+    /// Whether ECMA would coerce `value` through a guest-written method: a
+    /// plain object carrying its own callable `toString` or `valueOf` has no
+    /// substrate answer, because OrdinaryToPrimitive runs that method. Sites
+    /// that would otherwise silently coerce to a type tag or `NaN` check this
+    /// and refuse instead (FIG-3658).
+    pub(crate) fn javascript_object_coercion_needs_guest(
+        &self,
+        value: &Value,
+    ) -> Result<bool, RuntimeError> {
+        let record = match value {
+            Value::Record(record) => Some(record.as_ref()),
+            Value::Ref(id) => match self.get(*id)? {
+                HeapObject::Record(record) => Some(record.as_ref()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(record) = record else {
+            return Ok(false);
+        };
+        for name in ["toString", "valueOf"] {
+            if let Some(member) = record.get(name)
+                && let Value::Ref(id) = member
+                && matches!(self.get(*id)?, HeapObject::Closure { .. })
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// This is the ECMA-exact conversion: an object with no string of its own
     /// answers `"[object Object]"`. Property keys, `console.log`'s fallback
     /// text and `Map.prototype.toString` all ask for exactly that. The string

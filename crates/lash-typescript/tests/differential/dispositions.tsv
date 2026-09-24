@@ -56,3 +56,8 @@
 "({a:1}).b"	accept-unlinked	TS_LINK_ERROR
 "({a:1}).missing"	accept-unlinked	TS_LINK_ERROR
 "(() => { const o = { a: 1, b: 2 }; return `${o.c}`; })()"	accept-unlinked	TS_LINK_ERROR
+# FIG-3658: ToString/ToIntegerOrInfinity on an object whose own toString or
+# valueOf would answer means running guest code inside a builtin, which this
+# value model cannot do — refused by name rather than silently coerced.
+"'AB'.match({ toString: function() { return 'AB'; } })"	runtime-reject	TS_OBJECT_STRING_COERCION
+"[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	runtime-reject	TS_OBJECT_STRING_COERCION

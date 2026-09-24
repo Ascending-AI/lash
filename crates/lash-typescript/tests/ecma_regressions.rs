@@ -1092,6 +1092,43 @@ fn array_last_index_of_distinguishes_omitted_from_explicit_undefined() {
     );
 }
 
+/// FIG-3658: on a heap-held array the search trio compare members by live
+/// heap identity — a RegExp needle finds the RegExp member and no other —
+/// while a `fromIndex` whose coercion would run a guest `toString`/`valueOf`
+/// refuses rather than silently reading `NaN`.
+#[test]
+fn array_searches_keep_reference_identity_and_refuse_guest_from_index() {
+    assert_eq!(
+        finished("const r=/x/; finish([0,true,r,3,false].lastIndexOf(r,2));"),
+        Value::Number(2.0)
+    );
+    assert_eq!(
+        finished("const r=/x/; finish([0,true,3,r,false].lastIndexOf(r,2));"),
+        Value::Number(-1.0)
+    );
+    // Same shape, different object: identity, not structure.
+    assert_eq!(
+        finished("finish([0,/x/,3].indexOf(/x/));"),
+        Value::Number(-1.0)
+    );
+    assert_eq!(
+        finished("const r=/x/; finish([[r],r].includes(r));"),
+        Value::Bool(true)
+    );
+    let error =
+        execute("finish([0,1,2].lastIndexOf(2, { toString: function() { return '2'; } }));")
+            .expect_err("a fromIndex with a guest toString must refuse");
+    assert!(
+        error.to_string().contains("TS_OBJECT_STRING_COERCION"),
+        "the refusal is the named one: {error}"
+    );
+    // An object with no coercion methods has only a type tag for ECMA: NaN.
+    assert_eq!(
+        finished("finish([0,1,2].lastIndexOf(2, {}));"),
+        Value::Number(-1.0)
+    );
+}
+
 /// `flat`'s default depth is 1 whether the argument is omitted or written as
 /// `undefined`: normalization pads the call to `[undefined]`, and reading the
 /// padding through `ToNumber` used to produce NaN — a depth of zero that

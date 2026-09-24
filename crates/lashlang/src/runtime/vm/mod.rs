@@ -21,6 +21,7 @@ mod javascript_json;
 mod javascript_operators;
 pub(crate) mod javascript_regexp;
 mod javascript_stdlib;
+mod javascript_string_regexp;
 mod javascript_substrate;
 mod javascript_url;
 mod pending_tools;

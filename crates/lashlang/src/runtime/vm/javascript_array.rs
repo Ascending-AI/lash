@@ -1,8 +1,13 @@
 use super::super::javascript::javascript_to_number;
 use super::javascript::js_stdlib_error;
+use super::javascript_stdlib::{
+    array_includes, array_index_of, array_last_index_of, clamp_relative_index,
+    last_index_exclusive, normalized_instance_arguments, search_index_argument,
+};
 use super::*;
 
 pub(super) fn javascript_array_method_for_value(
+    heap: &Heap,
     method: &str,
     target: &Value,
     items: &[Value],
@@ -13,13 +18,14 @@ pub(super) fn javascript_array_method_for_value(
         // guest code.
         return Ok(target.clone());
     }
-    super::javascript::javascript_array_method(method, items, args)
+    super::javascript::javascript_array_method(heap, method, items, args)
 }
 
 /// A regexp match is array-shaped to JavaScript, so its method dispatch lives
 /// beside ordinary array methods while this helper preserves heap identity for
 /// `valueOf`.
 pub(super) fn javascript_regexp_match_method(
+    heap: &Heap,
     method: &str,
     receiver: HeapId,
     items: &[Value],
@@ -28,7 +34,7 @@ pub(super) fn javascript_regexp_match_method(
     if method == "valueOf" && args.is_empty() {
         return Ok(Value::Ref(receiver));
     }
-    super::javascript::javascript_array_method(method, items, args)
+    super::javascript::javascript_array_method(heap, method, items, args)
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -41,6 +47,34 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let HeapObject::List(current) = self.heap.get(receiver)? else {
             return Ok(false);
         };
+        // The search trio only read the vector, so they run on the live heap
+        // values: a needle or member that is a reference — a RegExp, say —
+        // compares by heap identity here where the value path would have to
+        // detach it across the host boundary (FIG-3658).
+        if matches!(method, "indexOf" | "includes" | "lastIndexOf") {
+            let argument_count = args.len();
+            let args = normalized_instance_arguments(method, args);
+            let (needle, from) = (args[0].clone(), args[1].clone());
+            let result = if method == "lastIndexOf" && argument_count < 2 {
+                array_last_index_of(current, &needle, current.len())
+            } else {
+                let from = search_index_argument(&self.heap, &from)?;
+                match method {
+                    "includes" => {
+                        array_includes(current, &needle, clamp_relative_index(from, current.len()))
+                    }
+                    "indexOf" => {
+                        array_index_of(current, &needle, clamp_relative_index(from, current.len()))
+                    }
+                    _ => last_index_exclusive(from, current.len())
+                        .map_or(Ok(Value::Number(-1.0)), |end| {
+                            array_last_index_of(current, &needle, end)
+                        }),
+                }
+            }?;
+            self.stack.push(result);
+            return Ok(true);
+        }
         // `push` is the one array method a program runs once per loop
         // iteration, so it is the one that must not rebuild the array. It
         // grows the vector the heap already owns instead of cloning it, and

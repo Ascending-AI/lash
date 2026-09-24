@@ -479,3 +479,308 @@ fn the_regexp_charge_is_the_documented_ratio() {
         "one regexp call must cost at least the documented charge of {per_call}"
     );
 }
+
+/// FIG-3658: a name shared by capture groups in disjoint alternatives is one
+/// logical group. A backreference to it consults whichever group participated
+/// — matching the empty string when none did — and `groups.name` answers the
+/// participating group's text.
+#[test]
+fn duplicate_named_groups_match_through_whichever_alternative_participated() {
+    let cases = [
+        (
+            "finish(/(?<x>a)|(?<x>b)/.exec('bab').slice(0,3).join('|'));",
+            "b||b",
+        ),
+        (
+            "finish(/(?<x>b)|(?<x>a)/.exec('bab').slice(0,3).join('|'));",
+            "b|b|",
+        ),
+        (
+            "finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('aa').slice(0,3).join('|'));",
+            "aa|a|",
+        ),
+        (
+            "finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('bb').slice(0,3).join('|'));",
+            "bb||b",
+        ),
+        (
+            "finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('abab') === null ? 'null' : 'found');",
+            "null",
+        ),
+        (
+            "finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.exec('cdef') === null ? 'null' : 'found');",
+            "null",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z)\\k<a>$/.exec('xx').slice(0,3).join('|'));",
+            "xx|x|",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z)\\k<a>$/.exec('z').slice(0,3).join('|'));",
+            "z||",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z)\\k<a>$/.exec('zz') === null ? 'null' : 'found');",
+            "null",
+        ),
+        (
+            "finish(/(?<a>x)|(?:zy\\k<a>)/.exec('zy').slice(0,2).join('|'));",
+            "zy|",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.exec('xz').slice(0,3).join('|'));",
+            "xz||",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.exec('yz').slice(0,3).join('|'));",
+            "yz||",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.exec('xzx') === null ? 'null' : 'found');",
+            "null",
+        ),
+        (
+            "finish(/^(?:(?<a>x)|(?<a>y)|z){2}\\k<a>$/.exec('yzy') === null ? 'null' : 'found');",
+            "null",
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+    assert_eq!(
+        finished(
+            "const m=/(?:(?:(?<x>a)|(?<x>b))\\k<x>){2}/.exec('aabb'); finish([m[0],m[1],m[2],m.groups.x]);"
+        ),
+        Value::List(
+            vec![
+                Value::String("aabb".into()),
+                Value::Undefined,
+                Value::String("b".into()),
+                Value::String("b".into()),
+            ]
+            .into()
+        )
+    );
+    assert!(matches!(
+        execute("finish(/(?:(?<x>a)|(?<x>b))\\k<x>/.test('abab'))"),
+        Ok(ExecutionOutcome::Finished(Value::Bool(false)))
+    ));
+}
+
+/// FIG-3658: `(?i:`/`(?-i:` scope ignoreCase to the group — backreferences,
+/// `\b`/`\B`, `\w` and `\p` all read the flag in force at their own position —
+/// and `(?s:`/`(?-s:`/`(?m:`/`(?-m:` scope `dotAll`/`multiline` the same way.
+#[test]
+fn regexp_modifiers_scope_flags_to_their_group() {
+    // Local `i` folds a backreference's comparison; nothing else changes.
+    let re1 = "/(a)(?i:\\1)/";
+    for (input, expected) in [("AA", false), ("Aa", false), ("aa", true), ("aA", true)] {
+        assert_eq!(
+            finished(&format!("finish({re1}.test('{input}'));")),
+            Value::Bool(expected),
+            "{re1} vs {input}"
+        );
+    }
+    // Local `-i` preserves a case-sensitive backreference under a global `i`.
+    let re2 = "/(a)(?-i:\\1)/i";
+    for (input, expected) in [("AA", true), ("aA", false), ("Aa", false), ("aa", true)] {
+        assert_eq!(
+            finished(&format!("finish({re2}.test('{input}'));")),
+            Value::Bool(expected),
+            "{re2} vs {input}"
+        );
+    }
+    // `\b`/`\B` under local `i` + `u` use the Unicode fold: ſ and K count as
+    // word characters inside the group only.
+    assert_eq!(
+        finished(
+            "finish([/(?i:\\b)/u.test('\\u017f'),/(?i:\\b)/u.test('\\u212a'),/(?-i:\\b)/ui.test('\\u017f'),/(?-i:\\b)/ui.test('\\u212a'),/(?i:Z\\B)/u.test('Z\\u017f'),/(?i:Z\\B)/u.test('Z\\u212a'),/(?-i:Z\\B)/ui.test('Z\\u017f'),/(?-i:Z\\B)/ui.test('Z\\u212a'),/(?i:\\w)/u.test('\\u017f'),/(?-i:\\w)/iu.test('\\u017f')]);"
+        ),
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+    // `\p` under local `i` closes over case folds; `\P` negates the raw set
+    // first, so both a and A answer.
+    assert_eq!(
+        finished(
+            "finish([/(?i:\\p{Lu})/u.test('a'),/(?i:\\p{Lu})/u.test('\\u03c3'),/(?-i:\\p{Lu})/iu.test('a'),/(?i:\\P{Lu})/u.test('A'),/(?i:\\P{Lu})/u.test('a')]);"
+        ),
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(true),
+            ]
+            .into()
+        )
+    );
+    // `(?s:` widens `.` inside the group only and `(?m:`/`(?-m:` scope `^`/`$`
+    // the same way.
+    assert_eq!(
+        finished(
+            "finish([/(?s:.)/.test('\\n'),/(?m:^b$)/.test('a\\nb'),/(?-m:^b$)/m.test('a\\nb')]);"
+        ),
+        Value::List(vec![Value::Bool(true), Value::Bool(true), Value::Bool(false)].into())
+    );
+}
+
+/// FIG-3658: `new RegExp(regexp)` clones the pattern's own source and flags;
+/// an explicit flags argument overrides them, and `undefined` flags — spelled
+/// or defaulted — inherit the pattern's (ECMA-262 RegExpInitialize).
+#[test]
+fn regexp_constructor_clones_regexp_patterns() {
+    assert_eq!(
+        finished(
+            "const p=/./i; const r=new RegExp(p); finish([r.source,r.ignoreCase,r.global,r.multiline]);"
+        ),
+        Value::List(
+            vec![
+                Value::String(".".into()),
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished(
+            "const p=/\\t/m; let x; const r=new RegExp(p,x); finish([r.source,r.multiline,r.global]);"
+        ),
+        Value::List(
+            vec![
+                Value::String("\\t".into()),
+                Value::Bool(true),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished("const r=new RegExp(new RegExp(),'g'); finish([r.source,r.global,r.ignoreCase]);"),
+        Value::List(
+            vec![
+                Value::String("(?:)".into()),
+                Value::Bool(true),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+    assert_eq!(
+        finished("const r=new RegExp(new RegExp('a','gi'),undefined); finish(r.flags);"),
+        Value::String("gi".into())
+    );
+    assert_eq!(
+        finished("const p=/a+/; const r=new RegExp(p,'y'); finish([r.source,r.flags]);"),
+        Value::List(vec![Value::String("a+".into()), Value::String("y".into())].into())
+    );
+}
+
+/// FIG-3658: a RegExp instance has no [[Call]], so calling one raises a
+/// catchable TypeError — `e instanceof TypeError` must hold in the guest.
+#[test]
+fn calling_a_regexp_instance_throws_a_catchable_type_error() {
+    assert_eq!(
+        finished(
+            "let verdict='uncaught'; try { /[^a]*/(); } catch (e) { verdict = e instanceof TypeError; } finish(verdict);"
+        ),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        finished(
+            "let name='none'; try { new RegExp('x')(); } catch (e) { name = e.name; } finish(name);"
+        ),
+        Value::String("TypeError".into())
+    );
+}
+
+/// FIG-3658: `dotAll` reports the RegExp's own `s` flag — a local `(?-s:`
+/// group narrows `.` without touching the flag the property reads.
+#[test]
+fn regexp_dotall_property_reports_the_outer_flag() {
+    assert_eq!(
+        finished("finish([/a./s.dotAll,/a./.dotAll,/(?-s:^.$)/s.dotAll,/(?s:.)/.dotAll]);"),
+        Value::List(
+            vec![
+                Value::Bool(true),
+                Value::Bool(false),
+                Value::Bool(true),
+                Value::Bool(false),
+            ]
+            .into()
+        )
+    );
+}
+
+/// FIG-3658: `match`/`search` run RegExpCreate on a non-RegExp argument —
+/// `undefined` (or no argument) is the empty pattern, other primitives coerce
+/// through ToString, extra arguments are ignored — and an object whose own
+/// `toString`/`valueOf` would answer is refused rather than silently compiled.
+#[test]
+fn match_and_search_coerce_non_regexp_arguments() {
+    assert_eq!(
+        finished("finish('gnulluna'.match(null)[0]);"),
+        Value::String("null".into())
+    );
+    assert_eq!(
+        finished("finish('gnulluna'.search(null));"),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        finished("finish(String('undefined').search(undefined));"),
+        Value::Number(0.0)
+    );
+    assert_eq!(
+        finished("const m='1234567890'.match(3); finish([m[0],m.length,m.index,m.input]);"),
+        Value::List(
+            vec![
+                Value::String("3".into()),
+                Value::Number(1.0),
+                Value::Number(2.0),
+                Value::String("1234567890".into()),
+            ]
+            .into()
+        )
+    );
+    // Extra arguments are ignored and an absent argument is `undefined`.
+    assert_eq!(
+        finished("finish(['abc'.search('b','ignored'),'abc'.match().length,'abc'.match()[0]]);"),
+        Value::List(
+            vec![
+                Value::Number(1.0),
+                Value::Number(1.0),
+                Value::String("".into()),
+            ]
+            .into()
+        )
+    );
+    // A RegExp argument is used as-is, not recompiled from its source text.
+    assert_eq!(
+        finished("finish('xBy'.match(/b/i)[0]);"),
+        Value::String("B".into())
+    );
+    // An object whose own methods would answer ToString must refuse: the
+    // dialect cannot run guest code inside the coercion.
+    let error = execute("finish('AB'.match({ toString: function() { return 'AB'; } }));")
+        .expect_err("an object with a guest toString must refuse");
+    assert!(
+        error.to_string().contains("TS_OBJECT_STRING_COERCION"),
+        "the refusal is the named one: {error}"
+    );
+}

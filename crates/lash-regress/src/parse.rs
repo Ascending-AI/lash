@@ -551,12 +551,18 @@ where
                         // Term :: Assertion :: \b
                         'b' => {
                             self.consume('b');
-                            result.push(ir::Node::WordBoundary { invert: false });
+                            result.push(ir::Node::WordBoundary {
+                                invert: false,
+                                icase: self.flags.icase,
+                            });
                         }
                         // Term :: Assertion :: \B
                         'B' => {
                             self.consume('B');
-                            result.push(ir::Node::WordBoundary { invert: true });
+                            result.push(ir::Node::WordBoundary {
+                                invert: true,
+                                icase: self.flags.icase,
+                            });
                         }
                         // Term :: Atom :: \ AtomEscape :: CharacterEscape :: c AsciiLetter
                         // Term :: ExtendedAtom :: \ [lookahead = c]
@@ -1619,10 +1625,18 @@ where
                 let property_escape = self.try_consume_unicode_property_escape()?;
                 match property_escape {
                     PropertyEscapeKind::CharacterClass(s) => {
-                        Ok(ir::Node::Bracket(BracketContents {
-                            invert: negate,
-                            cps: CodePointSet::from_sorted_disjoint_intervals(s.to_vec()),
-                        }))
+                        // Unlike \w and friends, \P negates the raw property
+                        // set before case folding applies: under ignoreCase a
+                        // character matches iff its fold is reachable from the
+                        // (already complemented) set.
+                        let mut cps = CodePointSet::from_sorted_disjoint_intervals(s.to_vec());
+                        if negate {
+                            cps = cps.inverted();
+                        }
+                        if self.flags.icase {
+                            cps = unicode::add_icase_code_points(cps);
+                        }
+                        Ok(ir::Node::Bracket(BracketContents { invert: false, cps }))
                     }
                     PropertyEscapeKind::StringSet(_) if negate => error("Invalid character escape"),
                     PropertyEscapeKind::StringSet(strings) => Ok(make_alt(
@@ -1648,7 +1662,10 @@ where
             '1'..='9' if self.flags.unicode => {
                 let group = self.try_consume_decimal_integer_literal().unwrap();
                 if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef(group as u32))
+                    Ok(ir::Node::BackRef {
+                        groups: vec![group as u32],
+                        icase: self.flags.icase,
+                    })
                 } else {
                     error("Invalid character escape")
                 }
@@ -1662,7 +1679,10 @@ where
                 let group = self.try_consume_decimal_integer_literal().unwrap();
 
                 if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef(group as u32))
+                    Ok(ir::Node::BackRef {
+                        groups: vec![group as u32],
+                        icase: self.flags.icase,
+                    })
                 } else {
                     self.input = input;
                     let c = self.consume_character_escape()?;
@@ -1690,25 +1710,12 @@ where
                     ));
                 };
                 // Note backreferences are 1-based.
-                let node = match group_indices.len() {
-                    0 => unreachable!("Should not have empty indices for group name"),
-                    1 => {
-                        // Common case of a backref matching a single group.
-                        ir::Node::BackRef(group_indices[0] + 1)
-                    }
-                    _ => {
-                        // Unusual case of multiple groups sharing a name: the backref should try each in turn.
-                        // Lower to alternations of backreferences. Reverse to keep it right-associative: a | (b | (c | d))...
-                        let backrefs = group_indices
-                            .iter()
-                            .rev()
-                            .map(|group_index| ir::Node::BackRef(*group_index + 1));
-                        backrefs
-                            .reduce(|right, left| ir::Node::Alt(Box::new(left), Box::new(right)))
-                            .unwrap()
-                    }
-                };
-                Ok(node)
+                // Multiple groups may share the name in disjoint alternations;
+                // the backreference then tries whichever groups participated.
+                Ok(ir::Node::BackRef {
+                    groups: group_indices.iter().map(|index| index + 1).collect(),
+                    icase: self.flags.icase,
+                })
             }
 
             // [~NamedCaptureGroups] k GroupName

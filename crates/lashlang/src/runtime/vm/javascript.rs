@@ -433,7 +433,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.stack.push(Value::List(elements.into()));
             return Ok(());
         }
-        let result = javascript_stdlib(&values)?;
+        let result = javascript_stdlib(&self.heap, &values)?;
         if let Value::String(value) = &result {
             ensure_javascript_string_size(value.len())?;
         }
@@ -783,7 +783,7 @@ fn javascript_json_has_cycle(
     Ok(false)
 }
 
-fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
+fn javascript_stdlib(heap: &Heap, values: &[Value]) -> Result<Value, RuntimeError> {
     let Some(Value::String(method)) = values.first() else {
         return Err(js_stdlib_error("missing method discriminator"));
     };
@@ -802,7 +802,7 @@ fn javascript_stdlib(values: &[Value]) -> Result<Value, RuntimeError> {
     match target {
         Value::String(value) => javascript_string_method(method, value, args),
         Value::List(items) | Value::Tuple(items) => {
-            javascript_array_method_for_value(method, target, items.as_ref(), args)
+            javascript_array_method_for_value(heap, method, target, items.as_ref(), args)
         }
         Value::Number(value) => javascript_number_method(method, *value, args),
         // Reading a member of `null`/`undefined` is an ECMA `TypeError` about
@@ -1279,6 +1279,7 @@ pub(super) fn javascript_string_method(
 }
 
 pub(super) fn javascript_array_method(
+    heap: &Heap,
     method: &str,
     items: &[Value],
     args: &[Value],
@@ -1313,18 +1314,18 @@ pub(super) fn javascript_array_method(
         ("includes", [needle, from]) => array_includes(
             items,
             needle,
-            clamp_relative_index(javascript_to_number(from), items.len()),
+            clamp_relative_index(search_index_argument(heap, from)?, items.len()),
         ),
         ("indexOf", [needle, from]) => array_index_of(
             items,
             needle,
-            clamp_relative_index(javascript_to_number(from), items.len()),
+            clamp_relative_index(search_index_argument(heap, from)?, items.len()),
         ),
         ("lastIndexOf", [needle, Value::Undefined]) if argument_count < 2 => {
             array_last_index_of(items, needle, items.len())
         }
         ("lastIndexOf", [needle, from]) => {
-            last_index_exclusive(javascript_to_number(from), items.len())
+            last_index_exclusive(search_index_argument(heap, from)?, items.len())
                 .map_or(Ok(Value::Number(-1.0)), |end| {
                     array_last_index_of(items, needle, end)
                 })
