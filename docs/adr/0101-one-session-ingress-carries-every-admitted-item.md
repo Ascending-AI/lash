@@ -39,6 +39,15 @@ implemented**: FIG-3600 builds it inside the FIG-3540 cutover series, after
 FIG-3585. Where the amendment and an earlier section disagree, the amendment
 wins; the passages it overrides carry a short note.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: ingress claims fenced by the session-execution
+lease, and the in-process work driver on SQLite and PostgreSQL (A1); per-session
+serialized execution becomes an engine obligation. Those passages stay as
+written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
+the session lease) rewrites them.
+
 ## Context
 
 Lash feeds turns from two durable queues. `pending_turn_inputs` holds host

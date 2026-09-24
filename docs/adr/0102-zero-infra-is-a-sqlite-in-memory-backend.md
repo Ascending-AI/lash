@@ -2,6 +2,9 @@
 
 ## Status
 
+Superseded by [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+(FIG-3669, 2026-09-24). See "What 0104 kept" at the end of this ADR.
+
 Accepted 2026-09-23 (FIG-3574) as the design freeze for arc FIG-3573. **Not yet
 implemented**: FIG-3575 through FIG-3584 build it, and FIG-3585 is the cut that
 deletes the superseded code and rewrites the passages listed at the end. Nothing
@@ -236,3 +239,34 @@ that deletes what they describe.
 - ADR 0025:12, 24, 50, 57, 84.
 - ADR 0094:246.
 - ADR 0012:74, ADR 0065:46, 146 and 504, ADR 0047:78.
+
+## What 0104 kept
+
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. Lash owns
+no effect engine, so zero-infra cannot be a lash engine over SQLite.
+
+**Dead.** D3: zero-infra is a local `restate-server` or `restate dev`, not a
+SQLite in-memory backend. SQLite and PostgreSQL stop being backends: each
+supplies a storage-only `StoreSet`, and a backend is the Restate engine over one.
+With them go `SqliteBackend::memory()` as the zero-infra entry point, the
+memory backend's completion-key lifetime, and D4's rule that the in-process
+worker drivers stay: no store is left for them to claim from. The *Conformance*
+section moves to the `lash-restate-test` runtime; lash-sim's memory world goes
+with the SQL worlds. A `memdb` SQLite store set may remain as test storage. It
+is a store set, never a backend with an engine, so the reader-blocks-writer
+risk above binds only storage paths.
+
+**Alive.** D1: every host journals, and the one engine does. D2: a backend is
+one value, now an effect engine plus a storage-only store set, with no mixed sets and no ports
+assembled by hand. The runtime builder takes it as a required argument, and no
+in-memory default exists anywhere. The kernel names no concrete store and no
+concrete engine, and the crate-graph rule stands. Failure settlement is
+classified by cause. The `sqlite` feature stays optional with no default. The
+Lashlang artifact port stays with the storage: the store set supplies it.
+The PostgreSQL store set still takes its attachment backend at construction.
+FIG-3585 still deletes the native host, `lash-core-memory`, `EffectJournaling`
+and store-delegated turn control, and still rewrites the passages listed under
+*Superseded by this ADR on landing of FIG-3585*. FIG-3584 moves conformance,
+lash-sim and lash-perf onto `lash-restate-test` instead of the SQLite memory
+backend.

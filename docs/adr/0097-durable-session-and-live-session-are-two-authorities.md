@@ -10,6 +10,14 @@ pending-input and queued-work reads, cancels and abandons become one set over
 Session Ingress items, and batch ids become item ids, with no aliases. The split
 between the two authorities is unchanged.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: the live session's Session Execution Lease; the
+split between the two authorities stays. Those passages stay as written until
+the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the session
+lease) rewrites them.
+
 ## Context
 
 Reaching a session's durable queue required `LashSession`, and the only way to

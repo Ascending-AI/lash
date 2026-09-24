@@ -35,6 +35,15 @@ of which carries the matching amendment and links here. Supersedes FIG-1416
 ruling 3 for unfinished tool execution at normal opener end, and for nothing
 else.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: the `EffectReplayRowStore` group operations, the
+SQL tiers' finalization, the store drain and the SQL crash windows; the
+lifecycle contract stays, as an engine obligation. Those passages stay as
+written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
+the session lease) rewrites them.
+
 ## Context
 
 [ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-host-seam.md)

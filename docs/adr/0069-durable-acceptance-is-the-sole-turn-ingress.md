@@ -42,6 +42,14 @@ redrive cedes with `accepted_turn_input_ceded` and commits nothing. ADR 0029's
 recovered-settlement drop, which section 5(d) and section 6 refer to, is
 deleted.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: claiming accepted input under the
+session-execution lease. Those passages stay as written until the PR that
+deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the session lease)
+rewrites them.
+
 ## Context
 
 Lash has two ways to start a turn, and they disagree about what durably exists.

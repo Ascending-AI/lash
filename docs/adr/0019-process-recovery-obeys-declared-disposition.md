@@ -4,6 +4,15 @@
 
 accepted
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: lease-validated completion
+(`complete_process_with_lease`) and recovery after a lapsed process lease; the
+declared disposition itself stays and the engine applies it. Those passages stay
+as written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600
+for the session lease) rewrites them.
+
 ## Decision
 
 Every process registration declares a **Recovery Disposition** — a required

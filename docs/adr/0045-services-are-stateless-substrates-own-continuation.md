@@ -1,5 +1,14 @@
 # Services are stateless; substrates own continuation
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour in *The reference substrate*, which makes lash
+the substrate over the SQL stores, with its own redrive and worker retry
+budget. *Conformance is the contract* stands, and now binds the one engine and
+any later one. Those passages stay as written until the PR that deletes the
+code (FIG-3667, FIG-3668, or FIG-3600 for the session lease) rewrites them.
+
 A lash service instance is stateless with respect to correctness. In-memory
 state exists — a turn mid-stream, watch hubs, caches — but none of it may be
 load-bearing across an effect boundary. Every committed step lives in the

@@ -26,6 +26,14 @@ Restate group children `call` children. FIG-3394 folded the occurrence ordinal
 into `batch_id`, so the group key has no separate occurrence segment. The
 affected clauses carry inline notes.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: the SQL tiers' group rows, finalization and
+store drain; the group contract stays, as an engine obligation. Those passages
+stay as written until the PR that deletes the code (FIG-3667, FIG-3668, or
+FIG-3600 for the session lease) rewrites them.
+
 ## Context
 
 A tool batch has been one atomic effect: `call_tool_batch` built a single

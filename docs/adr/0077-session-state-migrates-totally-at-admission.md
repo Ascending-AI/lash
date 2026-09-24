@@ -12,6 +12,14 @@ cutover advances `session_state_version` from 2 to 3 with no converter step and
 an oldest supported version of 3, so an older session is refused at admission,
 not migrated.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: admission under the SQL session-execution lease;
+total migration at admission stays. Those passages stay as written until the PR
+that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for the session lease)
+rewrites them.
+
 ## Context
 
 Lash has exact format counters for individual mutable records: the checkpoint

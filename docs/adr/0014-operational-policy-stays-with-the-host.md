@@ -13,6 +13,14 @@ a defaulted, fallible per-factory release seam through `LashCore::shutdown()` is
 in. An orchestrating drain remains out; intake, ordering, deadlines, active-turn
 handling, and other host policy do not move into Lash.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: the session-execution, effect-replay and process
+leases under *Lease Timings* and *Failover parity*. Those passages stay as
+written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
+the session lease) rewrites them.
+
 ## Decision
 
 Lash ships no shutdown or drain orchestrator. Operational policy — when to stop

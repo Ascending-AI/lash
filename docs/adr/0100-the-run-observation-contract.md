@@ -20,6 +20,13 @@ The source investigation is
 `/workspace/notes/lash/prospect-viz-2026-09-21.md`. Its replay-scope check is
 `/workspace/notes/lash/prospect-viz-arc/verify-R0-replay-scope.md`.
 
+Amended 2026-09-24 (FIG-3669), **not yet implemented**:
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
+makes Restate the only effect engine and the SQL stores storage only. This ADR
+specifies SQL-engine behaviour: SQL effect replay rows keyed by scope and replay
+key. Those passages stay as written until the PR that deletes the code
+(FIG-3667, FIG-3668, or FIG-3600 for the session lease) rewrites them.
+
 ## Context
 
 Lash exposes a serializable workflow graph and an in-process trace-derived run
