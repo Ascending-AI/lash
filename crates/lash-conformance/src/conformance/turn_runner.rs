@@ -4,10 +4,11 @@
 //! it in the test task. A Restate turn exists only inside a handler: its
 //! effects journal on a `ctx`-bound controller, and the deployment-level host
 //! refuses every effect that has not entered one. A law that drives a real
-//! turn therefore takes the turn as a [`ConformanceTurnJob`] and hands it to
-//! the tier's [`ConformanceTurnRunner`], which supplies the scoped controller
-//! the turn runs on — the host's own on the in-process tiers, a handler-bound
-//! one on Restate — so one law body states the contract on every tier.
+//! turn therefore takes the turn as a [`ConformanceTurnAttempt`] and hands it
+//! to the tier's [`ConformanceTurnRunner`], which supplies the scoped
+//! controller the turn runs on — the host's own on the in-process tiers, a
+//! handler-bound one on Restate — so one law body states the contract on
+//! every tier.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -39,20 +40,14 @@ impl ConformanceTurnEnd {
     }
 }
 
-/// One turn, run on the scoped controller the tier supplies. The job owns
-/// everything it drives (the runtime and its inputs), reports what it
-/// observed through its own channel, and answers how its turn ended.
-pub type ConformanceTurnJob = Box<
-    dyn for<'a> FnOnce(
-            crate::ScopedEffectController<'a>,
-        ) -> Pin<Box<dyn Future<Output = ConformanceTurnEnd> + Send + 'a>>
-        + Send,
->;
-
-/// One attempt at a turn that a tier may run more than once: Restate re-runs
-/// a handler from the top whenever it replays the invocation (after a
-/// suspension or a failed attempt), so an attempt is a factory, and every run
-/// of it must issue the same journaled commands.
+/// One attempt at a turn, run on the scoped controller the tier supplies.
+/// Restate re-runs a handler from the top whenever it replays the invocation
+/// (after a suspension or a failed attempt), so an attempt is a factory: every
+/// run of it builds its turn afresh from inputs that outlive the run (the
+/// runtime is rebuilt; the durable store and host are shared), so every run
+/// issues the same journaled commands. It reports what it observed through
+/// its own channel — only a run that ends reports — and answers how its turn
+/// ended.
 pub type ConformanceTurnAttempt = Arc<
     dyn for<'a> Fn(
             crate::ScopedEffectController<'a>,
@@ -83,11 +78,13 @@ pub enum JournalCutPoint {
     BeforeEffect,
 }
 
-/// Runs a [`ConformanceTurnJob`] where the tier runs turns.
+/// Runs a [`ConformanceTurnAttempt`] where the tier runs turns.
 #[async_trait::async_trait]
 pub trait ConformanceTurnRunner: Send + Sync {
-    /// Runs `job` to completion on a controller admitted for `admitted`.
-    async fn run_turn(&self, admitted: crate::AdmittedScope, job: ConformanceTurnJob);
+    /// Runs `attempt` to its end on a controller admitted for `admitted`,
+    /// once per execution the tier gives it: once in process, once per
+    /// replay of the handler on Restate.
+    async fn run_turn(&self, admitted: crate::AdmittedScope, attempt: ConformanceTurnAttempt);
 
     /// Runs one turn across a crash: `crashing` must panic before its turn
     /// commits, and the tier then redelivers the same turn to `redrive` the
@@ -175,12 +172,12 @@ impl ConformanceTurnRunner for HostTurnRunner {
         clippy::expect_used,
         reason = "conformance-law fixture: an unscoped host is a fixture defect"
     )]
-    async fn run_turn(&self, admitted: crate::AdmittedScope, job: ConformanceTurnJob) {
+    async fn run_turn(&self, admitted: crate::AdmittedScope, attempt: ConformanceTurnAttempt) {
         let scoped = self
             .host
             .scoped(admitted)
             .expect("scope the conformance turn on its host");
-        job(scoped).await;
+        attempt(scoped).await;
     }
 
     #[expect(

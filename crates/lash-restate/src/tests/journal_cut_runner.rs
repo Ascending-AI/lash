@@ -46,12 +46,8 @@ impl JournalCutRunner {
 
 #[async_trait::async_trait]
 impl ConformanceTurnRunner for JournalCutRunner {
-    async fn run_turn(
-        &self,
-        admitted: lash_core::AdmittedScope,
-        job: lash_conformance::ConformanceTurnJob,
-    ) {
-        self.inner.run_turn(admitted, job).await;
+    async fn run_turn(&self, admitted: lash_core::AdmittedScope, attempt: ConformanceTurnAttempt) {
+        self.inner.run_turn(admitted, attempt).await;
     }
 
     async fn run_crashed_then_redriven_turn(

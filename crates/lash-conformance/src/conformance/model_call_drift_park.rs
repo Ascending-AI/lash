@@ -277,10 +277,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     runner
         .run_turn(
             admit(crate::ExecutionScope::turn(&session_id, &turn_id)),
-            Box::new({
-                let attempt = attempt(&parts, &turn_id, Some(0.5), false, Some(result_tx.clone()));
-                move |scope| attempt(scope)
-            }),
+            attempt(&parts, &turn_id, Some(0.5), false, Some(result_tx.clone())),
         )
         .await;
     let error = result_rx
@@ -296,10 +293,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     runner
         .run_turn(
             admit(crate::ExecutionScope::turn(&session_id, &turn_id)),
-            Box::new({
-                let attempt = attempt(&parts, &turn_id, None, false, Some(result_tx));
-                move |scope| attempt(scope)
-            }),
+            attempt(&parts, &turn_id, None, false, Some(result_tx)),
         )
         .await;
     let turn = result_rx

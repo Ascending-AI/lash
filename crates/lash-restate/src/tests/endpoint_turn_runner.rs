@@ -41,13 +41,11 @@ use super::live_turn_probe::CatchUnwind;
 /// How long one attempt may run before the invoker gives up on it.
 const ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// What a scope's next attempt runs.
-enum PendingAttempt {
-    Job(Option<lash_conformance::ConformanceTurnJob>),
-    Attempt {
-        attempt: lash_conformance::ConformanceTurnAttempt,
-        crashing: bool,
-    },
+/// What a scope's next attempt runs: the law's attempt factory, run afresh
+/// by every execution of the handler.
+struct PendingAttempt {
+    attempt: lash_conformance::ConformanceTurnAttempt,
+    crashing: bool,
 }
 
 type PendingAttempts = Arc<Mutex<HashMap<String, (lash_core::AdmittedScope, PendingAttempt)>>>;
@@ -69,25 +67,19 @@ impl EndpointTurnProbe for EndpointTurnProbeImpl {
         Json(key): Json<String>,
     ) -> HandlerResult<Json<bool>> {
         let next = {
-            let mut pending = self
+            let pending = self
                 .pending
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            pending
-                .get_mut(&key)
-                .and_then(|(admitted, attempt)| match attempt {
-                    PendingAttempt::Job(job) => {
-                        job.take().map(|job| (admitted.clone(), job, false))
-                    }
-                    PendingAttempt::Attempt { attempt, crashing } => {
-                        let attempt = Arc::clone(attempt);
-                        let job: lash_conformance::ConformanceTurnJob =
-                            Box::new(move |scoped| attempt(scoped));
-                        Some((admitted.clone(), job, *crashing))
-                    }
-                })
+            pending.get(&key).map(|(admitted, pending)| {
+                (
+                    admitted.clone(),
+                    Arc::clone(&pending.attempt),
+                    pending.crashing,
+                )
+            })
         };
-        let Some((admitted, job, crashing)) = next else {
+        let Some((admitted, attempt, crashing)) = next else {
             return Err(TerminalError::new(format!(
                 "no attempt of conformance turn `{key}` is pending in this invoker"
             ))
@@ -97,7 +89,11 @@ impl EndpointTurnProbe for EndpointTurnProbeImpl {
         let scoped = controller
             .scoped_effect_controller(admitted)
             .map_err(TerminalError::from_error)?;
-        match (CatchUnwind { inner: job(scoped) }).await {
+        match (CatchUnwind {
+            inner: attempt(scoped),
+        })
+        .await
+        {
             Ok(lash_conformance::ConformanceTurnEnd::Settled) => Ok(Json(true)),
             // The turn aborted without an outcome: the attempt fails
             // retryably, so the invocation keeps its journal for its retry.
@@ -332,10 +328,16 @@ impl lash_conformance::ConformanceTurnRunner for EndpointTurnRunner {
     async fn run_turn(
         &self,
         admitted: lash_core::AdmittedScope,
-        job: lash_conformance::ConformanceTurnJob,
+        attempt: lash_conformance::ConformanceTurnAttempt,
     ) {
-        self.run_attempt(admitted, PendingAttempt::Job(Some(job)))
-            .await;
+        self.run_attempt(
+            admitted,
+            PendingAttempt {
+                attempt,
+                crashing: false,
+            },
+        )
+        .await;
     }
 
     async fn run_crashed_then_redriven_turn(
@@ -347,7 +349,7 @@ impl lash_conformance::ConformanceTurnRunner for EndpointTurnRunner {
         let crashed = self
             .run_attempt(
                 admitted.clone(),
-                PendingAttempt::Attempt {
+                PendingAttempt {
                     attempt: crashing,
                     crashing: true,
                 },
@@ -359,7 +361,7 @@ impl lash_conformance::ConformanceTurnRunner for EndpointTurnRunner {
         );
         self.run_attempt(
             admitted,
-            PendingAttempt::Attempt {
+            PendingAttempt {
                 attempt: redrive,
                 crashing: false,
             },

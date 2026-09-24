@@ -258,9 +258,7 @@ async fn first_attempt_key(
         Some(answers),
     );
     let scope = crate::ExecutionScope::turn(probe_session, turn_id);
-    runner
-        .run_turn(admit(scope.clone()), Box::new(move |scoped| probe(scoped)))
-        .await;
+    runner.run_turn(admit(scope.clone()), probe).await;
     answer(&mut answered)
         .await
         .0
@@ -400,9 +398,7 @@ pub async fn redriven_cell_links_against_its_journaled_binding_set(
                         drift,
                         Some(answers.clone()),
                     );
-                    runner
-                        .run_turn(admitted.clone(), Box::new(move |scoped| again(scoped)))
-                        .await;
+                    runner.run_turn(admitted.clone(), again).await;
                     turn = Some(answer(&mut answered).await.0);
                 }
             }
