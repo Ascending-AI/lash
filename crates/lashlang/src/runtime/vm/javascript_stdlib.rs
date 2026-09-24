@@ -847,4 +847,33 @@ mod tests {
             1
         );
     }
+
+    /// A string pattern has no captures, so GetSubstitution runs with `m = 0`
+    /// and every capture-shaped token — `$0`, `$00`, `$01`, `$n`, `$nn`,
+    /// `$<name>` — is literal text; only `$$`, `$&`, `` $` `` and `$'` expand
+    /// (FIG-3649).
+    #[test]
+    fn string_pattern_replacement_keeps_capture_tokens_literal() {
+        let cases: &[(&str, &str)] = &[
+            ("|$0|", "foo-|$0|-bar"),
+            ("|$00|", "foo-|$00|-bar"),
+            ("|$000|", "foo-|$000|-bar"),
+            ("|$01|", "foo-|$01|-bar"),
+            ("|$010|", "foo-|$010|-bar"),
+            ("|$1|", "foo-|$1|-bar"),
+            ("|$9|", "foo-|$9|-bar"),
+            ("|$<n>|", "foo-|$<n>|-bar"),
+            ("|$$|", "foo-|$|-bar"),
+            ("|$&|", "foo-|x|-bar"),
+            ("|$`|", "foo-|foo-|-bar"),
+            ("|$'|", "foo-|-bar|-bar"),
+        ];
+        for (replacement, expected) in cases {
+            assert_eq!(
+                replace_string("foo-x-bar", "x", replacement).unwrap(),
+                *expected,
+                "{replacement}"
+            );
+        }
+    }
 }

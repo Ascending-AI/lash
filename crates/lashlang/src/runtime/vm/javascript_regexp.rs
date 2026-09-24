@@ -1379,7 +1379,7 @@ fn find_string_matches(
 
 #[expect(
     clippy::unwrap_used,
-    reason = "the arm matched an ASCII digit above per the guard, and combined is unwrapped under the is_some_and check two lines above"
+    reason = "the arm matched an ASCII digit above per the guard, so to_digit(10) cannot fail"
 )]
 fn expand_replacement_checked(
     heap: &Heap,
@@ -1480,29 +1480,35 @@ fn expand_replacement_checked(
                 }
                 index = end + 1;
             }
-            digit if digit.is_ascii_digit() && digit != '0' => {
+            digit if digit.is_ascii_digit() => {
                 let first = digit.to_digit(10).unwrap() as usize;
                 let second = chars
                     .get(index + 2)
                     .and_then(|digit| digit.to_digit(10))
                     .map(|digit| digit as usize);
-                let combined = second.map(|digit| first * 10 + digit);
-                let (capture, consumed) =
-                    if combined.is_some_and(|value| value <= found.captures.len()) {
-                        (combined.unwrap(), 3)
-                    } else if first <= found.captures.len() {
-                        (first, 2)
-                    } else {
-                        append_utf16_checked(
-                            heap,
-                            output,
-                            output_bytes,
-                            &['$' as u16],
-                            lone_surrogate_error,
-                        )?;
-                        index += 1;
-                        continue;
-                    };
+                // GetSubstitution: up to two digits form the reference, leading
+                // zero included, so `$01` is capture 1 while `$0` and `$00`
+                // are index 0 and never name one. An index outside 1..=m falls
+                // back to the first digit alone; still out of range, the whole
+                // sequence stays literal text.
+                let (capture, consumed) = if let Some(combined) =
+                    second.map(|digit| first * 10 + digit)
+                    && (1..=found.captures.len()).contains(&combined)
+                {
+                    (combined, 3)
+                } else if (1..=found.captures.len()).contains(&first) {
+                    (first, 2)
+                } else {
+                    append_utf16_checked(
+                        heap,
+                        output,
+                        output_bytes,
+                        &['$' as u16],
+                        lone_surrogate_error,
+                    )?;
+                    index += 1;
+                    continue;
+                };
                 if let Some(range) = &found.captures[capture - 1] {
                     append_utf16_checked(
                         heap,
@@ -1605,3 +1611,7 @@ fn has_unclosed_group(pattern: &str) -> bool {
     }
     depth != 0
 }
+
+#[cfg(test)]
+#[path = "javascript_regexp_tests.rs"]
+mod tests;

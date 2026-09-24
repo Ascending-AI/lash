@@ -73,6 +73,14 @@ fn typeof_uses_ecma_object_kinds_and_allows_unresolvable_references() {
         ("finish(typeof []);", "object"),
         ("finish(typeof (() => 1));", "function"),
         ("finish(typeof someUndeclared);", "undefined"),
+        // The reserved value idents lower to literals, so `typeof` classifies
+        // the literal — `NaN` is a number, not an unbound name (FIG-3649).
+        ("finish(typeof NaN);", "number"),
+        ("finish(typeof (0 / 0));", "number"),
+        ("finish(typeof Number.NaN);", "number"),
+        ("finish(typeof -NaN);", "number"),
+        ("finish(typeof Infinity);", "number"),
+        ("finish(typeof undefined);", "undefined"),
     ];
     for (source, expected) in cases {
         assert_eq!(finished(source), Value::String(expected.into()), "{source}");

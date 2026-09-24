@@ -587,3 +587,19 @@ findings	298	accept	"(() => { const k = 'x'; const o = { [k]: 1 }; o.y = 2; retu
 findings	299	accept	"(() => { const o = { a: 1 }; const seen = []; for (const k of ['z', 'y']) { seen.push(`${o.z}`); o[k] = 3; } return seen.join(','); })()"	"undefined,3"	-
 findings	300	accept	"(() => { const o = { a: 1 }; const grow = (x) => { x.z = 3; }; grow(o); return `${o.z}|${o.missing}`; })()"	"3|undefined"	-
 findings	301	accept-unlinked	"(() => { const o = { a: 1, b: 2 }; return `${o.c}`; })()"	"undefined"	TS_LINK_ERROR
+findings	302	accept	"typeof NaN"	"number"	-
+findings	303	accept	"typeof (0/0)"	"number"	-
+findings	304	accept	"typeof Number.NaN"	"number"	-
+findings	305	accept	"typeof -NaN"	"number"	-
+findings	306	accept	"'foo-x-bar'.replace(/(x)/, '|$0|')"	"foo-|$0|-bar"	-
+findings	307	accept	"'foo-x-bar'.replace(/(x)/, '|$00|')"	"foo-|$00|-bar"	-
+findings	308	accept	"'foo-x-bar'.replace(/(x)/, '|$01|')"	"foo-|x|-bar"	-
+findings	309	accept	"'foo-x-bar'.replace(/(x)/, '|$010|')"	"foo-|x0|-bar"	-
+findings	310	accept	"'foo-x-bar'.replace(/((((((((((x))))))))))/, '|$10|')"	"foo-|x|-bar"	-
+findings	311	accept	"'foo-x-bar'.replace(/(x)/, '|$10|')"	"foo-|x0|-bar"	-
+findings	312	accept	"'foo-x-bar'.replace('x', '|$1|')"	"foo-|$1|-bar"	-
+findings	313	accept	"'x-x'.replaceAll(/(x)/g, '|$01|')"	"|x|-|x|"	-
+findings	314	accept	"'x-x'.replaceAll('x', '|$1|')"	"|$1|-|$1|"	-
+findings	315	accept	"'foo-x-bar'.replace(/(x)|(y)/, '|$2|')"	"foo-||-bar"	-
+findings	316	accept	"'foo-x-bar'.replace(/(?<n>x)/, '|$<n>|$<miss>|')"	"foo-|x||-bar"	-
+findings	317	accept	"'foo-x-bar'.replace(/(x)/, \"|$$|$&|$`|$'|\")"	"foo-|$|x|foo-|-bar|-bar"	-
