@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use super::super::harness::HarnessMode;
 use super::generator::{GRAMMAR, GeneratedSession, Grammar, OPEN_DEFECT_EXCLUSIONS, generate};
 use super::node::{NodeCell, NodeOracle, NodeSession, sessions_directory};
-use super::round_trip::{self, NOT_A_DIALECT_VALUE, Pin, ROWS};
+use super::round_trip::{self, NOT_A_DIALECT_VALUE, ROWS};
 use super::{Observation, PINNED_NODE, run_session};
 
 const GENERATED: &str =
@@ -93,7 +93,9 @@ fn expected(node: &Observation, reject: Option<&str>) -> Observation {
     let mut expected = node.clone();
     expected.diagnostic = reject.map(str::to_string);
     for name in &node.closures {
-        expected.probes.insert(name.clone(), "unbound".to_string());
+        expected
+            .probes
+            .insert(name.clone(), super::DROPPED.to_string());
     }
     expected.closures.clear();
     expected
@@ -440,7 +442,7 @@ fn listed(section: &str, name: &str) -> bool {
 }
 
 /// Every shape the generator excludes is an open defect, pinned where it
-/// diverges: by a round-trip row or a defect cell of the session corpus.
+/// diverges: by a defect cell of the session corpus.
 /// When the defect is fixed, its README entry goes and this test names the
 /// exclusion to delete.
 #[test]
@@ -461,12 +463,9 @@ fn every_generator_exclusion_is_a_pinned_open_defect() {
                 "the generator excludes `{defect}` ({ticket}), which is not an open defect: delete the exclusion"
             ));
         }
-        let pinned_by_law = ROWS
-            .iter()
-            .any(|row| matches!(row.pin, Pin::Fails { name, .. } if name == *defect));
-        if !pinned_by_law && !corpus_defects.contains(defect) {
+        if !corpus_defects.contains(defect) {
             failures.push(format!(
-                "the generator excludes `{defect}`, which no round-trip row or session-corpus defect cell pins"
+                "the generator excludes `{defect}`, which no session-corpus defect cell pins"
             ));
         }
     }
@@ -503,15 +502,6 @@ fn every_value_type_round_trips_or_is_refused() {
         }
         if !names.insert(row.name) {
             failures.push(format!("round-trip row `{}` is named twice", row.name));
-        }
-        if let Pin::Fails { name, .. } = row.pin
-            && !listed("## Deviation register", name)
-            && !listed("## Open conformance defects", name)
-        {
-            failures.push(format!(
-                "round-trip row `{}` is pinned by `{name}`, which the README neither registers nor lists as open",
-                row.name
-            ));
         }
         if let Some(deviation) = row.node_deviation
             && !listed("## Deviation register", deviation)

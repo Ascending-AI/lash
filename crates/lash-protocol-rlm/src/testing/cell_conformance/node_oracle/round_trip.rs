@@ -19,32 +19,27 @@
 //! row here.
 //!
 //! A type that cannot round-trip must be refused with a named diagnostic,
-//! never silently degraded. Where the law fails today, the row is pinned
-//! ([`Pin::Fails`]) by the open defect or registered deviation that makes it
-//! fail, in the modes it fails in, and the law requires it to keep failing
-//! there until the defect is fixed: then the pin is deleted (the ratchet).
+//! never silently degraded: a class instance cannot be created
+//! ([`Pin::Refused`]), and a value that reaches a function works in its own
+//! cell and is refused by name in any later one ([`Pin::RefusedWhenStored`]).
+//! A value type whose law fails must be refused the same way, or fixed; the
+//! law has no other way to pass.
 
 use super::super::harness::HarnessMode;
 use super::{Observation, run_session};
 
-/// Why a row's law fails today, or how the dialect refuses the type.
+/// Whether a row's value round-trips, or how the dialect refuses it.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Pin {
     /// The law holds.
     Holds,
-    /// The law fails in `modes`, by the open defect or registered deviation
-    /// `name` (in the crate README); `authority` is the ticket that fixes it
-    /// or the ruling that registered it.
-    Fails {
-        name: &'static str,
-        authority: &'static str,
-        modes: &'static [HarnessMode],
-    },
     /// The dialect refuses to create the value, by this diagnostic.
     Refused(&'static str),
+    /// The value works in the cell that created it, and a later cell's use
+    /// of it is refused, by this diagnostic, live and reloaded alike: the
+    /// value does not survive its cell, and says so rather than degrading.
+    RefusedWhenStored(&'static str),
 }
-
-const BOTH: &[HarnessMode] = &[HarnessMode::Resident, HarnessMode::RestartBetweenCells];
 
 /// One value type: a cell that binds `value`, and a cell that uses it.
 #[derive(Clone, Copy, Debug)]
@@ -223,11 +218,16 @@ pub(super) const ROWS: &[Row] = &[
             "const base = 10;\nconst value = (n) => n + base;",
             "console.log(value(1));",
         ),
-        Pin::Fails {
-            name: "closure-boundary",
-            authority: "ADR 0062 register entry 17",
-            modes: BOTH,
-        },
+        Pin::RefusedWhenStored("TS_FUNCTION_NOT_PERSISTED"),
+    ),
+    pinned(
+        row(
+            "record",
+            "object-holding-a-function",
+            "const value = { run: () => 1, n: 2 };",
+            "console.log(value.n, typeof value.run);",
+        ),
+        Pin::RefusedWhenStored("TS_FUNCTION_NOT_PERSISTED"),
     ),
     Row {
         kind: "record",
@@ -292,6 +292,19 @@ pub(super) fn check(row: &Row, node: &[Observation]) -> Vec<String> {
         return failures;
     }
     let reference = never_stored(row);
+    if let Pin::RefusedWhenStored(code) = row.pin {
+        for mode in HarnessMode::ALL {
+            let (create, uses) = stored(row, *mode);
+            if create.outcome != "normal"
+                || uses.outcome != "rejected"
+                || uses.diagnostic.as_deref() != Some(code)
+            {
+                failures.push(format!(
+                    "{context} {mode:?}: a stored value's later use must be refused by `{code}`, and the cells observed {create:?} then {uses:?}"
+                ));
+            }
+        }
+    }
     // Node's single-cell answer: the creating cell's lines, then the using
     // cell's, ending as the using cell ends.
     let [node_create, node_uses] = node else {
@@ -330,23 +343,13 @@ pub(super) fn check(row: &Row, node: &[Observation]) -> Vec<String> {
         // using cell answers for the whole reference.
         let mut observed = uses.clone();
         observed.prints = create.prints.iter().chain(&uses.prints).cloned().collect();
-        let holds = behaviour(&observed) == behaviour(&reference);
-        let pinned = match row.pin {
-            Pin::Fails {
-                name,
-                authority,
-                modes,
-            } if modes.contains(mode) => Some((name, authority)),
-            _ => None,
-        };
-        match (pinned, holds) {
-            (None, false) => failures.push(format!(
+        if matches!(row.pin, Pin::RefusedWhenStored(_)) {
+            continue;
+        }
+        if behaviour(&observed) != behaviour(&reference) {
+            failures.push(format!(
                 "{context} {mode:?}: the stored value does not behave as if never stored\n  stored:       {observed:?}\n  never stored: {reference:?}"
-            )),
-            (Some((name, authority)), true) => failures.push(format!(
-                "{context} {mode:?}: the law now holds; `{name}` ({authority}) is fixed here, so delete the pin"
-            )),
-            _ => {}
+            ));
         }
     }
     failures

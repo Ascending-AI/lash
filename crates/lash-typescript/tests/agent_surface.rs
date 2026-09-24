@@ -1806,16 +1806,17 @@ fn the_selected_rejection_is_replay_deterministic() {
 /// carries the consumer mode, timer leaves and the immediate-prefix boundary,
 /// and its reply is the four-way response algebra instead of a settlement
 /// order. The consumer mode did not move the snapshot: nothing about an
-/// aggregate is persisted in a session snapshot. It is at v8 for an unrelated
-/// reason, record property order (FIG-3606). The continuation moved
+/// aggregate is persisted in a session snapshot. It is at v9 for unrelated
+/// reasons: record property order (FIG-3606, v8) and the functions a cell
+/// boundary dropped (FIG-3608, v9). The continuation moved
 /// separately, for the timer entries in its pending-request map and the
 /// refusals it can carry.
 #[test]
 fn the_consumer_mode_moves_the_vm_abi_and_not_the_snapshot() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        8,
-        "snapshot v8 keeps record property order; no aggregate state rides it"
+        9,
+        "snapshot v9 keeps property order and the dropped functions; no aggregate state rides it"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,

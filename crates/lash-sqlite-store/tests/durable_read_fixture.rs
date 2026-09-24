@@ -636,6 +636,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     );
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+        process_lease_ttl_ms: fixture::PINNED_PROCESS_LEASE_TTL_MS,
         runtime: Arc::clone(&runtime) as Arc<dyn RuntimePersistence>,
         session_factory: session_factory as Arc<dyn SessionStoreFactory>,
         processes: Arc::clone(&processes)

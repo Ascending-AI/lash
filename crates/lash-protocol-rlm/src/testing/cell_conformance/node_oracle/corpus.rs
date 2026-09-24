@@ -88,7 +88,9 @@ fn expected(session: &SessionCase, cell: &CellCase, mode: HarnessMode) -> Observ
         .any(|name| name == CLOSURE_BOUNDARY)
     {
         for name in &cell.node.closures {
-            expected.probes.insert(name.clone(), "unbound".to_string());
+            expected
+                .probes
+                .insert(name.clone(), super::DROPPED.to_string());
         }
     }
     expected

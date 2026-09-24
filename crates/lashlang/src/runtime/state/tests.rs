@@ -33,6 +33,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
         let mut runtime_globals = Record::new();
         runtime_globals.insert("f".to_string(), closure);
         let snapshot = Snapshot {
+            expired_functions: BTreeSet::new(),
             mode: StateMode::HeapBacked(Box::new(HeapBackedState {
                 runtime_globals,
                 projected: Record::new(),
@@ -65,6 +66,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
     let mut runtime_globals = Record::new();
     runtime_globals.insert("f".to_string(), closure);
     let bytes = Snapshot {
+        expired_functions: BTreeSet::new(),
         mode: StateMode::HeapBacked(Box::new(HeapBackedState {
             runtime_globals,
             projected: Record::new(),
@@ -203,6 +205,7 @@ fn canonical_decode_rejects_integer_encoded_runtime_number() {
 #[test]
 fn canonical_decode_rejects_sequence_form_structs() {
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "root".to_string(),
@@ -228,6 +231,7 @@ fn canonical_decode_rejects_sequence_form_structs() {
 fn canonical_decode_rejects_unsorted_and_duplicate_dynamic_keys() {
     for names in [["z", "a"], ["same", "same"]] {
         let wire = CanonicalSnapshot {
+            expired_functions: Vec::new(),
             version: LASHLANG_SNAPSHOT_VERSION,
             globals: Some(
                 names
@@ -302,6 +306,7 @@ fn heapless_snapshot_encode_refuses_a_heap_reference() {
 #[test]
 fn heapless_snapshot_decode_refuses_a_heap_reference() {
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "dangling".to_string(),
@@ -323,6 +328,7 @@ fn heapless_snapshot_decode_refuses_a_heap_reference() {
 #[test]
 fn snapshot_try_from_refuses_a_heap_reference_without_the_raw_wire_validator() {
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "wrapper".to_string(),
@@ -346,6 +352,7 @@ fn snapshot_try_from_refuses_a_heap_reference_without_the_raw_wire_validator() {
 #[test]
 fn heapless_snapshot_fixed_point_cannot_launder_a_heap_reference() {
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "wrapper".to_string(),
@@ -381,6 +388,7 @@ fn canonical_decode_rejects_a_depth_bomb_before_deserializing() {
         value = CanonicalValue::List { items: vec![value] };
     }
     let bomb = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "bomb".to_string(),
@@ -459,9 +467,9 @@ fn canonical_wire_golden_covers_every_value_kind_and_projection_ref() {
     assert_eq!(
         sha2::Sha256::digest(&bytes).as_slice(),
         &[
-            0x9b, 0x46, 0x10, 0x85, 0xe7, 0xad, 0xea, 0xc1, 0x11, 0x56, 0xe3, 0x2b, 0x99, 0xe8,
-            0x58, 0xf2, 0xb2, 0xe5, 0x89, 0x13, 0x21, 0xe2, 0xa8, 0x84, 0x90, 0xbe, 0xa7, 0x65,
-            0xe8, 0x49, 0xf0, 0x96,
+            0x26, 0x4b, 0x47, 0xad, 0x94, 0x63, 0x39, 0x59, 0x19, 0xd0, 0x89, 0x91, 0xb0, 0x7b,
+            0x39, 0x3f, 0x7e, 0xe5, 0xd7, 0x4c, 0x25, 0xc8, 0xdb, 0xda, 0x40, 0xce, 0xce, 0x10,
+            0xff, 0x1a, 0xad, 0x0b,
         ]
     );
 }
@@ -514,6 +522,7 @@ fn snapshot_round_trip_preserves_undefined_cell_global() {
 fn canonical_decode_rejects_extra_fields_on_undefined_value() {
     // A malformed canonical wire where undefined has extra fields
     let wire = CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: Some(vec![CanonicalBinding {
             name: "root".to_string(),
@@ -558,6 +567,7 @@ fn canonical_decode_rejects_extra_fields_on_undefined_value() {
 fn canonical_runtime_value_validator_covers_every_canonical_value_variant() {
     fn validate_wire_value(value: CanonicalValue) -> Result<Snapshot, SnapshotDecodeError> {
         let wire = CanonicalSnapshot {
+            expired_functions: Vec::new(),
             version: LASHLANG_SNAPSHOT_VERSION,
             globals: Some(vec![CanonicalBinding {
                 name: "root".to_string(),
@@ -649,7 +659,7 @@ fn canonical_empty_heap_has_exact_golden_bytes() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    assert_eq!(hex, "82a776657273696f6e08a7676c6f62616c7390");
+    assert_eq!(hex, "82a776657273696f6e09a7676c6f62616c7390");
 }
 
 #[test]
@@ -708,6 +718,7 @@ fn canonical_heap_with(
     live_logical_bytes: u64,
 ) -> CanonicalSnapshot {
     CanonicalSnapshot {
+        expired_functions: Vec::new(),
         version: LASHLANG_SNAPSHOT_VERSION,
         globals: None,
         heap: Some(CanonicalHeap {
@@ -768,6 +779,7 @@ fn a_snapshot_one_version_ahead_with_unknown_variant_is_refused_as_version_misma
     let mut roots = Record::new();
     roots.insert("rejection".to_string(), error);
     let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
         mode: StateMode::HeapBacked(Box::new(HeapBackedState {
             runtime_globals: roots,
             projected: Record::new(),
@@ -837,6 +849,7 @@ fn a_minted_error_brand_ships_by_name_and_round_trips_at_the_current_version() {
     let mut roots = Record::new();
     roots.insert("rejection".to_string(), error);
     let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
         mode: StateMode::HeapBacked(Box::new(HeapBackedState {
             runtime_globals: roots,
             projected: Record::new(),
@@ -1286,6 +1299,7 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     roots.insert("date".to_string(), date);
     roots.insert("error".to_string(), error);
     let snapshot = Snapshot {
+        expired_functions: BTreeSet::new(),
         mode: StateMode::HeapBacked(Box::new(HeapBackedState {
             runtime_globals: roots,
             projected: Record::new(),

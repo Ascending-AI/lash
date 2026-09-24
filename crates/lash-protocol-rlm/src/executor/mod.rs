@@ -491,6 +491,10 @@ async fn execute_code_inner(
     host_environment = host_environment.with_globals(live_global_names);
     host_environment =
         host_environment.with_process_handles(process_handle_names(state.rlm.globals()));
+    // A function an earlier cell bound did not survive its cell, and a
+    // reference to it is refused by name rather than as a name never bound.
+    host_environment =
+        host_environment.with_expired_functions(state.rlm.expired_functions().iter().cloned());
 
     // The kind is decided here, while the failure is still a typed diagnostic.
     // "Compilation failed" is not enough to classify it: a misspelled name and a
@@ -511,32 +515,28 @@ async fn execute_code_inner(
             // carries them — it is the same set the linker will check against.
             // Rendered against the cell source, not `to_string()`: the
             // diagnostic carries a span and the model needs the line it wrote.
-            None => lash_typescript::parse_with_globals_and_process_handles(
-                code,
-                &host_environment.globals,
-                &host_environment.process_handles,
-            )
-            .map_err(|error| {
-                let error = refine_typescript_method_diagnostic(code, &host_environment, error);
-                (
-                    typescript_feedback_kind(&error),
-                    format_rlm_parse_diagnostic(
-                        lash_typescript::format_diagnostic(code, &error),
-                        channel,
-                    ),
-                )
-            })
-            .and_then(|program| {
-                state
-                    .linked_programs
-                    .get_or_compile_ast(code, program, &host_environment)
-                    .map_err(|error| {
-                        (
-                            lashlang_link_feedback_kind(&error),
-                            format_rlm_link_diagnostic(code, &error),
-                        )
-                    })
-            }),
+            None => lash_typescript::parse_cell(code, &host_environment)
+                .map_err(|error| {
+                    let error = refine_typescript_method_diagnostic(code, &host_environment, error);
+                    (
+                        typescript_feedback_kind(&error),
+                        format_rlm_parse_diagnostic(
+                            lash_typescript::format_diagnostic(code, &error),
+                            channel,
+                        ),
+                    )
+                })
+                .and_then(|program| {
+                    state
+                        .linked_programs
+                        .get_or_compile_ast(code, program, &host_environment)
+                        .map_err(|error| {
+                            (
+                                lashlang_link_feedback_kind(&error),
+                                format_rlm_link_diagnostic(code, &error),
+                            )
+                        })
+                }),
         }
     };
     emit_step_trace(

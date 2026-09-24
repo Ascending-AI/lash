@@ -454,12 +454,140 @@ fn a_predecessor_header_is_refused_by_its_version() {
         b'u', b'l', b'l',
     ];
     let error = State::from_durable_parts(&v7_value_body, [("value", &v7_value_body[..])])
-        .expect_err("a v7 body is not a v8 header");
+        .expect_err("a v7 body is not a current header");
     assert_eq!(
         error,
         SnapshotDecodeError::VersionMismatch {
             expected: LASHLANG_SNAPSHOT_VERSION,
             found: 7,
+        }
+    );
+}
+
+fn closure(heap: &mut Heap) -> Value {
+    heap.allocate(HeapObject::Closure {
+        function: 0,
+        captures: Vec::new(),
+    })
+    .expect("allocate a closure")
+}
+
+/// A binding that reaches a function is dropped at the boundary and its name
+/// is kept, whether the function is the value or sits inside it; a binding the
+/// run left alone is untouched (FIG-3608).
+#[test]
+fn a_boundary_remembers_the_functions_it_drops() {
+    let mut heap = Heap::default();
+    let direct = closure(&mut heap);
+    let nested_closure = closure(&mut heap);
+    let mut holder = Record::new();
+    holder.insert("run".to_string(), nested_closure);
+    let nested = heap
+        .allocate(HeapObject::Record(Box::new(holder)))
+        .expect("allocate a record holding a closure");
+    let state = install(
+        vec![
+            ("helper", direct),
+            ("box", nested),
+            ("count", Value::Number(1.0)),
+        ],
+        heap,
+    );
+    assert_eq!(
+        state.expired_functions().iter().collect::<Vec<_>>(),
+        ["box", "helper"]
+    );
+    assert!(state.binding_names().eq(["count"]));
+}
+
+/// A name bound again, by a later run or by a host write, is live again and
+/// no longer refused.
+#[test]
+fn a_rebound_name_is_no_longer_expired() {
+    let mut heap = Heap::default();
+    let helper = closure(&mut heap);
+    let mut state = install(vec![("helper", helper), ("other", Value::Null)], heap);
+    assert!(state.expired_functions().contains("helper"));
+
+    let (mut roots, heap) = state.take_runtime();
+    roots.insert("helper".to_string(), Value::Number(2.0));
+    state
+        .install_runtime(roots, heap)
+        .expect("install the rebound roots");
+    assert!(state.expired_functions().is_empty());
+
+    let mut heap = Heap::default();
+    let again = closure(&mut heap);
+    let mut state = install(vec![("again", again)], heap);
+    state
+        .insert_global("again", Value::Bool(true))
+        .expect("a host rebinds the name");
+    assert!(state.expired_functions().is_empty());
+}
+
+/// The dropped names survive a durable reload and a whole-snapshot round
+/// trip, so a later cell is refused the same way live and reloaded.
+#[test]
+fn the_dropped_functions_survive_a_reload() {
+    let mut heap = Heap::default();
+    let helper = closure(&mut heap);
+    let list = heap
+        .allocate(HeapObject::List(vec![Value::Number(1.0)]))
+        .expect("allocate a list");
+    let state = install(vec![("helper", helper), ("items", list)], heap);
+    let parts = complete(&state);
+    let (reloaded, _) = reload(&parts.header, &bodies(&parts));
+    assert_eq!(reloaded.expired_functions(), state.expired_functions());
+
+    let bytes = state
+        .snapshot()
+        .to_canonical_bytes()
+        .expect("encode the whole snapshot");
+    let decoded = State::from_snapshot(
+        Snapshot::from_canonical_bytes(&bytes).expect("decode the whole snapshot"),
+    );
+    assert_eq!(decoded.expired_functions(), state.expired_functions());
+
+    // A plain state keeps the names too.
+    let mut plain = State::new();
+    plain.expired_functions.insert("gone".to_string());
+    let parts = complete(&plain);
+    let (reloaded, _) = reload(&parts.header, &bodies(&parts));
+    assert!(reloaded.expired_functions().contains("gone"));
+}
+
+/// A name cannot be both live and dropped, so a wire claiming both is refused.
+#[test]
+fn a_dropped_name_that_is_also_bound_is_refused() {
+    let mut state = install(vec![("both", Value::Number(1.0))], Heap::default());
+    state.expired_functions.insert("both".to_string());
+    let parts = complete(&state);
+    let error = State::from_durable_parts(
+        &parts.header,
+        bodies(&parts)
+            .iter()
+            .map(|(name, body)| (name.as_str(), body.as_slice())),
+    )
+    .expect_err("a live binding cannot also be a dropped function");
+    assert!(
+        matches!(&error, SnapshotDecodeError::InvalidEncoding(reason) if reason.contains("`both`")),
+        "{error:?}"
+    );
+}
+
+/// A v8 capture predates the dropped-function names: it is refused by its
+/// version before anything is restored, not read as a session that never
+/// dropped one.
+#[test]
+fn a_v8_header_is_refused_by_its_version() {
+    let v8_header = [0x81, 0xa7, b'v', b'e', b'r', b's', b'i', b'o', b'n', 0x08];
+    let error = State::from_durable_parts(&v8_header, std::iter::empty())
+        .expect_err("a v8 header is not a v9 one");
+    assert_eq!(
+        error,
+        SnapshotDecodeError::VersionMismatch {
+            expected: LASHLANG_SNAPSHOT_VERSION,
+            found: 8,
         }
     );
 }

@@ -56,6 +56,7 @@ pub enum DiagnosticCode {
     UnknownBinding,
     AssignConst,
     MutableCaptureUnsupported,
+    FunctionNotPersisted,
     NonLiftableCapture,
     ProcessParamTypeUnsupported,
     TriggerSourceEventAccess,
@@ -133,6 +134,7 @@ impl DiagnosticCode {
         Self::UnknownBinding,
         Self::AssignConst,
         Self::MutableCaptureUnsupported,
+        Self::FunctionNotPersisted,
         Self::NonLiftableCapture,
         Self::ProcessParamTypeUnsupported,
         Self::TriggerSourceEventAccess,
@@ -248,6 +250,9 @@ impl DiagnosticCode {
             Self::MutableCaptureUnsupported => {
                 "pass the value into the function as a parameter and return the new value"
             }
+            Self::FunctionNotPersisted => {
+                "define the function again in this cell; keep data, not functions, in session globals"
+            }
             Self::NonLiftableCapture => "pass the value to the process through its `run` arguments",
             Self::ProcessParamTypeUnsupported => {
                 "declare the parameter with a durable type: a primitive, an array, an object literal, a union of string literals, or a host data type"
@@ -336,6 +341,7 @@ impl DiagnosticCode {
             | Self::DeclareUnsupported
             | Self::MutualRecursionUnsupported
             | Self::MutableCaptureUnsupported
+            | Self::FunctionNotPersisted
             | Self::NonLiftableCapture
             | Self::DateImmutable
             // Rules about size, placement, and shape. No single construct to
@@ -431,6 +437,7 @@ impl DiagnosticCode {
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
             Self::AssignConst => "TS_ASSIGN_CONST",
             Self::MutableCaptureUnsupported => "TS_MUTABLE_CAPTURE_UNSUPPORTED",
+            Self::FunctionNotPersisted => "TS_FUNCTION_NOT_PERSISTED",
             Self::NonLiftableCapture => "TS_NON_LIFTABLE_CAPTURE",
             Self::ProcessParamTypeUnsupported => "TS_PROCESS_PARAM_TYPE_UNSUPPORTED",
             Self::TriggerSourceEventAccess => "TS_TRIGGER_SOURCE_EVENT_ACCESS",

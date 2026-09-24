@@ -17,6 +17,7 @@ pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnosti
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::new(),
         &std::collections::BTreeSet::new(),
+        &std::collections::BTreeSet::new(),
     )
 }
 
@@ -44,12 +45,14 @@ pub(crate) fn lower_with_ambient(
     program: &adapter::Program,
     ambient: &std::collections::BTreeSet<String>,
     process_handles: &std::collections::BTreeSet<String>,
+    expired_functions: &std::collections::BTreeSet<String>,
 ) -> Result<LashProgram, Diagnostic> {
     lower_with_context(
         program,
         ambient,
         process_handles,
         &std::collections::BTreeSet::new(),
+        expired_functions,
     )
 }
 
@@ -71,6 +74,7 @@ pub(crate) fn lower_workflow_fragment(
         &std::collections::BTreeSet::new(),
         BindingKind::Let,
         processes,
+        &std::collections::BTreeSet::new(),
     )
 }
 
@@ -79,6 +83,7 @@ pub(crate) fn lower_with_context(
     ambient: &std::collections::BTreeSet<String>,
     process_handles: &std::collections::BTreeSet<String>,
     module_authority_roots: &std::collections::BTreeSet<String>,
+    expired_functions: &std::collections::BTreeSet<String>,
 ) -> Result<LashProgram, Diagnostic> {
     lower_with_ambient_kind(
         program,
@@ -87,6 +92,7 @@ pub(crate) fn lower_with_context(
         module_authority_roots,
         BindingKind::Const,
         &std::collections::BTreeSet::new(),
+        expired_functions,
     )
 }
 
@@ -97,12 +103,15 @@ fn lower_with_ambient_kind(
     module_authority_roots: &std::collections::BTreeSet<String>,
     ambient_kind: BindingKind,
     ambient_processes: &std::collections::BTreeSet<String>,
+    expired_functions: &std::collections::BTreeSet<String>,
 ) -> Result<LashProgram, Diagnostic> {
     let mut lowerer = Lowerer {
         root_scope_depth: 2,
         module_authority_roots: module_authority_roots.clone(),
         called_bindings: super::binding::called_binding_names(&program.statements),
         global_this_names: super::binding::global_this_names(&program.statements),
+        global_this_writes: super::binding::global_this_writes(&program.statements),
+        expired_functions: expired_functions.clone(),
         ..Lowerer::default()
     };
     let mut ambient_scope = Scope::default();
