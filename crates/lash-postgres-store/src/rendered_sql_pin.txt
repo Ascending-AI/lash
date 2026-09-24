@@ -24,6 +24,11 @@ SELECT EXISTS(
                  SELECT 1 FROM lash_runtime_effect_replay
                  WHERE scope_id = $1 AND replay_key = $2
              )
+=== effect::replay::ReplayStatements | effect_replay.settled_by_key
+SELECT EXISTS(
+                 SELECT 1 FROM lash_runtime_effect_replay
+                 WHERE scope_id = $1 AND replay_key = $2 AND status <> 'in_progress'
+             )
 === effect::replay::ReplayStatements | effect_replay.select_keys_in_range
 SELECT replay_key FROM lash_runtime_effect_replay
              WHERE scope_id = $1 AND replay_key >= $2 AND replay_key <= $3

@@ -9,6 +9,9 @@ Amended 2026-09-24 (FIG-3587): a redrive runs against the surface its live
 pass saw — the cell's journaled binding set and the iteration's journaled
 prompt surface — and any recorded effect's replay hash conflict parks the
 turn; see [Journaled surface](#amendment-fig-3587-journaled-surface).
+Amended 2026-09-25 (FIG-3719): the engine, not the frontier read, answers
+whether a drifted binding's effect is served, so a positional journal
+(Restate) serves a recorded result too.
 
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
@@ -336,13 +339,33 @@ registry still holds (`agents.spawn`, for one) orchestrates as the catalog
 call it replays did: its body re-runs, prepared by its live provider, against
 its recorded nested effects (a started process and its await, which the
 frontier read now reads as the call's own rows). The command is served only:
-every *dispatching* write — a tool attempt, a retry sleep, a nested effect —
-must land on a key whose outcome the journal holds (completed or failed), and
-one that would run live — no row, or an in-progress row after a crash
-mid-dispatch — refuses before its claim with `lashlang_cell_binding_drift`,
-naming the binding, its tool and whether it is missing or changed. A wait on
-an external completion (a deferred tool's `{cmd}:await`) dispatches nothing
-and passes. A command the journal does not hold as issued is refused as the
+every *dispatching* effect it issues under its run's namespace — a tool
+attempt, a retry sleep, a nested effect — carries the drift refusal to its
+engine on the local executor (`RuntimeEffectLocalExecutor::served_only`), and
+the engine answers whether the journal holds its outcome (FIG-3719). An
+engine that serves a recorded outcome never runs the executor; one that would
+run it live — no outcome recorded, or an in-progress entry after a crash
+mid-dispatch — refuses with `lashlang_cell_binding_drift` instead, naming the
+binding, its tool and whether it is missing or changed, and records nothing.
+The SQL driver asks its row store for a settled row before it claims; Restate,
+whose journal is positional and answers no key read, learns it as its replay
+reaches the run: a recorded `ctx.run` is served without running its closure,
+and a closure that does run is the live frontier, so it signals the refusal
+and never completes, and the run proposes no result. A budget give-up entry
+for the effect is the frontier the same way. Nothing may be journaled after
+such an orphaned run in the same attempt: the next replay would await it
+while commands remain (`JOURNAL_MISMATCH`); the refusal stops the run, no seal
+follows a nested error, and the park is written through the session store.
+Restate's served-only effects that act outside a `ctx.run` closure — process
+commands, which reach Restate through their own journaled commands (a
+drifted orchestrating binding's process start, for one), and timers — cannot
+tell a recorded outcome from a live one before they act, so they refuse up
+front: such a command parks even when its process command or sleep was
+recorded, and never starts a process or journals a sleep. A command a keyed
+journal holds nothing for refuses before it issues anything; on a positional
+journal the command enters and its engine refuses at the live frontier. A
+wait on an external completion (a deferred tool's `{cmd}:await`) dispatches
+nothing and carries no refusal. A command the journal does not hold as issued is refused as the
 run's divergence first (`lashlang_cell_replay_divergence`). The code classifies `Parked` and the turn
 parks as for a divergence (`TurnParkReason::BindingDrift`): nothing is
 dispatched, nothing terminal is written, and every redrive refuses again until
@@ -353,13 +376,13 @@ Limitations, deferred:
 - An aggregate naming a drifted binding refuses at any admission, even when
   every leaf settled: its leaves re-drive through the tool child host, which
   resolves each tool live.
-- On Restate the recorded journal is `Positional`, with no settled-key set to
-  fence against, so a drifted binding always parks there.
 - A non-orchestrating provider whose preparation is not the identity would
   prepare a call differently than the recorded identity preparation does;
   such a call diverges instead of replaying.
 - An orchestrating tool the registry no longer holds cannot re-run its body,
   so a call on it parks even when its nested effects all settled.
+- On Restate, a drifted command whose effects include a process command or a
+  timer parks even when those were recorded (they refuse up front, above).
 
 **Cell journal grammar 3.** `LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION` (3) is the
 replay-key grammar plus the binding set, and is what the sync's
@@ -401,6 +424,8 @@ is refused, typed and before any effect, as `effect_replay_divergence`, and
 the turn parks. The conformance law
 `model_call_drift_parks_then_completes_once_restored` runs on SQLite,
 PostgreSQL and Restate (an in-process invoker over the real endpoint).
-`redriven_cell_links_against_its_journaled_binding_set` runs on SQLite and
-PostgreSQL only: it injects faults into the SQL effect journal and reads its
-recorded keys, neither of which a positional engine journal offers.
+`redriven_cell_links_against_its_journaled_binding_set` runs on SQLite,
+PostgreSQL and the Restate server double: each tier's runner cuts the first
+attempt at the journal point the law names (FIG-3665), and on the double a
+drifted binding whose result was recorded replays it while one needed live
+refuses (FIG-3719).

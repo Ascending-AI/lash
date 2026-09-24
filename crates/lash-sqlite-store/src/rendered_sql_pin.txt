@@ -24,6 +24,11 @@ SELECT EXISTS(
                  SELECT 1 FROM main.runtime_effect_replay
                  WHERE scope_id = ?1 AND replay_key = ?2
              )
+=== main | effect::replay::ReplayStatements | effect_replay.settled_by_key
+SELECT EXISTS(
+                 SELECT 1 FROM main.runtime_effect_replay
+                 WHERE scope_id = ?1 AND replay_key = ?2 AND status <> 'in_progress'
+             )
 === main | effect::replay::ReplayStatements | effect_replay.select_keys_in_range
 SELECT replay_key FROM main.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
@@ -367,6 +372,11 @@ SELECT EXISTS(
                  SELECT 1 FROM effect_journal.runtime_effect_replay
                  WHERE scope_id = ?1 AND replay_key = ?2
              )
+=== effect_journal | effect::replay::ReplayStatements | effect_replay.settled_by_key
+SELECT EXISTS(
+                 SELECT 1 FROM effect_journal.runtime_effect_replay
+                 WHERE scope_id = ?1 AND replay_key = ?2 AND status <> 'in_progress'
+             )
 === effect_journal | effect::replay::ReplayStatements | effect_replay.select_keys_in_range
 SELECT replay_key FROM effect_journal.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
@@ -709,6 +719,11 @@ SELECT EXISTS(
 SELECT EXISTS(
                  SELECT 1 FROM process_registry.runtime_effect_replay
                  WHERE scope_id = ?1 AND replay_key = ?2
+             )
+=== process_registry | effect::replay::ReplayStatements | effect_replay.settled_by_key
+SELECT EXISTS(
+                 SELECT 1 FROM process_registry.runtime_effect_replay
+                 WHERE scope_id = ?1 AND replay_key = ?2 AND status <> 'in_progress'
              )
 === process_registry | effect::replay::ReplayStatements | effect_replay.select_keys_in_range
 SELECT replay_key FROM process_registry.runtime_effect_replay

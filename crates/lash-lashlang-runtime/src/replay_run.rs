@@ -217,9 +217,6 @@ struct RecordedRun {
     /// Every replay key the journal holds in the namespace: a replayed
     /// command's writes must land on these while entries lie beyond it.
     keys: std::sync::Arc<std::collections::BTreeSet<String>>,
-    /// The subset of `keys` whose outcome the journal holds: all a command
-    /// served only from the journal may touch (FIG-3587).
-    settled: std::sync::Arc<std::collections::BTreeSet<String>>,
 }
 
 impl RecordedRun {
@@ -236,7 +233,6 @@ impl RecordedRun {
             ..Self::default()
         };
         run.keys = std::sync::Arc::new(keys.replay_keys.iter().cloned().collect());
-        run.settled = std::sync::Arc::new(keys.settled_keys.iter().cloned().collect());
         let seal = namespace.seal();
         let mut shapes: BTreeMap<u64, Vec<(String, Option<CommandShape>)>> = BTreeMap::new();
         for key in keys.replay_keys {
@@ -598,14 +594,11 @@ impl LashlangReplayRun {
         }
     }
 
-    /// The keys whose outcome the journal holds, when the run replays against
-    /// a recorded frontier; `None` on a host that checks by position, which
-    /// cannot say whether a recorded entry has settled.
-    pub fn settled_keys(&self) -> Option<std::sync::Arc<std::collections::BTreeSet<String>>> {
-        match &self.state.lock_recover().frontier {
-            Frontier::Recorded(recorded) => Some(std::sync::Arc::clone(&recorded.settled)),
-            Frontier::Unread | Frontier::Positional => None,
-        }
+    /// Whether the run's host replays its journal by position, answering no
+    /// frontier read: which commands it holds is known only as the replay
+    /// reaches them (Restate).
+    pub fn is_positional(&self) -> bool {
+        matches!(self.state.lock_recover().frontier, Frontier::Positional)
     }
 
     /// Closes `command`: `wrote` says whether it wrote the journal. A written

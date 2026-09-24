@@ -98,14 +98,6 @@ ticket = "FIG-3561"
 reason = "the recording context cannot host effect groups; the crash matrix and error-return sweep move to the live Restate harness"
 
 [[deferred]]
-file = "crates/lash-restate/src/tests/journal_cut_runner.rs"
-claimant = "lash_restate::tests::journal_cut_runner::on_the_server_double"
-suite = "cell_binding_drift_tests"
-recipe = "parked"
-ticket = "FIG-3719"
-reason = "a drifted cell binding is served only from settled keys, and Restate's positional journal has none, so a redrive whose probe result was recorded refuses instead of completing"
-
-[[deferred]]
 file = "crates/lash-postgres-store/tests/conformance/effect_host.rs"
 claimant = "conformance::effect_host"
 suite = "effect_group_close_race_tests"

@@ -76,6 +76,19 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             .map_err(effect_store_error)
     }
 
+    async fn replay_row_settled(
+        &self,
+        scope_id: &str,
+        replay_key: &str,
+    ) -> Result<bool, RuntimeEffectControllerError> {
+        sqlx::query_scalar(effect_sql().replay.settled_by_key.sql())
+            .bind(scope_id)
+            .bind(replay_key)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(effect_store_error)
+    }
+
     async fn recorded_keys_in_range(
         &self,
         scope_id: &str,

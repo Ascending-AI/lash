@@ -60,7 +60,7 @@ pub use executor::{
     QueuedLaneHolder, QueuedLaneProbe, RecordedJournal, RecordedKeyFence, Resolution,
     ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
-    ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnlyFence,
+    ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnlyRange,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
     TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
@@ -91,7 +91,7 @@ pub use validation::{
     validate_replayed_effect_envelope,
 };
 
-pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner};
+pub use executor::{AdmittedProcess, EffectControllerTaskRequest, ProcessRunner, ServedOnly};
 pub use executor::{EffectTaskController, drive_effect_controller_task, effect_groups_unsupported};
 pub use executor::{RUN_SEAL_OPERATION, RuntimeEffectControllerHandle, TurnCancelWait};
 pub use outcome::{

@@ -14,6 +14,7 @@ mod group_read;
 pub(crate) mod journal_budget;
 mod journaled_effect;
 use journaled_effect::EngineFaults;
+mod live_frontier;
 mod scope_recording;
 mod scoped;
 
@@ -55,6 +56,7 @@ use crate::effect_group::{
 use crate::ingress::RestateAuthorityId;
 use crate::process::RestateProcessCancelRequest;
 use context::journaled_restate_durable_wait_request;
+pub(crate) use live_frontier::LiveFrontier;
 
 pub use context::RestateControllerContext;
 
@@ -1032,6 +1034,7 @@ where
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let execution = restate_effect_execution(envelope)?;
         self.remember_trace_invocation(execution.invocation());
+        live_frontier::refuse_outside_a_run(&execution, &local_executor)?;
         match execution {
             RestateEffectExecution::DirectProcess {
                 invocation,
