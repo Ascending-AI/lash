@@ -17,8 +17,6 @@ use spans::SpanMarkers;
 
 mod stdlib;
 use stdlib::*;
-mod loops;
-use loops::*;
 mod array_callbacks;
 mod array_map;
 mod attribute_update;
@@ -30,6 +28,7 @@ mod constructs;
 mod entry;
 mod graph;
 mod json_replacer;
+mod loops;
 mod param_types;
 mod process_wrapper;
 mod regex;
@@ -655,15 +654,8 @@ impl Lowerer {
                 iterable,
                 body,
             } => {
-                if let Some(reason) = body_may_mutate_iterable(iterable, body) {
-                    return Err(Diagnostic::new(
-                        DiagnosticCode::ForOfUnsupported,
-                        format!(
-                            "this for-of body {reason}; the v1 iterator walks a snapshot, so mutating the iterable mid-loop is not supported"
-                        ),
-                        None,
-                    ));
-                }
+                // The loop follows its iterable live, as ECMA-262 does
+                // (FIG-3625), so its body may change it freely.
                 self.in_loop_statement(|lowerer| {
                     lowerer.lower_for_each(pattern, *kind, iterable, body, false)
                 })?

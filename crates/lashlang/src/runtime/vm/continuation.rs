@@ -62,9 +62,14 @@ use super::exceptions::PendingErrorOrigin;
 /// decodes cleanly but its counters and slots name a retired node vocabulary,
 /// so it is refused rather than resumed.
 ///
+/// v20 (FIG-3625) carries live loop cursors: a `for...of` over an array or a
+/// `URLSearchParams` is a reference and an index, and one over a `Map` or a
+/// `Set` holds the collection its pending tail follows. A v19 cursor is a
+/// snapshot the resumed loop would walk as if it were live, so it is refused.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 19;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 20;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
@@ -893,10 +898,23 @@ fn iterator_to_continuation(
         &format!("{location} restore value"),
     )?;
     let cursor = match &iterator.cursor {
-        IterCursor::List { values, index } => {
+        IterCursor::List {
+            values,
+            index,
+            collection,
+        } => {
             validate_values(values, &format!("{location} values"))?;
+            validate_optional_value(collection.as_ref(), &format!("{location} collection"))?;
             VmIteratorCursor::List {
                 values: values.iter().cloned().collect(),
+                next_index: *index,
+                collection: collection.clone(),
+            }
+        }
+        IterCursor::Live { source, index } => {
+            validate_optional_value(Some(source), &format!("{location} source"))?;
+            VmIteratorCursor::Live {
+                source: source.clone(),
                 next_index: *index,
             }
         }
@@ -916,8 +934,17 @@ fn iterator_to_continuation(
 fn iterator_from_continuation(iterator: VmIteratorContinuation) -> IterState {
     IterState {
         cursor: match iterator.cursor {
-            VmIteratorCursor::List { values, next_index } => IterCursor::List {
+            VmIteratorCursor::List {
+                values,
+                next_index,
+                collection,
+            } => IterCursor::List {
                 values: values.into(),
+                index: next_index,
+                collection,
+            },
+            VmIteratorCursor::Live { source, next_index } => IterCursor::Live {
+                source,
                 index: next_index,
             },
             VmIteratorCursor::Range { next, end, step } => IterCursor::Range { next, end, step },

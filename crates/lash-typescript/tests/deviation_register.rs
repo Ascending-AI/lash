@@ -237,15 +237,9 @@ const PROBES: &[Probe] = &[
     ),
     // 13. String coercion of a value whose only string is a type tag.
     probe(13, "TS_OBJECT_STRING_COERCION", "finish('' + { a: 1 });"),
-    // 16. `for...of` snapshots, and a classic-loop `continue` across a
-    // `finally`.
+    // 23. A classic-loop `continue` across a `finally`.
     probe(
-        16,
-        "TS_FOR_OF_UNSUPPORTED",
-        "const xs = [1]; for (const x of xs) { xs.push(x); } finish(xs.length);",
-    ),
-    probe(
-        16,
+        23,
         "TS_FOR_UNSUPPORTED",
         "for (let i = 0; i < 2; i++) { try { continue; } finally { } } finish(1);",
     ),

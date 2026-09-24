@@ -421,12 +421,15 @@ impl Lowerer {
         } else {
             self.lower_iterable_sink(source)?
         };
+        // `for...of` hands the loop its iterable itself: the VM follows an
+        // array, a `Map`, a `Set` or a `URLSearchParams` live and converts
+        // anything else as `Array.from` does (FIG-3625).
         let iterable = if keys {
             Self::stdlib_call("Object.keys", vec![source])
         } else if let Some(method) = direct_exotic {
             Self::stdlib_call(method, vec![source])
         } else {
-            Self::iterable_copy(source)
+            source
         };
         let (bind, body) = self.with_loop(|lowerer| {
             lowerer.continue_epilogues.push(None);

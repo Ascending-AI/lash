@@ -2147,7 +2147,7 @@
           "source": "const items = [1, 2];\nfor (const item of items) {\n  const items = [item];\n  console.log(items.length);\n}\n",
           "reject": null,
           "deviation": null,
-          "defect": "for-of-shadowed-iterable",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
@@ -2159,26 +2159,6 @@
               "item": "unbound"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "rejected",
-              "diagnostic": "TS_FOR_OF_UNSUPPORTED",
-              "prints": [],
-              "probes": {
-                "item": "unbound",
-                "items": "unbound"
-              }
-            },
-            "restart": {
-              "outcome": "rejected",
-              "diagnostic": "TS_FOR_OF_UNSUPPORTED",
-              "prints": [],
-              "probes": {
-                "item": "unbound",
-                "items": "unbound"
-              }
-            }
           }
         }
       ]
@@ -2475,7 +2455,7 @@
           "source": "const items = [1];\nconst same = items;\nfor (const item of items) {\n  if (same.length < 3) {\n    same.push(item + 1);\n  }\n}\nconsole.log(same);\n",
           "reject": null,
           "deviation": null,
-          "defect": "for-of-aliased-iterable",
+          "defect": null,
           "node": {
             "outcome": "normal",
             "prints": [
@@ -2487,30 +2467,93 @@
               "item": "unbound"
             },
             "closures": []
-          },
-          "lash": {
-            "resident": {
-              "outcome": "normal",
-              "prints": [
-                "[1,2]"
-              ],
-              "probes": {
-                "item": "unbound",
-                "items": "object [1,2]",
-                "same": "object [1,2]"
-              }
+          }
+        }
+      ]
+    },
+    {
+      "id": "for-of-appends-during-the-loop",
+      "about": "a for...of loop visits what its body appends, and stops short of what it removes (FIG-3625)",
+      "probe": [
+        "queue",
+        "seen",
+        "item"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const queue = [1];\nconst seen = [];\nfor (const item of queue) {\n  seen.push(item);\n  if (item < 4) {\n    queue.push(item * 2);\n  }\n}\nconsole.log(seen, queue);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[1,2,4] [1,2,4]"
+            ],
+            "probes": {
+              "queue": "object [1,2,4]",
+              "seen": "object [1,2,4]",
+              "item": "unbound"
             },
-            "restart": {
-              "outcome": "normal",
-              "prints": [
-                "[1,2]"
-              ],
-              "probes": {
-                "item": "unbound",
-                "items": "object [1,2]",
-                "same": "object [1,2]"
-              }
-            }
+            "closures": []
+          }
+        },
+        {
+          "source": "for (const item of queue) {\n  queue.pop();\n  seen.push(item);\n}\nconsole.log(seen, queue);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[1,2,4,1,2] [1]"
+            ],
+            "probes": {
+              "queue": "object [1]",
+              "seen": "object [1,2,4,1,2]",
+              "item": "unbound"
+            },
+            "closures": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "for-of-map-and-set-are-live",
+      "about": "a for...of over a Map or a Set visits entries added during the loop and skips ones deleted before their turn (FIG-3625)",
+      "probe": [
+        "counts",
+        "tags",
+        "key",
+        "value",
+        "tag"
+      ],
+      "deviations": [],
+      "cells": [
+        {
+          "source": "const counts = new Map([['a', 1], ['b', 2], ['c', 3]]);\nfor (const [key, value] of counts) {\n  if (key === 'a') {\n    counts.delete('b');\n    counts.set('d', 4);\n    counts.set('c', 30);\n  }\n  console.log(key, value);\n}\nconst tags = new Set(['x']);\nfor (const tag of tags) {\n  if (tags.size < 3) {\n    tags.add(tag + 'y');\n  }\n  console.log(tag);\n}\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "a 1",
+              "c 30",
+              "d 4",
+              "x",
+              "xy",
+              "xyy"
+            ],
+            "probes": {
+              "counts": "object {}",
+              "tags": "object {}",
+              "key": "unbound",
+              "value": "unbound",
+              "tag": "unbound"
+            },
+            "closures": []
           }
         }
       ]
