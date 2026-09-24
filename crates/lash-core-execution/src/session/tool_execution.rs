@@ -702,7 +702,6 @@ impl RuntimeExecutionContext<'_> {
                             tool_name: outcome.record.tool.clone(),
                             args: outcome.record.args.clone(),
                             output: Box::new(outcome.record.output.clone()),
-                            duration_ms: outcome.record.duration_ms,
                         },
                     ),
                     crate::RuntimeEffectLocalExecutor::presentation(
@@ -710,6 +709,7 @@ impl RuntimeExecutionContext<'_> {
                         std::sync::Arc::new(settlement.clone()),
                         std::sync::Arc::clone(&self.dispatch.attachment_store),
                         self.attachment_acceptance().clone(),
+                        outcome.record.duration_ms,
                     ),
                 )
                 .await
