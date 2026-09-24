@@ -654,7 +654,8 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             // every other command this double journals — the local executor
             // runs the step chain once and the record above is what replay
             // serves.
-            command @ RuntimeEffectCommand::PresentToolResult { .. } => {
+            command @ (RuntimeEffectCommand::PresentToolResult { .. }
+            | RuntimeEffectCommand::LoadExecutionEnv { .. }) => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await

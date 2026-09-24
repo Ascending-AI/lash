@@ -59,6 +59,9 @@ pub enum RuntimeEffectKind {
     ClaimAcceptedTurnInput,
     Checkpoint,
     SyncExecutionEnvironment,
+    /// The recorded read of a tool child's execution environment (FIG-3683):
+    /// the store is read once and every replay serves the recorded spec.
+    LoadExecutionEnv,
     Sleep,
     AwaitEvent,
     PeekAwaitEvent,
@@ -84,6 +87,7 @@ impl RuntimeEffectKind {
             Self::ClaimAcceptedTurnInput => "claim_accepted_turn_input",
             Self::Checkpoint => "checkpoint",
             Self::SyncExecutionEnvironment => "sync_execution_environment",
+            Self::LoadExecutionEnv => "load_execution_env",
             Self::Sleep => "sleep",
             Self::AwaitEvent => "await_event",
             Self::PeekAwaitEvent => "peek_await_event",

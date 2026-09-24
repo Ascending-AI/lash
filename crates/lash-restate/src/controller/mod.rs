@@ -13,6 +13,7 @@ mod group_commit;
 mod group_read;
 pub(crate) mod journal_budget;
 mod journaled_effect;
+use journaled_effect::EngineFaults;
 mod scope_recording;
 mod scoped;
 
@@ -1311,7 +1312,10 @@ where
                 .await
                 .map(|resolution| RuntimeEffectOutcome::PeekAwaitEvent { resolution })
                 .map_err(RuntimeEffectControllerError::from),
-            RestateEffectExecution::JournaledRun { envelope } => {
+            RestateEffectExecution::JournaledRun {
+                envelope,
+                engine_faults,
+            } => {
                 let effect_kind = envelope.command.kind();
                 let reconstructed_envelope = envelope.canonical_form()?;
                 let replay_trace = local_executor.replay_validation_trace().cloned();
@@ -1323,19 +1327,13 @@ where
                     }
                 });
                 let recorded_envelope = Arc::new(reconstructed_envelope.clone());
-                let journaled_envelope = Arc::clone(&recorded_envelope);
                 let recorded = self
-                    .record_effect(
+                    .record_journaled_run(
                         &invocation,
                         &recorded_envelope,
-                        Box::pin(async move {
-                            let outcome =
-                                execute_restate_journaled_effect(envelope, local_executor).await;
-                            RecordedRuntimeEffect {
-                                envelope: journaled_envelope,
-                                outcome,
-                            }
-                        }),
+                        envelope,
+                        local_executor,
+                        engine_faults,
                     )
                     .await;
                 let recorded = match recorded {
@@ -1357,6 +1355,12 @@ where
                     replay_trace.as_ref(),
                 );
                 let outcome = match outcome {
+                    // A step that journals no fault can only hand back an
+                    // error it recorded: its outcome on every replay, whatever
+                    // its code (FIG-3528).
+                    Ok(outcome) if engine_faults == EngineFaults::Retried => {
+                        outcome.map_err(RuntimeEffectControllerError::into_journaled)
+                    }
                     Ok(outcome) => outcome,
                     Err(error) => {
                         self.emit_trace(Some(&invocation), || {
@@ -1483,6 +1487,7 @@ pub(crate) enum RestateEffectExecution {
     },
     JournaledRun {
         envelope: RuntimeEffectEnvelope,
+        engine_faults: EngineFaults,
     },
 }
 
@@ -1494,7 +1499,7 @@ impl RestateEffectExecution {
             | Self::Timer { invocation, .. }
             | Self::AwaitEvent { invocation, .. }
             | Self::PeekAwaitEvent { invocation, .. } => invocation,
-            Self::DirectLocal { envelope } | Self::JournaledRun { envelope } => {
+            Self::DirectLocal { envelope } | Self::JournaledRun { envelope, .. } => {
                 &envelope.invocation
             }
         }
@@ -1612,7 +1617,20 @@ pub(crate) fn restate_effect_execution(
                 command,
                 group,
             },
+            engine_faults: EngineFaults::Recorded,
         },
+        // A store read: a store that did not answer is this attempt's fault,
+        // never the read's recorded outcome (FIG-3683).
+        command @ RuntimeEffectCommand::LoadExecutionEnv { .. } => {
+            RestateEffectExecution::JournaledRun {
+                envelope: RuntimeEffectEnvelope {
+                    invocation,
+                    command,
+                    group,
+                },
+                engine_faults: EngineFaults::Retried,
+            }
+        }
     })
 }
 pub(crate) fn restate_effect_name(invocation: &RuntimeEffectInvocation) -> String {

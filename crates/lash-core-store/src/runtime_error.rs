@@ -1581,9 +1581,10 @@ impl RuntimeEffectControllerError {
     }
 
     /// Marks this failure of an uncommitted host derivation — an
-    /// execution-environment sync's rebuild that met a live fault — as safe to
-    /// execute again: the claim is released unsealed instead of journaling the
-    /// failure as the effect's outcome (FIG-3587).
+    /// execution-environment sync's rebuild, or a recorded execution-environment
+    /// load, that met a live fault — as safe to execute again: the claim is
+    /// released unsealed instead of journaling the failure as the effect's
+    /// outcome (FIG-3587, FIG-3683).
     #[must_use]
     pub fn retryable_uncommitted_derivation(mut self) -> Self {
         self.journal_disposition =
@@ -1591,12 +1592,15 @@ impl RuntimeEffectControllerError {
         self
     }
 
-    /// Only the host derivations — the assistant-response hooks and the
-    /// execution-environment sync — can consume derivation retry authority.
+    /// Only the host derivations — the assistant-response hooks, the
+    /// execution-environment sync and the execution-environment load — can
+    /// consume derivation retry authority.
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalDisposition {
         if matches!(
             kind,
-            RuntimeEffectKind::AssistantResponseHooks | RuntimeEffectKind::SyncExecutionEnvironment
+            RuntimeEffectKind::AssistantResponseHooks
+                | RuntimeEffectKind::SyncExecutionEnvironment
+                | RuntimeEffectKind::LoadExecutionEnv
         ) {
             self.journal_disposition
         } else {

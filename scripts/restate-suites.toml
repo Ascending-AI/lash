@@ -68,9 +68,6 @@ report_only = "tool-result durations reach journaled identities (FIG-3672); see 
 "tests::conformance_and_poison::the_oracle_and_the_budget_plugin_coexist" = "the child's follow-on call replay key diverges on replay; rank 0 never settles (FIG-3672)"
 "tests::conformance_and_poison::a_same_name_process_incarnation_is_not_the_recorded_opener" = "the child's follow-on call replay key diverges on replay; rank 3 never settles (FIG-3672)"
 "tests::conformance_and_poison::tool_children_run_through_the_invocation_driver" = "the child's follow-on call replay key diverges on replay; rank 1 never settles (FIG-3672)"
-# The child's process-environment read is not journaled, so a replay reads
-# it again: "a park is not re-run: the child read its environment once" sees 2.
-"tests::conformance_and_poison::a_divergent_child_settles_with_its_park" = "the child's process-env read runs again on replay (FIG-3683)"
 # A suspension drops the turn's registration in the live opener registry, so
 # the turn's tool child finds no dispatch context to run in ("no executor
 # currently routes ... tool child 0") and the resumed turn waits for it.
