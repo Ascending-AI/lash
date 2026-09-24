@@ -139,13 +139,15 @@ pub trait GroupExecutors: Send + Sync {
     ///
     /// [`executor_for`](Self::executor_for) answers for *this process*: a tool
     /// child whose opener is live in another worker is `None` here and runs
-    /// there. A first open's preflight asks this instead, because a durable
-    /// host may answer it from any worker of the deployment — Restate routes a
-    /// group's preflight and dispatcher to whichever endpoint takes the call —
-    /// and reading "the opener is live elsewhere" as "no executor" would refuse
-    /// a group the opener's own worker runs (FIG-3630). The default is
-    /// `executor_for`'s answer, which is right for every resolver whose routing
-    /// does not depend on which process asks.
+    /// there. The opener's own process answers a first open with
+    /// `executor_for`, which is what refuses an absent, foreign or superseded
+    /// opener (ADR 0099 §1). A check made from an endpoint handler asks this
+    /// instead: Restate routes a group's dispatcher, and a handler-driven
+    /// open's preflight, to whichever worker takes the call, and reading "the
+    /// opener is live elsewhere" as "no executor" would refuse a group the
+    /// opener's own worker runs (FIG-3630). The default is `executor_for`'s
+    /// answer, which is right for every resolver whose routing does not depend
+    /// on which process asks.
     fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
         self.executor_for(envelope).is_some()
     }

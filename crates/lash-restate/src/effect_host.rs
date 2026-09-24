@@ -1120,16 +1120,23 @@ impl RuntimeEffectController for RestateEffectHostController {
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/probe", error))?;
+        // Opener liveness is this process's to judge; the endpoint's is routing.
+        let local = self.group_executors.get().and_then(|executors| {
+            (group.children().iter()).position(|child| executors.executor_for(child).is_none())
+        });
         if matches!(probe, EffectGroupProbeResponse::Absent)
-            && let Some(position) = ingress
-                .call_workflow_json::<_, Option<usize>>(
-                    "EffectGroupDispatch",
-                    &group_key,
-                    "preflight",
-                    &group.children(),
-                )
-                .await
-                .map_err(|error| ingress_group_error("EffectGroupDispatch/preflight", error))?
+            && let Some(position) = match local {
+                found @ Some(_) => found,
+                None => ingress
+                    .call_workflow_json::<_, Option<usize>>(
+                        "EffectGroupDispatch",
+                        &group_key,
+                        "preflight",
+                        &group.children(),
+                    )
+                    .await
+                    .map_err(|error| ingress_group_error("EffectGroupDispatch/preflight", error))?,
+            }
         {
             let replay_key = shape.replay_keys.get(position).ok_or_else(|| {
                 group_shape_error(format!(
