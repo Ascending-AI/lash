@@ -971,6 +971,7 @@ class PrTailLabelTests(unittest.TestCase):
         "//crates/lash-typescript:corpus_laws__test",
         "//crates/lash-typescript:integration__test",
         "//crates/lash-typescript:race_any_runtime__test",
+        "//crates/lash-typescript:test262_full__test",
     ]
 
     def test_the_2109_diff_yields_the_typescript_deferred_labels(self) -> None:
