@@ -1,6 +1,5 @@
 use lash_sansio::{SessionId, TurnId, sync::MutexExt};
 use std::{
-    collections::HashMap,
     fmt::Write as _,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -149,6 +148,43 @@ pub(crate) enum TurnEntry {
     RestateHandler(lash_restate_test::RestateTestBackend),
 }
 
+/// Which facade call drives a benchmark turn on its scoped controller.
+#[derive(Clone, Copy)]
+pub(crate) enum TurnDrive {
+    /// `collect_session_events_with_scope`, the path every runtime scenario
+    /// measures.
+    CollectEvents,
+    /// `run_with_scope`, the caller-supplied-controller path the
+    /// scoped-effect scenario measures.
+    RunWithScope,
+}
+
+async fn drive_turn(
+    session: &lash::LashSession,
+    input: lash::TurnInput,
+    turn_id: Option<TurnId>,
+    cancel: tokio_util::sync::CancellationToken,
+    scoped: lash::runtime::ScopedEffectController<'_>,
+    drive: TurnDrive,
+) -> anyhow::Result<lash::TurnReport> {
+    let mut turn = session.turn(input).cancel(cancel);
+    if let Some(turn_id) = turn_id {
+        turn = turn.turn_id(turn_id);
+    }
+    let turn = turn.advanced();
+    match drive {
+        TurnDrive::CollectEvents => turn
+            .collect_session_events_with_scope(&lash::runtime::NoopEventSink, scoped)
+            .await
+            .map_err(anyhow::Error::from),
+        TurnDrive::RunWithScope => turn
+            .run_with_scope(scoped)
+            .await
+            .map(|output| output.result)
+            .map_err(anyhow::Error::from),
+    }
+}
+
 impl TurnEntry {
     /// Run one turn of `session` to its report. Without a `turn_id` the host
     /// lane lets the session name the turn; the Restate lane names it, since
@@ -160,6 +196,18 @@ impl TurnEntry {
         turn_id: Option<&TurnId>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<lash::TurnReport> {
+        self.run_driven(session, input, turn_id, cancel, TurnDrive::CollectEvents)
+            .await
+    }
+
+    pub(crate) async fn run_driven(
+        &self,
+        session: &lash::LashSession,
+        input: lash::TurnInput,
+        turn_id: Option<&TurnId>,
+        cancel: tokio_util::sync::CancellationToken,
+        drive: TurnDrive,
+    ) -> anyhow::Result<lash::TurnReport> {
         match self {
             Self::Host => {
                 let scope_turn_id = turn_id.cloned().unwrap_or_else(|| {
@@ -170,23 +218,13 @@ impl TurnEntry {
                     )
                 });
                 let effect_host = session.effect_host();
-                let scoped_effect_controller = effect_host
+                let scoped = effect_host
                     .scoped(
                         lash_core::AdmittedScope::unpinned(session.turn_scope(scope_turn_id))
                             .map_err(anyhow::Error::from)?,
                     )
                     .map_err(anyhow::Error::from)?;
-                let mut turn = session.turn(input).cancel(cancel);
-                if let Some(turn_id) = turn_id {
-                    turn = turn.turn_id(turn_id);
-                }
-                turn.advanced()
-                    .collect_session_events_with_scope(
-                        &lash::runtime::NoopEventSink,
-                        scoped_effect_controller,
-                    )
-                    .await
-                    .map_err(anyhow::Error::from)
+                drive_turn(session, input, turn_id.cloned(), cancel, scoped, drive).await
             }
             Self::RestateHandler(restate) => {
                 let turn_id = turn_id.cloned().unwrap_or_else(|| {
@@ -207,17 +245,9 @@ impl TurnEntry {
                         let cancel = cancel.clone();
                         let report = Arc::clone(&report);
                         Box::pin(async move {
-                            let result = session
-                                .turn(input)
-                                .turn_id(turn_id)
-                                .cancel(cancel)
-                                .advanced()
-                                .collect_session_events_with_scope(
-                                    &lash::runtime::NoopEventSink,
-                                    scoped,
-                                )
-                                .await
-                                .map_err(anyhow::Error::from);
+                            let result =
+                                drive_turn(&session, input, Some(turn_id), cancel, scoped, drive)
+                                    .await;
                             *report.lock_recover() = Some(result);
                         })
                     })
@@ -400,17 +430,6 @@ impl BenchmarkRuntime {
 
     #[expect(
         clippy::expect_used,
-        reason = "the benchmark session is taken by set_up before measurement runs that read turn scopes"
-    )]
-    pub(crate) fn turn_scope(&self, turn_id: impl Into<TurnId>) -> lash::runtime::ExecutionScope {
-        self.session
-            .as_ref()
-            .expect("benchmark session")
-            .turn_scope(turn_id)
-    }
-
-    #[expect(
-        clippy::expect_used,
         reason = "the benchmark session is taken by set_up before turn work runs"
     )]
     pub(crate) async fn run_turn(
@@ -561,19 +580,19 @@ impl BenchmarkRuntime {
     pub(crate) async fn run_turn_with_execution_scope(
         &self,
         input: lash::TurnInput,
+        turn_id: &TurnId,
         cancel: tokio_util::sync::CancellationToken,
-        scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
     ) -> anyhow::Result<lash::TurnReport> {
-        self.session
-            .as_ref()
-            .expect("benchmark session")
-            .turn(input)
-            .cancel(cancel)
-            .advanced()
-            .run_with_scope(scoped_effect_controller)
+        let session = self.session.as_ref().expect("benchmark session");
+        self.turn_entry
+            .run_driven(
+                session,
+                input,
+                Some(turn_id),
+                cancel,
+                TurnDrive::RunWithScope,
+            )
             .await
-            .map(|output| output.result)
-            .map_err(anyhow::Error::from)
     }
 
     #[expect(
@@ -1031,12 +1050,9 @@ pub(crate) async fn build_runtime(
         };
     let InProcessLane {
         restate,
-        backend: mut perf_backend,
+        backend: perf_backend,
         stores: store_factory,
     } = in_process_lane().await?;
-    if wiring.turn_start_gate {
-        perf_backend = perf_backend.with_effect_layer(Arc::new(StartGateRetryLayer::default()));
-    }
     let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> = Arc::new(perf_backend);
     let effect_host = backend.effect_host();
     let settlement_control = scenario
@@ -1119,35 +1135,6 @@ pub(crate) async fn build_runtime(
         tool_catalog_observer,
         _openai_compat_server: openai_compat_server,
     })
-}
-
-/// Fails the first two peeks of each turn-cancel gate so the start gate's
-/// bounded retry wrapper is on the measured path.
-#[derive(Default)]
-struct StartGateRetryLayer {
-    attempts_by_key: Mutex<HashMap<String, usize>>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::testing::EffectLayer for StartGateRetryLayer {
-    async fn peek_await_event(
-        &self,
-        inner: &dyn lash_core::AwaitEventResolver,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        if matches!(key.wait, lash_core::AwaitEventWaitIdentity::TurnCancelGate) {
-            let mut attempts = self.attempts_by_key.lock_recover();
-            let attempt = attempts.entry(key.key_id.clone()).or_default();
-            *attempt += 1;
-            if *attempt < 3 {
-                return Err(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::RuntimePerfStartGateRetry,
-                    "deterministic start-gate retry fixture",
-                ));
-            }
-        }
-        inner.peek_await_event(key).await
-    }
 }
 
 struct BenchmarkWorkbenchTriggerPluginFactory;

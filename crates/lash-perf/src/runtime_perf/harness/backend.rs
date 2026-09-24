@@ -4,9 +4,8 @@
 //! is lash-restate's engine on the in-process Restate server double over a
 //! SQLite memory store set; the durable lanes open a SQLite file or a
 //! PostgreSQL backend. A lane that measures persistence puts the perf store
-//! decorator in front of the backend's session catalog, and the start-gate
-//! scenario layers its retry fixture over the backend's host; every other
-//! port stays the backend's.
+//! decorator in front of the backend's session catalog; every other port
+//! stays the backend's.
 
 use std::sync::Arc;
 
@@ -17,7 +16,7 @@ use lash_lashlang_runtime::{LashlangArtifactStore, LashlangArtifactStoreSet as _
 /// cost, not a schedule, so one fixed seed serves every scenario.
 const RESTATE_SEED: u64 = 0x5eed_9e4f;
 
-/// `inner` with its session catalog or its effect host decorated. It keeps
+/// `inner` with its session catalog decorated. It keeps
 /// the inner backend's Lashlang artifacts, so an RLM factory built over it
 /// keeps them there too.
 pub(super) struct PerfBackend {
@@ -54,18 +53,6 @@ impl PerfBackend {
     /// Serve sessions from `catalog`, the perf store decorator.
     pub(super) fn with_catalog(mut self, catalog: Arc<dyn SessionStoreFactory>) -> Self {
         self.catalog = catalog;
-        self
-    }
-
-    /// Run every effect through `layer` before the backend's host.
-    pub(super) fn with_effect_layer(
-        mut self,
-        layer: Arc<dyn lash_core::testing::EffectLayer>,
-    ) -> Self {
-        self.effect_host = Arc::new(lash_core::testing::LayeredEffectHost::new(
-            self.effect_host,
-            layer,
-        ));
         self
     }
 }
