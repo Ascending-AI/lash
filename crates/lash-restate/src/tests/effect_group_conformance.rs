@@ -517,6 +517,35 @@ impl LiveConformanceHarness {
         })
     }
 
+    /// A maker of fresh Restate backends on this endpoint's ingress, each over
+    /// its own SQLite memory store set: the backend a law that builds a
+    /// runtime runs on.
+    pub(super) fn backend_factory(
+        &self,
+    ) -> impl Fn() -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Arc<dyn lash_core::Backend>> + Send>,
+    > + Send
+    + Sync
+    + 'static {
+        let ingress_url = self.ingress_url.clone();
+        move || {
+            let ingress_url = ingress_url.clone();
+            Box::pin(async move {
+                Arc::new(crate::RestateBackend::new(
+                    ingress_url.as_str(),
+                    crate::RestateAuthorityId::new("lash-conformance-backend-laws")
+                        .expect("valid authority"),
+                    Arc::new(
+                        lash_sqlite_store::SqliteStoreSet::memory()
+                            .await
+                            .expect("open the law's store set"),
+                    ),
+                    crate::RestateQueuedWork::Disabled,
+                )) as Arc<dyn lash_core::Backend>
+            })
+        }
+    }
+
     pub(super) fn group_host_factory(&self) -> GroupHostFactory {
         let ingress_url = self.ingress_url.clone();
         let executors = Arc::clone(&self.executors);

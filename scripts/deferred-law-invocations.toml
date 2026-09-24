@@ -29,6 +29,15 @@ receipt_artifact = "target/functional-e2e-artifacts/effect-group-conformance/law
 [[deferred]]
 file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
 claimant = "lash_restate::tests::conformance_and_poison"
+suite = "session_config_settlement_tests"
+recipe = "effect-group-conformance-e2e"
+ci_job = "functional-e2e"
+ci_matrix_name = "effect-group-conformance"
+receipt_artifact = "target/functional-e2e-artifacts/effect-group-conformance/law-receipts.txt"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison"
 suite = "effect_host_await_event_witness_tests"
 recipe = "effect-group-conformance-e2e"
 ci_job = "functional-e2e"
@@ -78,3 +87,11 @@ suite = "turn_crash_recovery_tests"
 recipe = "parked"
 ticket = "FIG-3561"
 reason = "the recording context cannot host effect groups; the crash matrix and error-return sweep move to the live Restate harness"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison"
+suite = "effect_group_closed_caller_tests"
+recipe = "parked"
+ticket = "FIG-3676"
+reason = "Restate serves a closed group's settlements to a restored handle instead of refusing the await by shape"
