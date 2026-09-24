@@ -1452,3 +1452,23 @@ fn fig3662_computed_record_keys_use_ecma_to_string() {
         Value::String("B|A|D|G|E".into())
     );
 }
+
+#[test]
+fn fig3662_set_intersection_iterates_the_smaller_side() {
+    for (source, expected) in [
+        (
+            "finish([...(new Set([3,2,1,0])).intersection(new Set([1,3,5]))].join(','));",
+            "1,3",
+        ),
+        (
+            "finish([...(new Set([1,3,5])).intersection(new Set([3,2,1,0]))].join(','));",
+            "1,3",
+        ),
+        (
+            "finish([...(new Set([3,2,1])).intersection(new Set([1,3,5,7]))].join(','));",
+            "3,1",
+        ),
+    ] {
+        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
+    }
+}

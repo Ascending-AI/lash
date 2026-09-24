@@ -9187,7 +9187,7 @@ test/built-ins/Set/prototype/intersection/length.js	refused	TS_PROTOTYPE_MUTATIO
 test/built-ins/Set/prototype/intersection/name.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Set/prototype/intersection/receiver-not-set.js	refused	TS_CLASS_UNSUPPORTED
 test/built-ins/Set/prototype/intersection/require-internal-slot.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/Set/prototype/intersection/result-order.js	fail	FIG-3662
+test/built-ins/Set/prototype/intersection/result-order.js	pass	-
 test/built-ins/Set/prototype/intersection/set-like-array.js	fail	FIG-3653
 test/built-ins/Set/prototype/intersection/set-like-class-mutation.js	refused	TS_ACCESSOR_UNSUPPORTED
 test/built-ins/Set/prototype/intersection/set-like-class-order.js	refused	TS_ACCESSOR_UNSUPPORTED

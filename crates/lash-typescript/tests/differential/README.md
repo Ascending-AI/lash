@@ -2,9 +2,9 @@
 
 `expectations.tsv` is a checked-in Node.js v25.2.1 oracle snapshot. It contains
 all 163 Opus review expressions, all 124 sol-sub review expressions, and
-386 focused rows for the combined fix findings. Duplicate expressions are
-retained so the provenance counts stay executable: the table's 673 rows carry
-600 distinct expressions.
+395 focused rows for the combined fix findings. Duplicate expressions are
+retained so the provenance counts stay executable: the table's 682 rows carry
+609 distinct expressions.
 
 Regeneration is deliberate, not part of normal tests. Enum rows are first
 transpiled with pinned TypeScript 7.0.2 through `npx tsc --target esnext`, then

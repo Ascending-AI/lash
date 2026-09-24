@@ -680,9 +680,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         }
                     }
                     "intersection" => {
-                        for value in &left {
-                            if self.heap.set_has(*other, value)? {
-                                output.push(value.clone());
+                        // ECMA iterates the smaller set and keeps its order:
+                        // `this` when it is no larger than the argument,
+                        // otherwise the argument's own insertion order.
+                        if left.len() <= right.len() {
+                            for value in &left {
+                                if self.heap.set_has(*other, value)? {
+                                    output.push(value.clone());
+                                }
+                            }
+                        } else {
+                            for value in &right {
+                                if self.heap.set_has(receiver, value)? {
+                                    output.push(value.clone());
+                                }
                             }
                         }
                     }
