@@ -1,312 +1,211 @@
-# Drive-determinism allowlist for rule 5 of scripts/check-substrate-boundary.sh
-# (FIG-3672, slice P5b).
+# Drive determinism allowlist (FIG-3672 inventory). One entry per
+# (file, normalized line text) pair:
 #
-# One line per forbidden-construct match in the drive modules: `path:line`, then
-# the FIG-3672 inventory id(s) the site belongs to. `OBS` marks a site on the
-# inventory's observation-only list (it has no id); `UNMAPPED` marks a hit with
-# no inventory row at that exact file and line. A later slice deletes the lines
-# its fix removes; scripts/test_check_substrate_boundary.py keeps the entry
-# count at or below scripts/drive-determinism-allowlist.count, so this file can
-# only shrink.
-crates/lash-core-execution/src/runtime/effect/group.rs:12  # UNMAPPED
-crates/lash-core-execution/src/runtime/effect/group.rs:245  # UNMAPPED
-crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs:143  # CR11
-crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs:672  # IO37
-crates/lash-core-execution/src/session.rs:537  # UNMAPPED
-crates/lash-core-execution/src/session/execution_context.rs:6  # UNMAPPED
-crates/lash-core-execution/src/session/execution_context.rs:59  # UNMAPPED
-crates/lash-core-execution/src/session/execution_context.rs:628  # AC35
-crates/lash-core-execution/src/session/execution_context.rs:1069  # IO32 IO60
-crates/lash-core-execution/src/session/execution_context.rs:1177  # UNMAPPED
-crates/lash-core-execution/src/session/execution_context.rs:1188  # UNMAPPED
-crates/lash-core-execution/src/session/execution_context.rs:1289  # IO39
-crates/lash-core-execution/src/session/execution_context.rs:1318  # UNMAPPED
-crates/lash-core-execution/src/session/tool_execution.rs:12  # UNMAPPED
-crates/lash-core-execution/src/session/tool_execution.rs:1266  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/context.rs:5  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/execution.rs:157  # AC42
-crates/lash-core-execution/src/tool_dispatch/execution.rs:215  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/execution.rs:221  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/intent_executor.rs:471  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/intent_executor.rs:599  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/preparation.rs:48  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/retry.rs:208  # IO31
-crates/lash-core/src/runtime/logical_turn.rs:413  # IO12
-crates/lash-core/src/runtime/logical_turn.rs:423  # IO12
-crates/lash-core/src/runtime/logical_turn.rs:540  # IO9
-crates/lash-core/src/runtime/logical_turn.rs:696  # IO10
-crates/lash-core/src/runtime/logical_turn.rs:749  # IO10
-crates/lash-core/src/runtime/logical_turn.rs:861  # IO11
-crates/lash-core/src/runtime/turn_boundary.rs:91  # UNMAPPED
-crates/lash-core/src/runtime/turn_boundary.rs:398  # IO21
-crates/lash-core/src/runtime/turn_boundary.rs:756  # IO21
-crates/lash-core/src/runtime/turn_driver/context.rs:156  # AC33
-crates/lash-core/src/runtime/turn_driver/effects.rs:8  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:22  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:39  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:62  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:78  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:170  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:171  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:487  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:557  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:629  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:635  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs:689  # AC34
-crates/lash-core/src/runtime/turn_driver/effects.rs:779  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/events.rs:142  # OBS
-crates/lash-core/src/runtime/turn_driver/handlers.rs:73  # HK1
-crates/lash-core/src/runtime/turn_driver/handlers.rs:300  # IO27
-crates/lash-core/src/runtime/turn_driver/handlers.rs:313  # IO27
-crates/lash-core/src/runtime/turn_driver/handlers.rs:320  # IO27
-crates/lash-core/src/runtime/turn_driver/local_effects.rs:12  # LZ1
-crates/lash-core/src/runtime/turn_driver/machine.rs:2  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/machine.rs:13  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/machine.rs:17  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:90  # IO30
-crates/lash-core/src/runtime/turn_driver/streaming.rs:209  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:245  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:286  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:312  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:461  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:1061  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:1441  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:1442  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:1447  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs:1464  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming/support.rs:96  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming/support.rs:101  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming/terminal.rs:41  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/tools.rs:11  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/tools.rs:12  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/tools.rs:64  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/tools.rs:65  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/accept.rs:238  # IO1
-crates/lash-core/src/runtime/turn_loop/commit.rs:227  # IO21
-crates/lash-core/src/runtime/turn_loop/commit.rs:446  # IO19
-crates/lash-core/src/runtime/turn_loop/commit.rs:489  # IO20
-crates/lash-core/src/runtime/turn_loop/commit.rs:499  # IO20
-crates/lash-core/src/runtime/turn_loop/commit.rs:680  # LZ29
-crates/lash-core/src/runtime/turn_loop/commit.rs:762  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/commit.rs:826  # HK9
-crates/lash-core/src/runtime/turn_loop/commit.rs:1012  # IO22
-crates/lash-core/src/runtime/turn_loop/drain_end.rs:95  # IO26
-crates/lash-core/src/runtime/turn_loop/drain_end.rs:235  # IO26
-crates/lash-core/src/runtime/turn_loop/drain_end.rs:294  # IO26
-crates/lash-core/src/runtime/turn_loop/execute.rs:217  # AC1
-crates/lash-core/src/runtime/turn_loop/execute.rs:722  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs:149  # IO5
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs:162  # IO5
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs:233  # IO6
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs:244  # IO6
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs:282  # IO5
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs:307  # IO5
-crates/lash-core/src/runtime/turn_loop/initial_drive.rs:315  # IO5
-crates/lash-core/src/runtime/turn_loop/lease.rs:103  # IO1
-crates/lash-core/src/runtime/turn_loop/lease.rs:230  # IO17
-crates/lash-core/src/runtime/turn_loop/lease.rs:267  # IO18
-crates/lash-core/src/runtime/turn_loop/lease.rs:324  # IO17
-crates/lash-core/src/runtime/turn_loop/lease.rs:368  # IO7
-crates/lash-core/src/runtime/turn_loop/lease.rs:378  # IO7
-crates/lash-core/src/runtime/turn_loop/lease.rs:465  # IO3
-crates/lash-core/src/runtime/turn_loop/lease.rs:497  # IO3
-crates/lash-core/src/runtime/turn_loop/lease.rs:507  # IO3
-crates/lash-core/src/runtime/turn_loop/lease.rs:527  # IO3
-crates/lash-core/src/runtime/turn_loop/lease.rs:534  # IO3
-crates/lash-core/src/runtime/turn_loop/lease.rs:557  # IO3
-crates/lash-core/src/runtime/turn_loop/lease.rs:582  # IO3
-crates/lash-core/src/runtime/turn_loop/lease.rs:596  # IO3
-crates/lash-core/src/runtime/turn_loop/lease.rs:662  # IO13
-crates/lash-core/src/runtime/turn_loop/lease.rs:692  # IO13
-crates/lash-core/src/runtime/turn_loop/lease.rs:769  # IO13
-crates/lash-core/src/runtime/turn_loop/lease.rs:798  # IO13
-crates/lash-core/src/runtime/turn_loop/lease.rs:801  # IO13
-crates/lash-core/src/runtime/turn_loop/prepare.rs:58  # CR19 IO15
-crates/lash-core/src/runtime/turn_loop/prepare.rs:465  # IO16
-crates/lash-core/src/runtime/turn_loop/queued_work.rs:197  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/queued_work.rs:290  # IO24
-crates/lash-core/src/runtime/turn_loop/queued_work.rs:311  # IO24
-crates/lash-core/src/runtime/turn_loop/queued_work.rs:368  # IO24
-crates/lash-core/src/runtime/turn_loop/queued_work.rs:418  # IO24
-crates/lash-core/src/runtime/turn_loop/queued_work.rs:508  # IO24
-crates/lash-core/src/runtime/turn_loop/queued_work.rs:758  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/queued_work.rs:836  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/queued_work.rs:901  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/resident_session.rs:203  # UNMAPPED
-crates/lash-core/src/runtime/turn_loop/resident_session.rs:403  # IO14
-crates/lash-core/src/runtime/turn_loop/resident_session.rs:504  # HK9 IO14
-crates/lash-core/src/runtime/turn_loop/resident_session.rs:535  # HK9 IO14
-crates/lash-lashlang-runtime/src/lib.rs:843  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs:901  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs:968  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs:1068  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs:1186  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs:1205  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs:1249  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs:1264  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs:1278  # UNMAPPED
-crates/lash-lashlang-runtime/src/lib.rs:1288  # UNMAPPED
-crates/lash-lashlang-runtime/src/process.rs:144  # AC40
-crates/lash-lashlang-runtime/src/process.rs:152  # UNMAPPED
-crates/lash-lashlang-runtime/src/process.rs:170  # AC40
-crates/lash-lashlang-runtime/src/process.rs:398  # UNMAPPED
-crates/lash-lashlang-runtime/src/process.rs:737  # AC20
-crates/lash-lashlang-runtime/src/process.rs:750  # AC20
-crates/lash-lashlang-runtime/src/process.rs:1000  # SB3
-crates/lash-lashlang-runtime/src/process/effect_operations.rs:170  # UNMAPPED
-crates/lash-lashlang-runtime/src/process/trace_map.rs:37  # UNMAPPED
-crates/lash-lashlang-runtime/src/trigger_commands.rs:96  # IO59
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:2  # UNMAPPED
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:69  # SB2
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:319  # UNMAPPED
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:627  # UNMAPPED
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:814  # UNMAPPED
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:940  # IO57
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:1086  # AC37
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:1337  # IO57
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:1346  # IO57
-crates/lash-protocol-rlm/src/executor/host_bridge.rs:1360  # IO57
-crates/lash-protocol-rlm/src/executor/mod.rs:160  # UNMAPPED
-crates/lash-protocol-rlm/src/executor/mod.rs:569  # IO56
-crates/lash-protocol-rlm/src/projection/bindings.rs:64  # CR23
-crates/lash-protocol-rlm/src/projection/context.rs:1  # UNMAPPED
-crates/lash-protocol-rlm/src/projection/context.rs:38  # UNMAPPED
-crates/lash-protocol-rlm/src/projection/context.rs:39  # UNMAPPED
-crates/lash-protocol-rlm/src/projection/context.rs:49  # UNMAPPED
-crates/lash-protocol-rlm/src/projection/context.rs:125  # UNMAPPED
-crates/lash-protocol-rlm/src/projection/context.rs:126  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:70  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:75  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:278  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:289  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:308  # LZ11 SB30
-crates/lash-restate/src/controller/context.rs:322  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:329  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:338  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:363  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:374  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:381  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:410  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:418  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:425  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:440  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:451  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:464  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:474  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:489  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:504  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:518  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:534  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:551  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:568  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:586  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:655  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:722  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:810  # LZ11
-crates/lash-restate/src/controller/context.rs:885  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:905  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1028  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1045  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1064  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1171  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1191  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1208  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1228  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1248  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1265  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1283  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1301  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1318  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1336  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1353  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1371  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1388  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1451  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1467  # UNMAPPED
-crates/lash-restate/src/controller/context.rs:1498  # UNMAPPED
-crates/lash-restate/src/controller/journaled_effect.rs:197  # SB30
-crates/lash-restate/src/controller/journaled_effect.rs:275  # SB30
-crates/lash-restate/src/controller/mod.rs:264  # UNMAPPED
-crates/lash-restate/src/controller/mod.rs:570  # CR12
-crates/lash-restate/src/controller/mod.rs:1442  # IO47
-crates/lash-restate/src/controller/process_command.rs:165  # IO44
-crates/lash-restate/src/controller/process_command.rs:189  # IO44
-crates/lash-restate/src/controller/process_command.rs:197  # IO44
-crates/lash-restate/src/controller/process_command.rs:268  # IO44
-crates/lash-restate/src/controller/process_command.rs:295  # IO43
-crates/lash-restate/src/controller/process_command.rs:306  # IO43
-crates/lash-restate/src/controller/process_command.rs:326  # IO45
-crates/lash-restate/src/controller/process_command.rs:333  # IO45
-crates/lash-restate/src/controller/process_command.rs:340  # IO45
-crates/lash-restate/src/controller/process_command.rs:368  # IO45
-crates/lash-restate/src/controller/process_command.rs:424  # IO46
-crates/lash-restate/src/controller/process_command.rs:478  # IO45
-crates/lash-restate/src/controller/process_command.rs:522  # UNMAPPED
-crates/lash-restate/src/controller/process_command.rs:581  # UNMAPPED
-crates/lash-restate/src/controller/process_command.rs:589  # UNMAPPED
-crates/lash-restate/src/controller/process_command.rs:623  # IO45
-crates/lash-restate/src/controller/process_scheduling.rs:57  # IO44
-crates/lash-restate/src/controller/process_scheduling.rs:102  # IO44
-crates/lash-restate/src/controller/process_scheduling.rs:155  # UNMAPPED
-crates/lash-restate/src/durable_wait.rs:155  # UNMAPPED
-crates/lash-restate/src/durable_wait.rs:159  # UNMAPPED
-crates/lash-restate/src/durable_wait.rs:168  # UNMAPPED
-crates/lash-restate/src/durable_wait.rs:170  # UNMAPPED
-crates/lash-restate/src/durable_wait.rs:713  # CR13
-crates/lash-restate/src/effect_group.rs:18  # UNMAPPED
-crates/lash-restate/src/effect_group.rs:51  # UNMAPPED
-crates/lash-restate/src/effect_group.rs:543  # UNMAPPED
-crates/lash-restate/src/effect_group.rs:544  # UNMAPPED
-crates/lash-restate/src/effect_group.rs:546  # UNMAPPED
-crates/lash-restate/src/effect_group.rs:556  # UNMAPPED
-crates/lash-restate/src/effect_group/dispatch.rs:484  # AC18
-crates/lash-restate/src/effect_group/dispatch.rs:540  # AC18
-crates/lash-restate/src/effect_group/dispatch.rs:573  # UNMAPPED
-crates/lash-restate/src/effect_group/dispatch.rs:601  # UNMAPPED
-crates/lash-restate/src/process/admission.rs:185  # UNMAPPED
-crates/lash-restate/src/process/admission.rs:241  # UNMAPPED
-crates/lash-restate/src/process/admission.rs:344  # UNMAPPED
-crates/lash-restate/src/process/mod.rs:52  # CR16
-crates/lash-restate/src/process/mod.rs:426  # UNMAPPED
-crates/lash-restate/src/process/mod.rs:496  # UNMAPPED
-crates/lash-restate/src/process/mod.rs:517  # UNMAPPED
-crates/lash-restate/src/process/mod.rs:535  # UNMAPPED
-crates/lash-restate/src/process/mod.rs:549  # UNMAPPED
-crates/lash-restate/src/process/mod.rs:670  # UNMAPPED
-crates/lash-restate/src/process/mod.rs:711  # UNMAPPED
-crates/lash-restate/src/process/workflow.rs:173  # AC19
-crates/lash-restate/src/process/workflow.rs:296  # UNMAPPED
-crates/lash-restate/src/process/workflow.rs:312  # UNMAPPED
-crates/lash-restate/src/process/workflow.rs:397  # AC19
-crates/lash-restate/src/process/workflow.rs:463  # IO50
-crates/lash-restate/src/process/workflow.rs:483  # IO50
-crates/lash-restate/src/process/workflow.rs:491  # IO50
-crates/lash-restate/src/process/workflow.rs:506  # IO50
-crates/lash-restate/src/process/workflow.rs:515  # IO50
-crates/lash-restate/src/process/workflow.rs:545  # UNMAPPED
-crates/lash-restate/src/process/workflow.rs:571  # IO48
-crates/lash-restate/src/process/workflow.rs:600  # UNMAPPED
-crates/lash-restate/src/process/workflow.rs:728  # IO50
-crates/lash-restate/src/process/workflow.rs:767  # IO52
-crates/lash-restate/src/process/workflow.rs:814  # IO53
-crates/lash-restate/src/process/workflow.rs:842  # IO53
-crates/lashlang/src/artifact.rs:2  # UNMAPPED
-crates/lashlang/src/artifact.rs:747  # UNMAPPED
-crates/lashlang/src/artifact.rs:748  # UNMAPPED
-crates/lashlang/src/runtime/format.rs:25  # UNMAPPED
-crates/lashlang/src/runtime/format.rs:110  # UNMAPPED
-crates/lashlang/src/runtime/format.rs:342  # UNMAPPED
-crates/lashlang/src/runtime/json.rs:95  # UNMAPPED
-crates/lashlang/src/runtime/ops.rs:858  # UNMAPPED
-crates/lashlang/src/runtime/ops.rs:934  # UNMAPPED
-crates/lashlang/src/runtime/ops.rs:1332  # AC38
-crates/lashlang/src/runtime/projector.rs:97  # UNMAPPED
-crates/lashlang/src/runtime/value.rs:344  # SB5
-crates/lashlang/src/runtime/value.rs:935  # AC38
-crates/lashlang/src/runtime/vm/control.rs:216  # VM1
-crates/lashlang/src/runtime/vm/control.rs:257  # VM1
-crates/lashlang/src/runtime/vm/control.rs:263  # UNMAPPED
-crates/lashlang/src/runtime/vm/control.rs:296  # VM1
-crates/lashlang/src/runtime/vm/control.rs:319  # VM1
-crates/lashlang/src/runtime/vm/control.rs:362  # VM1
-crates/lashlang/src/runtime/vm/mod.rs:1329  # UNMAPPED
+#   path  |  <normalized line text>  |  <occurrence count>  # <inventory id>
+#
+# The line text is the offending source line trimmed, with internal whitespace
+# collapsed to single spaces; the `  |  ` / `  # ` separators use a double
+# space, which normalized text can never contain. Keys ignore line numbers,
+# so edits that move or reindent a pinned site stay pinned. A hit fails when
+# its (file, text) is unlisted or occurs more times than the count; a count
+# that exceeds the current occurrences is stale and fails, so fixes must
+# delete or decrement entries. The comment carries the FIG-3672 inventory id
+# for each pinned site (UNMAPPED = the line lint flags code the §1 tables do
+# not cite by line; OBS = a §1 observation-only site).
+crates/lash-core-execution/src/runtime/effect/group.rs  |  let mut first_seen_at: HashMap<&str, usize> = HashMap::with_capacity(children.len());  |  1  # UNMAPPED
+crates/lash-core-execution/src/runtime/effect/group.rs  |  use std::collections::HashMap;  |  1  # UNMAPPED
+crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs  |  .await  |  1  # IO37
+crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs  |  clock: Arc::new(std::sync::Mutex::new(Arc::new(crate::SystemClock))),  |  1  # CR11
+crates/lash-core-execution/src/session.rs  |  event_tx: tokio::sync::mpsc::Sender<SessionStreamEvent>,  |  1  # UNMAPPED
+crates/lash-core-execution/src/session/execution_context.rs  |  .await  |  2  # IO32 IO39 IO60
+crates/lash-core-execution/src/session/execution_context.rs  |  .await?;  |  2  # UNMAPPED
+crates/lash-core-execution/src/session/execution_context.rs  |  let _ = tx.send(TurnActivity::new(correlation_id, event)).await;  |  1  # AC35
+crates/lash-core-execution/src/session/execution_context.rs  |  started_process_ids: Arc<std::sync::Mutex<std::collections::HashSet<ProcessId>>>,  |  1  # UNMAPPED
+crates/lash-core-execution/src/session/execution_context.rs  |  tokio::sync::mpsc::UnboundedReceiver<  |  1  # UNMAPPED
+crates/lash-core-execution/src/session/execution_context.rs  |  use tokio::sync::mpsc::Sender;  |  1  # UNMAPPED
+crates/lash-core-execution/src/session/tool_execution.rs  |  let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =  |  1  # UNMAPPED
+crates/lash-core-execution/src/session/tool_execution.rs  |  use std::collections::HashMap;  |  1  # UNMAPPED
+crates/lash-core-execution/src/tool_dispatch/context.rs  |  use tokio::sync::mpsc;  |  1  # UNMAPPED
+crates/lash-core-execution/src/tool_dispatch/execution.rs  |  .await  |  2  # AC42 UNMAPPED
+crates/lash-core-execution/src/tool_dispatch/execution.rs  |  return unavailable_prepared_tool_outcome(context, prepared).await;  |  1  # UNMAPPED
+crates/lash-core-execution/src/tool_dispatch/intent_executor.rs  |  .await  |  1  # UNMAPPED
+crates/lash-core-execution/src/tool_dispatch/intent_executor.rs  |  .await?;  |  1  # UNMAPPED
+crates/lash-core-execution/src/tool_dispatch/preparation.rs  |  .unwrap_or_else(|| format!("tool:{}", uuid::Uuid::new_v4())),  |  1  # UNMAPPED
+crates/lash-core-execution/src/tool_dispatch/retry.rs  |  .await  |  1  # IO31
+crates/lash-core/src/runtime/logical_turn.rs  |  && let Err(err) = store.abandon_queued_work_claims(&withheld.queued).await  |  1  # IO12
+crates/lash-core/src/runtime/logical_turn.rs  |  && let Err(err) = store.abandon_turn_input_claims(turn_input_claims).await  |  1  # IO12
+crates/lash-core/src/runtime/logical_turn.rs  |  .await  |  4  # IO10 IO11 IO9
+crates/lash-core/src/runtime/turn_boundary.rs  |  .await;  |  1  # IO21
+crates/lash-core/src/runtime/turn_boundary.rs  |  Arc::new(crate::SystemClock),  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_boundary.rs  |  let observed = store.turn_cancel_request_intent(&address).await?;  |  1  # IO21
+crates/lash-core/src/runtime/turn_driver/context.rs  |  tokio::select! {  |  1  # AC33
+crates/lash-core/src/runtime/turn_driver/effects.rs  |  &std::collections::HashSet<String>,  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/effects.rs  |  ) -> Result<std::collections::HashSet<String>, RuntimeError> {  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/effects.rs  |  .await  |  3  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/effects.rs  |  .await?;  |  2  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/effects.rs  |  .collect::<std::collections::HashSet<_>>();  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/effects.rs  |  fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>) {  |  2  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/effects.rs  |  fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>);  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/effects.rs  |  let mut already_delivered = std::collections::HashSet::new();  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/effects.rs  |  tokio::select! {  |  1  # AC34
+crates/lash-core/src/runtime/turn_driver/events.rs  |  TurnActivityId::new(uuid::Uuid::new_v4().to_string()),  |  1  # OBS
+crates/lash-core/src/runtime/turn_driver/handlers.rs  |  .await  |  3  # IO27
+crates/lash-core/src/runtime/turn_driver/handlers.rs  |  match self.before_llm_call(machine, &request).await {  |  1  # HK1
+crates/lash-core/src/runtime/turn_driver/local_effects.rs  |  std::collections::HashMap<usize, crate::runtime::LlmStreamSummary>,  |  1  # LZ1
+crates/lash-core/src/runtime/turn_driver/machine.rs  |  assistant_ids_at_last_model_call: Option<HashSet<String>>,  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/machine.rs  |  fn assistant_ids<'a>(messages: impl Iterator<Item = &'a Message>) -> HashSet<String> {  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/machine.rs  |  use std::collections::HashSet;  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  .await  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  .await?,  |  1  # IO30
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  TurnActivityId::new(uuid::Uuid::new_v4().to_string()),  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  let mut block_raw_text = std::collections::HashMap::new();  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_stream_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>,  |  2  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_task: &mut tokio::task::JoinHandle<T>,  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  tokio::select! {  |  2  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming.rs  |  tokio::sync::mpsc::unbounded_channel::<LlmStreamEvent>();  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  handle: tokio::task::AbortHandle,  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  pub(super) fn new(handle: tokio::task::AbortHandle) -> Self {  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/streaming/terminal.rs  |  call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/tools.rs  |  let (turn_event_tx, mut turn_event_rx) = tokio::sync::mpsc::channel::<TurnActivity>(64);  |  2  # UNMAPPED
+crates/lash-core/src/runtime/turn_driver/tools.rs  |  tokio::sync::mpsc::channel::<SessionStreamEvent>(64);  |  2  # UNMAPPED
+crates/lash-core/src/runtime/turn_loop/accept.rs  |  *session_execution_lease = self.claim_session_execution_lease().await?;  |  1  # IO1
+crates/lash-core/src/runtime/turn_loop/commit.rs  |  .await  |  5  # HK9 IO19 IO20 UNMAPPED
+crates/lash-core/src/runtime/turn_loop/commit.rs  |  .await,  |  1  # IO21
+crates/lash-core/src/runtime/turn_loop/commit.rs  |  let mut seen = std::collections::HashSet::new();  |  1  # LZ29
+crates/lash-core/src/runtime/turn_loop/commit.rs  |  registry.record_parent_end(&parent).await.map_err(|error| {  |  1  # IO22
+crates/lash-core/src/runtime/turn_loop/drain_end.rs  |  if let Err(error) = registry.record_parent_end(&parent).await {  |  1  # IO26
+crates/lash-core/src/runtime/turn_loop/drain_end.rs  |  match registry.list_processes(&filter).await {  |  1  # IO26
+crates/lash-core/src/runtime/turn_loop/drain_end.rs  |  match store.load_session_head_meta().await {  |  1  # IO26
+crates/lash-core/src/runtime/turn_loop/execute.rs  |  llm_stream_summaries: HashMap::new(),  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_loop/execute.rs  |  tokio::select! {  |  1  # AC1
+crates/lash-core/src/runtime/turn_loop/initial_drive.rs  |  .await  |  2  # IO5
+crates/lash-core/src/runtime/turn_loop/initial_drive.rs  |  .await?  |  2  # IO5 IO6
+crates/lash-core/src/runtime/turn_loop/initial_drive.rs  |  .await?;  |  1  # IO5
+crates/lash-core/src/runtime/turn_loop/initial_drive.rs  |  self.store.abandon_turn_input_claim(&claim).await?;  |  2  # IO5 IO6
+crates/lash-core/src/runtime/turn_loop/lease.rs  |  .await  |  14  # IO1 IO13 IO3 IO7
+crates/lash-core/src/runtime/turn_loop/lease.rs  |  if let Err(abandon_err) = store.abandon_queued_work_claims(claims).await {  |  1  # IO17
+crates/lash-core/src/runtime/turn_loop/lease.rs  |  if let Err(abandon_err) = store.abandon_turn_input_claims(&claims).await {  |  1  # IO17
+crates/lash-core/src/runtime/turn_loop/lease.rs  |  let observed = match store.turn_cancel_request_intent(&address).await {  |  1  # IO13
+crates/lash-core/src/runtime/turn_loop/lease.rs  |  match store.record_turn_park(&park).await {  |  1  # IO18
+crates/lash-core/src/runtime/turn_loop/lease.rs  |  repair_observed = match store.turn_cancel_request_intent(&address).await {  |  1  # IO13
+crates/lash-core/src/runtime/turn_loop/prepare.rs  |  .await  |  2  # CR19 IO15 IO16
+crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  .await  |  3  # IO24 UNMAPPED
+crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  .await?;  |  1  # IO24
+crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  if let Err(error) = self.refresh_session_graph_from_store().await {  |  2  # IO24 UNMAPPED
+crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  let admission = match store.begin_or_resume_queued_run(&fence, request).await {  |  1  # IO24
+crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  let run = match store.queued_run(&scope).await {  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_loop/queued_work.rs  |  let settled = store.settle_queued_run(&lease.fence(), settlement).await?;  |  1  # UNMAPPED
+crates/lash-core/src/runtime/turn_loop/resident_session.rs  |  .await  |  3  # HK9 IO14
+crates/lash-core/src/runtime/turn_loop/resident_session.rs  |  uuid::Uuid::new_v4()  |  1  # UNMAPPED
+crates/lash-lashlang-runtime/src/lib.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {  |  1  # UNMAPPED
+crates/lash-lashlang-runtime/src/lib.rs  |  .await  |  8  # UNMAPPED
+crates/lash-lashlang-runtime/src/lib.rs  |  .await?;  |  1  # UNMAPPED
+crates/lash-lashlang-runtime/src/process.rs  |  .await  |  1  # UNMAPPED
+crates/lash-lashlang-runtime/src/process.rs  |  Pin<Box<dyn Future<Output = Result<lashlang::AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB3
+crates/lash-lashlang-runtime/src/process.rs  |  signal_wait_ordinals: self.signal_wait_ordinals.lock().await.clone(),  |  1  # AC40
+crates/lash-lashlang-runtime/src/process.rs  |  signal_wait_ordinals: tokio::sync::Mutex::new(  |  1  # UNMAPPED
+crates/lash-lashlang-runtime/src/process.rs  |  signal_wait_ordinals: tokio::sync::Mutex<BTreeMap<String, u64>>,  |  1  # AC40
+crates/lash-lashlang-runtime/src/process.rs  |  tokio::select! {  |  2  # AC20
+crates/lash-lashlang-runtime/src/process/effect_operations.rs  |  .await;  |  1  # UNMAPPED
+crates/lash-lashlang-runtime/src/process/trace_map.rs  |  .await?  |  1  # UNMAPPED
+crates/lash-lashlang-runtime/src/trigger_commands.rs  |  .await  |  1  # IO59
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  .await;  |  2  # UNMAPPED
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  Pin<Box<dyn Future<Output = Result<AbilityResult, ExecutionHostError>> + Send + 'a>>;  |  1  # SB2
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  active_nodes: std::sync::Arc<Mutex<HashSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,  |  1  # UNMAPPED
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  attachment_store.get(&id).await.map_err(|_| {  |  1  # IO57
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  let images = collect_printed_images(&value, attachment_store.as_ref()).await?;  |  1  # IO57
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  let mut seen = HashSet::new();  |  1  # IO57
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  seen: &'a mut HashSet<String>,  |  1  # IO57
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  tokio::task::yield_now().await;  |  1  # AC37
+crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  use std::collections::{BTreeMap, HashSet};  |  1  # UNMAPPED
+crates/lash-protocol-rlm/src/executor/mod.rs  |  .await  |  1  # IO56
+crates/lash-protocol-rlm/src/executor/mod.rs  |  let start = std::time::Instant::now();  |  1  # UNMAPPED
+crates/lash-protocol-rlm/src/projection/bindings.rs  |  let key = uuid::Uuid::new_v4().to_string();  |  1  # CR23
+crates/lash-protocol-rlm/src/projection/context.rs  |  ) -> HashSet<usize> {  |  1  # UNMAPPED
+crates/lash-protocol-rlm/src/projection/context.rs  |  chronological_indices: HashMap<usize, usize>,  |  1  # UNMAPPED
+crates/lash-protocol-rlm/src/projection/context.rs  |  let mut chronological_indices = HashMap::with_capacity(projection.entries().len());  |  1  # UNMAPPED
+crates/lash-protocol-rlm/src/projection/context.rs  |  let mut suppressed = HashSet::new();  |  1  # UNMAPPED
+crates/lash-protocol-rlm/src/projection/context.rs  |  suppressed_chronological_indices: HashSet<usize>,  |  1  # UNMAPPED
+crates/lash-protocol-rlm/src/projection/context.rs  |  use std::collections::{BTreeSet, HashMap, HashSet};  |  1  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), TerminalError>> + Send + 'run>>  |  10  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupCloseResponse, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupDrainBlockersResponse, TerminalError>> + Send + 'run>>  |  1  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupOpenResponse, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupPayloadGetResponse, TerminalError>> + Send + 'run>>  |  1  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupProbeResponse, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<EffectGroupReadRankResponse, TerminalError>> + Send + 'run>>  |  1  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Json<T>, TerminalError>> + Send + 'run>>  |  2  # LZ11 SB30
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<Resolution>, TerminalError>> + Send + 'run>>  |  4  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<String>, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Option<usize>, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<ProcessAwaitOutput, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<Resolution, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>  |  1  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>  |  2  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<T, TerminalError>> + Send + 'run>>  |  1  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  ) -> Pin<Box<dyn Future<Output = Result<bool, TerminalError>> + Send + 'run>>  |  8  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  Box<dyn Future<Output = Result<EffectGroupReadRankResponse, TerminalError>> + Send + 'run>,  |  1  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  Box<dyn Future<Output = Result<RestateTurnCancelRaceOutcome<T>, TerminalError>> + Send + 'run>,  |  1  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  dyn Future<Output = Result<EffectGroupPayloadGetResponse, TerminalError>> + Send + 'run,  |  1  # UNMAPPED
+crates/lash-restate/src/controller/context.rs  |  dyn Future<Output = Result<RestateDurableWaitResolveResponse, TerminalError>> + Send + 'run,  |  1  # UNMAPPED
+crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = JournaledEffectRecord> + Send + 'run>>,  |  1  # SB30
+crates/lash-restate/src/controller/journaled_effect.rs  |  future: Pin<Box<dyn Future<Output = RecordedRuntimeEffect> + Send + 'run>>,  |  1  # SB30
+crates/lash-restate/src/controller/mod.rs  |  &lash_core::facade_support::SystemClock,  |  1  # UNMAPPED
+crates/lash-restate/src/controller/mod.rs  |  .await  |  1  # IO47
+crates/lash-restate/src/controller/mod.rs  |  let clock = lash_core::facade_support::SystemClock;  |  1  # CR12
+crates/lash-restate/src/controller/process_command.rs  |  .await  |  2  # IO44
+crates/lash-restate/src/controller/process_command.rs  |  .await;  |  1  # UNMAPPED
+crates/lash-restate/src/controller/process_command.rs  |  .await?  |  3  # IO43 IO44
+crates/lash-restate/src/controller/process_command.rs  |  .await?;  |  4  # IO44 IO45 IO46 UNMAPPED
+crates/lash-restate/src/controller/process_command.rs  |  if registry.get_process(&process_id).await?.is_none() {  |  1  # IO45
+crates/lash-restate/src/controller/process_command.rs  |  let report = registry.delete_session_process_state(&session_id).await?;  |  1  # IO45
+crates/lash-restate/src/controller/process_command.rs  |  let result = registry.append_event(&process_id, request).await?;  |  1  # IO45
+crates/lash-restate/src/controller/process_command.rs  |  let result = registry.append_event_ref(&process_ref, request).await?;  |  1  # UNMAPPED
+crates/lash-restate/src/controller/process_command.rs  |  registry.get_process_ref(&process_ref).await?;  |  2  # IO45
+crates/lash-restate/src/controller/process_scheduling.rs  |  .await  |  2  # IO44 UNMAPPED
+crates/lash-restate/src/controller/process_scheduling.rs  |  .await?;  |  1  # IO44
+crates/lash-restate/src/durable_wait.rs  |  ) -> tokio::sync::oneshot::Receiver<RestateDurableWaitRegistration> {  |  1  # UNMAPPED
+crates/lash-restate/src/durable_wait.rs  |  deadline.remaining(lash_core::facade_support::SystemClock.timestamp_ms())?;  |  1  # CR13
+crates/lash-restate/src/durable_wait.rs  |  let (send, receive) = tokio::sync::oneshot::channel();  |  1  # UNMAPPED
+crates/lash-restate/src/durable_wait.rs  |  std::sync::Mutex<std::collections::HashMap<String, WaitRegistrationWitness>>,  |  1  # UNMAPPED
+crates/lash-restate/src/durable_wait.rs  |  type WaitRegistrationWitness = tokio::sync::oneshot::Sender<RestateDurableWaitRegistration>;  |  1  # UNMAPPED
+crates/lash-restate/src/effect_group.rs  |  .get_or_init(|| Mutex::new(HashMap::new()))  |  2  # UNMAPPED
+crates/lash-restate/src/effect_group.rs  |  let hook = Arc::new(tokio::sync::Notify::new());  |  1  # UNMAPPED
+crates/lash-restate/src/effect_group.rs  |  pub(crate) fn arm_admission_witness(group_key: &str) -> Arc<tokio::sync::Notify> {  |  1  # UNMAPPED
+crates/lash-restate/src/effect_group.rs  |  static ADMISSION_WITNESSES: std::sync::OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =  |  1  # UNMAPPED
+crates/lash-restate/src/effect_group.rs  |  use std::collections::HashMap;  |  1  # UNMAPPED
+crates/lash-restate/src/effect_group/dispatch.rs  |  let Json(outcome) = tokio::select! {  |  1  # UNMAPPED
+crates/lash-restate/src/effect_group/dispatch.rs  |  let outcome = tokio::select! {  |  2  # AC18 UNMAPPED
+crates/lash-restate/src/effect_group/dispatch.rs  |  tokio::select! {  |  1  # AC18
+crates/lash-restate/src/process/admission.rs  |  .await  |  2  # UNMAPPED
+crates/lash-restate/src/process/admission.rs  |  nonce: uuid::Uuid::new_v4().to_string(),  |  1  # UNMAPPED
+crates/lash-restate/src/process/mod.rs  |  .await  |  3  # UNMAPPED
+crates/lash-restate/src/process/mod.rs  |  .await?  |  1  # UNMAPPED
+crates/lash-restate/src/process/mod.rs  |  let current = self.registry.get_process(&process_id).await?;  |  1  # UNMAPPED
+crates/lash-restate/src/process/mod.rs  |  let record = self.registry.get_process_ref(process_ref).await?;  |  1  # UNMAPPED
+crates/lash-restate/src/process/mod.rs  |  self.registry.get_process_ref(process_ref).await?;  |  1  # UNMAPPED
+crates/lash-restate/src/process/mod.rs  |  std::time::SystemTime::now()  |  1  # CR16
+crates/lash-restate/src/process/workflow.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), HandlerError>> + Send>> {  |  1  # AC19
+crates/lash-restate/src/process/workflow.rs  |  .await  |  11  # IO50 IO52 IO53 UNMAPPED
+crates/lash-restate/src/process/workflow.rs  |  .await?  |  1  # UNMAPPED
+crates/lash-restate/src/process/workflow.rs  |  .await?;  |  1  # UNMAPPED
+crates/lash-restate/src/process/workflow.rs  |  let outcome = tokio::select! {  |  1  # AC19
+crates/lash-restate/src/process/workflow.rs  |  tokio::time::sleep(PROCESS_CANCEL_CONFIRM_RETRY_DELAY).await;  |  1  # IO48
+crates/lashlang/src/artifact.rs  |  owners: HashSet<(ModuleRef, lash_core_execution::ArtifactOwner)>,  |  1  # UNMAPPED
+crates/lashlang/src/artifact.rs  |  retired_owners: HashSet<lash_core_execution::ArtifactOwner>,  |  1  # UNMAPPED
+crates/lashlang/src/artifact.rs  |  use std::collections::HashSet;  |  1  # UNMAPPED
+crates/lashlang/src/runtime/format.rs  |  futures_executor::block_on(append_stringified_value_async(output, value))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/format.rs  |  futures_executor::block_on(apply_format_async(template, args))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/format.rs  |  futures_executor::block_on(stringify_value_async(value))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/json.rs  |  futures_executor::block_on(to_json_async(value))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/ops.rs  |  Value::Projected(value) => futures_executor::block_on(value.truthy())?,  |  1  # AC38
+crates/lashlang/src/runtime/ops.rs  |  futures_executor::block_on(execute_join_builtin_async(items, sep))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/ops.rs  |  futures_executor::block_on(execute_push_builtin_async(list.clone(), item))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/projector.rs  |  futures_executor::block_on(self.project(context))  |  1  # UNMAPPED
+crates/lashlang/src/runtime/value.rs  |  futures_executor::block_on(self.materialize_async())  |  1  # AC38
+crates/lashlang/src/runtime/value.rs  |  pub type ProjectedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;  |  1  # SB5
+crates/lashlang/src/runtime/vm/control.rs  |  .map(|_| (instruction.profile_tag(), Instant::now()));  |  1  # UNMAPPED
+crates/lashlang/src/runtime/vm/control.rs  |  active_started = Instant::now();  |  4  # VM1
+crates/lashlang/src/runtime/vm/control.rs  |  let mut active_started = Instant::now();  |  1  # VM1
+crates/lashlang/src/runtime/vm/mod.rs  |  let start = self.profile.as_ref().map(|_| Instant::now());  |  1  # UNMAPPED

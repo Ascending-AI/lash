@@ -259,7 +259,14 @@ fi
 # collections": FxHash maps use a fixed hasher and stay legal).
 #
 # Every current hit is pinned in scripts/drive-determinism-allowlist.txt as
-# `path:line  # <inventory id>`; the ratchet test only lets that file shrink.
+# `path  |  <normalized line text>  |  <occurrence count>  # <inventory id>`,
+# where the text is the offending line trimmed with internal whitespace
+# collapsed. Entries key on the matched text, not the line number, so an
+# unrelated edit that shifts lines in a drive file does not break the check;
+# a hit fails when its (file, text) is unlisted or occurs more times than
+# pinned, and a pinned entry that occurs fewer times than listed is stale and
+# fails, so later slices must delete or decrement their lines. The ratchet
+# test only lets the total occurrence count shrink.
 
 drive_paths=(
   crates/lash-core/src/runtime/turn_loop
@@ -317,18 +324,42 @@ fi
 cat "$tmp_dir/rule5.store" >>"$tmp_dir/rule5.raw"
 sort -u -o "$tmp_dir/rule5.raw" "$tmp_dir/rule5.raw" 2>/dev/null || true
 
+# A hit's key is (file, normalized line text): trimmed, with every internal
+# whitespace run collapsed to one space, so edits that move or reindent the
+# line keep it pinned. The allowlist's `  |  ` and `  # ` separators use a
+# double space, which normalized text can never contain.
+drive_normalize() {
+  local text=$1
+  text="$(printf '%s' "$text" | tr -s '[:space:]' ' ')"
+  text="${text# }"
+  text="${text% }"
+  printf '%s' "$text"
+}
+
 declare -A drive_allowed=()
 if [[ -f $drive_allowlist ]]; then
-  while read -r allowed_ref _; do
-    [[ -n $allowed_ref && $allowed_ref != \#* ]] && drive_allowed[$allowed_ref]=1
+  while IFS= read -r entry || [[ -n $entry ]]; do
+    [[ $entry == \#* || -z ${entry//[[:space:]]/} ]] && continue
+    body=${entry%%  # *}
+    allowed_file=${body%%  |  *}
+    allowed_rest=${body#*  |  }
+    allowed_text=${allowed_rest%%  |  *}
+    allowed_count=${allowed_rest##*  |  }
+    if [[ $body != *'  |  '* || $allowed_rest != *'  |  '* || -z $allowed_file \
+      || -z $allowed_text || ! $allowed_count =~ ^[0-9]+$ ]]; then
+      echo "substrate boundary check failed: malformed allowlist entry: $entry" >&2
+      failed=1
+      continue
+    fi
+    drive_allowed["$allowed_file|$allowed_text"]=$allowed_count
   done <"$drive_allowlist"
 else
   echo "substrate boundary check failed: $drive_allowlist is missing" >&2
   failed=1
 fi
 
+declare -A drive_seen=()
 : >"$tmp_dir/rule5.hits"
-: >"$tmp_dir/rule5.seen"
 while IFS=: read -r file line source; do
   [[ -n "$file" ]] || continue
   if [[ $file =~ $test_path_regex ]]; then
@@ -337,25 +368,41 @@ while IFS=: read -r file line source; do
   if [[ $(line_in_test_region "$file" "$line") == 1 ]]; then
     continue
   fi
-  printf '%s:%s\n' "$file" "$line" >>"$tmp_dir/rule5.seen"
-  if [[ -z ${drive_allowed[$file:$line]+x} ]]; then
-    printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$tmp_dir/rule5.hits"
-  fi
+  printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$tmp_dir/rule5.hits"
+  key="$file|$(drive_normalize "$source")"
+  drive_seen[$key]=$(( ${drive_seen[$key]:-0} + 1 ))
 done <"$tmp_dir/rule5.raw"
-if [[ -s "$tmp_dir/rule5.hits" ]]; then
-  cat "$tmp_dir/rule5.hits" >&2
+
+declare -A drive_bad=()
+if [[ ${#drive_seen[@]} -gt 0 ]]; then
+  for key in "${!drive_seen[@]}"; do
+    if [[ ${drive_seen[$key]} -gt ${drive_allowed[$key]:-0} ]]; then
+      drive_bad[$key]=1
+    fi
+  done
+fi
+if [[ ${#drive_bad[@]} -gt 0 ]]; then
+  while IFS=: read -r file line source; do
+    [[ -n "$file" ]] || continue
+    key="$file|$(drive_normalize "$source")"
+    if [[ -n ${drive_bad[$key]+x} ]]; then
+      printf '%s:%s:%s\n' "$file" "$line" "$source" >&2
+    fi
+  done <"$tmp_dir/rule5.hits"
   echo "substrate boundary rule 5 failed: nondeterministic facility found in drive code" >&2
   echo "  (new sites belong behind a recorded step; if one is deliberate, pin it in $drive_allowlist with its inventory id)" >&2
   failed=1
 fi
-if [[ -f $drive_allowlist ]]; then
-  while read -r allowed_ref _; do
-    [[ -n $allowed_ref && $allowed_ref != \#* ]] || continue
-    if ! grep -qxF "$allowed_ref" "$tmp_dir/rule5.seen"; then
-      echo "substrate boundary rule 5 failed: stale allowlist entry $allowed_ref (site moved or fixed; regenerate the allowlist)" >&2
+if [[ ${#drive_allowed[@]} -gt 0 ]]; then
+  for key in "${!drive_allowed[@]}"; do
+    actual=${drive_seen[$key]:-0}
+    if [[ $actual -lt ${drive_allowed[$key]} ]]; then
+      stale_file=${key%%|*}
+      stale_text=${key#*|}
+      echo "substrate boundary rule 5 failed: stale allowlist entry $stale_file  |  $stale_text  |  ${drive_allowed[$key]} (occurs $actual time(s)); remove or decrement it" >&2
       failed=1
     fi
-  done <"$drive_allowlist"
+  done
 fi
 
 if [[ $failed -ne 0 ]]; then
