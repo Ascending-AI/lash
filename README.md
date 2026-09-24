@@ -13,7 +13,7 @@ Most agent stacks treat the LLM as the runtime and stitch state around it — a 
 - **Two execution modes, one commit unit** — `standard` uses native provider tool-calling with concurrent dispatch; `rlm` runs model-authored TypeScript, lowered into the `lashlang` IR, in a sandboxed VM where every effect crosses the host.
 - **Tool providers and plugins** — ordinary host operations are `ToolProvider`s; plugins add runtime/session behavior such as prompts, planning, memory, subagents, history transforms, UI activity, catalog policy, and tool-output budgeting. Hosts compose only what they embed.
 - **Provider portability** — Anthropic, OpenAI Responses, any OpenAI-compatible Chat Completions endpoint, OpenAI Codex, and Google Gemini / Code Assist. MCP servers attach through `lash-plugin-mcp`.
-- **Tracing as a first-class sink** — attach a `TraceSink` for structured turn, tool, LLM, prompt, and usage records. Bundled JSONL sink + self-contained HTML viewer; optional OpenTelemetry export.
+- **Tracing as a first-class sink** — attach a `TraceSink` for structured turn, tool, LLM, prompt, and usage records. Bundled JSONL sink; optional OpenTelemetry export.
 
 ## Examples
 
@@ -35,7 +35,7 @@ consumption of at-least-once webhooks, restart recovery — and for the native t
 loop.
 
 ```bash
-# Durable chat app from a Kiln fork: SQLite or Postgres, RLM, app-owned tools, Restate turns
+# Durable chat app from a Kiln fork: SQLite, RLM, app-owned tools, optional Restate turns
 OPENROUTER_API_KEY=sk-or-... AGENT_SERVICE_DATA_DIR="$PWD/.agent-service" \
   kiln run //examples/agent-service:agent-service  # then open http://127.0.0.1:3000
 

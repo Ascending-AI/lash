@@ -2,6 +2,11 @@
 
 Status: Accepted (2026-09-09)
 
+Amended 2026-09-24 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
+makes TypeScript the sole RLM dialect, so there is one tool catalogue, rendered
+as TypeScript declarations. The lashlang catalogue rendering and the reference
+to ADR 0063's dialect vocabulary below are historical.
+
 ## Decision
 
 Render one tool catalogue per dialect. TypeScript uses typed declarations with

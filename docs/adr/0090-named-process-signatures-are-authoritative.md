@@ -9,6 +9,12 @@ authority, and every intent that would create a durable row checks the claim
 against it before the row exists. Process values reach tool contracts through
 the `x-lash` keyword rather than the hand-written catalogue.
 
+Amended 2026-09-24 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
+retired Lashlang source. `Process<(…), …>` below is the IR type's canonical
+rendering rather than a source form, and the Lashlang-source refusals are
+moot. `trigger.event` is refused in TypeScript (`TriggerEventRemoved`), so the
+trigger-registration requirement below is historical.
+
 ## Context
 
 Lashlang process types previously stored a flattened input type beside an

@@ -20,6 +20,11 @@ opener's losers after its worker dies (W5), segment reattachment and the
 per-opener bound (§9). The clause statuses below say what each slice
 delivered.
 
+Amended 2026-09-24: the **holds today** / **new** labels and the "What exists
+today" section record the code on 2026-09-21, before these landings. Where a
+body paragraph still says something does not exist, the clause's *Status* line
+and this header are current; the stale clause statuses are corrected inline.
+
 Amends [ADR 0025](0025-bounded-journals-are-an-effect-controller-obligation.md),
 [ADR 0042](0042-tool-attempts-are-atomic.md),
 [ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md),
@@ -56,6 +61,9 @@ costs more than B-prime by exactly the recovery ownership B-prime could not
 actually delete.
 
 ### What exists today, and what does not
+
+*(Written 2026-09-21. Every item listed under "What does not exist" below has
+since landed; `calls.rs` now accepts `Promise.race` and `Promise.any`.)*
 
 This ADR builds on real primitives and specifies a lifecycle that does not yet
 exist. The distinction matters section by section, so each clause is labelled
@@ -180,9 +188,9 @@ untouched (`crates/lash-core/src/runtime/session_manager/session_init.rs`). So
 that child turn's cells are opened by the process and not by the child turn: a
 worker retry keeps the incarnation and reuses the journal, while a
 re-registration under the same name is a different opener. The incarnation
-reaches the cell because the process runner binds it onto the admitted
-controller — `ScopedEffectController::with_admitted_process`, from the record
-the authority CAS returned — and a process-scoped execution that carries no
+reaches the cell because the process runner admits the controller with an
+`AdmittedScope` that pairs the scope with the `ProcessRef` the authority CAS
+returned (FIG-3430) — and a process-scoped execution that carries no
 admitted incarnation is refused rather than opened on the reusable name. Found
 by FIG-3394, when refusing a process scope outright took every subagent cell's
 first tool call out: the child's `task.fail(...)` came back as "has no logical
@@ -226,9 +234,9 @@ Lashlang runtime serializes at a boundary; the sibling `ReplayOrdinalsState`
 carries the separate sleep, event and signal ordinals and is not where aggregate
 occurrences live.
 
-*Status.* The group-key shape and the continuation carriage **hold today**; **no
-production path mints an occurrence**, which is FIG-3394's. The opener identity
-above and its recovery-time validation are **new**.
+*Status.* The group-key shape and the continuation carriage hold. **Implemented**
+(FIG-3394): the product path mints the occurrence, and the opener identity
+above is validated at recovery.
 
 ---
 
@@ -263,14 +271,11 @@ retry, drain, a resuming process and a fresh handler execution all run with no
 caller in scope.
 
 **On Restate, children become `call` children of the parent with the child's
-replay key as the idempotency key.** They are not today: every group child is
-dispatched one-way —
-`crates/lash-restate/src/effect_group/dispatch.rs` builds each as
-`.child(Json(EffectGroupChildRequest { … })).send()` — and the pinned VM's
+replay key as the idempotency key.** When this ADR was decided they were not:
+every group child was dispatched one-way (`.send()`), and the pinned VM's
 implicit cancellation covers tracked `call` children while deliberately exempting
-one-way sends. **Implicit cancellation therefore covers zero group children
-today**, and it never becomes the sole close protocol once it does cover them
-(§4).
+one-way sends, so implicit cancellation covered zero group children. It never
+becomes the sole close protocol now that it does cover them (§4).
 
 *Status.* The resolver seam and the recorded-body rule **hold today**, and the
 handler-level driver now holds on all four tiers — in-process (FIG-2266 C1)
@@ -418,10 +423,10 @@ tool-facing reader is `ToolContext::plugin_input`. So the request records no
 turn-context payload and needs no new refusal: this is a restatement of an
 existing fence, not a behaviour change.
 
-*Status.* Capture, ownership and the separate grant **hold today**. Retained
-accepted membership, the reconstructible request and environment protection
-through the last dependency are **new** (FIG-3396). The request shape and the
-`ToolInvocation` command are **minted but unproduced** (FIG-3408).
+*Status.* Capture, ownership and the separate grant hold. **Implemented**
+(FIG-3408, FIG-3396, FIG-3397): retained accepted membership, the
+reconstructible request and environment protection through the last
+dependency; the `ToolInvocation` command is produced and consumed.
 
 ---
 
@@ -435,9 +440,10 @@ record. Signalling the body and the bounded local grace *follow* the cancel
 decision and cannot reverse it. **A final record found after recovery is
 protected even if its in-memory commit notification was never published.**
 
-The in-process machinery today is local, not durable, and the difference is the
-work. `crates/lash-core-execution/src/session/tool_execution/batch.rs`
-short-circuits its own grace with `if final_result_committed.is_committed() {
+The in-process machinery was local, not durable, and the difference was the
+work. *(FIG-3397 deleted the code quoted here with the batch path.)*
+`crates/lash-core-execution/src/session/tool_execution/batch.rs`
+short-circuited its own grace with `if final_result_committed.is_committed() {
 return tool_call.await; }` before arming `Duration::from_millis(50)`, and
 `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs` publishes
 that signal where the terminal is sealed — `begin_final_drain` "Publishes this
@@ -531,8 +537,8 @@ group, assigned at the moment a final record commits, and journaled; a child nev
 waits on an unfinished sibling. It is the order in which the group's children may
 emit nested semantic commands, and therefore the order a replay must reproduce.
 
-This replaces today's cross-child **source** order, which cannot be carried into
-groups. `settle_terminal_attempt` in
+This replaces the cross-child **source** order of 2026-09-21, which cannot be
+carried into groups; the code quoted below was deleted by FIG-3397. `settle_terminal_attempt` in
 `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs` calls
 `slot.begin_final_drain().await` for **every** terminal attempt, whether or not it
 declared a single intent, and `BatchIntentDrainGate::wait_for` parks until `next
@@ -607,9 +613,9 @@ none is invented.** Existing target transaction order decides, and the
 consumer-visible observation prefix is journaled (§6). **No turn-wide intent
 scheduler.**
 
-*Status.* The per-group gate and its in-process discharge **hold today**, in
-source order. Commit order, durable discharge and the journaled observation prefix
-are **new** (FIG-3396, FIG-3397).
+*Status.* **Implemented** (FIG-3409, FIG-3397): commit order (`next_commit_seq`),
+durable discharge and the journaled observation prefix replace the source-ordered
+in-process gate, which FIG-3397 deleted.
 
 ---
 
@@ -711,8 +717,9 @@ item, no `work_kind`, and no table exists for this."
 **No fresh attempt retries after close** except what is necessary to recover a
 committed obligation.
 
-**Session deletion must exclude an accepted or closing group, and that exclusion
-does not exist.** Both SQL session-retirement paths delete effect-group rows —
+**Session deletion must exclude an accepted or closing group.** *(Implemented by
+FIG-3410; see the Status below. The rest of this paragraph records the gap as
+it stood on 2026-09-21.)* Both SQL session-retirement paths delete effect-group rows —
 `crates/lash-store-sql/src/effect/group.rs` carries `delete_by_session = "DELETE
 FROM runtime_effect_group WHERE session_id = ?1"` — and the refusal that does
 exist, in `crates/lash-sqlite-store/src/session_deletion.rs`, counts
@@ -1173,7 +1180,7 @@ both.
 | W13 | segment handover: continuation committed, successor not started | ADR 0025's three handover requirements apply unchanged, and outstanding children are reattached by the successor (§8). Handover does not enter closing. |
 | W14 | child handler death with the opener alive | The child invocation is retried or reattached by invocation id. Abandonment is never inferred from a dead handler. |
 | W15 | attach retention expired before the successor attached | A typed recovery failure. Never a re-execution of an opaque tool body, never a synthesized terminal. |
-| W16 | session delete requested while the group is accepted or closing | Refused until settled. **This exclusion does not exist today** (§7) and is FIG-3396's. |
+| W16 | session delete requested while the group is accepted or closing | Refused until settled (§7, FIG-3410). |
 | W17 | a late completion arrives after the cancel decision committed | Refused, typed, with **no journal write**; the refusal's evidence survives retirement. Already-admitted descendant commands are not undone (§4). |
 | W18 | native: OS process death | Nothing is promised. Native durability ends at the runtime's lifetime (§14). |
 | W19 | **final record committed and its commit-order position assigned, crash before the drain runs** | Recovery drains in the **recorded** commit order and never re-derives it from whatever completes first on the redrive. The position is a durable fact assigned at the §4 linearization point, not a property of the run that observed it. |
@@ -1186,10 +1193,11 @@ both.
 lash TypeScript dialect. "Today" is `main`.
 
 **1. Fan-out.** `await Promise.all([fetch_doc("a"), fetch_doc("b"), fetch_doc("c")])`
-is concurrent on native, SQLite and Postgres and **serial on Restate** today — the
-controller answers `fn supports_concurrent_effects(&self) -> bool { false }`, so
-the batch takes its serial branch. Under this ADR it is three concurrent children
-on every tier, and a redrive replays the same settlement order from the ranks. No
+was concurrent on native, SQLite and Postgres and **serial on Restate** when this
+ADR was decided — the controller answered `supports_concurrent_effects() ->
+false`, so the batch took its serial branch. It is now three concurrent children
+on every tier (FIG-3397 deleted the flag and the serial branch), and a redrive
+replays the same settlement order from the ranks. No
 loser exists. FIG-3400 pins the parallelism by rendezvous.
 
 **2. Timeout, then keep working.**

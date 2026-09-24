@@ -149,10 +149,16 @@ prose naming *any* registered dialect — with one dialect that check would refu
 the only correct spelling. Tool prose may name TypeScript. FIG-3021 owns the
 mechanics.
 
+Amended 2026-09-24: the deletions above have not landed. `DialectPromptVocabulary`,
+`tool_call_path`, the prompt walker with its `SUBSTRATE_CARVE_OUTS`,
+`TOOL_PROSE_TOKENS` and `validate_dialect_neutral_tool_prose` remain in
+`lash-protocol-rlm` over the single TypeScript vocabulary, and tool prose that
+names TypeScript is still refused at registration.
+
 **Alive.** Substrate identifiers are not model-visible: modules under the
 reserved `__` namespace are hidden from the host-environment section rather
 than renamed, because renaming moves durable identity. `lashlang_step`,
-`process:lashlang:v2:…` and `lashlang:effect:…` keep their spellings for the
+`process:lashlang:v3:…` and `lashlang:effect:…` keep their spellings for the
 same reason; under 0096 they name the IR and VM, which is what they always
 described, so they are no longer foreign words in the prompt and the carve-out
 register that tracked them as debt is retired. The trace record's `language`

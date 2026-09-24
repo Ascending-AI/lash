@@ -12,7 +12,7 @@ Supersedes the claim-renewal language in
 bullet: queued-work and turn-input claims are no longer leases with a TTL and a
 renewal API. `LeaseTimings` now governs only the three true lease lanes.
 
-Amended 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) merges
+Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) merges
 queued-work and turn-input claims into one ingress claim type with one claim-id
 dialect and one supersession error. The generation fencing and the supersession
 LAW below apply unchanged to that one claim. A deferred row is released on its

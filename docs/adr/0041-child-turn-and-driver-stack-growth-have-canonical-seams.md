@@ -10,7 +10,7 @@ large.
 We designate owned task boundaries as the intentional stack-growth seams. A
 managed child turn with an owned, shareable effect controller runs in its own
 `tokio::spawn` task. Inside a physical turn, heavy local effects (`LlmCall`,
-`ToolBatch`, `ToolAttempt`, `ExecCode`, and direct LLM calls) also run through
+`ToolInvocation`, `ToolAttempt`, `ExecCode`, and direct LLM calls) also run through
 the runtime task seam. Every recursively re-entrant effect therefore starts
 with a fresh task stack instead of extending the turn driver's poll stack.
 Cheap leaf effects remain inline. Callers must not add opportunistic boxes

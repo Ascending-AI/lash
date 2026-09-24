@@ -93,8 +93,8 @@ same boundary discipline keeps drain policy inside the host.
   waits. All execution scopes use the exact workflow address, while scopes
   carrying a session id additionally participate in the session index.
 - Anything lash cannot expose as a lever without becoming an orchestrator
-  (signal handling, drain deadlines, readiness endpoints) is documented as host
-  territory in the production guide instead of API surface.
+  (signal handling, drain deadlines, readiness endpoints) is host territory
+  rather than API surface.
 - Trigger list operations expose registered subscription truth without
   current-artifact membership labels. Stable explicit or compiler-generated
   subscription keys retain idempotent registration behavior; only explicit

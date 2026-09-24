@@ -18,7 +18,7 @@ alias.
 unleased writer:
 
 - **`ExternalOwner`** — an external actor closes an `ExternallyOwned` row it
-  observes (the `shell.start` detach path). The
+  observes (e.g. a host tool's detached launch). The
   session-manager completion path verifies the caller has an observer edge for
   the row before the authority reaches the registry; per-closer attribution is
   no longer recorded on the terminal event.
@@ -123,6 +123,10 @@ effect-journal contract, and the configured substrate owns the journal (ADR
   `completion_authority_validated_against_disposition`, pinning the full matrix
   (accepted and rejected per disposition) and the terminal-event evidence field
   for every backend; it runs under the SQLite and Postgres conformance harnesses.
+  *(Amended 2026-09-24: this law and
+  `completion_authority_reads_live_disposition_not_stale` below were removed in
+  the weak-observer cutover (#170); neither name exists in the conformance suite
+  today.)*
 - The remote protocol is **not** bumped. `complete_process` is an in-process
   registry write, not an RPC; the remote surface mirrors process *records*,
   *await outputs*, and *abandon evidence* (read-side projections), none of which

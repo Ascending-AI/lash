@@ -21,10 +21,10 @@ The runtime must protect durable session, effect, queue, lease, checkpoint, and 
 
 ## Harness Homes
 
-- Runtime Scenarios use `crates/lash-core/src/runtime/tests/runtime_scenarios.rs` as the module root, with cases in `runtime_scenarios/cases.rs` and private support modules under `runtime_scenarios/support/`. They are named ingress, checkpoint, claim, lease, fault, and commit phases. Run with `kiln test //crates/lash-core:lash-core__unit_test --test_arg=runtime_scenario`.
+- Runtime Scenarios use `crates/lash-core/tests/runtime/tests/runtime_scenarios.rs` as the module root, with cases in `runtime_scenarios/cases.rs` and private support modules under `runtime_scenarios/support/`. They are named ingress, checkpoint, claim, lease, fault, and commit phases. Run with `kiln test //crates/lash-core:runtime_scenarios__test`.
 - Standard Protocol Scenarios live in `crates/lash-protocol-standard/tests/protocol_scenarios.rs`. Run with `kiln test //crates/lash-protocol-standard:protocol_scenarios__test`.
 - RLM Protocol Scenarios live under `crates/lash-protocol-rlm/tests/protocol_drivers/`, with the `protocol_drivers.rs` test root declaring `support`, `scenarios`, `prompt_history`, and `driver_mechanics` as sibling modules. Run with `kiln test //crates/lash-protocol-rlm:protocol_drivers__test`.
-- Agent Scenarios live in `crates/lash/src/tests/agent_scenarios/`. Run with `cargo test -p lash-runtime --features rlm,testing agent_scenarios` because this is a non-default feature combination.
+- Agent Scenarios live in `crates/lash/src/tests/agent_scenarios/`. Run with `kiln test //crates/lash:lash__unit_test --test_arg=agent_scenarios`; that target already builds with the `rlm` and `testing` features.
 
 ## Ownership Boundaries
 
@@ -32,7 +32,6 @@ The runtime must protect durable session, effect, queue, lease, checkpoint, and 
 - Persistence conformance owns backend permutations for the same storage concepts: source-key idempotence, cross-session isolation, claim expiry/reclaim, backend-specific fence behavior, and schema compatibility.
 - Full runtime tests in `crates/lash-core/tests/runtime/tests/turns/` own live scheduler behavior that cannot be reduced to a store-level scenario: public `stream_next_queued_work` return shape, provider prompt contents, event streams, phase-probe lease loss, plugin checkpoint hooks, process-wake history, and cancellation through an active turn.
 - Facade turn-streaming tests own app-facing stream and projection behavior at the `lash` API boundary.
-- CLI e2e tests own rendered UI/operator behavior and process-level invocation of the binary.
 
 ## Scenario Coverage Index
 
@@ -40,7 +39,7 @@ The canonical case-to-boundary index lives with the scenario code so renames and
 
 | Harness | Code-owned index |
 | --- | --- |
-| Runtime Scenario | `RUNTIME_SCENARIO_COVERAGE` in `crates/lash-core/src/runtime/tests/runtime_scenarios/cases.rs` |
+| Runtime Scenario | `RUNTIME_SCENARIO_COVERAGE` in `crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs` |
 | Standard Protocol Scenario | `STANDARD_PROTOCOL_SCENARIO_COVERAGE` in `crates/lash-protocol-standard/tests/protocol_scenarios.rs` |
 | RLM Protocol Scenario | `RLM_PROTOCOL_SCENARIO_COVERAGE` in `crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs` |
 | Agent Scenario | `AGENT_SCENARIO_COVERAGE` in `crates/lash/src/tests/agent_scenarios/cases.rs` |
@@ -65,10 +64,10 @@ alongside a scenario's assertions, never in place of them.
 When new scenario files are still untracked, use intent-to-add for review visibility without staging content for commit:
 
 ```sh
-git add -N crates/lash-core/src/runtime/tests/runtime_scenarios.rs \
-  crates/lash-core/src/runtime/tests/runtime_scenarios/support.rs \
-  crates/lash-core/src/runtime/tests/runtime_scenarios/support/*.rs \
-  crates/lash-core/src/runtime/tests/runtime_scenarios/cases.rs \
+git add -N crates/lash-core/tests/runtime/tests/runtime_scenarios.rs \
+  crates/lash-core/tests/runtime/tests/runtime_scenarios/support.rs \
+  crates/lash-core/tests/runtime/tests/runtime_scenarios/support/*.rs \
+  crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs \
   crates/lash-protocol-standard/tests/protocol_scenarios.rs \
   crates/lash-protocol-rlm/tests/protocol_drivers.rs \
   crates/lash-protocol-rlm/tests/protocol_drivers/*.rs \
@@ -88,8 +87,6 @@ The original `lash_e2e_*` cases seeded the Agent Scenario Harness and now use `a
 | `lash_e2e_foreground_labeled_tool_call` | `agent_scenario_foreground_labeled_tool_call` |
 | `lash_e2e_started_process_labeled_tool_call` | `agent_scenario_started_process_labeled_tool_call` |
 | `lash_e2e_process_durable_input_request_tool` | `agent_scenario_process_durable_input_request_tool` |
-| `lash_e2e_shell_nonzero_and_pipeline_results_are_data` | `agent_scenario_shell_nonzero_and_pipeline_results_are_data` |
-| `lash_e2e_shell_output_survives_print_projection_in_variable` | `agent_scenario_shell_output_survives_print_projection_in_variable` |
 | `lash_e2e_started_process_labeled_subagent_spawn` | `agent_scenario_started_process_labeled_subagent_spawn` |
 | `lash_e2e_nested_process_start_await` | `agent_scenario_nested_process_start_await` |
 | `lash_e2e_session_turn_process_child` | `agent_scenario_session_turn_process_child` |
@@ -104,4 +101,4 @@ The original `lash_e2e_*` cases seeded the Agent Scenario Harness and now use `a
 - `lash-core` small runtime tests keep narrow turn-loop, projection, tracing, and assembler assertions when a scenario would obscure the single invariant being tested.
 - `lash-protocol-rlm` direct `TurnMachine` tests stay for malformed turn options, checkpoint restore, and driver-state ownership mutation because those tests intentionally inspect or corrupt white-box state.
 - `lash-protocol-standard` focused native-tool and builder tests stay outside Standard Protocol Scenarios when they validate a single helper or internal projection rule rather than an end-to-end protocol loop.
-- `lash` facade tests that require full plugins, tools, process graphs, subagents, or app-facing final values belong to Agent Scenarios; smaller CLI/config/turn-streaming tests are not part of this harness migration.
+- `lash` facade tests that require full plugins, tools, process graphs, subagents, or app-facing final values belong to Agent Scenarios; smaller config/turn-streaming tests are not part of this harness migration.

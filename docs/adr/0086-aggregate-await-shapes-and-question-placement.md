@@ -4,6 +4,13 @@
 
 Accepted.
 
+Amended 2026-09-24 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
+retired the Lashlang surface that spelled these shapes. The compile-time
+aggregate paths (`ResourceOperationBatch`, `ResourceOperationListBatch`) remain
+in the IR and VM but have no authored spelling, and the RLM prompt teaches only
+TypeScript, so it no longer teaches the comprehension form. The
+source syntax below is historical; `AwaitExpectsHandle` still stands.
+
 ## Context
 
 `await` over a literal list, tuple or record of direct module-operation calls

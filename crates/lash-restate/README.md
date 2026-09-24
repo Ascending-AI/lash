@@ -2,7 +2,8 @@
 
 `lash-restate` adapts Lash's scoped effect-controller boundary to Restate
 handlers. Use it inside a Restate service, object, or workflow handler and pass
-the resulting `ScopedEffectController` into Lash turn execution.
+the resulting `RestateRuntimeEffectController` (a `RuntimeEffectController`)
+into Lash turn execution.
 
 ```rust,no_run
 use lash_restate::RestateRuntimeEffectController;
@@ -21,7 +22,7 @@ impl AgentTurnWorkflow for AgentTurnWorkflowImpl {
         ctx: WorkflowContext<'_>,
         Json(req): Json<TurnRequest>,
     ) -> HandlerResult<Json<TurnResponse>> {
-        let effect_controller = RestateRuntimeEffectController::new(ctx);
+        let effect_controller = RestateRuntimeEffectController::new(ctx, authority_id());
         let response = run_lash_turn(&effect_controller, req)
             .await
             .map_err(TerminalError::from_error)?;
@@ -30,7 +31,8 @@ impl AgentTurnWorkflow for AgentTurnWorkflowImpl {
 }
 ```
 
-The application owns `run_lash_turn`: open the `LashSession` from stable
+The application owns `authority_id` (its `RestateEffectHost`'s authority id)
+and `run_lash_turn`: open the `LashSession` from stable
 request data and call
 `session.turn(input).turn_id(turn_id).run_with_effects(&controller)`
 for the Restate-backed turn. Restate recovery is handler replay with the same turn id

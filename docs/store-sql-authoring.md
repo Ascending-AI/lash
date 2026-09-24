@@ -147,7 +147,7 @@ expression.
 
 Some predicates are neither dialect nor prose. `status IN ('running',
 'waiting')` is the *live process* partition, generated from `ProcessStatus` by
-`lash_core::store_backend_support` so that adding a variant is one edit rather
+`lash_core_execution::store_backend_support` so that adding a variant is one edit rather
 than seventy-nine (FIG-2815, FIG-2844). A statement may not retype it — the
 `process_lifecycle_vocabulary` gate in `lash-sim` refuses that, and so does this
 layout's own gate for a column a family declares vocabulary-valued.
@@ -170,12 +170,12 @@ that is what the vocabulary helpers take. Inner spacing is free. A token
 inside a string literal or a comment is that literal's or comment's own text
 and is left alone, exactly like a `?` inside `'why?'`.
 
-The expansions come from the **backend** crate, which has the `lash-core`
-dependency this crate deliberately does not (ADR 0098). Each backend registers
+The expansions come from the **backend** crate, which has the
+`lash-core-execution` dependency this crate deliberately does not (ADR 0098). Each backend registers
 them once, beside where it renders its statement set:
 
 ```rust
-use lash_core::store_backend_support as vocabulary;
+use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
 const PROCESS_LIFECYCLE: Vocabulary = Vocabulary::new(&[

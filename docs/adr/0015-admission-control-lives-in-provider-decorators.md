@@ -41,8 +41,8 @@ into attempt exhaustion.
 
 ## Consequences
 
-- Hosts that need admission control write a small decorator (the providers
-  page documents the pattern and its disciplines: forward `close()`
+- Hosts that need admission control write a small decorator (the pattern's
+  disciplines: forward `close()`
   explicitly, re-wrap at every construction site because `serialize_config`
   round-trips only the inner provider's config, keep admission awaits
   cancellation-safe, class by `scope.session_id`).
@@ -75,7 +75,7 @@ into attempt exhaustion.
   vocabulary it never interprets. `scope.session_id` already gives the host a
   classing key it controls end to end — it is contractually present on every
   provider request, and even direct calls accept a host-chosen session id
-  (`crates/lash-core/src/direct.rs`).
+  (`crates/lash-core-execution/src/direct.rs`).
 - **A general metadata bag on `LlmRequest`.** Rejected as a junk drawer:
   unversioned stringly side-channels between host layers, with every future
   "just one field" request landing there instead of being designed. Everything

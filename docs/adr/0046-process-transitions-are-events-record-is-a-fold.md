@@ -1,6 +1,6 @@
 # Process transitions are events; the record is a fold
 
-Amended 2026-09-23 (FIG-3540): [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) narrows the
+Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) narrows the
 merge-key paragraph below. `merge_key` and authority become per-item data for
 the drain policy and traces, not composition gates: wakes and host input share
 one FIFO prefix, and session commands form a separate class-level lane applied

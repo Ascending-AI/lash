@@ -19,7 +19,7 @@ still had to hand-forward every read, lease, wake, and retention method.
 ## Decision
 
 The registry contract is a set of narrow, single-concern traits that a backend
-composes (`crates/lash-core/src/runtime/process/registry_concerns.rs`):
+composes (`crates/lash-core-execution/src/runtime/process/registry_concerns.rs`):
 
 - `ProcessQuery` — point reads, listings, the change feed, the recovery
   worklist, aggregates.

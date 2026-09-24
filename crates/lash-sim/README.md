@@ -100,7 +100,7 @@ bound, not a discovered runtime invariant violation.
 - Full-lane Postgres trace replay is implemented as `lash-sim replay-postgres
   <trace> --out <artifact-root>`, gated by `LASH_POSTGRES_DATABASE_URL` or the
   confidence gate's Docker bootstrap, and writes replay/divergence artifacts.
-- Generated traces are produced by `lash-sim.generated-workload.v8`, a
+- Generated traces are produced by `lash-sim.generated-workload.v10`, a
   deterministic state-machine generator over sessions, provider scripts,
   queued ingress, cancellation, triggers, observer reconnects, backend
   failure choices, provider mutations, atomic tools, exec-code, process waits,
@@ -205,7 +205,7 @@ The deferred cross-backend suites run in their named service gates.
   fails persists the full reproducibility package under
   `failures/seed-<hex>/` before the run aborts, in both evidence and search
   modes, and the run error names the failing oracle and the exact replay
-  command (`generated_seed_failure_writes_reproducibility_package`).
+  command.
 - Real SQLite substrate faults are gated in `scenario-harnesses`: four seeds
   cover the complete point set per PR, while the full soak runs 256 seeds to
   vary the deterministic 1-to-8-commit prefix. Reports explicitly list any
@@ -219,8 +219,7 @@ at lane-scaled budgets: 256 seeds @ 500 max boundaries for default
 broad (`LASH_SIM_BROAD_SEEDS`/`LASH_SIM_BROAD_MAX_BOUNDARIES`), and 243 @
 2000 for full (`LASH_SIM_FULL_SEEDS`/`LASH_SIM_FULL_MAX_BOUNDARIES`), all
 shardable with `LASH_SIM_SHARD`. The weekly Confidence workflow partitions the
-full seed space as shard `1/9` on the main full job plus eight
-`sim-search:<i>/9` matrix jobs, so the fleet covers every configured seed
+full seed space across nine `sim-search:<i>/9` matrix jobs, so the fleet covers every configured seed
 exactly once per week. `scripts/confidence-gate.sh sim-search:<i>/<n>` runs
 one shard standalone. A dedicated `sim-search:` shard is bounded by wall
 clock, not the seed count alone: the gate hands each pass a `--time-budget`

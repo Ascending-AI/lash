@@ -4,6 +4,15 @@
 
 accepted
 
+Amended 2026-09-24 (#846): the native substrate became first-class and the
+seam names below follow the code. `ProcessWorkDriver` is now
+`ProcessWorkSubstrate`, whose `await_process_terminal` is the only sanctioned
+wait and returns `ProcessTerminalWait::{Terminal, Reattach}`; there is no
+polling fallback and no optional attach. `ProcessAwaiter` is now
+`NativeProcessAwaiter`, the native substrate's waiter, and `ProcessAttach` is
+gone: the Restate substrate implements `await_process_terminal` itself. The
+decision (waits live above storage) is unchanged.
+
 ## Decision
 
 `ProcessRegistry` is a state interface, not a coordination primitive. Registry
@@ -14,14 +23,15 @@ backend-specific polling contracts.
 
 Process waits live above storage:
 
-- `ProcessWorkDriver` is the process execution and coordination seam. Process
-  commands route terminal waits through the driver when one is installed.
-- `ProcessAwaiter` is the core fallback for local and store-only deployments:
-  it performs point reads (`get_process`, `event_page`) and uses a
+- `ProcessWorkSubstrate` is the process execution and coordination seam.
+  Process commands route every terminal wait through its
+  `await_process_terminal`.
+- `NativeProcessAwaiter` is the native substrate's waiter for local and
+  store-only deployments: it performs point reads (`get_process`, `event_page`) and uses a
   `ProcessChangeHub` when the registry is wrapped in-process, with bounded
   exponential backoff when another process may be mutating the store.
-- `ProcessAttach` lets an external execution backend own a terminal await. The
-  Restate adapter uses synchronous ingress to
+- An external execution backend owns a terminal await by implementing
+  `await_process_terminal`. The Restate substrate uses synchronous ingress to
   `LashProcessWorkflow/{process_id}/await_terminal`, so the durable workflow
   promise is the long-hold mechanism instead of a database wait loop.
 
@@ -33,7 +43,7 @@ registries each had to carry their own notify/poll loops, lost-wakeup defenses,
 and polling cadence. That duplicated the most failure-prone part of process
 waiting while hiding it behind a trait whose real job is durable state.
 
-The runtime already has the right boundary: `ProcessWorkDriver` knows whether
+The runtime already has the right boundary: `ProcessWorkSubstrate` knows whether
 process execution is inline, worker-owned, or externally attached. Storage does
 not know whether a wait should be a cheap in-process watch, a bounded polling
 loop, or a durable workflow promise. Moving waits to the driver seam keeps
@@ -48,13 +58,13 @@ economics, and gives store-only deployments one shared implementation.
 - Native waits are still correct without a hub: the awaiter repeatedly performs
   narrow point reads with a 25ms floor, doubling backoff, and a 1s cap. With a
   hub, local mutations wake waiters promptly without database polling.
-- External drivers that install `ProcessAttach` are authoritative for terminal
-  waits. An attach error is surfaced instead of silently falling back to local
+- External substrates are authoritative for terminal waits through
+  `await_process_terminal`. An attach error is surfaced instead of silently falling back to local
   polling, because the external backend owns the durable promise.
 - Restate's in-workflow await path remains the durable handler primitive; the
   new ingress attach is the host-side consumer for waiting on an already
   scheduled `LashProcessWorkflow`.
 - New registry implementations should not reintroduce wait methods. Implement
   state mutations, wrap with `watch_process_registry` when local wakeups are
-  useful, and expose backend-specific long holds through a `ProcessWorkDriver`
-  attachment.
+  useful, and expose backend-specific long holds through a
+  `ProcessWorkSubstrate` implementation.

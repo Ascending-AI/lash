@@ -34,7 +34,7 @@ hand.
   typed events to spans (`lash.tool` for tool calls in both modes, the
   `lash.exec_code` family for exec diagnostics with the precise phase carried on
   the `lash.protocol.diagnostic_phase` attribute); and the remote wire mirror is
-  a compile-forced exhaustive `From<TurnEvent> for RemoteTurnEvent`. `TurnEvent`
+  a compile-forced exhaustive `TryFrom<TurnEvent> for RemoteTurnEvent`. `TurnEvent`
   is deliberately **not** `#[non_exhaustive]` so those matches fail to compile
   until a new variant is handled everywhere.
 
@@ -57,7 +57,7 @@ viewer *(Superseded on this point by the 2026-08-21 removal note.)*, the OTel sp
 names, the JSONL `type` tags, and the wire DTO all describe the same events; if
 each re-derived its own strings and field lists, they would disagree the first
 time an event changed. Routing every consumer through `TraceEvent::kind()`, an
-exhaustive `TraceEvent` match, or an exhaustive `From<TurnEvent>` turns "keep the
+exhaustive `TraceEvent` match, or an exhaustive `TryFrom<TurnEvent>` turns "keep the
 consumers in sync" into a compile error instead of a code-review hope.
 
 ## Consequences
@@ -66,7 +66,7 @@ consumers in sync" into a compile error instead of a code-review hope.
   protocol driver. Everything downstream inherits the new record.
 - **A new `TurnEvent` variant is compile-forced** into `TraceEvent::kind()`, the
   trace-viewer `RenderModel` *(Superseded on this point by the 2026-08-21 removal note.)*,
-  and `From<TurnEvent> for RemoteTurnEvent`. The exhaustive match is the drift
+  and `TryFrom<TurnEvent> for RemoteTurnEvent`. The exhaustive match is the drift
   guard; there is no version number on `TurnEvent` itself.
 - **Exec-diagnostic detail stays additive.** The `exec_code_completed`
   diagnostic carries its per-tool `tool_calls` list inside the free-form

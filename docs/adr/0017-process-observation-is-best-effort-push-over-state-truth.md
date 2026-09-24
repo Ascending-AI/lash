@@ -49,8 +49,9 @@ physically deletes
 terminal process rows older than the cutoff — together with their events, wake
 acks, observer edges, and lease rows — and never touches non-terminal rows. It
 returns a `ProcessPruneReport { pruned_processes, pruned_events,
-pruned_trigger_deliveries }`; low-level registries report zero trigger rows and
-the public process facade fills that field after cross-store reconciliation.
+pruned_trigger_deliveries, artifact_cleanup_acknowledgements }`; low-level
+registries report zero trigger rows and no acknowledgements, and the public
+process facade fills both after cross-store reconciliation.
 
 ## Why
 
@@ -68,7 +69,9 @@ terminal waits on the work-driver seam, where the mechanism (engine promise vs.
 in-process watch) matches the deployment. Routing completion through a
 best-effort sink would reintroduce a lost-wakeup surface that the await seam was
 built to eliminate. So `complete_process` writes its terminal event past the
-decorator, and the sink is confined to non-terminal appends.
+decorator, and the sink is confined to non-terminal appends. *(Superseded by
+ADR 0046: the sink now emits terminals too; terminal observation still rides
+the await seam.)*
 
 The prune lever exists because a host that projects process results and events
 into its own store becomes the real consumer of that data; the lash registry

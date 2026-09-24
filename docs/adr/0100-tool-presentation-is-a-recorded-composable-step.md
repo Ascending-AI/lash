@@ -36,7 +36,7 @@ Three properties of that boundary had drifted from the rest of the runtime:
 * **B. The chain runs inside a journaled effect.** `RuntimeEffectCommand::
   PresentToolResult` carries the settled output once; its outcome is a
   versioned `ToolPresentation { version, model_return, artifacts }` guarded by
-  `TOOL_PRESENTATION_VERSION`. Both call sites — the scalar/batch
+  `TOOL_PRESENTATION_VERSION`. Both call sites — the scalar
   `complete_tool_call` path (replay key `{call_id}:present`) and the
   group-child driver under the child's bound controller — execute it through
   the scoped controller, so replay serves the recorded outcome and no step

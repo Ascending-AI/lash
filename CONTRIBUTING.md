@@ -41,9 +41,9 @@ python3 scripts/dev-test.py   # before calling it done; never starts Postgres/S3
 
 Source the fork's `env.sh` before **any** Cargo command. It selects the fork's
 private target directory and applies the shared machine's build and test
-budgets. `kiln test` with no labels runs `//:dev_tests` — the 95-label
-developer suite, which is the 97-label `//:workspace_tests` PR partition minus
-the two slowest binaries — and `kiln test //:workspace_tests` runs that PR
+budgets. `kiln test` with no labels runs `//:dev_tests` — the developer
+suite, which is the `//:workspace_tests` PR partition minus the dev-deferred
+slow binaries — and `kiln test //:workspace_tests` runs that PR
 partition exactly as CI does. When
 the change has merged, remove the fork with `kiln rm lash <name>`. Never write
 under a `golden-*` directory, remove a fork with `rm -rf`, or set `CARGO_*`
@@ -57,7 +57,7 @@ portable default-feature run.
 
 | Command | Coverage |
 | --- | --- |
-| `kiln test` | `//:dev_tests`: the deterministic developer suite (95 labels); `//:workspace_tests` adds the two dev-deferred binaries for the PR partition. |
+| `kiln test` | `//:dev_tests`: the deterministic developer suite; `//:workspace_tests` adds the dev-deferred binaries for the PR partition. |
 | `scripts/ci/with-service.sh <pg14\|pg16\|pg18\|s3\|all> -- bash scripts/ci/store-tests.sh <suite>` | One PostgreSQL or MinIO suite, against a container this command starts and removes. |
 | `python3 scripts/dev-test.py` | `//:dev_tests` narrowed to the changed package directories (`:all` each); a shared input widens to the whole suite. Refuses live store URLs. |
 | Named Cargo recipes | Tests and checks that require Cargo-owned semantics or assets. |
@@ -184,6 +184,9 @@ offsets are stable:
 - `+20..+23` agent-service Restate and endpoint;
 - `+30..+34` agent-workbench Restate, endpoint, and PostgreSQL;
 - `+35..+37` slack-clone full-host platform, bot, and HTTP MCP server;
+- `+35..+39` effect-group-conformance Restate (admin, ingress, node, two
+  endpoints); it shares `+35..+37` with slack-clone and is serialized by the
+  checkout lock;
 - `+40` distributed-worker MinIO;
 - `+41..+46` process-operations MinIO, Restate, and PostgreSQL;
 - `+47` version-bump recreation PostgreSQL.

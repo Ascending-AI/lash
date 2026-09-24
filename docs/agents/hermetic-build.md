@@ -80,7 +80,7 @@ executor reproduction, and focused Bazel labels.
 `build` and `check` compile and link the requested Bazel labels (`check` is the
 full compile proof, not Cargo's metadata-only mode). `test` without labels
 builds and executes `//:dev_tests`, the generated developer suite
-(`//:workspace_tests` minus the two dev-deferred binaries); explicit labels
+(`//:workspace_tests` minus the dev-deferred binaries); explicit labels
 remain available for a focused edit loop. `clippy` lints the requested Rust
 labels or lint aggregates and defaults to `//:workspace_clippy`,
 `doc` renders the `rust_doc` targets into bazel-bin, `run` compiles a binary on
@@ -93,7 +93,7 @@ scripts/hermetic-build.sh analyze
 # Compile the complete Cargo --workspace --all-targets shape.
 kiln build
 
-# Run the generated developer suite (the PR partition minus two dev-deferred
+# Run the generated developer suite (the PR partition minus the dev-deferred
 # binaries); `kiln test //:workspace_tests` runs the full PR partition.
 kiln test
 
@@ -221,9 +221,9 @@ alongside it. Kiln invokes this cleanup before
 deleting a fork.
 
 The generated graph follows Cargo's resolved default workspace feature graph.
-Of its 114 executable test binaries, `//:workspace_tests` owns 97 deterministic
-binaries; `//:dev_tests` drops the two dev-deferred ones to 95 for the
-developer loop. The other 17 labels are deferred or Cargo-owned: 16 carry
+Of its 135 executable test binaries, `//:workspace_tests` owns 117 deterministic
+binaries; `//:dev_tests` drops the three dev-deferred ones to 114 for the
+developer loop. The other 18 labels are deferred or Cargo-owned: 17 carry
 `manual`, a reason tag, and a durable
 `cargo_only` explanation in `tools/bazel/target-inventory.json`; this keeps both
 the aggregate and `bazel test //...` from treating an unconfigured service,
@@ -306,7 +306,7 @@ real `cargo test -p … -- --list` against the workspace to prove the confidence
 gate's name filters still select tests. That is a claim about Cargo's own test
 selection, which a hermetic action without Cargo cannot make.
 `tools/bazel/generate_build_files.py` passes libtest `--skip` for them on
-`//crates/lash-core:lash-core__unit_test`, and the trunk-only `Test heavy
+`//crates/lash-core:runtime_scenarios__test`, and the dispatch-only `Test heavy
 suites` job (`profile.ci-heavy`) is where they run — it now contains nothing
 else. The `lash-sim` runner and minimizer fixture cases that used to share that
 job are deterministic compute and run in the Bazel partition as cached actions;
@@ -320,9 +320,9 @@ which is neither a Bazel test action's runfiles root nor nextest's per-crate
 working directory. That rules out feeding pool-built binaries to nextest
 through `--binaries-metadata`.
 
-The 15 Cargo-owned executable labels are eight PostgreSQL targets, the S3 unit
+The 17 Cargo-owned executable labels are nine PostgreSQL targets, the S3 unit
 binary, the two `lash-sim` cross-backend binaries, the `lash-runtime` trybuild
-binary, and three workflow-graph frontend binaries. Use the existing Cargo
+binary, and four workflow-graph frontend binaries. Use the existing Cargo
 recipes for these correctness contracts:
 
 - `scripts/check_feature_coverage.py` still owns feature-combination coverage,
@@ -450,7 +450,7 @@ fenced examples remain as prose; nothing compiles or executes them.
 ## Clippy
 
 `//:workspace_clippy` is the `cargo clippy --workspace --all-targets` shape as
-one cached Bazel action per target: 190 labels, every first-party target of the
+one cached Bazel action per target: 212 labels, every first-party target of the
 resolved default graph except the one label that merely *runs* a build script,
 whose exemption is recorded as `clippy_exempt` in
 `tools/bazel/target-inventory.json` because running a script compiles nothing
@@ -470,10 +470,11 @@ reasons, all about matching Cargo's effective lint set rather than an
 approximation of it:
 
 - Clippy resolves its configuration by walking up from each crate's manifest
-  directory and stopping at the first `clippy.toml`. This repository has three —
-  the workspace file plus `crates/lash-core/clippy.toml` and
-  `crates/lash-core-store/clippy.toml`, which carry the `disallowed-methods`
-  list that `clippy::disallowed_methods` denies — while the
+  directory and stopping at the first `clippy.toml`. This repository has
+  seventeen — the workspace file plus crate-, example- and runbook-local files
+  such as `crates/lash-core/clippy.toml` and `crates/lash-core-store/clippy.toml`,
+  which carry the `disallowed-methods` list that `clippy::disallowed_methods`
+  denies — while the
   upstream aspect binds a single config for the whole build. The aspect here
   selects the nearest declared config per target, so `lash-core` sees its own
   list instead of an empty one.
@@ -487,12 +488,13 @@ approximation of it:
   build script against `[workspace.lints]` like any other target, so the aspect
   reads `@crates//:workspace_cargo_lints` itself for a target that carries none.
 
-`slack-clone`'s `e2e` feature is outside the resolved default workspace graph,
-so `cargo clippy -p slack-clone --all-targets --features e2e --no-deps` has no
-Bazel equivalent and stays a Cargo command on every event.
+`slack-clone`'s `e2e` feature is outside the resolved default workspace graph.
+Trusted merge groups and dispatches lint it through `//:feature_lane_clippy`;
+untrusted events, which receive no cache credentials, keep
+`cargo clippy -p slack-clone --all-targets --features e2e --no-deps`.
 ## Service-backed jobs
 
-The eleven `cargo-service-gate` labels are still *built* by Bazel from the
+The twelve `cargo-service-gate` labels are still *built* by Bazel from the
 shared cache; only their execution is Cargo-free. `scripts/ci/store-tests.sh`
 owns both paths for every suite in the `Test Postgres store` and `Test S3 store`
 jobs and dispatches on `BAZEL_TRUSTED`. Two properties hold on the Bazel path:
@@ -574,7 +576,6 @@ container and a test run rather than a runner and a Bazel client.
 | --- | --- | --- | --- |
 | `pull_request` (rust) | skipped | runs | skipped |
 | `merge_group` (rust) | schema diffs only | runs | schema diffs only |
-| `push` to `main` | skipped (queue already witnessed the SHA) | skipped | skipped |
 | `workflow_dispatch` | runs | runs | runs |
 
 The compatibility lanes only compare the live catalog artifact and a focused
@@ -634,11 +635,11 @@ remote cache hit proves the same interpreter and script were used. The
 feature-lane workbench unit targets use the same Node input.
 
 The `Lint` job builds
-`//:workspace_clippy` in place of the workspace `cargo clippy`, and the
-`Check workspace` job builds `//:workspace_compile` in place of
-`cargo check --workspace --all-targets`, with
+`//:workspace_clippy` in place of the workspace `cargo clippy`, with
 `--remote_download_outputs=minimal`: nothing on that runner consumes the
-outputs, and a compile or link error still fails the build.
+outputs, and a compile error still fails the build. That aggregate is also the
+all-targets compile proof on CI; the separate `Check workspace` job was removed
+(#1668), and `//:workspace_compile` remains available for local runs.
 `//:workspace_compile` compiles *and links*
 every label of the resolved default graph, including the
 unit- and integration-test crates that carry the `cfg(test)` shape and the
@@ -654,8 +655,8 @@ event.
 
 Fork and Dependabot pull requests never receive cache credentials: their Bazel
 job is intentionally skipped, their ordinary nextest job omits the generated
-filter, the `Lint` and `Check workspace` jobs run exactly the
-Cargo clippy and check commands that predate this cutover, and the
+filter, the `Lint` job runs exactly the Cargo clippy command that predates this
+cutover, and the
 service jobs take the Cargo branch of `scripts/ci/store-tests.sh`, preserving
 the full workspace fallback. `CI conclusion` accepts that
 skip only when the shared trust decision classifies the event as untrusted.

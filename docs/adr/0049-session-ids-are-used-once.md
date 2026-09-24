@@ -181,7 +181,7 @@ record of a dropped waiter and retires the scope. That is the one
 memory-versus-durable differential in the quiescence law, and it is stated
 in the shared conformance law rather than papered over.
 
-> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats` (`crates/lash/src/formats.rs`), registered in `scripts/versioned-surfaces.toml` and checked by `scripts/check_format_registry.py`.
 
 ## Consequences
 

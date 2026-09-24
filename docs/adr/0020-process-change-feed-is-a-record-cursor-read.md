@@ -2,7 +2,7 @@
 
 Hosts that project process state into their own stores need a completeness lane: a way to find
 every Runtime Process that changed since a watermark, including terminal transitions, which the
-`ProcessEventSink` deliberately never carries (ADR 0017). We add a **Process Change Feed** to
+best-effort `ProcessEventSink` cannot guarantee to deliver (ADR 0017, ADR 0046). We add a **Process Change Feed** to
 `ProcessRegistry`: every process-row mutation (registration, event append, wait, status,
 terminal write) bumps a per-store monotonic change sequence, and a cursor-paged
 `processes_changed_since(cursor, limit)` read returns the changed `ProcessRecord`s in that

@@ -168,7 +168,7 @@ process journals live until host-scheduled terminal-process retention prunes
 the process. SQLite effect schema 6 and PostgreSQL store schema 28 are
 reject-and-recreate cutovers with no compatibility path.
 
-> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats`; see `scripts/check_format_versions.py`.
+> **Historical versions.** The version numbers in this ADR record the state at ratification. The current values live in `lash::formats` (`crates/lash/src/formats.rs`), registered in `scripts/versioned-surfaces.toml` and checked by `scripts/check_format_registry.py`.
 
 Restate keeps its native invocation journal and native retention. Its effect
 host creates and deletes no SQL replay rows, so lifecycle retirement is a
@@ -177,6 +177,14 @@ store and does not know about effect-journal tables; lifecycle owners call the
 effect host directly.
 
 ### ToolBatch entry payloads
+
+*(Amended 2026-09-24 (FIG-3397): the aggregate `ToolBatch` journal entry this
+section describes is deleted. A tool batch is now a durable effect group whose
+`ToolInvocation` children journal their own results, and a journaled
+`tool_batch` envelope is refused with a typed version refusal. The per-entry
+reasoning below applies to one tool child's result: one entry per child, not a
+fixed byte count. The intent admission bounds and the absence of a universal
+byte cap stand.)*
 
 The segmentation guarantee bounds journal growth by completed effect count; it
 does not claim that every effect result has a universal byte ceiling. Restate
@@ -202,8 +210,8 @@ tool result into a deterministic failure.
 
 ## Outstanding tool children at a boundary (FIG-3392)
 
-**Decided, not yet implemented.** FIG-3397 lands reattachment and the admission
-bound; the full contract is
+**Implemented** by FIG-3397 (reattachment and the admission bound); the full
+contract is
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
 Effect groups made it possible for a boundary to arrive while independently
