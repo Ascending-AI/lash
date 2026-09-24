@@ -32,11 +32,11 @@ pub(super) async fn turn_builder_stream_emits_activities_and_finishes() -> Resul
 #[tokio::test]
 async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Result<()> {
     let streamed_reasoning = LlmOutputPart::Reasoning {
-        text: "**Planning single shell command execution**".to_string(),
+        text: "**Planning single file search step**".to_string(),
         replay: Some(lash_core::llm::types::ProviderReasoningReplay {
             item_id: Some("reasoning-streamed".to_string()),
             encrypted_content: Some("opaque-streamed".to_string()),
-            summary: vec!["**Planning single shell command execution**".to_string()],
+            summary: vec!["**Planning single file search step**".to_string()],
             ..Default::default()
         }),
     };
@@ -68,7 +68,7 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
                 });
                 stream.send(LlmStreamEvent::ReasoningDelta {
                     block,
-                    text: "shell command execution**".to_string(),
+                    text: "file search step**".to_string(),
                 });
                 stream.send(LlmStreamEvent::Part(streamed_reasoning.clone()));
                 stream.send(LlmStreamEvent::Part(completed_only_reasoning.clone()));
@@ -115,7 +115,7 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
         reasoning,
         vec![
             "**Planning single ",
-            "shell command execution**",
+            "file search step**",
             "**Completed-only summary**",
         ],
         "incremental chunks stay distinct, their completed snapshot is not republished, and a completed-only summary remains visible",
@@ -136,7 +136,7 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
     assert_eq!(
         durable_reasoning,
         vec![
-            "**Planning single shell command execution**",
+            "**Planning single file search step**",
             "**Completed-only summary**",
         ],
         "completed reasoning parts remain authoritative durable response state",

@@ -56,8 +56,8 @@ pub(crate) mod helpers {
         accumulator.push_reasoning("I'll check the time.".to_string(), None, Vec::new(), None);
         accumulator.push_tool_call(
             "call_1".to_string(),
-            "exec_command".to_string(),
-            "{\"cmd\":\"date\"}".to_string(),
+            "get_time".to_string(),
+            "{\"timezone\":\"UTC\"}".to_string(),
             Some(lash_sansio::llm::types::ProviderReplayMeta {
                 item_id: Some("item_1".to_string()),
                 opaque: Some("sig".to_string()),
@@ -68,8 +68,8 @@ pub(crate) mod helpers {
         let mut response = LlmResponse {
             parts: vec![LlmOutputPart::ToolCall {
                 call_id: "call_1".to_string(),
-                tool_name: "exec_command".to_string(),
-                input_json: "{\"cmd\":\"date\"}".to_string(),
+                tool_name: "get_time".to_string(),
+                input_json: "{\"timezone\":\"UTC\"}".to_string(),
                 replay: Some(lash_sansio::llm::types::ProviderReplayMeta {
                     item_id: Some("item_1".to_string()),
                     opaque: Some("sig".to_string()),
@@ -89,7 +89,7 @@ pub(crate) mod helpers {
         ));
         assert!(matches!(
             &response.parts[1],
-            LlmOutputPart::ToolCall { tool_name, .. } if tool_name == "exec_command"
+            LlmOutputPart::ToolCall { tool_name, .. } if tool_name == "get_time"
         ));
     }
 

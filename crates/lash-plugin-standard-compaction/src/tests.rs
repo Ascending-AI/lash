@@ -109,7 +109,7 @@ use lash_core::testing::{MockSessionManager, mock_assembled_turn as empty_turn};
 fn mock_manager() -> MockSessionManager {
     MockSessionManager::default()
         .with_tool_catalog(vec![
-            json!({"name":"exec_command"}),
+            json!({"name":"search_tools"}),
             json!({"name":"read_file"}),
         ])
         .with_turn(empty_turn(

@@ -237,7 +237,7 @@ Scenario::Baseline => vec![
             b::assign("missing", b::await_expr(b::receiver_call(b::var("tools"), "missing_tool", vec![b::record(vec![("value", b::string("x"))])]))),
             b::assign("boom", b::await_expr(b::receiver_call(b::var("tools"), "boom", vec![b::record(vec![("reason", b::string("explicit"))])]))),
             b::assign("ok", b::await_expr(b::receiver_call(b::var("tools"), "echo", vec![b::record(vec![("value", b::string("still-running"))])]))),
-            b::assign("probe", b::await_expr(b::receiver_call(b::var("shell"), "exec", vec![b::record(vec![("cmd", b::string("test -f Cargo.lock"))])]))),
+            b::assign("probe", b::await_expr(b::receiver_call(b::var("jobs"), "run", vec![b::record(vec![("target", b::string("check Cargo.lock"))])]))),
             b::finish(b::record(vec![("missing_ok", b::field(b::var("missing"), "ok")), ("missing_error", b::builtin("contains", vec![b::field(b::var("missing"), "error"), b::string("unknown tool")])), ("boom_ok", b::field(b::var("boom"), "ok")), ("boom_error", b::builtin("contains", vec![b::field(b::var("boom"), "error"), b::string("explicit failure")])), ("ok_value", b::field(b::var("ok"), "value")), ("probe_exit", b::field(b::field(b::var("probe"), "value"), "exit_code")), ("probe_done", b::field(b::field(b::var("probe"), "value"), "done"))])),
         ],
         Scenario::ToolControlHostEnvironment => vec![

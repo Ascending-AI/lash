@@ -112,7 +112,8 @@ pub struct AbandonEvidence {
 #[serde(tag = "authority", rename_all = "snake_case")]
 pub enum ProcessCompletionAuthority {
     /// An external actor closes an [`RecoveryContract::ExternallyOwned`] row
-    /// it observes (the `shell.start` detach path, ADR 0019).
+    /// it observes: a host that launched work outside lash records that
+    /// work's launch identity as the terminal outcome (ADR 0019).
     /// Rejected on any lash-executed disposition: those have a lease-fenced
     /// single writer.
     ExternalOwner,

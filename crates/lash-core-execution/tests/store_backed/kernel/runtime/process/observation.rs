@@ -502,15 +502,15 @@ mod tests {
                 ProcessInput::ToolCall {
                     call: PreparedToolCall::from_parts(
                         "call-1",
-                        "tool:shell.run",
-                        "shell.run",
+                        "tool:files.read",
+                        "files.read",
                         json!({}),
                         None,
                         serde_json::Value::Null,
                     ),
                 },
                 "tool",
-                "shell.run",
+                "files.read",
                 None,
             ),
             (
@@ -585,7 +585,7 @@ mod tests {
             .map(|item| (item.process.process_id.as_str(), item))
             .collect::<std::collections::BTreeMap<_, _>>();
 
-        assert_eq!(by_id["tool"].label(), "shell.run");
+        assert_eq!(by_id["tool"].label(), "files.read");
         assert_eq!(by_id["engine"].label(), "remember");
         assert_eq!(by_id["engine"].process.kind(), "test-engine");
         assert_eq!(by_id["session"].label(), "researcher");

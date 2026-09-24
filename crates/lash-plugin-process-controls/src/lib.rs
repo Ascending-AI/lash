@@ -139,8 +139,8 @@ impl StaticToolExecute for SessionProcessAdminTools {
 ///
 /// A handle is the shape every other process tool takes, so `cancel` accepts
 /// it too and reads it through the one handle parser. The bare `process_id`
-/// stays for a host that holds an id and never held a handle — a `shell.start`
-/// run reported by id, for instance.
+/// stays for a host that holds an id and never held a handle — an
+/// Externally-Owned run the host launched and reported by id, for instance.
 fn cancel_target(args: &Value) -> Option<String> {
     if let Some(handle) = args.get("handle")
         && let Ok(process_ref) = lash_core::ProcessRef::from_handle_json(handle)
@@ -167,7 +167,7 @@ pub fn process_list_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:list_process_handles",
         "list_process_handles",
-        "List process runs visible to this session, including `shell.start` runs, with process id, descriptor, optional definition name, and lifecycle status. Filters are optional; the default returns running runs. Empty arguments select running runs; `definition` selects runs of a definition and `status: \"any\"` includes visible run history.",
+        "List process runs visible to this session, including host-launched runs, with process id, descriptor, optional definition name, and lifecycle status. Filters are optional; the default returns running runs. Empty arguments select running runs; `definition` selects runs of a definition and `status: \"any\"` includes visible run history.",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -254,7 +254,7 @@ pub fn process_cancel_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:cancel_process",
         "cancel_process",
-        "Request cancellation for a durable process, including a running `shell.start` process. Pass the handle a process start or `processes.list(...)` returned, or the bare `process_id`.",
+        "Request cancellation for a durable process, including a running host-launched process. Pass the handle a process start or `processes.list(...)` returned, or the bare `process_id`.",
         serde_json::json!({
             "type": "object",
             "properties": {

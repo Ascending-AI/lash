@@ -105,10 +105,10 @@ async fn strings_preserve_utf8_content() {
     assert_eq!(value, Value::String("Grüße 東京".into()));
 }
 
-/// Shell-shaped text is the payload these cells carry most often, and every
-/// character of it has to survive the front-end and the VM untouched.
+/// Quote- and escape-heavy text — command lines, embedded JSON, paths — has to
+/// survive the front-end and the VM untouched, character for character.
 #[tokio::test(flavor = "current_thread")]
-async fn string_values_preserve_shell_quotes_and_escapes() {
+async fn string_values_preserve_quotes_and_escapes() {
     let host = TestHost::default();
     let mut state = State::new();
 

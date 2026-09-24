@@ -630,11 +630,11 @@ impl ProcessCapability {
 
     /// Write the terminal outcome for an Externally-Owned process the session
     /// observes (ADR 0019). This is the "external actor calling
-    /// `complete_process`" closure path: a `shell.start` detach records its
-    /// immediately-terminal launch fact through here. Only Externally-Owned rows
-    /// may be completed this way — an OwnerBound or Rerunnable row has a lash
-    /// execution owner as its single terminal writer, so completing it out of
-    /// band is rejected.
+    /// `complete_process`" closure path: a host that launches work outside
+    /// lash registers it as an Externally-Owned row and completes it here with
+    /// the launch identity. Only Externally-Owned rows may be completed this
+    /// way — an OwnerBound or Rerunnable row has a lash execution owner as its
+    /// single terminal writer, so completing it out of band is rejected.
     pub(in crate::runtime::session_manager) async fn complete_external_process(
         &self,
         current: &CurrentSessionCapability,

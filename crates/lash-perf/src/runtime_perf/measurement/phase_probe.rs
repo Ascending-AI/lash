@@ -414,7 +414,6 @@ async fn run_once_inner(
         | RuntimePerfScenario::RlmToolCatalogWarm
         | RuntimePerfScenario::RlmObliqueStackMix
         | RuntimePerfScenario::OpenAiCompatStream
-        | RuntimePerfScenario::StandardShellOutput
         | RuntimePerfScenario::ToolDiscoverySearch
         | RuntimePerfScenario::ScopedEffectController
         | RuntimePerfScenario::StoreReopen

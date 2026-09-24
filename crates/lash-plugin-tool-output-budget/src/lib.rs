@@ -581,7 +581,7 @@ async fn truncation_hint(
 ) -> String {
     if let Some(path) = existing_tool_output_path(ctx) {
         return format!(
-            "The tool output was truncated. Full output saved to: {}\nUse the shell tool or host-provided file access to inspect specific sections instead of reading the whole file at once.",
+            "The tool output was truncated. Full output saved to: {}\nUse host-provided file access to inspect specific sections instead of reading the whole file at once.",
             path.display()
         );
     }
@@ -595,7 +595,7 @@ async fn truncation_hint(
             );
         }
     }
-    "The tool output was truncated. Re-run the tool with narrower arguments, or use the shell tool or host-provided file access to inspect a smaller section.".to_string()
+    "The tool output was truncated. Re-run the tool with narrower arguments, or use host-provided file access to inspect a smaller section.".to_string()
 }
 
 fn retained_output_label(ctx: &ToolResultProjectionContext) -> String {
@@ -1059,11 +1059,11 @@ mod tests {
     async fn a_tool_supplied_full_output_path_wins_over_retention() {
         let artifacts = Arc::new(RecordingArtifacts::default());
         let ctx = test_context_with_artifacts(
-            "exec_command",
+            "run_report",
             json!({}),
             json!({
                 "output": "x".repeat(20_000),
-                "full_output_path": "/tmp/existing-shell-output.log",
+                "full_output_path": "/tmp/existing-report-output.log",
             }),
             artifacts.clone(),
         );
@@ -1077,8 +1077,8 @@ mod tests {
             .await
             .expect("project tool result");
         let output = render_model_return_parts(&projected.parts);
-        assert!(output.contains("Full output saved to: /tmp/existing-shell-output.log"));
-        assert!(output.contains("Use the shell tool or host-provided file access"));
+        assert!(output.contains("Full output saved to: /tmp/existing-report-output.log"));
+        assert!(output.contains("Use host-provided file access"));
         assert!(!output.contains("read_file"));
         assert!(!output.contains("grep"));
         assert!(artifacts.retained().is_empty());
@@ -1090,7 +1090,7 @@ mod tests {
         let hint = truncation_hint(&ctx, "full output", false).await;
 
         assert!(hint.contains("Re-run the tool with narrower arguments"));
-        assert!(hint.contains("shell tool or host-provided file access"));
+        assert!(hint.contains("use host-provided file access"));
         assert!(!hint.contains("read_file"));
         assert!(!hint.contains("grep"));
     }

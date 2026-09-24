@@ -87,7 +87,6 @@ pub(crate) enum RuntimePerfScenario {
     RlmToolCatalogWarm,
     RlmObliqueStackMix,
     OpenAiCompatStream,
-    StandardShellOutput,
     ToolDiscoverySearch,
     OpenAiResponsesSseParse,
     DirectLlmClient,
@@ -363,7 +362,7 @@ impl RuntimePerfScenario {
         Self::HighTrafficKneePostgres,
     ];
 
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 60] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 59] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -516,13 +515,6 @@ impl RuntimePerfScenario {
             StandardProtocolScenario,
             "Measures Standard protocol streaming provider compatibility as model-response projection.",
             wiring { compat_stream_server = true }
-        ),
-        runtime_perf_metadata!(
-            StandardShellOutput,
-            "standard_shell_output",
-            Standard,
-            StandardProtocolScenario,
-            "Measures Standard protocol handling of native shell output feedback."
         ),
         runtime_perf_metadata!(
             ToolDiscoverySearch,
@@ -865,7 +857,7 @@ impl RuntimePerfScenario {
             false
         ),
     ];
-    pub(crate) const KNOWN: [Self; 60] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 59] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; RUNTIME_PERF_DEFAULT_COUNT] =
@@ -1011,7 +1003,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 60] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 59] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -1072,7 +1064,6 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 60] {
         RuntimePerfScenario::METADATA[56].scenario,
         RuntimePerfScenario::METADATA[57].scenario,
         RuntimePerfScenario::METADATA[58].scenario,
-        RuntimePerfScenario::METADATA[59].scenario,
     ]
 }
 

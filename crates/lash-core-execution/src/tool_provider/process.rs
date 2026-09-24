@@ -219,10 +219,10 @@ impl InternalProcessAdmin<'_> {
     }
 
     /// Record the terminal outcome of an Externally-Owned process this session
-    /// owns (ADR 0019). A `shell.start` detach registers its launch as an
-    /// Externally-Owned row and immediately completes it with the launch
-    /// identity — lash never claims it as running. Only Externally-Owned rows
-    /// accept this out-of-band completion.
+    /// owns (ADR 0019). A host that launches work outside lash registers it as
+    /// an Externally-Owned row and completes it with the launch identity —
+    /// lash never claims it as running. Only Externally-Owned rows accept this
+    /// out-of-band completion.
     ///
     /// This is ADR 0051's protocol and process-engine implementor class.
     pub async fn complete_external(

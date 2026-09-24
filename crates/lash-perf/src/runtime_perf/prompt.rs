@@ -54,10 +54,6 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             turn_index + 1,
             expected_reply()
         ),
-        RuntimePerfScenario::StandardShellOutput => format!(
-            "Turn {} in standard mode. Exercise shell.exec output capture, then reply with exactly: runtime perf benchmark ok",
-            turn_index + 1
-        ),
         RuntimePerfScenario::ToolDiscoverySearch => format!(
             "Turn {} in standard mode. Search the catalog for Gmail email tools, then reply with exactly: runtime perf benchmark ok",
             turn_index + 1
