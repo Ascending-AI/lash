@@ -476,6 +476,7 @@ jobs:
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_version_bump_fixtures.py
           python3 scripts/test_check_conformance_law_registration.py
+          python3 scripts/test_check_substrate_boundary.py
           python3 scripts/test_check_law_execution_receipts.py
           python3 scripts/test_check_test_shard_coverage.py
           python3 scripts/test_check_transcript_diff.py
