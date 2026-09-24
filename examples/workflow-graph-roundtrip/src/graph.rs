@@ -1264,6 +1264,51 @@ fn terminal_kind(node: &WorkflowNode) -> Option<&'static str> {
 mod tests {
     use super::*;
 
+    /// FIG-3630: the editor saves an admitted workflow whose process is a
+    /// lifted literal after the author adds a statement in front of it and
+    /// edits the process body. The document carries the literal's reference
+    /// as text; the save must read it back as that reference and find the
+    /// lifted body wherever the statement now sits.
+    #[test]
+    fn a_statement_added_before_a_lifted_process_saves_its_body_edit() {
+        let source = "const blank = async () => {\n  return 0;\n};\n";
+        let environment = crate::runtime::host_environment();
+        let graph = lash::typescript::workflow_graph::workflow_graph_from_source_with_facets(
+            source,
+            Some(&environment),
+        )
+        .expect("the blank workflow admits");
+        let mut document = document_from_graph(1, source.to_string(), graph.clone());
+
+        let binding = document
+            .nodes
+            .iter()
+            .find(|node| node.node_type == "data")
+            .expect("the process binding")
+            .clone();
+        let mut inserted = binding;
+        inserted.id = "new:before-process".to_string();
+        inserted.data.binding = Some("greeting".to_string());
+        inserted.data.expression = Some("\"hello\"".to_string());
+        document.roots.main.insert(0, inserted.id.clone());
+        document.nodes.push(inserted);
+        document
+            .nodes
+            .iter_mut()
+            .find(|node| node.node_type == "terminal")
+            .expect("the process terminal")
+            .data
+            .expression = Some("7".to_string());
+
+        let rebuilt = graph_from_document(document, &graph).expect("rebuild the edited document");
+        let rendered = lash::typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
+            .unwrap_or_else(|error| panic!("the edited workflow renders: {error}"));
+        assert_eq!(
+            rendered,
+            "let greeting = \"hello\";\nconst blank = async () => {\n  return 7;\n};\n"
+        );
+    }
+
     #[test]
     fn promoted_constructs_flatten_and_rebuild_as_typed_nodes() {
         let input = r#"const worker = async () => {

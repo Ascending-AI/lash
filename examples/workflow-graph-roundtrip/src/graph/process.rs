@@ -181,15 +181,43 @@ fn editable_process_type(
         "any" => Ok(lash::rlm::lang::TypeExpr::Any),
         "null" => Ok(lash::rlm::lang::TypeExpr::Null),
         "str" | "string" => Ok(lash::rlm::lang::TypeExpr::Str),
-        "int" => Ok(lash::rlm::lang::TypeExpr::Int),
-        "float" => Ok(lash::rlm::lang::TypeExpr::Float),
+        // TypeScript has one number type, which lowers to `float`; an `int`
+        // parameter has no annotation the canonical source could carry.
+        "float" | "number" => Ok(lash::rlm::lang::TypeExpr::Float),
         "bool" | "boolean" => Ok(lash::rlm::lang::TypeExpr::Bool),
         other => Err(RenderErrorResponse::invalid_node_payload(
             process_id,
             format!(
                 "`data.{field}` is not a valid type expression: `{other}` is not one of \
-                 any, null, str, int, float, bool"
+                 any, null, str, float, bool"
             ),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// TypeScript has one number type: a parameter typed `int` has no
+    /// annotation the canonical source could carry, so it is refused where
+    /// the host reads it rather than widened when the source prints.
+    #[test]
+    fn process_parameter_types_are_the_ones_typescript_can_annotate() {
+        let process = ProcessId::from("process");
+        for (text, expected) in [
+            ("number", lash::rlm::lang::TypeExpr::Float),
+            ("float", lash::rlm::lang::TypeExpr::Float),
+            ("string", lash::rlm::lang::TypeExpr::Str),
+            ("bool", lash::rlm::lang::TypeExpr::Bool),
+            ("any", lash::rlm::lang::TypeExpr::Any),
+        ] {
+            assert_eq!(
+                editable_process_type(&process, "params.type", text)
+                    .unwrap_or_else(|_| panic!("{text} is a parameter type")),
+                expected
+            );
+        }
+        assert!(editable_process_type(&process, "params.type", "int").is_err());
     }
 }

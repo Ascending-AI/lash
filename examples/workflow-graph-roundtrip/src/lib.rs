@@ -264,7 +264,20 @@ async fn save_workflow(
             current.version,
         ));
     }
-    let graph = graph::graph_from_document(document.clone(), &current.graph)?;
+    // A document is an edit of the projection of its own source: a projected
+    // (not yet saved) workflow names the nodes and processes of that source,
+    // not of the saved one. Its baseline is re-derived from that source, so
+    // every underived fact — a lifted process's origin above all — comes from
+    // the lens, never from the client.
+    let reprojected_baseline;
+    let baseline = if document.source == current.source {
+        &current.graph
+    } else {
+        reprojected_baseline = workflow_graph_from_source(&document.source)
+            .map_err(RenderErrorResponse::projection)?;
+        &reprojected_baseline
+    };
+    let graph = graph::graph_from_document(document.clone(), baseline)?;
     let source = workflow_graph_to_source(&graph).map_err(RenderErrorResponse::from)?;
     let canonical_graph =
         workflow_graph_from_source(&source).map_err(RenderErrorResponse::projection)?;
@@ -420,5 +433,33 @@ impl IntoResponse for SourceProjectionErrorResponse {
 impl From<GraphRenderError> for RenderErrorResponse {
     fn from(error: GraphRenderError) -> Self {
         Self::render(error)
+    }
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+
+    /// FIG-3630: a document projected from source that is not the saved
+    /// workflow saves as that source. Its process is a lifted literal whose
+    /// origin the save re-derives from the document's own source, and its
+    /// parameter type survives as the annotation that lowers to it.
+    #[tokio::test]
+    async fn a_projected_workflow_with_a_lifted_process_saves_as_its_source() {
+        let state = AppState::new().expect("default workflow");
+        let Json(projected) = project_source(
+            State(state.clone()),
+            Json(ProjectWorkflowRequest {
+                source: "const typed = async (name: string) => {\n  return name;\n};\n".to_string(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("the source projects"));
+        let source = projected.document.source.clone();
+        let Json(saved) = save_workflow(State(state), Json(projected.document))
+            .await
+            .unwrap_or_else(|error| panic!("the projected workflow saves: {:?}", error.body));
+        assert_eq!(saved.document.source, source);
+        assert!(saved.document.source.contains("async (name: string)"));
     }
 }

@@ -196,3 +196,83 @@ fn compound_member_assignment_is_an_attribute_update() {
     let rendered = workflow_graph_to_source(&graph).expect("the graph renders");
     assert!(rendered.contains("box.value += 2;"), "{rendered}");
 }
+
+/// A host edits an admitted view: it re-reads every node's text through the
+/// lens's fragment door and inserts statements around a lifted literal. The
+/// literal's lifted declaration is still found — by the reference the view
+/// holds, as a reference or as the name it prints to, and for a draft by the
+/// literal still digesting to its name at its declared site — so the edit
+/// inside the process body renders wherever the literal now sits (FIG-3630).
+/// A moved or renamed origin is still refused by
+/// `graph_submission_cannot_edit_a_process_origin`.
+#[test]
+fn a_lifted_process_body_renders_after_host_text_round_trips_and_moves() {
+    let source = "const blank = async () => {\n  return 0;\n};\n";
+    let environment = lashlang::testing::harness::test_environment();
+    let admitted = workflow_graph_from_source_with_facets(source, Some(&environment))
+        .expect("the source admits");
+    let draft = workflow_graph_from_source(source).expect("the source projects");
+    for (what, graph) in [("admitted view", admitted), ("draft", draft)] {
+        let mut edited = graph.clone();
+        let processes = edited
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                WorkflowDeclaration::Process(process) => Some(process.name.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        // A host spells every main expression as text and reads it back.
+        for node in &mut edited.main.nodes {
+            if let WorkflowNodeKind::Data { expression, .. } = &mut node.kind {
+                let text = typescript_expression_source(expression).expect("print");
+                *expression = parse_typescript_expression(&text, &BTreeSet::new(), &processes)
+                    .expect("the lens reads back what it printed");
+            }
+        }
+        // An edit inside the process body, and a statement inserted before
+        // the literal.
+        let process = edited
+            .declarations
+            .iter_mut()
+            .find_map(|declaration| match declaration {
+                WorkflowDeclaration::Process(process) if process.origin.is_lifted() => {
+                    Some(process)
+                }
+                _ => None,
+            })
+            .expect("the literal lifts");
+        let terminal = process
+            .body
+            .nodes
+            .iter_mut()
+            .find(|node| matches!(node.kind, WorkflowNodeKind::Terminal { .. }))
+            .expect("the body returns");
+        if let WorkflowNodeKind::Terminal {
+            expression: lashlang::Expr::Return(value),
+            ..
+        } = &mut terminal.kind
+        {
+            **value = lashlang::Expr::Number(7.0);
+        }
+        let mut inserted = edited.main.nodes[0].clone();
+        inserted.id = WorkflowNodeId::new("node:0123456789abcdef01234567".to_string());
+        inserted.kind = WorkflowNodeKind::Data {
+            binding: Some(lashlang::AssignTarget::variable("greeting".into())),
+            expression: lashlang::Expr::String("hello".into()),
+        };
+        edited.main.nodes.insert(0, inserted);
+
+        let rendered = workflow_graph_to_source(&edited)
+            .unwrap_or_else(|error| panic!("{what}: a moved literal still renders: {error}"));
+        assert!(
+            rendered.contains("greeting = \"hello\";"),
+            "{what}: {rendered}"
+        );
+        assert!(rendered.contains("return 7;"), "{what}: {rendered}");
+        assert_eq!(
+            rendered, "let greeting = \"hello\";\nconst blank = async () => {\n  return 7;\n};\n",
+            "{what}"
+        );
+    }
+}
