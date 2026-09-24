@@ -34,6 +34,34 @@ rejection_test!(
     "label: while (true) { break; }",
     Code::LabelUnsupported
 );
+/// A function declaration as the bare body of an `if`/`else` or a loop is an
+/// ECMA-262 early SyntaxError — Annex B's `if`-branch exception is
+/// sloppy-only and the dialect is strict — not a statement the lowerer
+/// should ever see (FIG-3661).
+#[test]
+fn statement_position_function_declarations_are_early_syntax_errors() {
+    for source in [
+        "if (true) async function f() {}",
+        "if (false) ; else async function f() {}",
+        "if (true) async function f() {} else async function g() {}",
+        "while (false) async function f() {}",
+        "do async function f() {} while (false)",
+        "for (;;) async function f() {}",
+        "for (var x in {}) async function f() {}",
+        "for (var x of []) async function f() {}",
+        "if (true) function f() {}",
+    ] {
+        let error = lash_typescript::validate(source).expect_err(source);
+        assert_eq!(error.code, Code::SyntaxError, "{error}");
+    }
+    for source in [
+        "if (true) { async function f() {} }",
+        "while (false) { function f() {} }",
+        "{ async function f() {} }",
+    ] {
+        lash_typescript::validate(source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+}
 rejection_test!(
     rejects_regexp_indices_flag,
     "const r = /x/d;",

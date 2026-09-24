@@ -16973,7 +16973,7 @@ test/language/statements/do-while/S12.6.1_A8.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/do-while/S12.6.1_A9.js	refused	TS_UNKNOWN_BINDING
 test/language/statements/do-while/cptn-abrupt-empty.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/do-while/cptn-normal.js	refused	TS_EVAL_UNSUPPORTED
-test/language/statements/do-while/decl-async-fun.js	fail	FIG-3661
+test/language/statements/do-while/decl-async-fun.js	pass	-
 test/language/statements/do-while/decl-cls.js	pass	-
 test/language/statements/do-while/decl-const.js	pass	-
 test/language/statements/do-while/decl-fun.js	pass	-
@@ -17008,7 +17008,7 @@ test/language/statements/for-in/cptn-expr-abrupt-empty.js	refused	TS_EVAL_UNSUPP
 test/language/statements/for-in/cptn-expr-itr.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/for-in/cptn-expr-skip-itr.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/for-in/cptn-expr-zero-itr.js	refused	TS_EVAL_UNSUPPORTED
-test/language/statements/for-in/decl-async-fun.js	fail	FIG-3661
+test/language/statements/for-in/decl-async-fun.js	pass	-
 test/language/statements/for-in/decl-cls.js	pass	-
 test/language/statements/for-in/decl-const.js	pass	-
 test/language/statements/for-in/decl-fun.js	pass	-
@@ -17105,7 +17105,7 @@ test/language/statements/for-of/cptn-decl-no-itr.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/for-of/cptn-expr-abrupt-empty.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/for-of/cptn-expr-itr.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/for-of/cptn-expr-no-itr.js	refused	TS_EVAL_UNSUPPORTED
-test/language/statements/for-of/decl-async-fun.js	fail	FIG-3661
+test/language/statements/for-of/decl-async-fun.js	pass	-
 test/language/statements/for-of/decl-cls.js	pass	-
 test/language/statements/for-of/decl-const.js	pass	-
 test/language/statements/for-of/decl-fun.js	pass	-
@@ -17618,7 +17618,7 @@ test/language/statements/for/cptn-decl-expr-iter.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/for/cptn-decl-expr-no-iter.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/for/cptn-expr-expr-iter.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/for/cptn-expr-expr-no-iter.js	refused	TS_EVAL_UNSUPPORTED
-test/language/statements/for/decl-async-fun.js	refused	TS_FOR_UNSUPPORTED
+test/language/statements/for/decl-async-fun.js	pass	-
 test/language/statements/for/decl-cls.js	pass	-
 test/language/statements/for/decl-const.js	pass	-
 test/language/statements/for/decl-fun.js	pass	-
@@ -18194,9 +18194,9 @@ test/language/statements/if/cptn-no-else-false.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/if/cptn-no-else-true-abrupt-empty.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/if/cptn-no-else-true-nrml.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/if/empty-statement.js	pass	-
-test/language/statements/if/if-async-fun-else-async-fun.js	fail	FIG-3661
-test/language/statements/if/if-async-fun-else-stmt.js	fail	FIG-3661
-test/language/statements/if/if-async-fun-no-else.js	fail	FIG-3661
+test/language/statements/if/if-async-fun-else-async-fun.js	pass	-
+test/language/statements/if/if-async-fun-else-stmt.js	pass	-
+test/language/statements/if/if-async-fun-no-else.js	pass	-
 test/language/statements/if/if-cls-else-cls.js	pass	-
 test/language/statements/if/if-cls-else-stmt.js	pass	-
 test/language/statements/if/if-cls-no-else.js	pass	-
@@ -18212,7 +18212,7 @@ test/language/statements/if/if-fun-no-else-strict.js	pass	-
 test/language/statements/if/if-let-else-let.js	pass	-
 test/language/statements/if/if-let-else-stmt.js	pass	-
 test/language/statements/if/if-let-no-else.js	pass	-
-test/language/statements/if/if-stmt-else-async-fun.js	fail	FIG-3661
+test/language/statements/if/if-stmt-else-async-fun.js	pass	-
 test/language/statements/if/if-stmt-else-cls.js	pass	-
 test/language/statements/if/if-stmt-else-const.js	pass	-
 test/language/statements/if/if-stmt-else-decl-strict.js	pass	-
@@ -18791,7 +18791,7 @@ test/language/statements/while/S12.6.2_A9.js	refused	TS_UNKNOWN_BINDING
 test/language/statements/while/cptn-abrupt-empty.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/while/cptn-iter.js	refused	TS_EVAL_UNSUPPORTED
 test/language/statements/while/cptn-no-iter.js	refused	TS_EVAL_UNSUPPORTED
-test/language/statements/while/decl-async-fun.js	fail	FIG-3661
+test/language/statements/while/decl-async-fun.js	pass	-
 test/language/statements/while/decl-cls.js	pass	-
 test/language/statements/while/decl-const.js	pass	-
 test/language/statements/while/decl-fun.js	pass	-
