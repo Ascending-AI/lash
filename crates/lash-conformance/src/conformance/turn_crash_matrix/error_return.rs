@@ -23,6 +23,10 @@ use pretty_assertions::assert_eq;
 pub(super) enum ErrorReturnPlacement {
     /// `execute_effect(ToolAttempt)` returns the store-typed controller error.
     ToolAttempt,
+    /// `execute_effect(ToolAttempt)` returns the session-retirement refusal a
+    /// controller answers once the session is deleted under the turn
+    /// (FIG-3630): `SessionDeleted`, carrying its cause.
+    ToolAttemptSessionRetirement,
     /// The journal's `claim` for the tool attempt's replay key returns the
     /// backend's `Store` vocabulary error.
     EffectJournalClaim,
@@ -41,7 +45,7 @@ impl ErrorReturnPlacement {
     ) -> Option<lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint> {
         use lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint;
         match self {
-            Self::ToolAttempt => None,
+            Self::ToolAttempt | Self::ToolAttemptSessionRetirement => None,
             Self::EffectJournalClaim => Some(EffectJournalFaultPoint::Claim),
             Self::EffectJournalFinalize => Some(EffectJournalFaultPoint::Finalize),
             Self::EffectJournalRenew => Some(EffectJournalFaultPoint::Renew),
@@ -52,6 +56,7 @@ impl ErrorReturnPlacement {
     fn key(self) -> &'static str {
         match self {
             Self::ToolAttempt => "tool-attempt",
+            Self::ToolAttemptSessionRetirement => "tool-attempt-session-retirement",
             Self::EffectJournalClaim => "effect-journal-claim",
             Self::EffectJournalFinalize => "effect-journal-finalize",
             Self::EffectJournalRenew => "effect-journal-renew",
@@ -295,8 +300,12 @@ async fn run_error_return_case<F>(
         });
     // The scripted turn is a queued drain, and a queued run keeps a live fault
     // for a redrive (FIG-3575): a retryable fault reaches the caller as
-    // itself, any other as the retained run's typed `QueuedRunPending`.
-    let expected_code = if injected_code.is_retryable() {
+    // itself, any other as the retained run's typed `QueuedRunPending`. A
+    // session retirement is no live fault: the turn aborts on it without
+    // recording, and the run settles on the refusal itself (FIG-3630).
+    let expected_code = if ruling.placement == ErrorReturnPlacement::ToolAttemptSessionRetirement {
+        crate::RuntimeErrorCode::SessionDeleted
+    } else if injected_code.is_retryable() {
         injected_code
     } else {
         crate::RuntimeErrorCode::QueuedRunPending

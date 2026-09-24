@@ -82,10 +82,13 @@ impl RuntimeTurnDriver<'_> {
             Ok(None) => {}
             // A protocol refusal before the model call is an outcome over the
             // turn's journaled inputs, recorded as a failed turn on every host
-            // (FIG-3575). Only a live fault the hook ran into aborts.
+            // (FIG-3575). Only a live fault the hook ran into, or a session
+            // retirement it met (FIG-3630), aborts.
             Err(err) => {
                 let failure = err.into_turn_failure(RuntimeErrorCode::ProtocolBeforeLlmCall);
-                if failure.turn_failure_cause().aborts_invocation() {
+                if failure.turn_failure_cause().aborts_invocation()
+                    || failure.is_session_retirement()
+                {
                     return Err(failure);
                 }
                 machine.fail_turn(make_error_event(
@@ -583,11 +586,11 @@ impl RuntimeTurnDriver<'_> {
                             )
                         })?;
                 }
-                // A live fault aborts whether or not a cancel is pending; the
-                // effect loop settles a pending cancel as `Stopped { Cancelled }`
-                // after the abort. Any other failure under a cancel is the
-                // cancel's own consequence (FIG-3575).
-                if err.turn_failure_cause().aborts_invocation() {
+                // A live fault or a session retirement aborts whether or not a
+                // cancel is pending; the effect loop settles a pending cancel as
+                // `Stopped { Cancelled }` after the abort. Any other failure
+                // under a cancel is the cancel's own consequence (FIG-3575).
+                if Self::aborts_turn(&err) {
                     return Err(err.into_runtime_error());
                 }
                 if let Some(evidence) = cancellation_evidence {

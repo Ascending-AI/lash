@@ -1426,6 +1426,18 @@ impl RuntimeError {
         self.cause.is_none() && self.code.is_retryable()
     }
 
+    /// Whether this is a session-retirement refusal: the session was deleted,
+    /// or is being deleted, under the turn it failed (FIG-3630).
+    ///
+    /// Its class is unchanged (terminal, never retried), but a turn failing
+    /// with it aborts rather than recording a failed turn: the retirement owns
+    /// the turn and leaves no head to record on. Recording would authorize a
+    /// cancellation-closure pin the revoked session can never settle, and
+    /// that pin refuses the deletion itself.
+    pub fn is_session_retirement(&self) -> bool {
+        matches!(self.cause, Some(RuntimeErrorCause::SessionDeleted { .. }))
+    }
+
     /// Whether retrying cannot succeed without a host-side change.
     pub fn is_terminal(&self) -> bool {
         self.cause.is_some()
@@ -1578,6 +1590,18 @@ impl RuntimeEffectControllerError {
     pub fn into_journaled(mut self) -> Self {
         self.journaled = true;
         self
+    }
+
+    /// Whether this is a session-retirement refusal: the session was deleted,
+    /// or is being deleted, under the turn it failed (FIG-3630).
+    ///
+    /// Its class is unchanged (terminal, never retried), but a turn failing
+    /// with it aborts rather than recording a failed turn: the retirement owns
+    /// the turn and leaves no head to record on. Recording would authorize a
+    /// cancellation-closure pin the revoked session can never settle, and
+    /// that pin refuses the deletion itself.
+    pub fn is_session_retirement(&self) -> bool {
+        matches!(self.cause, Some(RuntimeErrorCause::SessionDeleted { .. }))
     }
 
     /// Whether retrying cannot succeed without a host-side change: a terminal
