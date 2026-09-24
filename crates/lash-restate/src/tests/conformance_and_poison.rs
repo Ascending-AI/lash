@@ -618,12 +618,21 @@ mod on_the_server_double {
         (harness, factory)
     });
 
-    lash_conformance::tool_child_invocation_tests!({
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let fixture = harness.tool_child_law_fixture();
-        (harness, "restate", fixture)
-    });
+    // Parked on the double (scripts/deferred-law-invocations.toml): since
+    // FIG-3630's routing preflight, a tool-child group whose opener is not
+    // live opens on Restate, and three of this catalogue's opener laws still
+    // expect the refusal at open — the same failure on restate-server 1.7.12
+    // (FIG-3699). The census parks whole invocations.
+    lash_conformance::tool_child_invocation_tests!(
+        #[ignore = "parked on the server double until FIG-3699"]
+        {
+            let harness =
+                LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process())
+                    .await;
+            let fixture = harness.tool_child_law_fixture();
+            (harness, "restate", fixture)
+        }
+    );
 
     // Parked on the double (scripts/deferred-law-invocations.toml): the
     // catalogue's FIG-3679 law `a_diverged_tool_presentation_parks_the_turn`

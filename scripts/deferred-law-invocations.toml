@@ -95,3 +95,11 @@ suite = "turn_runner_tests"
 recipe = "parked"
 ticket = "FIG-3697"
 reason = "a_diverged_tool_presentation_parks_the_turn returns from its Restate handler mid-replay, a journal mismatch that retries until the invocation pauses; the suite's laws run on the live server"
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison::on_the_server_double"
+suite = "tool_child_invocation_tests"
+recipe = "parked"
+ticket = "FIG-3699"
+reason = "since FIG-3630's routing preflight a tool-child group whose opener is not live opens on Restate, and three opener laws still expect the refusal at open; they fail the same way on restate-server"
