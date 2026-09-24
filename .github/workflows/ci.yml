@@ -17,7 +17,8 @@ name: CI
 #
 # Pull requests get fast signal; the merge group gets breadth. A pull request
 # runs the core Bazel suite (`//:workspace_tests` minus its tail, plus the
-# API seal `//crates/lash:ui_fixtures`), the workspace clippy, the feature
+# API seal `//crates/lash:ui_fixtures` and the dev-deferred labels of every
+# package the diff touches), the workspace clippy, the feature
 # lanes (every feature variant of scripts/feature-coverage.toml compiled, plus
 # the executable lanes), the `lash-postgres-store` suites on one PostgreSQL
 # major (16) when the diff reaches that crate's closure, and the path-gated
@@ -150,6 +151,7 @@ jobs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       fail_open: ${{ steps.classify.outputs.fail_open }}
       reason: ${{ steps.classify.outputs.reason }}
+      pr_tail_labels: ${{ steps.classify.outputs.pr_tail_labels }}
       postgres_primary: ${{ steps.postgres-matrix.outputs.postgres_primary }}
       postgres_compatibility: ${{ steps.postgres-matrix.outputs.postgres_compatibility }}
       bazel_trusted: >-
@@ -691,7 +693,8 @@ jobs:
         run: rm -rf -- "$RUNNER_TEMP/build-cache"
 
   # The core of the deterministic/default-feature partition, on every trusted
-  # event: `//:workspace_tests` minus its long tail. The merge group adds the
+  # event: `//:workspace_tests` minus its long tail, plus the dev-deferred
+  # labels of the packages the diff touches. The merge group adds the
   # tail on a parallel runner (`bazel-tests-tail`). The job
   # executes locally on a GitHub-hosted runner and only shares
   # action results with that exact runner image identity, never Kiln's executor
@@ -739,6 +742,14 @@ jobs:
           # a core-touching diff otherwise ends this leg in a ~5.5-minute
           # agent-workbench compile long after every crate test has finished.
           #
+          # `${{ needs.plan.outputs.pr_tail_labels }}` then re-adds the
+          # `dev-deferred` labels of every package this diff touches: Bazel
+          # applies target patterns in order, so a positive label after the
+          # negative pattern re-adds it. Admin-merged PRs skip the merge group
+          # and so skip the tail job entirely -- #2109 changed
+          # `corpus_laws__test`'s expectations file and main went red without
+          # the deferred test ever running.
+          #
           # `//crates/lash:ui_fixtures` is the API seal. It checks every
           # compile-fail pin under tests/ui/ and, through its validation
           # output, builds the `ui__test` harness whose compile-pass modules
@@ -755,7 +766,7 @@ jobs:
             --cache_test_results=yes --test_output=errors \
             --profile="${RUNNER_TEMP}/bazel-profile.json.gz" \
             --execution_log_compact_file="${RUNNER_TEMP}/bazel-exec-log.binpb.zst" \
-            -- //:workspace_tests -//:workspace_tail_tests //crates/lash:ui_fixtures
+            -- //:workspace_tests -//:workspace_tail_tests //crates/lash:ui_fixtures ${{ needs.plan.outputs.pr_tail_labels }}
 
       # FIG-3429 item 8: conformance laws leave an execution receipt in each
       # target's undeclared outputs; this census fails on any registered law

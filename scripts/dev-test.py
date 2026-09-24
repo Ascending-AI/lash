@@ -144,7 +144,14 @@ def plan(base: str, dependents: bool) -> dict:
             broad = True
         else:
             members = set(result.stdout.split()) & allowed
-    labels = ["//:dev_tests"] if broad else batch_labels(members, batches)
+    # A change under a package's directory also runs that package's
+    # `dev-deferred` labels: the tail leg is merge-group-only in CI, so a
+    # change to a deferred test's inputs (#2109's corpus expectations file)
+    # otherwise lands untested. This holds on a broad plan too -- a package
+    # manifest widens the selection but is still a deferred test's input.
+    tail = ci_plan.pr_tail_labels(paths, ROOT)
+    members |= set(tail)
+    labels = ["//:dev_tests", *tail] if broad else batch_labels(members, batches)
     if facade:
         labels.append("//crates/lash:ui_fixtures")
     uncovered = [p for p in packages if not any(label.split(":")[0] == p for label in members)]

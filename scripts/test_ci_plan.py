@@ -954,6 +954,134 @@ class DevTestScopeTests(unittest.TestCase):
         self.assertFalse(scope.broad or scope.repository)
 
 
+class PrTailLabelTests(unittest.TestCase):
+    """The PR leg re-adds the dev-deferred labels of each package a diff touches.
+
+    `bazel-tests-tail` runs only on merge groups and dispatches, and lash PRs
+    are often admin-merged past the queue: #2109 appended to
+    `corpus_laws__test`'s expectations file and main went red because nothing
+    ran the deferred test on the PR.
+    """
+
+    # Every `dev-deferred` label the checked-in inventory currently assigns to
+    # `crates/lash-typescript`. Pinned as a literal: a retag that changes this
+    # set is a deliberate edit, not a silent one.
+    TYPESCRIPT_TAIL = [
+        "//crates/lash-typescript:carrier_laws__test",
+        "//crates/lash-typescript:corpus_laws__test",
+        "//crates/lash-typescript:integration__test",
+        "//crates/lash-typescript:race_any_runtime__test",
+    ]
+
+    def test_the_2109_diff_yields_the_typescript_deferred_labels(self) -> None:
+        labels = ci_plan.pr_tail_labels(
+            ["crates/lash-typescript/tests/differential/expectations.tsv"]
+        )
+        self.assertEqual(self.TYPESCRIPT_TAIL, labels)
+        plan = ci_plan.classify(
+            [("M", "crates/lash-typescript/tests/differential/expectations.tsv")]
+        )
+        self.assertEqual(" ".join(self.TYPESCRIPT_TAIL), plan["pr_tail_labels"])
+
+    def test_an_untouched_packages_labels_are_not_selected(self) -> None:
+        self.assertEqual([], ci_plan.pr_tail_labels(["crates/lashlang/src/lib.rs"]))
+        plan = ci_plan.classify([("M", "crates/lashlang/src/lib.rs")])
+        self.assertNotIn("lash-typescript", plan["pr_tail_labels"])
+
+    def test_a_docs_diff_selects_none(self) -> None:
+        # docs/adr/0062 is a Rust runtime input, so it classifies above docs,
+        # but it still owns no package's labels; a true docs path is the same.
+        for path in (
+            "docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md",
+            "docs/guide.md",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual([], ci_plan.pr_tail_labels([path]))
+                self.assertEqual(
+                    "", ci_plan.classify([("M", path)])["pr_tail_labels"]
+                )
+
+    def test_a_fail_open_or_shared_diff_reruns_every_deferred_label(self) -> None:
+        expected = " ".join(ci_plan._all_dev_deferred_labels())
+        self.assertTrue(expected)
+        self.assertEqual(
+            expected, ci_plan.classify([("M", "Cargo.lock")])["pr_tail_labels"]
+        )
+        self.assertEqual(expected, ci_plan.fail_open("test")["pr_tail_labels"])
+
+    def test_examples_manual_and_pr_deferred_labels_are_never_returned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inventory = root / "tools/bazel/target-inventory.json"
+            inventory.parent.mkdir(parents=True)
+            inventory.write_text(json.dumps({
+                "packages": [
+                    {"manifest": "crates/touched/Cargo.toml", "targets": [
+                        {"kind": "test", "label": "//crates/touched:slow__test",
+                         "tags": ["dev-deferred"]},
+                        {"kind": "test", "label": "//crates/touched:gated__test",
+                         "tags": ["dev-deferred", "manual"]},
+                        {"kind": "test", "label": "//crates/touched:trunk__test",
+                         "tags": ["dev-deferred", "pr-deferred"]},
+                        {"kind": "lib", "label": "//crates/touched:touched",
+                         "tags": ["dev-deferred"]},
+                    ]},
+                    {"manifest": "examples/leaf/Cargo.toml", "targets": [
+                        {"kind": "test", "label": "//examples/leaf:leaf__test",
+                         "tags": ["dev-deferred"]},
+                    ]},
+                ]
+            }))
+            for directory in ("crates/touched", "examples/leaf"):
+                (root / directory).mkdir(parents=True)
+                (root / directory / "BUILD.bazel").write_text("")
+            self.assertEqual(
+                ["//crates/touched:slow__test"],
+                ci_plan.pr_tail_labels(
+                    ["crates/touched/src/lib.rs", "examples/leaf/src/lib.rs"], root
+                ),
+            )
+
+    def test_the_real_inventory_sweep_returns_only_dev_deferred_labels(self) -> None:
+        inventory = json.loads((ROOT / ci_plan.TARGET_INVENTORY).read_text())
+        directories = [
+            PurePosixPath(package["manifest"]).parent.as_posix()
+            for package in inventory["packages"]
+        ]
+        labels = ci_plan.pr_tail_labels(
+            [f"{directory}/src/lib.rs" for directory in directories]
+        )
+        # The sweep must name the known deferred set, not silently zero out.
+        self.assertIn("//crates/lash-typescript:corpus_laws__test", labels)
+        self.assertIn("//crates/lash-sim:lash-sim__unit_test", labels)
+        tags = {
+            target["label"]: target.get("tags", [])
+            for package in inventory["packages"]
+            for target in package["targets"]
+        }
+        for label in labels:
+            self.assertFalse(label.startswith("//examples/"), label)
+            self.assertIn("dev-deferred", tags[label])
+            self.assertNotIn("manual", tags[label])
+            self.assertNotIn("pr-deferred", tags[label])
+
+    def test_the_bazel_leg_readds_them_after_the_tail_subtraction(self) -> None:
+        jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        run = next(
+            step["run"]
+            for step in jobs["bazel-tests"]["steps"]
+            if step.get("name") == "Test the workspace core suite with shared cache"
+        )
+        self.assertLess(
+            run.index("-//:workspace_tail_tests"),
+            run.index("${{ needs.plan.outputs.pr_tail_labels }}"),
+        )
+        self.assertEqual(
+            "${{ steps.classify.outputs.pr_tail_labels }}",
+            jobs["plan"]["outputs"]["pr_tail_labels"],
+        )
+
+
 def successful_needs() -> dict[str, dict[str, object]]:
     plan_outputs = {family: "true" for family in ci_plan.FAMILIES}
     plan_outputs.update({"docs_only": "false", "fail_open": "false"})

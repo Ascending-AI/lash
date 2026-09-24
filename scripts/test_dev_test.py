@@ -40,6 +40,26 @@ class DevTestTests(unittest.TestCase):
             'WORKSPACE_DEV_TEST_TARGETS = ["//crates/example:first", "//crates/example:second"]\n'
             'WORKSPACE_TEST_BATCHES = {"//crates/example:test_batch": ["//crates/example:first", "//crates/example:second"]}\n'
         )
+        # The checked-in label inventory `ci_plan.pr_tail_labels` reads.
+        (self.root / "tools/bazel/target-inventory.json").write_text(json.dumps({"packages": [
+            {"manifest": "crates/example/Cargo.toml", "targets": [
+                {"kind": "test", "label": "//crates/example:first", "tags": []},
+                {"kind": "test", "label": "//crates/example:second", "tags": []},
+            ]},
+            {"manifest": "crates/slow/Cargo.toml", "targets": [
+                {"kind": "test", "label": "//crates/slow:slow__test", "tags": ["dev-deferred"]},
+                {"kind": "test", "label": "//crates/slow:service__test", "tags": ["manual"]},
+                {"kind": "test", "label": "//crates/slow:trunk__test", "tags": ["pr-deferred"]},
+            ]},
+            {"manifest": "examples/sample/Cargo.toml", "targets": [
+                {"kind": "test", "label": "//examples/sample:leaf__test", "tags": ["dev-deferred"]},
+            ]},
+        ]}))
+        # A package whose only Bazel test label is dev-deferred.
+        slow = self.root / "crates/slow/src"
+        slow.mkdir(parents=True)
+        (slow / "lib.rs").write_text("pub fn slow() {}\n")
+        (self.root / "crates/slow/BUILD.bazel").write_text("# fixture\n")
         workflow = self.root / ".github/workflows/ci.yml"
         workflow.parent.mkdir(parents=True)
         workflow.write_text("bash scripts/ci/run-gate-commands.sh --jobs 4 <<'GATES'\n"
@@ -96,6 +116,27 @@ class DevTestTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["commands"], [["kiln", "test", "//crates/example:test_batch", "//:schema_checks"]])
         (self.source.parents[1] / "Cargo.toml").write_text("[package]\n")
         self.assertEqual(json.loads(self.invoke("--dry-run").stdout)["commands"], [["kiln", "test", "//:dev_tests", "//:schema_checks"]])
+
+    def test_a_package_diff_also_selects_its_dev_deferred_labels(self):
+        (self.root / "crates/slow/src/lib.rs").write_text("pub fn slow() { let _ = 1; }\n")
+        commands = json.loads(self.invoke("--dry-run").stdout)["commands"]
+        self.assertEqual(commands, [[
+            "kiln", "test",
+            "//crates/example:test_batch",
+            "//crates/slow:slow__test",
+            "//:schema_checks",
+        ]])
+        # The manual and pr-deferred labels of the same package stay out; so
+        # does the dev-deferred examples leaf. A package manifest widens to
+        # the suite but is still a deferred test's input.
+        (self.root / "crates/slow/Cargo.toml").write_text("[package]\n")
+        commands = json.loads(self.invoke("--dry-run").stdout)["commands"]
+        self.assertEqual(commands, [[
+            "kiln", "test",
+            "//:dev_tests",
+            "//crates/slow:slow__test",
+            "//:schema_checks",
+        ]])
 
     def test_query_cannot_select_deferred_manual_or_duplicate_batch_members(self):
         query = self.bin / "bazel"
