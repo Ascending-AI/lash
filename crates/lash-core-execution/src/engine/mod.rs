@@ -27,6 +27,10 @@ mod commit;
 mod context;
 mod contracts;
 mod groups;
+/// The determinism harness every slice that makes the drive deterministic
+/// proves its change with (FIG-3672).
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use admission::{
     AdmissionId, AdmitRequest, AdmitVerdict, Admitted, CancelGate, ChildOutcome, ChildStart,

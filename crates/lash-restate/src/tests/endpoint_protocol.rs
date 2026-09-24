@@ -909,6 +909,18 @@ fn proposed_run_completion(payload: &[u8]) -> Option<(u32, &[u8])> {
     Some((completion_id?, value?))
 }
 
+/// Every run completion the handler proposed in `output` (FIG-3672): the
+/// completion id and the value it proposed, in output order.
+pub(super) fn restate_run_proposals(output: &[u8]) -> Option<Vec<(u32, Vec<u8>)>> {
+    restate_message_frames(output, 0x0005)?
+        .into_iter()
+        .map(|frame| {
+            let (completion_id, value) = proposed_run_completion(frame.get(8..)?)?;
+            Some((completion_id, value.to_vec()))
+        })
+        .collect()
+}
+
 fn encode_run_completion(completion_id: u32, value: &[u8]) -> Bytes {
     let mut nested_value = BytesMut::new();
     put_len_field(&mut nested_value, 1, value);
@@ -1118,7 +1130,7 @@ pub(super) fn with_admission(body: &[u8], admission: &[u8]) -> Result<Bytes, Ter
     Ok(spliced.freeze())
 }
 
-fn split_frames(input: &[u8]) -> Option<Vec<&[u8]>> {
+pub(super) fn split_frames(input: &[u8]) -> Option<Vec<&[u8]>> {
     let mut cursor = 0;
     let mut frames = Vec::new();
     while cursor < input.len() {
