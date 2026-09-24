@@ -15,9 +15,9 @@ use lash_core::AwaitEventResolver as _;
 use lash_core::{ProcessEventAppendRequest, facade_support::TurnOutcome, facade_support::TurnStop};
 use lash_postgres_store::PostgresStorage;
 use lash_restate::{
-    LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
-    LashDurableWaitWorkflowImpl, LashProcessAttach, LashProcessAttachImpl, LashProcessWorkflow,
-    RestateEffectHost, RestateRuntimeEffectController,
+    LashDurableWaitIndex, LashDurableWaitWorkflow, LashProcessAttach, LashProcessAttachImpl,
+    LashProcessWorkflow, RestateBackend, RestateEffectGroupRetryPolicy, RestateEffectGroupServices,
+    RestateEffectHost, RestateIngressClient, RestateRuntimeEffectController,
 };
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::prelude::{Endpoint, WorkflowContext};
@@ -1061,17 +1061,30 @@ async fn async_main() -> Result<()> {
         .await?;
     }
 
+    // A turn's or process's tool batch opens a durable effect group, so the
+    // endpoint serves the group services over the backend's effect host: the
+    // one every core of this worker installs its tool-child resolver on.
+    let effect_groups = RestateEffectGroupServices::new(
+        &backend.effect_host(),
+        RestateIngressClient::new(state.restate_ingress_url.clone()),
+        RestateEffectGroupRetryPolicy::infinite(),
+        lash::Backend::session_store_factory(backend.as_ref()),
+    );
     let endpoint = Endpoint::builder()
         .bind(E2eTurnWorkflowImpl::new(state).serve())
         .bind(process_workflow.serve())
-        .bind(LashDurableWaitWorkflowImpl.serve())
-        .bind(LashDurableWaitIndexImpl.serve())
+        .bind(effect_groups.index)
+        .bind(effect_groups.payload)
+        .bind(effect_groups.dispatch)
+        .bind(effect_groups.wait.workflow.serve())
+        .bind(effect_groups.wait.index.serve())
         .bind(LashProcessAttachImpl.serve())
         .build();
-    backend
-        .assert_endpoint_bound(&endpoint)
+    let mut required_services = RestateBackend::required_service_names();
+    required_services.extend(RestateEffectGroupServices::required_service_names());
+    lash_restate::assert_services_bound(&endpoint, &required_services)
         .await
-        .context("worker Restate endpoint must bind the lash process service surface")?;
+        .context("worker Restate endpoint must bind the lash process and effect-group surface")?;
     restate_sdk::http_server::HttpServer::new(endpoint)
         .listen_and_serve(addr)
         .await;

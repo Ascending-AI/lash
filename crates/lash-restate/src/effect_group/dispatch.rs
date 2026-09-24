@@ -122,7 +122,7 @@ impl EffectGroupDispatch {
             .run(move || async move {
                 let mut missing = None;
                 for (position, child) in preflight_children.iter().enumerate() {
-                    if executors.executor_for(child).is_none() && missing.is_none() {
+                    if !executors.routes(child) && missing.is_none() {
                         missing = Some(position);
                     }
                 }
@@ -260,9 +260,14 @@ impl EffectGroupDispatch {
         _ctx: SharedWorkflowContext<'_>,
         Json(children): Json<Vec<RuntimeEffectEnvelope>>,
     ) -> HandlerResult<Json<Option<usize>>> {
-        Ok(Json(children.iter().position(|child| {
-            self.executors.executor_for(child).is_none()
-        })))
+        // Routability, not a local executor: this handler may run on any
+        // worker of the deployment, and a tool child whose opener is live on
+        // another worker is still routed — it runs there (FIG-3630).
+        Ok(Json(
+            children
+                .iter()
+                .position(|child| !self.executors.routes(child)),
+        ))
     }
 
     #[handler]

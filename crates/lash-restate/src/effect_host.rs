@@ -153,6 +153,13 @@ impl GroupExecutors for RestateHostGroupExecutors {
             .get()?
             .executor_for(envelope)
     }
+
+    fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
+        self.controller
+            .group_executors
+            .get()
+            .is_some_and(|executors| executors.routes(envelope))
+    }
 }
 
 #[async_trait::async_trait]
