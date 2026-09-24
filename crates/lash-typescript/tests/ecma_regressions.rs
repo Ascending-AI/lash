@@ -282,6 +282,10 @@ fn widened_non_callback_stdlib_matches_dense_ecma_surface() {
             "1,x,x",
         ),
         (
+            "const a=[0,0]; const b=[0,0]; finish(a.fill(1,0,undefined).join(',')+'|'+b.fill(1,0,null).join(','));",
+            "1,1|0,0",
+        ),
+        (
             "const a=[1,2,3,4,5]; const r=a.copyWithin(-2); finish(a.join(',')+'|'+(a===r));",
             "1,2,3,1,2|true",
         ),

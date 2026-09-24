@@ -89,7 +89,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             "fill" => {
                 let value = args.first().cloned().unwrap_or(Value::Undefined);
                 let start = relative_bound(args.get(1), values.len(), 0);
-                let end = relative_bound(args.get(2), values.len(), values.len()).max(start);
+                // `undefined` is the absent `end`: ToIntegerOrInfinity reads
+                // it as NaN, but the parameter's default is the length.
+                let end = match args.get(2) {
+                    None | Some(Value::Undefined) => values.len(),
+                    Some(_) => relative_bound(args.get(2), values.len(), values.len()),
+                }
+                .max(start);
                 values[start..end].fill(value);
                 self.heap.replace_javascript_list(receiver, values)?;
                 Value::Ref(receiver)
