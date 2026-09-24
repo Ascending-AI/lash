@@ -2,7 +2,7 @@ use super::super::{
     ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_number,
     javascript_to_string,
 };
-use super::javascript_array::javascript_array_method_for_value;
+use super::javascript_array::{copy_within, javascript_array_method_for_value};
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
 pub(super) use super::javascript_stdlib::*;
 use super::*;
@@ -1325,6 +1325,11 @@ pub(super) fn javascript_array_method(
         }
         ("at", [index]) => Ok(relative_index(javascript_to_number(index), items.len())
             .map_or(Value::Undefined, |index| items[index].clone())),
+        ("copyWithin", _) => {
+            let mut values = items.to_vec();
+            copy_within(&mut values, &args);
+            Ok(Value::List(values.into()))
+        }
         ("concat", values) => {
             let mut output = items.to_vec();
             for value in values {

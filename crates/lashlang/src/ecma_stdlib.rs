@@ -173,6 +173,7 @@ pub const INSTANCE_STDLIB_SIGNATURES: &[StdlibSignature] = instance_signatures![
     ("endsWith", "search[, endPosition]", On::STRING),
     ("filter", "callback[, thisArg]", On::ARRAY),
     ("fill", "[value[, start[, end]]]", On::ARRAY),
+    ("copyWithin", "[target[, start[, end]]]", On::ARRAY),
     ("find", "callback[, thisArg]", On::ARRAY),
     ("findIndex", "callback[, thisArg]", On::ARRAY),
     ("findLast", "callback[, thisArg]", On::ARRAY),
