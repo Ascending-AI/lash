@@ -1331,7 +1331,7 @@ pub enum RuntimeErrorCause {
 /// ([`RuntimeErrorCode::SessionStateVersionUnsupported`] or
 /// [`RuntimeErrorCode::SessionStateVersionNewerThanRuntime`]) and a message
 /// naming both generations.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionStateVersionRefusal {
     pub found: u32,
     pub current: u32,
