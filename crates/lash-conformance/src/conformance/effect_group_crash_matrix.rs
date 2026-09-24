@@ -58,6 +58,7 @@ use super::effect_group_drain::{
     scope, settles, spec, until, until_leases_lapse, unwired_spec,
 };
 use super::*;
+use crate::EffectGroupHandle;
 use lash_core::testing::conformance_support::ChildDrainOutcome;
 
 /// How long a redrive waits for a settlement that the ruling says cannot
@@ -512,9 +513,24 @@ async fn crash_at(
                     Box::pin(async move {
                         let scoped = world.host.scoped(crate::admit(scope)).expect("scope");
                         let entered = Arc::new(AtomicUsize::new(0));
-                        let _handle =
+                        let opener =
                             open(&scoped, &key, 2, RUN, vec![settles(0), blocking(&entered)]).await;
                         until(|| entered.load(Ordering::SeqCst) == 1).await;
+                        // Position 0 returning is not position 0 ranked: its
+                        // finalize commits the terminal and its discharge
+                        // seats the rank in a later transaction, and position
+                        // 1 entering orders neither. A probe pass run between
+                        // the two would discharge the child itself and report
+                        // it `Decided`. A second cursor over the same journal
+                        // waits for rank 1 without consuming the opener's
+                        // handle, so the window stays "settled, not consumed".
+                        let mut witness = EffectGroupHandle::restored(key.clone(), 2, 0)
+                            .expect("a fresh cursor over a two-child group");
+                        let ranked = next(&scoped, &mut witness)
+                            .await
+                            .expect("position 0's rank is journaled");
+                        assert_eq!(ranked.position, 0, "rank 1 is position 0's");
+                        assert_eq!(opener.consumed(), 0, "the opener consumed nothing");
                         // The residue must be a *journaled* rank beside a live
                         // claim, not a child that merely returned. The drain's
                         // work list is children holding no rank, so position 0
@@ -835,8 +851,9 @@ where
         Box::pin(async move {
             let world = make(spec(CRASH_LEASE_MS, &RecordingExecutors::settling())).await;
             // A refusing resolver asks the drain's question and answers
-            // `NoExecutor`: the probe reads the queue without writing anything
-            // into it.
+            // `NoExecutor`: the probe executes nothing. It still discharges a
+            // child that is committed but not yet ranked — that needs no
+            // executor — so a phase probes only once its ranks are seated.
             let probe = make(spec(CRASH_LEASE_MS, &RecordingExecutors::refusing())).await;
             phase(world, probe).await;
         })
