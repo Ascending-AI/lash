@@ -1,6 +1,6 @@
 //! The server double's own semantics, on small handlers: the Restate
 //! behaviours lash builds on, each checked in streaming and in always-replay
-//! mode.
+//! mode, under concurrent and serial scheduling.
 
 #![expect(
     clippy::unwrap_used,
@@ -13,7 +13,9 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use lash_http_transport::{HttpMethod, HttpRequest, read_http_body_bytes};
-use lash_restate_test::{CrashPoint, CrashRule, RestateTestServer, ServerConfig, TimeMode};
+use lash_restate_test::{
+    CrashPoint, CrashRule, RestateTestServer, Scheduling, ServerConfig, TimeMode,
+};
 use restate_sdk::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -144,6 +146,67 @@ impl Flaky {
     }
 }
 
+/// How many `Gauge/work` handlers are between their two journaled steps
+/// right now, and the most there have ever been at once.
+static GAUGE: Mutex<(usize, usize)> = Mutex::new((0, 0));
+
+struct Gauge;
+
+#[restate_sdk::service]
+impl Gauge {
+    /// Journals a step, does a little wall-clock work outside the journal
+    /// while counted in [`GAUGE`], and journals a second step.
+    #[handler]
+    async fn work(&self, ctx: Context<'_>, Json(tag): Json<String>) -> HandlerResult<Json<String>> {
+        let first = ctx
+            .run(|| async move { Ok(format!("{tag}:in")) })
+            .name("in")
+            .await?;
+        {
+            let mut gauge = GAUGE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            gauge.0 += 1;
+            gauge.1 = gauge.1.max(gauge.0);
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        GAUGE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0 -= 1;
+        let second = ctx
+            .run(|| async move { Ok(format!("{first}:out")) })
+            .name("out")
+            .await?;
+        Ok(Json(second))
+    }
+}
+
+/// The server's ingress transport, for a handler that calls the ingress
+/// itself — as lash's handlers do when they resolve a durable wait.
+static INGRESS: Mutex<Option<RestateTestServer>> = Mutex::new(None);
+
+struct Relay;
+
+#[restate_sdk::service]
+impl Relay {
+    /// From inside a `ctx.run`, calls `Counter/{key}/add` through the
+    /// server's ingress and returns its answer.
+    #[handler]
+    async fn ask(&self, ctx: Context<'_>, Json(key): Json<String>) -> HandlerResult<Json<String>> {
+        let server = INGRESS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap();
+        let answer = ctx
+            .run(|| async move { Ok(post(&server, &format!("Counter/{key}/add"), "1").await.1) })
+            .name("ask")
+            .await?;
+        Ok(Json(answer))
+    }
+}
+
 fn endpoint() -> Endpoint {
     Endpoint::builder()
         .bind(Counter)
@@ -151,6 +214,8 @@ fn endpoint() -> Endpoint {
         .bind(Caller)
         .bind(Resolver)
         .bind(Flaky)
+        .bind(Gauge)
+        .bind(Relay)
         .build()
 }
 
@@ -177,7 +242,7 @@ async fn server(config: ServerConfig) -> RestateTestServer {
     RestateTestServer::start(endpoint(), config).await.unwrap()
 }
 
-fn modes() -> [ServerConfig; 4] {
+fn modes() -> [ServerConfig; 6] {
     [
         ServerConfig::default(),
         ServerConfig::default().always_replay(true),
@@ -185,6 +250,11 @@ fn modes() -> [ServerConfig; 4] {
         ServerConfig::default()
             .protocol(lash_restate_test::ProtocolVersion::V7)
             .always_replay(true),
+        ServerConfig::default().scheduling(Scheduling::Serial),
+        ServerConfig::default()
+            .protocol(lash_restate_test::ProtocolVersion::V7)
+            .always_replay(true)
+            .scheduling(Scheduling::Serial),
     ]
 }
 
@@ -377,4 +447,68 @@ async fn one_seed_reproduces_the_same_journals() {
         digests.windows(2).all(|pair| pair[0] == pair[1]),
         "{digests:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn serial_scheduling_runs_one_attempt_at_a_time_in_one_seeded_order() {
+    let mut traces = Vec::new();
+    for _ in 0..3 {
+        *GAUGE.lock().unwrap() = (0, 0);
+        let server = server(
+            ServerConfig::default()
+                .with_seed(11)
+                .scheduling(Scheduling::Serial),
+        )
+        .await;
+        for index in 0..6 {
+            assert_eq!(
+                post(&server, "Gauge/work/send", &format!("\"{index}\""))
+                    .await
+                    .0,
+                202
+            );
+        }
+        server.settle().await;
+        let completed = server
+            .invocations()
+            .iter()
+            .filter(|view| view.status == "completed")
+            .count();
+        assert_eq!(
+            completed,
+            6,
+            "{:#?} {:?}",
+            server.invocations(),
+            server.schedule_trace()
+        );
+        assert_eq!(GAUGE.lock().unwrap().1, 1, "one handler ran at a time");
+        assert_eq!(server.stats().stall_preemptions, 0);
+        traces.push(server.schedule_trace());
+    }
+    assert!(traces[0].len() >= 6, "{:?}", traces[0]);
+    assert!(
+        traces.windows(2).all(|pair| pair[0] == pair[1]),
+        "one seed grants the turn in one order: {traces:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_handler_waiting_on_its_own_ingress_request_yields_the_serial_turn() {
+    for config in [
+        ServerConfig::default().scheduling(Scheduling::Serial),
+        ServerConfig::default()
+            .always_replay(true)
+            .scheduling(Scheduling::Serial),
+    ] {
+        let server = server(config).await;
+        *INGRESS.lock().unwrap() = Some(server.clone());
+        assert_eq!(
+            post(&server, "Relay/ask", "\"relay\"").await,
+            (200, "\"1\"".into())
+        );
+        // The relay's request is attributed to its attempt, so the turn
+        // moves to the counter at once instead of after a stall.
+        assert_eq!(server.stats().stall_preemptions, 0);
+        *INGRESS.lock().unwrap() = None;
+    }
 }

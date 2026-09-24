@@ -92,8 +92,20 @@ impl WaitSet {
 #[derive(Debug)]
 pub struct LiveAttempt {
     pub number: u32,
-    /// The request-body sender; `None` once the server closed the input.
-    pub input: Option<mpsc::UnboundedSender<Bytes>>,
+    /// The request-body sender; `None` once the input is closed on the
+    /// wire.
+    input: Option<mpsc::UnboundedSender<Bytes>>,
+    /// Whether the server holds the input open. Under serial scheduling an
+    /// attempt that does not hold the turn sees a close only when it gets
+    /// the turn back, so this can be `false` while `input` is still set.
+    open: bool,
+    /// Serial scheduling: the attempt does not hold the turn, so what the
+    /// server delivers waits in `held` until it does.
+    gated: bool,
+    held: Vec<Bytes>,
+    /// Serial scheduling: the attempt task waits on this before it first
+    /// polls the endpoint.
+    start_gate: Option<oneshot::Sender<()>>,
     pub probe: Arc<InputProbe>,
     pub abort: Option<tokio::task::AbortHandle>,
     /// The journal index of the first notification stored after the input
@@ -105,9 +117,50 @@ pub struct LiveAttempt {
 }
 
 impl LiveAttempt {
-    /// Push `frame` down the attempt's open input. Returns whether it went.
+    /// A new attempt whose input is `input` (`None`: closed from the
+    /// start). A `start_gate` makes it a serially scheduled attempt that
+    /// does not run until [`release`](Self::release)d.
+    pub fn new(
+        number: u32,
+        input: Option<mpsc::UnboundedSender<Bytes>>,
+        probe: Arc<InputProbe>,
+        abort: tokio::task::AbortHandle,
+        start_gate: Option<oneshot::Sender<()>>,
+    ) -> Self {
+        Self {
+            number,
+            open: input.is_some(),
+            input,
+            gated: start_gate.is_some(),
+            held: Vec::new(),
+            start_gate,
+            probe,
+            abort: Some(abort),
+            unseen_from: None,
+            starved_since_ms: None,
+        }
+    }
+
+    /// Whether the server holds the attempt's input open.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// Push `frame` down the attempt's open input, or hold it for the
+    /// attempt's next turn. Returns whether it was delivered.
     pub fn push(&mut self, frame: Bytes) -> bool {
+        if !self.open {
+            return false;
+        }
         self.starved_since_ms = None;
+        if self.gated {
+            self.held.push(frame);
+            return true;
+        }
+        self.send(frame)
+    }
+
+    fn send(&mut self, frame: Bytes) -> bool {
         let pushed = self
             .input
             .as_ref()
@@ -116,6 +169,43 @@ impl LiveAttempt {
             self.probe.fed();
         }
         pushed
+    }
+
+    /// Close the input: the SDK sees end of input and suspends at its next
+    /// await the journal cannot resolve. A gated attempt sees it on its
+    /// next turn.
+    pub fn close(&mut self) {
+        self.open = false;
+        if !self.gated {
+            self.input = None;
+        }
+    }
+
+    /// Serial scheduling: whether the attempt has anything to act on once
+    /// it gets the turn — its first poll, held frames, or a held close.
+    pub fn has_held_work(&self) -> bool {
+        self.start_gate.is_some() || !self.held.is_empty() || (!self.open && self.input.is_some())
+    }
+
+    /// Serial scheduling: take the turn away; deliveries hold until the
+    /// next [`release`](Self::release).
+    pub fn gate(&mut self) {
+        self.gated = true;
+    }
+
+    /// Serial scheduling: give the attempt the turn: start it, or deliver
+    /// what it was held.
+    pub fn release(&mut self) {
+        self.gated = false;
+        if let Some(gate) = self.start_gate.take() {
+            let _ = gate.send(());
+        }
+        for frame in std::mem::take(&mut self.held) {
+            self.send(frame);
+        }
+        if !self.open {
+            self.input = None;
+        }
     }
 }
 

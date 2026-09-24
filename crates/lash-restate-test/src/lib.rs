@@ -31,6 +31,14 @@
 //! `restate-server`. Tests assert outcomes, not journal bytes. (lash also
 //! journals some wall-clock values and fresh ids inside `ctx.run` results,
 //! FIG-3672.)
+//!
+//! [`Scheduling::Serial`] narrows that for a scenario that wants one
+//! interleaving per seed: one attempt runs at a time, the turn passes in the
+//! order attempts became ready, and ingress requests from outside every
+//! attempt land between turns. On a current-thread runtime one seed then
+//! grants the turn in one order on every run
+//! ([`RestateTestServer::schedule_trace`]); the `server::serial` module docs
+//! say what it cannot order.
 
 mod backend;
 pub mod protocol;
@@ -40,5 +48,5 @@ pub use backend::{BackendError, HandlerAttempt, RestateTestBackend, backend};
 pub use protocol::ProtocolVersion;
 pub use server::{
     CrashPoint, CrashRule, InvocationView, JournalEntryView, RandomCrashes, RestateTestServer,
-    RetryPolicy, ServerConfig, StartError, Stats, TimeMode, TimerView,
+    RetryPolicy, Scheduling, ServerConfig, StartError, Stats, TimeMode, TimerView,
 };

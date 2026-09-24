@@ -5,14 +5,62 @@
 use std::sync::Arc;
 
 use http_body_util::BodyExt;
+use tokio::sync::oneshot;
 
 use super::Shared;
 use super::body::{AttemptBody, InputProbe};
 use super::model::InvKey;
 use super::processor::Flow;
+use super::serial::Turn;
 use crate::protocol::FrameDecoder;
 
+tokio::task_local! {
+    /// The attempt whose task is running: the server it belongs to (by
+    /// address) and its turn. Ingress requests a handler issues read it.
+    static CURRENT: (usize, Turn);
+}
+
+/// The turn of the attempt whose task is running this code, if it belongs
+/// to `shared`'s server.
+pub(super) fn current_turn(shared: &Arc<Shared>) -> Option<Turn> {
+    let server = Arc::as_ptr(shared) as usize;
+    CURRENT
+        .try_with(|(owner, turn)| (*owner == server).then_some(*turn))
+        .ok()
+        .flatten()
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one attempt's whole identity, handed from the processor to its task"
+)]
 pub(super) async fn run(
+    shared: Arc<Shared>,
+    key: InvKey,
+    number: u32,
+    service: String,
+    handler: String,
+    body: AttemptBody,
+    probe: Arc<InputProbe>,
+    started: Option<oneshot::Receiver<()>>,
+) {
+    // Serial scheduling: the attempt does not touch its handler before it
+    // first holds the turn.
+    if let Some(started) = started
+        && started.await.is_err()
+    {
+        return;
+    }
+    let server = Arc::as_ptr(&shared) as usize;
+    CURRENT
+        .scope(
+            (server, (key, number)),
+            drive(shared, key, number, service, handler, body, probe),
+        )
+        .await;
+}
+
+async fn drive(
     shared: Arc<Shared>,
     key: InvKey,
     number: u32,
@@ -69,6 +117,11 @@ pub(super) async fn run(
         // the server counts the attempt idle only once everything it wrote
         // has been applied.
         let next = std::future::poll_fn(|cx| {
+            // Not drained while the poll runs: the handler polled inside it
+            // may write a frame and block on its input before the poll
+            // returns that frame, and a starved probe beside a stale
+            // "drained" would read as blocked on the server.
+            probe.set_response_drained(false);
             let polled = http_body::Body::poll_frame(body.as_mut(), cx);
             probe.set_response_drained(polled.is_pending());
             if polled.is_pending() {

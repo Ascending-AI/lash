@@ -156,13 +156,13 @@ impl State {
                 .inactivity_timeout_ms
                 .unwrap_or(default_timeout);
             if let Status::Running(attempt) = &mut invocation.status {
-                if attempt.input.is_none() || !attempt.probe.is_starved() {
+                if !attempt.is_open() || !attempt.probe.is_starved() {
                     attempt.starved_since_ms = None;
                     continue;
                 }
                 let since = *attempt.starved_since_ms.get_or_insert(from_ms);
                 if now_ms.saturating_sub(since) >= timeout {
-                    attempt.input = None;
+                    attempt.close();
                 }
             }
         }
@@ -180,22 +180,31 @@ pub fn duration_ms(duration: Duration) -> u64 {
 /// re-anchors it on the virtual clock.
 ///
 /// Truncation and the frame's transit make the measured value read short of
-/// the requested duration by up to [`DURATION_SNAP_WINDOW_US`]. Within that
-/// window the server picks the roundest candidate (a whole second, then a
-/// multiple of 100 ms, 10 ms, 1 ms), so the durations handlers use recover
-/// exactly and one seed fires timers in one order.
+/// the requested duration. The server picks the roundest candidate the
+/// reading may fall short of (a whole second within 50 ms, then a multiple
+/// of 100 ms within 5 ms, of 10 ms within 2 ms, else the millisecond), so
+/// the durations handlers use recover exactly and one seed fires timers in
+/// one order.
 pub fn wall_delay_ms(wall_epoch_ms: u64, received_us: u128) -> u64 {
     let target_us = u128::from(wall_epoch_ms) * 1000;
     snap_duration_ms(target_us.saturating_sub(received_us))
 }
 
-/// How far short of the requested duration a measured one may read.
-pub const DURATION_SNAP_WINDOW_US: u128 = 2_000;
+/// How far short of the requested duration a measured one may read, by the
+/// granularity it snaps to: a descheduled attempt task reads a frame late,
+/// and the rounder the duration, the later it may read and still be taken
+/// for what the handler asked.
+const DURATION_SNAP_WINDOWS_US: [(u128, u128); 4] = [
+    (1_000_000, 50_000),
+    (100_000, 5_000),
+    (10_000, 2_000),
+    (1_000, 1_000),
+];
 
 fn snap_duration_ms(measured_us: u128) -> u64 {
-    for granularity_us in [1_000_000_u128, 100_000, 10_000, 1_000] {
+    for (granularity_us, window_us) in DURATION_SNAP_WINDOWS_US {
         let candidate = measured_us.div_ceil(granularity_us) * granularity_us;
-        if candidate <= measured_us + DURATION_SNAP_WINDOW_US {
+        if candidate <= measured_us + window_us {
             return u64::try_from(candidate / 1000).unwrap_or(u64::MAX);
         }
     }
@@ -214,5 +223,8 @@ mod tests {
         assert_eq!(snap_duration_ms(99_300), 100);
         assert_eq!(snap_duration_ms(1_234_000), 1_234);
         assert_eq!(snap_duration_ms(0), 0);
+        assert_eq!(snap_duration_ms(59_993_000), 60_000);
+        assert_eq!(snap_duration_ms(94_500), 95);
+        assert_eq!(snap_duration_ms(949_000), 950);
     }
 }

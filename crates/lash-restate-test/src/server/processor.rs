@@ -113,6 +113,9 @@ pub struct Stats {
     pub retries: u64,
     pub crashes: u64,
     pub timers_fired: u64,
+    /// Serial scheduling: turns taken from a holder that stalled without
+    /// the server seeing why (see the `serial` module docs).
+    pub stall_preemptions: u64,
 }
 
 /// The effective invoker retry policy of one handler.
@@ -156,6 +159,8 @@ pub struct State {
     pub timers: BTreeMap<(u64, u64, u64), TimerAction>,
     pub crash_plan: CrashPlan,
     pub stats: Stats,
+    /// The serial scheduler, under [`Scheduling::Serial`](super::Scheduling::Serial).
+    pub serial: Option<super::serial::Serial>,
     /// Virtual time at the last move, and the wall instant it happened: auto
     /// advance lets virtual time flow at wall speed from here.
     pub anchor: (u64, std::time::Instant),
@@ -171,8 +176,9 @@ impl State {
         self.anchor.0.saturating_add(elapsed)
     }
 
-    pub fn new(seed: u64, start_ms: u64) -> Self {
+    pub fn new(seed: u64, start_ms: u64, scheduling: super::Scheduling) -> Self {
         Self {
+            serial: (scheduling == super::Scheduling::Serial).then(super::serial::Serial::default),
             anchor: (start_ms, std::time::Instant::now()),
             frame_received_us: 0,
             now_ms: start_ms,
@@ -447,6 +453,13 @@ impl State {
             let _ = sender.send(entry.frame.encode());
         }
         let probe = Arc::new(InputProbe::default());
+        let (start_gate, started) = if self.serial.is_some() {
+            let (gate, started) = tokio::sync::oneshot::channel();
+            (Some(gate), Some(started))
+        } else {
+            (None, None)
+        };
+        let invocation = &mut self.invocations[key.0];
         let wake = Arc::clone(&sh.activity);
         let body = AttemptBody::new(
             receiver,
@@ -461,15 +474,16 @@ impl State {
             invocation.target.handler.clone(),
             body,
             Arc::clone(&probe),
+            started,
         ));
-        invocation.status = Status::Running(LiveAttempt {
+        invocation.status = Status::Running(LiveAttempt::new(
             number,
-            input: (!always_replay).then_some(sender),
+            (!always_replay).then_some(sender),
             probe,
-            abort: Some(handle.abort_handle()),
-            unseen_from: None,
-            starved_since_ms: None,
-        });
+            handle.abort_handle(),
+            start_gate,
+        ));
+        self.make_ready((key, number));
         self.stats.attempts += 1;
         if number > 1 || journal_len > 1 {
             self.stats.replays += 1;
@@ -509,8 +523,9 @@ impl State {
     /// suspends at its next await that the journal cannot resolve.
     pub(super) fn close_input(&mut self, key: InvKey) {
         if let Status::Running(attempt) = &mut self.invocations[key.0].status {
-            attempt.input = None;
+            attempt.close();
         }
+        self.delivered(key);
     }
 
     // ---------------------------------------------------------------------
@@ -598,7 +613,7 @@ impl State {
                 let delivered = if push {
                     attempt.push(encoded)
                 } else {
-                    attempt.input.is_some()
+                    attempt.is_open()
                 };
                 if !delivered {
                     attempt.unseen_from.get_or_insert(index);
@@ -609,6 +624,7 @@ impl State {
             _ => false,
         };
         self.touch(key);
+        self.delivered(key);
         if resume {
             self.start_attempt(sh, key);
         }
@@ -651,6 +667,7 @@ impl State {
             return Flow::Stop;
         }
         self.frame_received_us = received_us;
+        self.progressed();
         let site = self.crash_site(key, &frame);
         // A random crash's draw is keyed to the frame it would hit, so one
         // seed crashes the same frames however attempts interleave.
@@ -780,6 +797,7 @@ impl State {
                                 .encode(),
                             );
                         }
+                        self.delivered(key);
                     }
                 }
                 Ok(Flow::Continue)
@@ -1216,12 +1234,14 @@ impl State {
             .iter()
             .all(|invocation| match &invocation.status {
                 Status::Running(attempt) => {
-                    attempt.input.is_some()
+                    attempt.is_open()
                         && attempt.probe.is_idle()
+                        && !attempt.has_held_work()
                         && invocation.pending_runs.is_empty()
                 }
                 _ => true,
             })
+            && !self.serial_pending()
     }
 
     pub fn timers(&self) -> Vec<TimerView> {
