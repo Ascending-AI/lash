@@ -101,6 +101,11 @@ impl EndpointTurnProbe for EndpointTurnProbeImpl {
             Ok(lash_conformance::ConformanceTurnEnd::Settled) => Ok(Json(true)),
             // The turn aborted without an outcome: the attempt fails
             // retryably, so the invocation keeps its journal for its retry.
+            Ok(lash_conformance::ConformanceTurnEnd::Aborted(
+                lash_core::TurnFailureCause::Parked,
+            )) => Err(crate::parked_turn_failure(format!(
+                "conformance turn `{key}`"
+            ))),
             Ok(lash_conformance::ConformanceTurnEnd::Aborted(cause)) => Err(HandlerError::from(
                 std::io::Error::other(format!("conformance turn `{key}` aborted: {cause:?}")),
             )),

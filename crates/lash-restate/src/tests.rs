@@ -1513,7 +1513,7 @@ impl Fig1142ReplayDivergence for Fig1142ReplayDivergenceImpl {
                 // divergence parks, so the attempt fails retryably and the
                 // invocation keeps its journal.
                 if error.turn_failure_cause() == lash_core::TurnFailureCause::Parked {
-                    HandlerError::from(std::io::Error::other(error.to_string()))
+                    crate::parked_turn_failure(error)
                 } else {
                     TerminalError::from_error(error).into()
                 }

@@ -95,9 +95,9 @@ impl AgentServiceTurnWorkflow for AgentServiceTurnWorkflowImpl {
         {
             // A parked turn keeps its invocation's journal: the attempt fails
             // retryably, never terminally (lash_restate::turn_service).
-            TurnAttempt::Parked => Err(restate_sdk::errors::HandlerError::from(
-                std::io::Error::other(format!("turn {turn_id} is parked")),
-            )),
+            TurnAttempt::Parked => {
+                Err(lash_restate::parked_turn_failure(format!("turn {turn_id}")))
+            }
             TurnAttempt::Completed | TurnAttempt::Failed => Ok(restate_sdk::serde::Json(())),
         }
     }
