@@ -242,6 +242,16 @@ async fn drain_runtime(
     .await
 }
 
+/// The world's ports as the one backend its runtimes and sweep run over: the
+/// drain's effect host (its tool-child resolver already installed, so the
+/// drain's tool groups open there), its session catalog and its registry.
+fn world_backend(world: &DrainEndWorld) -> crate::LawBackend {
+    crate::LawBackend::in_process()
+        .with_effect_host(Arc::clone(&world.effect_host))
+        .with_session_store_factory(Arc::clone(&world.session_factory))
+        .with_process_registry(Arc::clone(&world.registry))
+}
+
 /// [`drain_runtime`] under an explicit commit budget.
 #[expect(
     clippy::expect_used,
@@ -255,11 +265,8 @@ async fn drain_runtime_with_budget(
     lease_owner: LeaseOwnerIdentity,
     commit_budget: crate::CommitBudget,
 ) -> LashRuntime {
-    // `with_effect_host`, not a field overwrite: it installs the tool-child
-    // resolver on the drain's host, where the drain's tool groups open.
     let mut host =
-        crate::RuntimeHostConfig::in_memory(commit_budget, crate::QueuedWorkBatchingConfig::new(1))
-            .with_effect_host(Arc::clone(&world.effect_host));
+        world_backend(world).host_config(commit_budget, crate::QueuedWorkBatchingConfig::new(1));
     host.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(SessionId::from(SESSION_ID));
@@ -268,23 +275,18 @@ async fn drain_runtime_with_budget(
     // must reopen the session its crashed predecessor committed, not fabricate
     // a fresh frame the drain-end receipt commit would refuse.
     Box::pin(
-        crate::LashRuntime::builder(
-            commit_budget,
-            crate::QueuedWorkBatchingConfig::new(1),
-            lease_owner,
-        )
-        .with_session_id(SESSION_ID)
-        .with_policy(policy)
-        .with_runtime_host(host)
-        .with_plugin_factories(
-            crate::testing::test_standard_protocol_factories()
-                .into_iter()
-                .chain(plugin_factories)
-                .collect(),
-        )
-        .with_process_registry(registry)
-        .with_store(Arc::clone(&world.store))
-        .build(),
+        crate::LashRuntime::builder(host, lease_owner)
+            .with_session_id(SESSION_ID)
+            .with_policy(policy)
+            .with_plugin_factories(
+                crate::testing::test_standard_protocol_factories()
+                    .into_iter()
+                    .chain(plugin_factories)
+                    .collect(),
+            )
+            .with_process_registry(registry)
+            .with_store(Arc::clone(&world.store))
+            .build(),
     )
     .await
     .expect("build the drain-end conformance runtime")
@@ -317,11 +319,10 @@ async fn drive_drain(
 )]
 fn drain_sweep(world: &DrainEndWorld) -> lash_core_worker::DurableProcessWorker {
     let watched = crate::facade_support::watch_process_registry(Arc::clone(&world.registry));
-    let host = crate::RuntimeHostConfig::in_memory(
+    let host = world_backend(world).host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_effect_host(Arc::clone(&world.effect_host));
+    );
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(SessionId::from(SESSION_ID));
     lash_core_worker::DurableProcessWorker::new(
@@ -330,7 +331,6 @@ fn drain_sweep(world: &DrainEndWorld) -> lash_core_worker::DurableProcessWorker 
                 crate::testing::test_standard_protocol_factories(),
             )),
             host,
-            Arc::clone(&world.session_factory),
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(crate::NoQueuedWork::new()),
             crate::testing::runtime_lease_owner(),

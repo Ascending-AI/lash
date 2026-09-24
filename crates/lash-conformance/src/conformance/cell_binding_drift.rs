@@ -135,11 +135,12 @@ async fn build_runtime(
             }
         })
         .build();
-    let mut host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_effect_host(Arc::clone(&world.effect_host));
+    let mut host = crate::LawBackend::in_process()
+        .with_effect_host(Arc::clone(&world.effect_host))
+        .host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let factories = world
@@ -156,19 +157,14 @@ async fn build_runtime(
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     Box::pin(
-        crate::LashRuntime::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-            crate::testing::runtime_lease_owner(),
-        )
-        .with_session_id(session_id)
-        .with_policy(policy)
-        .with_initial_state(state)
-        .with_runtime_host(host)
-        .with_plugin_factories(factories)
-        .with_store(store)
-        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
-        .build(),
+        crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner())
+            .with_session_id(session_id)
+            .with_policy(policy)
+            .with_initial_state(state)
+            .with_plugin_factories(factories)
+            .with_store(store)
+            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .build(),
     )
     .await
     .expect("build the binding-drift conformance runtime")

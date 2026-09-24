@@ -1063,17 +1063,7 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         draft: lash_core::TriggerSubscriptionDraft,
     ) -> crate::Result<lash_core::TriggerMutationReceipt> {
-        let store = self
-            .core
-            .env
-            .trigger_store
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                    "trigger store is unavailable in this runtime".to_string(),
-                ))
-            })?;
+        let store = self.core.env.core.trigger_store();
         let scoped = self.core.env.core.control.effect_host.scoped(
             lash_core::AdmittedScope::unpinned(self.scope.clone())
                 .map_err(lash_core::RuntimeError::from)?,
@@ -1135,13 +1125,7 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::RegisterProcessDefinitionIntent,
     ) -> crate::Result<lash_core::ProcessDefinitionRegistration> {
-        let registry = self.core.env.process_definitions.clone().ok_or_else(|| {
-            crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                "process definition registry is unavailable in this runtime: \
-                     cannot register a `{engine}` definition"
-                    .replace("{engine}", &intent.engine_kind),
-            ))
-        })?;
+        let registry = self.core.env.core.process_definitions();
         let name = intent
             .name
             .as_deref()
@@ -1226,17 +1210,7 @@ impl ToolIntentIngress {
         lash_core::facade_support::TriggerEmitReport,
         lash_core::StoreRealization,
     )> {
-        let store = self
-            .core
-            .env
-            .trigger_store
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| {
-                crate::EmbedError::Plugin(lash_core::PluginError::Session(
-                    "trigger store is unavailable in this runtime".to_string(),
-                ))
-            })?;
+        let store = self.core.env.core.trigger_store();
         let ports = self.core.substrate_slot.ports().await;
         let process_work = ports.process;
         let router = lash_core::facade_support::TriggerRouter::new(store, process_work)

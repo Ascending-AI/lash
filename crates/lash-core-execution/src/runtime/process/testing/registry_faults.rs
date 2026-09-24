@@ -1,5 +1,6 @@
-//! A registry decorator that injects read faults and stale wake deliveries and
-//! counts point and lease reads, over any backend.
+//! A registry decorator that injects read, lease, terminal-write and worklist
+//! faults and stale wake deliveries, holds a worklist page at a known point,
+//! and counts point and lease reads, over any backend.
 
 // The delegation macros take each forwarding hook as a block, and these hooks
 // only forward.
@@ -15,8 +16,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::super::model::{ProcessId, SessionId};
 use super::super::registry::ProcessRegistry;
 use super::super::registry_delegate::{
-    delegate_process_event_log, delegate_process_lifecycle, delegate_process_observer_registry,
-    delegate_process_registrar, delegate_process_retention, delegate_process_tool_intents,
+    delegate_process_observer_registry, delegate_process_registrar, delegate_process_retention,
+    delegate_process_tool_intents,
 };
 
 /// Wraps a registry so a test can make its point reads of one process fail,
@@ -46,6 +47,50 @@ struct ReadFaultPlan {
     absent: bool,
     record_override: Option<crate::ProcessRecord>,
     pinned: Option<crate::ProcessRecord>,
+    events_read_error: Option<crate::PluginError>,
+    lease_claim_error: Option<crate::PluginError>,
+    lease_renew_error: Option<crate::PluginError>,
+    lease_release_error: Option<crate::PluginError>,
+    terminal_write_error: Option<crate::PluginError>,
+    terminal_write_outcome: Option<crate::ProcessCompletionOutcome>,
+    worklist_page_reads: Vec<WorklistPageRead>,
+    worklist_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
+    worklist_page_pause: Option<WorklistPagePause>,
+}
+
+/// One worklist-page read the decorator saw: the page limit and the
+/// continuation it was asked from.
+pub type WorklistPageRead = (usize, Option<crate::ProcessWorklistCursor>);
+
+/// Holds the next worklist-page read until the test resumes it.
+#[derive(Clone)]
+pub struct WorklistPagePause {
+    reached: Arc<tokio::sync::Notify>,
+    resume: Arc<tokio::sync::Notify>,
+}
+
+impl WorklistPagePause {
+    fn new() -> Self {
+        Self {
+            reached: Arc::new(tokio::sync::Notify::new()),
+            resume: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    /// Wait until the paused read has reached the decorator.
+    pub async fn wait_until_validated(&self) {
+        self.reached.notified().await;
+    }
+
+    /// Let the paused read through.
+    pub fn resume(&self) {
+        self.resume.notify_one();
+    }
+
+    async fn hold(&self) {
+        self.reached.notify_one();
+        self.resume.notified().await;
+    }
 }
 
 impl ProcessRegistryFaults {
@@ -92,6 +137,61 @@ impl ProcessRegistryFaults {
     /// How many point reads reached this decorator, faulted or forwarded.
     pub fn process_point_reads(&self) -> usize {
         self.process_point_reads.load(Ordering::SeqCst)
+    }
+
+    /// The next event-history read fails with `error`, once.
+    pub fn set_process_events_read_error(&self, error: crate::PluginError) {
+        self.faults.lock_recover().events_read_error = Some(error);
+    }
+
+    /// Every process-lease claim fails with `error` until cleared with `None`.
+    pub fn set_process_lease_claim_error(&self, error: Option<crate::PluginError>) {
+        self.faults.lock_recover().lease_claim_error = error;
+    }
+
+    /// Every process-lease renewal fails with `error` until cleared with
+    /// `None`.
+    pub fn set_process_lease_renew_error(&self, error: Option<crate::PluginError>) {
+        self.faults.lock_recover().lease_renew_error = error;
+    }
+
+    /// Every process-lease release fails with `error` until cleared with
+    /// `None`.
+    pub fn set_process_lease_release_error(&self, error: Option<crate::PluginError>) {
+        self.faults.lock_recover().lease_release_error = error;
+    }
+
+    /// Every fenced terminal write fails with `error` until cleared with
+    /// `None`.
+    pub fn set_process_terminal_write_error(&self, error: Option<crate::PluginError>) {
+        self.faults.lock_recover().terminal_write_error = error;
+    }
+
+    /// The next fenced terminal write answers `outcome` without writing, once.
+    pub fn set_process_terminal_write_outcome(&self, outcome: crate::ProcessCompletionOutcome) {
+        self.faults.lock_recover().terminal_write_outcome = Some(outcome);
+    }
+
+    /// After `successful_reads` more worklist-page reads pass, the following
+    /// ones fail with `errors`, in order.
+    pub fn set_worklist_page_errors(
+        &self,
+        successful_reads: usize,
+        errors: Vec<crate::PluginError>,
+    ) {
+        self.faults.lock_recover().worklist_page_errors = Some((successful_reads, errors.into()));
+    }
+
+    /// Every worklist-page read that reached the decorator, in order.
+    pub fn worklist_page_reads(&self) -> Vec<WorklistPageRead> {
+        self.faults.lock_recover().worklist_page_reads.clone()
+    }
+
+    /// Hold the next worklist-page read until the returned handle resumes it.
+    pub fn pause_next_worklist_page(&self) -> WorklistPagePause {
+        let pause = WorklistPagePause::new();
+        self.faults.lock_recover().worklist_page_pause = Some(pause.clone());
+        pause
     }
 
     /// The next claim of pending wake deliveries hands out `wake` first,
@@ -142,6 +242,39 @@ impl ProcessRegistryFaults {
         }
         plan.pinned.clone().map(|record| Ok(Some(record)))
     }
+
+    fn lease_fault(
+        &self,
+        fault: impl FnOnce(&ReadFaultPlan) -> &Option<crate::PluginError>,
+    ) -> Result<(), crate::PluginError> {
+        fault(&self.faults.lock_recover())
+            .clone()
+            .map_or(Ok(()), Err)
+    }
+
+    fn take_events_read_fault(&self) -> Result<(), crate::PluginError> {
+        self.faults
+            .lock_recover()
+            .events_read_error
+            .take()
+            .map_or(Ok(()), Err)
+    }
+
+    fn worklist_page_fault(&self) -> Result<(), crate::PluginError> {
+        let mut plan = self.faults.lock_recover();
+        let Some((successful_reads, errors)) = plan.worklist_page_errors.as_mut() else {
+            return Ok(());
+        };
+        if *successful_reads > 0 {
+            *successful_reads -= 1;
+            return Ok(());
+        }
+        let error = errors.pop_front();
+        if errors.is_empty() {
+            plan.worklist_page_errors = None;
+        }
+        error.map_or(Ok(()), Err)
+    }
 }
 
 /// `resolve_process_ref` and `get_process_ref` keep the trait's provided
@@ -180,6 +313,16 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
         limit: std::num::NonZeroUsize,
         continuation: Option<crate::ProcessWorklistCursor>,
     ) -> Result<crate::ProcessWorklistPage, crate::PluginError> {
+        let pause = {
+            let mut plan = self.faults.lock_recover();
+            plan.worklist_page_reads
+                .push((limit.get(), continuation.clone()));
+            plan.worklist_page_pause.take()
+        };
+        if let Some(pause) = pause {
+            pause.hold().await;
+        }
+        self.worklist_page_fault()?;
         self.inner.list_non_terminal_page(limit, continuation).await
     }
 
@@ -223,21 +366,242 @@ delegate_process_registrar!(
 
 delegate_process_observer_registry!(ProcessRegistryFaults, inner);
 
-delegate_process_event_log!(
-    ProcessRegistryFaults,
-    inner,
-    event | _faults,
-    _process_id,
-    forwarded | { forwarded.await }
-);
+#[async_trait::async_trait]
+impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults {
+    async fn append_event(
+        &self,
+        process_id: &ProcessId,
+        request: crate::ProcessEventAppendRequest,
+    ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
+        self.inner.append_event(process_id, request).await
+    }
 
-delegate_process_lifecycle!(
-    ProcessRegistryFaults,
-    inner,
-    event | _faults,
-    _process_id,
-    forwarded | { forwarded.await }
-);
+    async fn append_event_ref(
+        &self,
+        process_ref: &crate::ProcessRef,
+        request: crate::ProcessEventAppendRequest,
+    ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
+        self.inner.append_event_ref(process_ref, request).await
+    }
+
+    async fn append_event_with_authority(
+        &self,
+        process_id: &ProcessId,
+        request: crate::ProcessEventAppendRequest,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
+        self.inner
+            .append_event_with_authority(process_id, request, authority)
+            .await
+    }
+
+    // `event_page` keeps the trait's provided body, which reads through
+    // `event_page_ref`: a by-id read sees the same fault.
+    async fn event_page_ref(
+        &self,
+        process_ref: &crate::ProcessRef,
+        after_sequence: u64,
+        limit: std::num::NonZeroUsize,
+        mode: crate::ProcessEventQueryMode,
+    ) -> Result<crate::ProcessEventReadOutcome<crate::ProcessEventPage>, crate::PluginError> {
+        self.take_events_read_fault()?;
+        self.inner
+            .event_page_ref(process_ref, after_sequence, limit, mode)
+            .await
+    }
+
+    async fn count_events_through(
+        &self,
+        process_id: &ProcessId,
+        event_type: &str,
+        up_to_sequence: u64,
+    ) -> Result<u64, crate::PluginError> {
+        self.inner
+            .count_events_through(process_id, event_type, up_to_sequence)
+            .await
+    }
+
+    async fn count_events_through_ref(
+        &self,
+        process_ref: &crate::ProcessRef,
+        event_type: &str,
+        up_to_sequence: u64,
+    ) -> Result<u64, crate::PluginError> {
+        self.take_events_read_fault()?;
+        self.inner
+            .count_events_through_ref(process_ref, event_type, up_to_sequence)
+            .await
+    }
+
+    async fn recent_events(
+        &self,
+        process_id: &ProcessId,
+        limit: usize,
+    ) -> Result<Vec<crate::ProcessEvent>, crate::PluginError> {
+        self.take_events_read_fault()?;
+        self.inner.recent_events(process_id, limit).await
+    }
+}
+
+#[async_trait::async_trait]
+impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults {
+    async fn complete_process(
+        &self,
+        process_id: &ProcessId,
+        await_output: crate::ProcessAwaitOutput,
+        authority: crate::ProcessCompletionAuthority,
+    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
+        self.inner
+            .complete_process(process_id, await_output, authority)
+            .await
+    }
+
+    async fn complete_process_with_lease(
+        &self,
+        lease: &crate::ProcessLease,
+        await_output: crate::ProcessAwaitOutput,
+    ) -> Result<crate::ProcessCompletionOutcome, crate::PluginError> {
+        {
+            let mut faults = self.faults.lock_recover();
+            if let Some(error) = faults.terminal_write_error.clone() {
+                return Err(error);
+            }
+            if let Some(outcome) = faults.terminal_write_outcome.take() {
+                return Ok(outcome);
+            }
+        }
+        self.inner
+            .complete_process_with_lease(lease, await_output)
+            .await
+    }
+
+    async fn record_parent_end(
+        &self,
+        parent: &crate::ParentScope,
+    ) -> Result<(), crate::PluginError> {
+        self.inner.record_parent_end(parent).await
+    }
+
+    async fn list_pending_parent_end_plans(
+        &self,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::ParentEndPlan>, crate::PluginError> {
+        self.inner.list_pending_parent_end_plans(limit).await
+    }
+
+    async fn get_parent_end_plan(
+        &self,
+        parent: &crate::ParentScope,
+    ) -> Result<Option<crate::ParentEndPlan>, crate::PluginError> {
+        self.inner.get_parent_end_plan(parent).await
+    }
+
+    async fn list_parent_end_children(
+        &self,
+        parent: &crate::ParentScope,
+        after: Option<&ProcessId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+        self.inner
+            .list_parent_end_children(parent, after, limit)
+            .await
+    }
+
+    async fn settle_parent_end_plan(
+        &self,
+        parent: &crate::ParentScope,
+    ) -> Result<(), crate::PluginError> {
+        self.inner.settle_parent_end_plan(parent).await
+    }
+
+    async fn list_unrecorded_opener_parents(
+        &self,
+        after: Option<&str>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::ParentScope>, crate::PluginError> {
+        self.inner
+            .list_unrecorded_opener_parents(after, limit)
+            .await
+    }
+
+    async fn record_first_started_with_authority(
+        &self,
+        process_id: &ProcessId,
+        started: crate::ProcessStarted,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessStartOutcome, crate::PluginError> {
+        self.inner
+            .record_first_started_with_authority(process_id, started, authority)
+            .await
+    }
+
+    async fn request_process_cancel(
+        &self,
+        process_ref: &crate::ProcessRef,
+        origin: crate::CancelOrigin,
+        requester: String,
+        attribution: Option<crate::RuntimeReplayAttribution>,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .request_process_cancel(process_ref, origin, requester, attribution)
+            .await
+    }
+
+    async fn request_process_cancel_reporting_realization(
+        &self,
+        process_ref: &crate::ProcessRef,
+        origin: crate::CancelOrigin,
+        requester: String,
+        attribution: Option<crate::RuntimeReplayAttribution>,
+    ) -> Result<(crate::ProcessRecord, crate::StoreRealization), crate::PluginError> {
+        self.inner
+            .request_process_cancel_reporting_realization(
+                process_ref,
+                origin,
+                requester,
+                attribution,
+            )
+            .await
+    }
+
+    async fn request_process_abandon(
+        &self,
+        process_id: &ProcessId,
+        request: crate::AbandonRequest,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .request_process_abandon(process_id, request)
+            .await
+    }
+
+    async fn record_caller_departure(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner.record_caller_departure(process_id).await
+    }
+
+    async fn set_process_wait_with_authority(
+        &self,
+        process_id: &ProcessId,
+        wait: crate::WaitState,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .set_process_wait_with_authority(process_id, wait, authority)
+            .await
+    }
+
+    async fn clear_process_wait_with_authority(
+        &self,
+        process_id: &ProcessId,
+        authority: &crate::ProcessExecutionWriteAuthority,
+    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        self.inner
+            .clear_process_wait_with_authority(process_id, authority)
+            .await
+    }
+}
 
 delegate_process_tool_intents!(ProcessRegistryFaults, inner);
 
@@ -319,6 +683,7 @@ impl super::super::registry_concerns::ProcessLeases for ProcessRegistryFaults {
         owner: &crate::LeaseOwnerIdentity,
         lease_ttl_ms: u64,
     ) -> Result<crate::ProcessLeaseClaimOutcome, crate::PluginError> {
+        self.lease_fault(|plan| &plan.lease_claim_error)?;
         self.inner
             .claim_process_lease(process_id, owner, lease_ttl_ms)
             .await
@@ -331,6 +696,7 @@ impl super::super::registry_concerns::ProcessLeases for ProcessRegistryFaults {
         observed_holder: &crate::ProcessLease,
         lease_ttl_ms: u64,
     ) -> Result<crate::ProcessLeaseClaimOutcome, crate::PluginError> {
+        self.lease_fault(|plan| &plan.lease_claim_error)?;
         self.inner
             .reclaim_process_lease(process_id, owner, observed_holder, lease_ttl_ms)
             .await
@@ -341,6 +707,7 @@ impl super::super::registry_concerns::ProcessLeases for ProcessRegistryFaults {
         lease: &crate::ProcessLease,
         lease_ttl_ms: u64,
     ) -> Result<crate::ProcessLease, crate::PluginError> {
+        self.lease_fault(|plan| &plan.lease_renew_error)?;
         self.inner.renew_process_lease(lease, lease_ttl_ms).await
     }
 
@@ -364,6 +731,7 @@ impl super::super::registry_concerns::ProcessLeases for ProcessRegistryFaults {
         &self,
         completion: &crate::ProcessLeaseCompletion,
     ) -> Result<(), crate::PluginError> {
+        self.lease_fault(|plan| &plan.lease_release_error)?;
         self.inner.complete_process_lease(completion).await
     }
 }

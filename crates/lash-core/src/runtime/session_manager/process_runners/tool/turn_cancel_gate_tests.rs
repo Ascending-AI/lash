@@ -180,14 +180,10 @@ async fn execute_process_dispatch(
     services: &crate::runtime::RuntimeSessionServices,
     surface: crate::plugin::ResolvedToolSurface,
 ) -> serde_json::Value {
-    let scoped = crate::ScopedEffectController::shared(
-        Arc::new(crate::NativeRuntimeEffectController::default()),
-        crate::AdmittedScope::process(crate::ProcessRef::new(
-            "process-route",
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        )),
-    )
-    .expect("valid process scope");
+    let scoped = crate::testing::runtime_helpers::host_process_scope(
+        &services.current.host.core,
+        "process-route",
+    );
     let run_context = ProcessRunContext::builder(services)
         .tool_surface(surface)
         .scoped_effect_controller(scoped)
@@ -298,6 +294,7 @@ async fn runner_side_deferred_await_inside_a_process_body_attaches_no_turn_cance
 /// await. The runner's owning process execution supplies the unobserved trio.
 #[tokio::test]
 async fn process_runner_deferred_await_uses_the_owning_process_execution_trio() {
+    let backend = crate::testing::memory_backend().await;
     let definition = crate::ToolDefinition::raw(
         "tool:process-witness",
         "process_witness",
@@ -309,6 +306,7 @@ async fn process_runner_deferred_await_uses_the_owning_process_execution_trio() 
         definition: definition.clone(),
     });
     let runtime = crate::runtime::tests::helpers::runtime_with_plugins_and_tools(
+        &backend,
         crate::testing::test_standard_protocol_factories(),
         provider,
         crate::runtime::tests::helpers::mock_provider(Vec::new()),
@@ -368,6 +366,7 @@ async fn process_runner_deferred_await_uses_the_owning_process_execution_trio() 
 async fn run_retrying_host_process_tool(
     parent_invocation: Option<crate::RuntimeInvocation>,
 ) -> Vec<(crate::RuntimeEffectKind, crate::RuntimeEffectInvocation)> {
+    let backend = crate::testing::memory_backend().await;
     let definition = crate::ToolDefinition::raw(
         "tool:process-attribution-witness",
         "process_attribution_witness",
@@ -381,6 +380,7 @@ async fn run_retrying_host_process_tool(
         attempts: std::sync::atomic::AtomicUsize::new(0),
     });
     let runtime = crate::runtime::tests::helpers::runtime_with_plugins_and_tools(
+        &backend,
         crate::testing::test_standard_protocol_factories(),
         provider,
         crate::runtime::tests::helpers::mock_provider(Vec::new()),
@@ -493,6 +493,7 @@ async fn process_runner_attempts_and_retry_sleep_preserve_actual_parent_attribut
 
 #[tokio::test]
 async fn process_run_context_captures_catalog_and_execution_route_together() {
+    let backend = crate::testing::memory_backend().await;
     let a_active = Arc::new(AtomicBool::new(true));
     let b_active = Arc::new(AtomicBool::new(false));
     let spec = crate::PluginSpec::new()
@@ -510,6 +511,7 @@ async fn process_run_context_captures_catalog_and_execution_route_together() {
         spec,
     )));
     let runtime = crate::runtime::tests::helpers::runtime_with_plugins(
+        &backend,
         factories,
         crate::runtime::tests::helpers::mock_provider(Vec::new()),
     )

@@ -406,7 +406,7 @@ async fn empty_claimable_peek_skips_hydration() {
 }
 
 struct CreateOnlyFactory {
-    inner: crate::InMemorySessionStoreFactory,
+    inner: Arc<dyn crate::SessionStoreFactory>,
 }
 
 #[async_trait::async_trait]
@@ -415,7 +415,7 @@ impl crate::AttachmentRootSet for CreateOnlyFactory {
         &self,
         cutoff: u64,
     ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
-        crate::AttachmentRootSet::live_attachment_refs(&self.inner, cutoff).await
+        crate::AttachmentRootSet::live_attachment_refs(self.inner.as_ref(), cutoff).await
     }
 
     async fn has_live_attachment_ref(
@@ -423,7 +423,7 @@ impl crate::AttachmentRootSet for CreateOnlyFactory {
         id: &crate::AttachmentId,
         cutoff: u64,
     ) -> Result<bool, crate::StoreError> {
-        crate::AttachmentRootSet::has_live_attachment_ref(&self.inner, id, cutoff).await
+        crate::AttachmentRootSet::has_live_attachment_ref(self.inner.as_ref(), id, cutoff).await
     }
 }
 
@@ -448,7 +448,7 @@ impl crate::SessionStoreFactory for CreateOnlyFactory {
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        crate::SessionStoreFactory::session_was_deleted(&self.inner, session_id).await
+        crate::SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id).await
     }
 
     async fn delete_session(
@@ -462,14 +462,16 @@ impl crate::SessionStoreFactory for CreateOnlyFactory {
     async fn count_unsettled_turns(
         &self,
     ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
-        crate::SessionStoreFactory::count_unsettled_turns(&self.inner).await
+        self.inner.count_unsettled_turns().await
     }
 }
 
 #[tokio::test]
 async fn create_only_factory_treats_claimability_as_unknown_and_runs() {
     let factory = CreateOnlyFactory {
-        inner: crate::InMemorySessionStoreFactory::new(),
+        inner: crate::testing::memory_backend()
+            .await
+            .session_store_factory(),
     };
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),

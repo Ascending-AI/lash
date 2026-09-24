@@ -1,16 +1,15 @@
 use std::sync::Arc;
 
 use lash_core::facade_support::{
-    InMemoryProcessExecutionEnvStore, InMemorySessionStoreFactory, NativeEffectHost, PluginHost,
-    PluginSessionContext, PluginSpec, PluginSpecFactory, RuntimeHostConfig,
+    PluginHost, PluginSessionContext, PluginSpec, PluginSpecFactory, RuntimeHostConfig,
     empty_trigger_source_key, watch_process_registry,
 };
 use lash_core::{
     ArtifactOwner, CommitBudget, LashSchema, NativeProcessWork, NoQueuedWork, PluginError,
     PluginOptions, ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessOriginator,
-    ProcessRegistry, QueuedWorkBatchingConfig, SessionPolicy, TriggerCommand,
-    TriggerCommandOutcome, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, TurnBudget,
+    QueuedWorkBatchingConfig, SessionPolicy, TriggerCommand, TriggerCommandOutcome,
+    TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
+    TurnBudget,
 };
 use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use lash_lashlang_runtime::{
@@ -177,8 +176,12 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         args: serde_json::Map::new(),
     };
 
-    let env_store: Arc<dyn ProcessExecutionEnvStore> =
-        Arc::new(InMemoryProcessExecutionEnvStore::new());
+    let backend: Arc<dyn lash_core::Backend> = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open a memory backend"),
+    );
+    let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
         &ArtifactOwner::host("fig3344-trigger-env"),
@@ -187,8 +190,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
     .await
     .expect("process execution env publishes");
 
-    let trigger_store: Arc<dyn TriggerStore> =
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let trigger_store: Arc<dyn TriggerStore> = backend.trigger_store();
     let source_key = empty_trigger_source_key(SOURCE_TYPE).expect("source key derives");
     let draft = TriggerSubscriptionDraft::for_process(
         "fig3344-fired",
@@ -220,8 +222,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         "trigger registration mutates the store"
     );
 
-    let registry: Arc<dyn ProcessRegistry> =
-        Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry = backend.process_registry();
     let engine = LashlangProcessEngine::new(
         Arc::clone(&artifact_store),
         LashlangSurface::new(
@@ -231,9 +232,7 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         ),
     );
     let runtime_host = RuntimeHostConfig::new(
-        Arc::new(NativeEffectHost::default()),
-        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
-        Arc::clone(&env_store),
+        Arc::clone(&backend),
         CommitBudget::bounded(1024 * 1024, 512),
         QueuedWorkBatchingConfig::new(1),
     )
@@ -246,12 +245,10 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
                 session_surface_factory(),
             ])),
             runtime_host,
-            Arc::new(InMemorySessionStoreFactory::new()),
             WorkerProcessWork::SelfNative(watched),
             Arc::new(NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
-        .with_trigger_store(Arc::clone(&trigger_store))
         .with_session_policy(session_policy()),
     )
     .expect("valid trigger surface worker");

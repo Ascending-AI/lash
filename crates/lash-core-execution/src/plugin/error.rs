@@ -111,12 +111,6 @@ pub enum PluginError {
     /// A captured plugin init payload exceeded the durable-request bound.
     #[error("captured session init payload is {bytes} bytes, exceeding the {limit}-byte bound")]
     SessionInitTooLarge { bytes: usize, limit: usize },
-    /// A session-creation request had no catalog capable of selecting and
-    /// admitting the new session's exact store.
-    #[error(
-        "session store is required before creating session `{session_id}`; configure a session-creation store factory"
-    )]
-    MissingSessionStore { session_id: SessionId },
     /// An existing plugin session cannot be reconstructed because a required
     /// protocol-owned field is absent from its durable record.
     #[error("recorded session config for plugin `{plugin_id}` is missing required field `{field}`")]
@@ -320,7 +314,6 @@ impl PluginError {
             | Self::AfterToolCallReplacementConflict { .. }
             | Self::MissingSessionInit { .. }
             | Self::SessionInitTooLarge { .. }
-            | Self::MissingSessionStore { .. }
             | Self::MissingRecordedSessionConfig { .. }
             | Self::RecordedSessionConfigConflict { .. }
             | Self::AppendOperationIdentityConflict { .. }
@@ -367,7 +360,6 @@ impl PluginError {
             Self::RuntimeEffectController(error) => error.is_terminal(),
             Self::BeforeToolCallReplacementConflict { .. }
             | Self::AfterToolCallReplacementConflict { .. }
-            | Self::MissingSessionStore { .. }
             | Self::MissingRecordedSessionConfig { .. }
             | Self::RecordedSessionConfigConflict { .. }
             | Self::AppendOperationIdentityConflict { .. }

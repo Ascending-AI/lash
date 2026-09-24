@@ -41,6 +41,12 @@ use crate::{RuntimeError, RuntimeErrorCode, SessionId};
 /// only arbiter of a group.
 #[async_trait::async_trait]
 pub trait EffectLayer: Send + Sync + 'static {
+    /// Whether the layered controller owns commit backpressure, as an
+    /// engine-backed controller does.
+    fn owns_commit_backpressure(&self, inner: &dyn RuntimeEffectController) -> bool {
+        inner.owns_commit_backpressure()
+    }
+
     async fn execute_effect(
         &self,
         inner: &dyn RuntimeEffectController,
@@ -101,6 +107,15 @@ pub trait EffectLayer: Send + Sync + 'static {
         deadline: Option<Instant>,
     ) -> Result<Resolution, RuntimeError> {
         inner.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn acquire_queued_lane(
+        &self,
+        inner: &dyn AwaitEventResolver,
+        lane: Arc<dyn QueuedLaneProbe>,
+        cancel: CancellationToken,
+    ) -> Result<QueuedLaneAcquisition, RuntimeError> {
+        inner.acquire_queued_lane(lane, cancel).await
     }
 }
 
@@ -171,7 +186,9 @@ impl AwaitEventResolver for LayeredEffectHost {
         lane: Arc<dyn QueuedLaneProbe>,
         cancel: CancellationToken,
     ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        self.inner.acquire_queued_lane(lane, cancel).await
+        self.layer
+            .acquire_queued_lane(self.inner.await_event_resolver(), lane, cancel)
+            .await
     }
 
     async fn prepare_completion_key(
@@ -417,7 +434,9 @@ impl AwaitEventResolver for LayeredController {
         lane: Arc<dyn QueuedLaneProbe>,
         cancel: CancellationToken,
     ) -> Result<QueuedLaneAcquisition, RuntimeError> {
-        self.inner.acquire_queued_lane(lane, cancel).await
+        self.layer
+            .acquire_queued_lane(self.inner.as_ref(), lane, cancel)
+            .await
     }
 
     async fn prepare_completion_key(
@@ -515,7 +534,7 @@ impl AwaitEventResolver for LayeredController {
 #[async_trait::async_trait]
 impl RuntimeEffectController for LayeredController {
     fn owns_commit_backpressure(&self) -> bool {
-        self.inner.owns_commit_backpressure()
+        self.layer.owns_commit_backpressure(self.inner.as_ref())
     }
 
     fn effect_journaling(&self) -> EffectJournaling {

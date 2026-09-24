@@ -35,18 +35,22 @@ impl RuntimePersistenceDecorator for FailCancelClosureAuthorizationStore {
                 "injected finish-time cancellation authorization failure".to_string(),
             ));
         }
-        self.inner
-            .authorize_turn_cancel_closure(lease, authorization)
-            .await
+        lash_core::store::TurnInputStore::authorize_turn_cancel_closure(
+            self.inner.as_ref(),
+            lease,
+            authorization,
+        )
+        .await
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelivery() {
+    let backend = memory_backend().await;
     const SESSION_ID: &str = "drop-cancel-owner-failure";
     const TURN_ID: &str = "turn-that-cannot-finish";
 
-    let inner_store = Arc::new(RecordingStore::default());
+    let inner_store = unbound_recording_store(&backend).await;
     let store = Arc::new(FailCancelClosureAuthorizationStore::new(Arc::clone(
         &inner_store,
     )));
@@ -67,9 +71,9 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
             }
         })
         .build();
-    let mut runtime = TestRuntime::new(transport)
+    let mut runtime = TestRuntime::new(&backend, transport)
         .tools(Arc::new(EmptyTools))
-        .host(test_host_config())
+        .host(test_host_config(&backend))
         .store(runtime_store)
         .with_session_id(SESSION_ID)
         .build()
@@ -87,7 +91,8 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     }));
 
     let persisted_state = runtime.export_persistence_state();
-    let turn_scope = native_scope(
+    let turn_scope = backend_admitted_scope(
+        &backend,
         lash_core::AdmittedScope::unpinned(persisted_state.turn_scope(TURN_ID))
             .expect("turn scope"),
     );
@@ -162,14 +167,6 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         "finish authorization fails once, then teardown authorizes the durable Drop repair"
     );
 
-    let raw = inner_store.raw_pending_turn_inputs_for_testing();
-    let dropped = raw
-        .iter()
-        .find(|(input_id, ..)| input_id == undelivered.input_id)
-        .expect("the cancelled row remains as durable evidence");
-    assert_eq!(dropped.2.kind(), lash_core::TurnInputStateKind::Cancelled);
-    assert!(dropped.3.is_none(), "recovery clears the dead turn claim");
-
     let pending = lash_core::TurnInputStore::list_pending_turn_inputs(
         inner_store.as_ref(),
         &lash_core::SessionId::from(SESSION_ID),
@@ -182,11 +179,11 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
             .all(|input| input.input.input_id != undelivered.input_id),
         "Drop evidence must keep the undelivered input out of every later claim"
     );
-    let record = inner_store
-        .turn_cancel_request(&turn_address)
-        .await
-        .expect("read durable cancellation record")
-        .expect("Drop request remains recorded");
+    let record =
+        lash_core::store::TurnInputStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
+            .await
+            .expect("read durable cancellation record")
+            .expect("Drop request remains recorded");
     let affected = record
         .outcome
         .expect("teardown recovery records its input decision")

@@ -398,10 +398,10 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
             .expect("open the engine's store"),
     );
     let sink = Arc::new(RecordingSink::default());
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let effect_host = memory_effect_host().await;
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let process_env_store = backend.process_env_store();
+    let effect_host = backend.effect_host();
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
@@ -427,16 +427,14 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         )
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&effect_host),
-        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
-        process_env_store.clone(),
+        Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_process_engine_registration(
         lash_lashlang_runtime::lashlang_process_engine_registration(traced_engine()),
     );
-    let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+    let registry_dyn = Arc::clone(&registry);
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::new(
@@ -450,7 +448,6 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
                 factories
             })),
             runtime_host,
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
@@ -499,7 +496,7 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
     assert!(response.error.is_none(), "{:?}", response.error);
     // Drive every started process to its end: the worker, then the literal
     // nested in it that the worker starts.
-    let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+    let registry_dyn = Arc::clone(&registry);
     let mut finished = BTreeSet::new();
     for _ in 0..4 {
         let _admitted = worker

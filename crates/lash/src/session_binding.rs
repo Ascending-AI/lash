@@ -7,7 +7,7 @@ use lash_sansio::SessionId;
 /// Immutable owner-issued capabilities for one successfully opened session.
 ///
 /// Construction stays inside the facade open/materialize paths. The store,
-/// effect host, process/queue ports, trigger store, and catalog are captured
+/// effect host, process/queue ports, backend, and catalog are captured
 /// together from the core's one backend so later per-session operations
 /// cannot independently consult a core override.
 #[derive(Clone)]
@@ -17,9 +17,7 @@ pub(crate) struct BoundSession {
     effect_host: Arc<dyn EffectHost>,
     process: ProcessWorkWiring,
     queued: Arc<dyn QueuedWorkSubstrate>,
-    trigger_store: Option<Arc<dyn lash_core::TriggerStore>>,
-    process_definitions: Option<Arc<dyn lash_core::ProcessDefinitionRegistry>>,
-    child_store_provider: Option<Arc<dyn SessionStoreFactory>>,
+    backend: Arc<dyn lash_core::Backend>,
     attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
@@ -45,9 +43,7 @@ impl BoundSession {
             effect_host,
             process,
             queued,
-            trigger_store: env.trigger_store.clone(),
-            process_definitions: env.process_definitions.clone(),
-            child_store_provider: env.session_store_factory.clone(),
+            backend: Arc::clone(env.core.backend()),
             attachment_store: Arc::clone(&env.core.durability.attachment_store),
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
             process_engines: env.core.process_engines.clone(),
@@ -86,7 +82,7 @@ impl BoundSession {
             self.catalog(),
             self.effect_host(),
             Some(self.process.clone()),
-            self.trigger_store.clone(),
+            Some(self.backend.trigger_store()),
             Arc::clone(&self.process_env_store),
             self.process_engines.clone(),
         )
@@ -96,12 +92,8 @@ impl BoundSession {
     /// Provider, plugin, prompt, tracing, and policy configuration continue to
     /// come from the core performing resume.
     pub(crate) fn apply_owner(&self, mut env: RuntimeEnvironment) -> RuntimeEnvironment {
+        env.core = env.core.with_backend(Arc::clone(&self.backend));
         env.core.control.effect_host = self.effect_host();
-        env.trigger_store = self.trigger_store.clone();
-        if let Some(registry) = self.process_definitions.as_ref() {
-            env.process_definitions = Some(Arc::clone(registry));
-        }
-        env.session_store_factory = self.child_store_provider.clone();
         env.core.durability.attachment_store = Arc::clone(&self.attachment_store);
         env.core.durability.process_env_store = Arc::clone(&self.process_env_store);
         env.with_work_ports(Some(self.process.clone()), Arc::clone(&self.queued))

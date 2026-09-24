@@ -18,7 +18,8 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
         Arc::clone(&registry),
         store_factory,
         vec![counting_tool_plugin(Arc::clone(&executions))],
-    );
+    )
+    .await;
     let context = Arc::new(ReplayableRecordingContext::default());
 
     let first_controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));

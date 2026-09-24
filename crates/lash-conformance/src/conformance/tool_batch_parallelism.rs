@@ -1076,14 +1076,17 @@ async fn drive_turn(
             }
         })
         .build();
-    // Constructed on the tier's host rather than `in_memory` with the field
-    // overwritten: `RuntimeHostConfig::new` installs the tool-child resolver
-    // on the effect host it is given, and a later `control.effect_host` swap
-    // would leave the resolver registered on the discarded host.
-    let mut host = crate::RuntimeHostConfig::new(
-        Arc::clone(&world.effect_host),
-        Arc::new(crate::InMemoryAttachmentStore::new()),
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+    // The tier's host is the backend's effect host rather than a field
+    // overwritten later: `RuntimeHostConfig::new` installs the tool-child
+    // resolver on the effect host it is given, and a later
+    // `control.effect_host` swap would leave the resolver registered on the
+    // discarded host.
+    let mut backend =
+        crate::LawBackend::in_process().with_effect_host(Arc::clone(&world.effect_host));
+    if let Some(registry) = world.process_registry.as_ref() {
+        backend = backend.with_process_registry(Arc::clone(registry));
+    }
+    let mut host = backend.host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );
@@ -1104,11 +1107,7 @@ async fn drive_turn(
     // that issues its batch from the turn still gets the plain one-turn
     // fixture.
     let plugin_host = crate::facade_support::PluginHost::new(world.factories.clone());
-    let mut builder = crate::LashRuntime::builder(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-        crate::testing::runtime_lease_owner(),
-    );
+    let mut process_wiring = None;
     let mut process_worker = None;
     if let Some(registry) = world.process_registry.as_ref() {
         host = plugin_host
@@ -1121,9 +1120,7 @@ async fn drive_turn(
         let port = Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
             watched.registry(),
         )));
-        builder = builder
-            .with_process_registry(Arc::clone(watched.registry()))
-            .with_process_work(crate::ProcessWorkWiring::new(watched.clone(), port));
+        process_wiring = Some(crate::ProcessWorkWiring::new(watched.clone(), port));
         process_worker = Some(
             lash_core_worker::DurableProcessWorker::new(
                 lash_core_worker::DurableProcessWorkerConfig::new(
@@ -1131,7 +1128,6 @@ async fn drive_turn(
                         world.factories.clone(),
                     )),
                     host.clone(),
-                    Arc::new(crate::InMemorySessionStoreFactory::new()),
                     lash_core_worker::WorkerProcessWork::SelfNative(watched),
                     Arc::new(crate::NoQueuedWork::new()),
                     crate::testing::runtime_lease_owner(),
@@ -1141,12 +1137,15 @@ async fn drive_turn(
             .expect("build the tool-batch parallelism process worker"),
         );
     }
+    let mut builder = crate::LashRuntime::builder(host, crate::testing::runtime_lease_owner());
+    if let Some(wiring) = process_wiring {
+        builder = builder.with_process_work(wiring);
+    }
     let mut runtime = Box::pin(
         builder
             .with_session_id(&world.session_id)
             .with_policy(policy)
             .with_initial_state(state)
-            .with_runtime_host(host)
             .with_plugin_host(plugin_host)
             .with_store(Arc::new(crate::InMemorySessionStore::new()))
             .with_queued_work(Arc::new(crate::NoQueuedWork::new()))

@@ -962,14 +962,17 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
         "invocation-rlm-cell",
     )
     .bind_attempt(2);
-    let controller = lash_core::facade_support::NativeRuntimeEffectController::default();
+    // The trace identity reads the context alone and the cell never runs, so
+    // the process scope needs no journaling host.
+    let controller: Arc<dyn lash_core::RuntimeEffectController> =
+        Arc::new(lash_core::testing::UnavailableEffectController);
     let admitted_process = lash_core::ProcessRef::new(
         process_id.clone(),
         lash_core::ProcessIncarnation::from_registration_sequence(1),
     );
     let process_controller = || {
-        lash_core::ScopedEffectController::borrowed(
-            &controller,
+        lash_core::ScopedEffectController::shared(
+            Arc::clone(&controller),
             lash_core::AdmittedScope::process(admitted_process.clone()),
         )
         .expect("process scope")

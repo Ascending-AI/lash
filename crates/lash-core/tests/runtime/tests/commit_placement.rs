@@ -1,129 +1,22 @@
 use super::*;
 
-#[derive(Default)]
-struct JournaledCommitController<const ENGINE: bool> {
-    native: lash_core::facade_support::NativeRuntimeEffectController,
-}
+/// A layer whose controllers own commit backpressure exactly when `ENGINE`,
+/// the way an engine-backed controller does, over a store-journaled host.
+struct JournaledCommitController<const ENGINE: bool>;
 
-#[async_trait::async_trait]
-impl<const ENGINE: bool> lash_core::AwaitEventResolver for JournaledCommitController<ENGINE> {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(format!("commit-controller:{:p}", &self.native))
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, RuntimeError> {
-        self.native.peek_await_event(key).await
-    }
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<lash_core::Resolution, RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-}
-
-#[async_trait::async_trait]
-impl<const ENGINE: bool> lash_core::RuntimeEffectController for JournaledCommitController<ENGINE> {
-    fn owns_commit_backpressure(&self) -> bool {
+impl<const ENGINE: bool> lash_core::testing::EffectLayer for JournaledCommitController<ENGINE> {
+    fn owns_commit_backpressure(&self, _inner: &dyn lash_core::RuntimeEffectController) -> bool {
         ENGINE
-    }
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
-        lash_core::EffectJournaling::Journaled
-    }
-    async fn execute_effect(
-        &self,
-        envelope: lash_core::RuntimeEffectEnvelope,
-        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
-        self.native.execute_effect(envelope, local_executor).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.native.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.register_group_executors(executors)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.native.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.close_effect_group(handle, disposition).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
     }
 }
 
 async fn assert_commit_placement(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
     session_id: &SessionId,
     effect_host: Arc<dyn lash_core::EffectHost>,
     expected_entries: usize,
 ) {
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(backend).await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -135,9 +28,9 @@ async fn assert_commit_placement(
         }),
     }]);
     let host = EmbeddedRuntimeHost::new(
-        test_runtime_host_config().with_effect_host(Arc::clone(&effect_host)),
+        test_runtime_host_config(backend).with_effect_host(Arc::clone(&effect_host)),
     );
-    let mut runtime = TestRuntime::new(transport)
+    let mut runtime = TestRuntime::new(backend, transport)
         .host(host)
         .store(store.clone())
         .with_session_id(session_id)
@@ -207,24 +100,17 @@ async fn assert_commit_placement(
 }
 
 /// The host an engine-owned controller is lent through.
-fn engine_commit_host() -> Arc<dyn lash_core::EffectHost> {
-    effect::controller_effect_host(Arc::new(JournaledCommitController::<true>::default()))
-}
-
-/// A SQLite memory backend's effect host: a store-journaled host that owns
-/// no commit backpressure.
-async fn store_commit_host() -> Arc<dyn lash_core::EffectHost> {
-    lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open a memory backend")
-        .effect_host()
+fn engine_commit_host(backend: &Arc<dyn lash_core::Backend>) -> Arc<dyn lash_core::EffectHost> {
+    effect::layered_effect_host(backend, Arc::new(JournaledCommitController::<true>))
 }
 
 #[tokio::test]
 async fn durable_journaled_engine_commits_bypass_local_admission() {
+    let backend = memory_backend().await;
     Box::pin(assert_commit_placement(
+        &backend,
         &SessionId::from("engine-commit-placement"),
-        engine_commit_host(),
+        engine_commit_host(&backend),
         0,
     ))
     .await;
@@ -232,9 +118,11 @@ async fn durable_journaled_engine_commits_bypass_local_admission() {
 
 #[tokio::test]
 async fn store_host_commits_enter_local_admission() {
+    let backend = memory_backend().await;
     Box::pin(assert_commit_placement(
+        &backend,
         &SessionId::from("store-host-commit-placement"),
-        store_commit_host().await,
+        backend.effect_host(),
         1,
     ))
     .await;
@@ -242,9 +130,11 @@ async fn store_host_commits_enter_local_admission() {
 
 #[tokio::test]
 async fn store_journaled_commits_keep_native_admission() {
+    let backend = memory_backend().await;
     Box::pin(assert_commit_placement(
+        &backend,
         &SessionId::from("store-journaled-commit-placement"),
-        effect::controller_effect_host(Arc::new(JournaledCommitController::<false>::default())),
+        effect::layered_effect_host(&backend, Arc::new(JournaledCommitController::<false>)),
         1,
     ))
     .await;
@@ -257,9 +147,10 @@ impl lash_core::testing::EffectLayer for PassThrough {}
 
 #[tokio::test]
 async fn commit_admission_ownership_survives_controller_wrappers() {
+    let backend = memory_backend().await;
     let hosts: [(Arc<dyn lash_core::EffectHost>, bool); 2] = [
-        (engine_commit_host(), true),
-        (store_commit_host().await, false),
+        (engine_commit_host(&backend), true),
+        (backend.effect_host(), false),
     ];
     for (inner, expected) in hosts {
         let host = lash_core::testing::LayeredEffectHost::new(inner, Arc::new(PassThrough));
@@ -277,8 +168,10 @@ async fn commit_admission_ownership_survives_controller_wrappers() {
 
 #[tokio::test]
 async fn invocation_controller_owns_session_command_admission_with_a_native_host() {
+    let backend = memory_backend().await;
     let session_id = "invocation-command-placement";
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
+        &backend,
         mock_provider(Vec::new()),
         &SessionId::from(session_id),
     )
@@ -308,12 +201,13 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
     .unwrap()
     .acquired()
     .unwrap();
-    let controller = JournaledCommitController::<true>::default();
+    let controller =
+        effect::layered_operation_controller(&backend, Arc::new(JournaledCommitController::<true>));
     runtime
         .drain_next_session_command_with_cancellation(
             &lease.fence(),
             CancellationToken::new(),
-            &controller,
+            controller.as_ref(),
         )
         .await
         .unwrap()

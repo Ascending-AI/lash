@@ -1,4 +1,3 @@
-use lash_core::ProcessRegistrar as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::BTreeSet;
@@ -841,7 +840,10 @@ impl lash_core::ToolProvider for StandardIntentProvider {
 
 #[tokio::test]
 async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback() {
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend");
+    let registry = lash_core::Backend::process_registry(&backend);
     registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
@@ -872,7 +874,6 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         )
         .await
         .expect("register Standard intent target");
-    let registry: Arc<dyn lash_core::ProcessRegistry> = registry;
     let requests = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let model_calls = Arc::new(AtomicUsize::new(0));
     let provider = lash_core::testing::TestProvider::builder()
@@ -933,23 +934,28 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
     };
     let watched = lash_core::facade_support::watch_process_registry(registry);
     let registry = Arc::clone(watched.registry());
-    let mut runtime = lash_core::facade_support::LashRuntime::builder(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-        lash_core::testing::runtime_lease_owner(),
+    let mut runtime = Box::pin(
+        lash_core::facade_support::LashRuntime::builder(
+            lash_core::facade_support::RuntimeHostConfig::new(
+                Arc::new(backend),
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::QueuedWorkBatchingConfig::new(1),
+            ),
+            lash_core::testing::runtime_lease_owner(),
+        )
+        .with_session_id("standard-protocol-scenario")
+        .with_policy(policy)
+        .with_plugin_factories(factories)
+        .with_provider_resolver(Arc::new(
+            lash_core::facade_support::SingleProviderResolver::new(provider.into_handle()),
+        ))
+        .with_process_work(lash_core::ProcessWorkWiring::new(
+            watched,
+            Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
+        ))
+        .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+        .build(),
     )
-    .with_session_id("standard-protocol-scenario")
-    .with_policy(policy)
-    .with_plugin_factories(factories)
-    .with_provider_resolver(Arc::new(
-        lash_core::facade_support::SingleProviderResolver::new(provider.into_handle()),
-    ))
-    .with_process_work(lash_core::ProcessWorkWiring::new(
-        watched,
-        Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
-    ))
-    .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
-    .build()
     .await
     .expect("build Standard intent runtime");
     let turn = runtime

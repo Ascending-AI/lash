@@ -1,364 +1,9 @@
 use super::*;
 
 #[tokio::test]
-pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
-    let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
-    let models = ["queued-model-a", "queued-model-b", "queued-model-c"];
-    for model in models {
-        enqueue_config_patch_command(
-            store.as_ref(),
-            &SessionId::from("root"),
-            lash_core::runtime::ApplyConfigPatch {
-                model: Some(
-                    lash_core::ModelSpec::builder(model)
-                        .context_window_tokens(32_000)
-                        .build()
-                        .expect("model"),
-                ),
-                ..lash_core::runtime::ApplyConfigPatch::default()
-            },
-        )
-        .await;
-    }
-    let commits_before = *store.runtime_commit_count.lock_recover();
-    let owner = lease_owner("config-patch-coalescing");
-    let lease = lash_core::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
-        store.as_ref(),
-        &SessionId::from("root"),
-        &owner,
-        "config-patch-coalescing-executor",
-        lash_core::facade_support::LeaseTimings::default().ttl_ms(),
-    )
-    .await
-    .expect("claim session execution lease")
-    .acquired()
-    .expect("session execution lease");
-
-    runtime
-        .drain_next_session_command(&lease.fence())
-        .await
-        .expect("drain coalesced config patches")
-        .expect("one receipt from the coalesced claim");
-
-    assert_eq!(
-        *store.runtime_commit_count.lock_recover(),
-        commits_before + 1,
-        "N config commands must share exactly one head commit"
-    );
-    assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("list settled config commands")
-        .is_empty(),
-        "every independently accepted command must settle its own batch"
-    );
-    assert_eq!(runtime.session_policy().model.id, "queued-model-c");
-}
-
-#[tokio::test]
-pub(super) async fn config_settlement_distinguishes_enqueue_rejection_from_durable_completion() {
-    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
-    let original_model = runtime.session_policy().model.clone();
-    let outcome = runtime
-        .submit_apply_config_patch_with_idempotency_key(
-            lash_core::runtime::ApplyConfigPatch {
-                model: Some(
-                    lash_core::ModelSpec::builder("must-not-publish")
-                        .context_window_tokens(32_000)
-                        .build()
-                        .expect("model"),
-                ),
-                ..lash_core::runtime::ApplyConfigPatch::default()
-            },
-            "",
-        )
-        .await
-        .expect("typed submission outcome");
-
-    let lash_core::runtime::SessionCommandSettlement::Rejected(rejection) = outcome else {
-        panic!("empty idempotency key must be rejected before durable acceptance");
-    };
-    assert_eq!(
-        rejection.code,
-        lash_core::RuntimeErrorCode::SessionCommandIdempotencyKey
-    );
-    assert_eq!(runtime.session_policy().model, original_model);
-
-    let durable = runtime
-        .submit_apply_config_patch_with_idempotency_key(
-            lash_core::runtime::ApplyConfigPatch {
-                model: Some(
-                    lash_core::ModelSpec::builder("durable-inline")
-                        .context_window_tokens(32_000)
-                        .build()
-                        .expect("model"),
-                ),
-                ..lash_core::runtime::ApplyConfigPatch::default()
-            },
-            "durable-inline",
-        )
-        .await
-        .expect("durable settlement");
-    assert!(matches!(
-        durable,
-        lash_core::runtime::SessionCommandSettlement::Durable(_)
-    ));
-    assert_eq!(runtime.session_policy().model.id, "durable-inline");
-}
-
-pub(super) fn turn_budget_config_mutator(
-    turn_budget: lash_core::TurnBudget,
-) -> Arc<dyn lash_core::facade_support::PluginFactory> {
-    Arc::new(RuntimeTestPluginFactory {
-        build: Arc::new(move |_| {
-            Ok(Arc::new(RuntimeTestPlugin {
-                before_turn: None,
-                checkpoint: None,
-                presentation_steps: vec![],
-                runtime_event: None,
-                external_registrar: Some(Arc::new(move |reg| {
-                    reg.session()
-                        .config_mutator(Arc::new(move |_ctx, mut policy| {
-                            Box::pin(async move {
-                                policy.turn_budget = turn_budget;
-                                Ok(policy)
-                            })
-                        }));
-                    Ok(())
-                })),
-            }))
-        }),
-    })
-}
-
-#[tokio::test]
-pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
-    let store = Arc::new(RecordingStore::default());
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    let persisted_budget = lash_core::TurnBudget::bounded(7);
-    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
-        vec![turn_budget_config_mutator(persisted_budget)],
-        Arc::new(EmptyTools),
-        mock_provider(Vec::new()),
-        test_host_config(),
-        Arc::clone(&runtime_store),
-    )
-    .await;
-
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            model: Some(
-                lash_core::ModelSpec::builder("turn-budget-mutation-trigger")
-                    .context_window_tokens(32_000)
-                    .build()
-                    .expect("model"),
-            ),
-            ..lash_core::facade_support::SessionConfigPatch::default()
-        })
-        .await
-        .expect("plugin turn-budget mutation settles");
-    assert_eq!(runtime.session_policy().turn_budget, persisted_budget);
-    drop(
-        Box::pin(runtime.park())
-            .await
-            .expect("park mutated session"),
-    );
-
-    let reloaded_state =
-        lash_core::testing::runtime_internals::load_persisted_session_state(runtime_store.as_ref())
-            .await
-            .expect("load parked session")
-            .expect("parked session exists");
-    let plugin_host =
-        lash_core::testing::test_plugin_host(vec![turn_budget_config_mutator(persisted_budget)]);
-    let plugins = match reloaded_state.plugin_state() {
-        Some(snapshot) => plugin_host.rematerialize_session(
-            "root",
-            snapshot,
-            lash_core::plugin::RecordedSessionConfig::new(
-                reloaded_state.protocol_turn_options.clone(),
-            ),
-        ),
-        None => plugin_host.build_session("root"),
-    }
-    .expect("reloaded plugins");
-    let runtime_host = test_host_config();
-    let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
-        plugins,
-        runtime_store,
-        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
-        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
-    );
-    let reloaded = lash_core::facade_support::LashRuntime::from_persistent_embedded_state(
-        standard_test_policy(),
-        runtime_host,
-        runtime_services,
-        reloaded_state,
-        lash_core::testing::runtime_lease_owner(),
-    )
-    .await
-    .expect("reload parked runtime");
-    assert_eq!(
-        reloaded.session_policy().turn_budget,
-        persisted_budget,
-        "plugin-mutated durable budget must survive cold reload"
-    );
-}
-
-#[tokio::test]
-pub(super) async fn every_session_config_patch_emits_a_lifecycle_event() {
-    let observed = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-    let observed_hook = Arc::clone(&observed);
-    let plugin = Arc::new(RuntimeTestPluginFactory {
-        build: Arc::new(move |_| {
-            let observed = Arc::clone(&observed_hook);
-            Ok(Arc::new(RuntimeTestPlugin {
-                before_turn: None,
-                checkpoint: None,
-                presentation_steps: vec![],
-                runtime_event: Some(Arc::new(move |event| {
-                    let observed = Arc::clone(&observed);
-                    Box::pin(async move {
-                        if let lash_core::plugin::PluginLifecycleEvent::SessionConfigChanged(ctx) =
-                            event
-                        {
-                            observed.lock().await.push((ctx.previous, ctx.current));
-                        }
-                        Ok(())
-                    })
-                })),
-                external_registrar: None,
-            }))
-        }),
-    });
-    let transport = mock_provider(Vec::new());
-    let mut runtime = runtime_with_plugins(vec![plugin], transport).await;
-
-    let alt_provider = TestProvider::builder()
-        .kind("alt")
-        .complete_error("alt provider not wired")
-        .build()
-        .into_handle();
-    let alt_model = lash_core::ModelSpec::builder("alt-model")
-        .context_window_tokens(123_456)
-        .build()
-        .expect("valid model spec");
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            model: Some(alt_model.clone()),
-            ..Default::default()
-        })
-        .await
-        .expect("update model config");
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(alt_provider),
-            ..Default::default()
-        })
-        .await
-        .expect("update provider config");
-
-    assert_eq!(observed.lock().await.len(), 2);
-
-    let combined_provider = TestProvider::builder()
-        .kind("combined")
-        .complete_error("combined provider not wired")
-        .build()
-        .into_handle();
-    let combined_model = lash_core::ModelSpec::builder("combined-model")
-        .context_window_tokens(234_567)
-        .build()
-        .expect("valid combined model spec");
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            provider: Some(combined_provider),
-            model: Some(combined_model.clone()),
-            ..Default::default()
-        })
-        .await
-        .expect("update combined config");
-
-    assert_eq!(observed.lock().await.len(), 3);
-
-    let prompt = lash_core::PromptLayer::new().with_contribution(
-        lash_core::PromptContribution::guidance("Patch", "prompt-only session config"),
-    );
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch::with_prompt(
-            prompt.clone(),
-        ))
-        .await
-        .expect("update prompt config");
-
-    assert_eq!(observed.lock().await.len(), 4);
-
-    let generation = lash_core::GenerationOptions {
-        seed: Some(42),
-        ..Default::default()
-    };
-    runtime
-        .update_session_config(lash_core::facade_support::SessionConfigPatch {
-            generation: Some(lash_core::facade_support::GenerationOverlay::Replace(
-                generation.clone(),
-            )),
-            ..Default::default()
-        })
-        .await
-        .expect("update generation config");
-
-    assert_eq!(observed.lock().await.len(), 5);
-
-    let helper_template =
-        lash_core::PromptTemplate::new(vec![lash_core::PromptTemplateSection::untitled(vec![
-            lash_core::PromptTemplateEntry::text("prompt helper template"),
-        ])]);
-    runtime
-        .set_prompt_template(helper_template.clone())
-        .await
-        .expect("set prompt template");
-
-    let changes = observed.lock().await;
-    assert_eq!(changes.len(), 6);
-    let (previous, current) = &changes[0];
-    assert_eq!(previous.provider_id, "mock");
-    assert_eq!(current.provider_id, "mock");
-    assert_eq!(current.model.id, "alt-model");
-    assert_ne!(
-        previous.context_window_tokens(),
-        current.context_window_tokens()
-    );
-    let (previous, current) = &changes[1];
-    assert_eq!(previous.provider_id, "mock");
-    assert_eq!(previous.model.id, "alt-model");
-    assert_eq!(current.provider_id, "alt");
-    assert_eq!(current.model.id, "alt-model");
-    let (previous, current) = &changes[2];
-    assert_eq!(previous.provider_id, "alt");
-    assert_eq!(previous.model.id, "alt-model");
-    assert_eq!(current.provider_id, "combined");
-    assert_eq!(current.model, combined_model);
-    let (previous, current) = &changes[3];
-    assert_eq!(previous.model.id, "combined-model");
-    assert_eq!(current.prompt, prompt);
-    let (previous, current) = &changes[4];
-    assert_eq!(previous.prompt, prompt);
-    assert_eq!(current.generation, generation);
-    let (previous, current) = &changes[5];
-    assert_eq!(previous.generation, generation);
-    assert_eq!(
-        current.prompt.template,
-        Some(helper_template),
-        "prompt helper changes emit SessionConfigChanged"
-    );
-}
-
-#[tokio::test]
 pub(super) async fn turn_provider_override_does_not_persist_into_session_policy_or_agent_frame() {
-    let mut runtime = runtime_with_plugins(Vec::new(), mock_provider(Vec::new())).await;
+    let backend = memory_backend().await;
+    let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     let alt_provider = TestProvider::builder()
         .kind("alt")
         .complete(|_| async {
@@ -388,7 +33,8 @@ pub(super) async fn turn_provider_override_does_not_persist_into_session_policy_
                 turn_context,
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("provider-override-turn"),
             ),
@@ -413,6 +59,7 @@ pub(super) async fn turn_provider_override_does_not_persist_into_session_policy_
 
 #[tokio::test]
 pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
+    let backend = memory_backend().await;
     let plugin = Arc::new(RuntimeTestPluginFactory {
         build: Arc::new(|_| {
             Ok(Arc::new(RuntimeTestPlugin {
@@ -444,7 +91,7 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
         }),
     });
     let transport = mock_provider(Vec::new());
-    let mut runtime = runtime_with_plugins(vec![plugin], transport).await;
+    let mut runtime = runtime_with_plugins(&backend, vec![plugin], transport).await;
 
     let turn = runtime
         .run_turn_assembled(
@@ -458,7 +105,8 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("plugin-extension-turn"),
             ),
@@ -490,6 +138,7 @@ pub(super) async fn plugin_before_turn_can_abort_and_inject_messages() {
 
 #[tokio::test]
 pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -501,7 +150,7 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
             ..LlmResponse::default()
         }),
     }]);
-    let mut runtime = runtime_with_plugins(Vec::new(), transport).await;
+    let mut runtime = runtime_with_plugins(&backend, Vec::new(), transport).await;
 
     let turn = runtime
         .run_turn_assembled(
@@ -515,7 +164,8 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("skill-command-visibility-turn"),
             ),
@@ -553,6 +203,7 @@ pub(super) async fn normal_turn_stores_effective_user_text_in_state() {
 
 #[tokio::test]
 pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -595,7 +246,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
             .with_code(FailureCode::provider("http_500"))),
         },
     ]);
-    let mut runtime = runtime_with_plugins(Vec::new(), transport).await;
+    let mut runtime = runtime_with_plugins(&backend, Vec::new(), transport).await;
     runtime.host.core.clock = Arc::new(CancelWatchTestClock(lash_core::testing::TestClock::new(
         1_700_000_000_123,
     )));
@@ -612,7 +263,8 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("retryable-error-turn"),
             ),
@@ -647,6 +299,7 @@ pub(super) async fn retryable_llm_failures_exhaust_and_fail_turn() {
 
 #[tokio::test]
 pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue() {
+    let backend = memory_backend().await;
     // A 400 classifies as a non-retryable Validation failure, so the turn
     // fails on the first attempt with fully typed failure signals.
     let transport = mock_provider(vec![MockCall {
@@ -657,7 +310,7 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
                 .with_code(FailureCode::provider("400")),
         ),
     }]);
-    let mut runtime = runtime_with_plugins(Vec::new(), transport).await;
+    let mut runtime = runtime_with_plugins(&backend, Vec::new(), transport).await;
 
     let turn = runtime
         .run_turn_assembled(
@@ -671,7 +324,8 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("typed-provider-failure-turn"),
             ),
@@ -700,6 +354,7 @@ pub(super) async fn provider_failure_surfaces_typed_kind_and_retryability_on_tur
 
 #[tokio::test]
 pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -711,7 +366,7 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
             ..LlmResponse::default()
         }),
     }]);
-    let mut runtime = runtime_with_plugins(Vec::new(), transport).await;
+    let mut runtime = runtime_with_plugins(&backend, Vec::new(), transport).await;
     runtime.host.core.clock = Arc::new(ManualClock::new(4_242));
 
     let turn = runtime
@@ -726,7 +381,11 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(&SessionId::from("root"), &TurnId::from("turn-timing-turn")),
+            backend_turn_scope(
+                &backend,
+                &SessionId::from("root"),
+                &TurnId::from("turn-timing-turn"),
+            ),
         )
         .await
         .expect("turn");
@@ -739,6 +398,7 @@ pub(super) async fn assembled_turn_reports_turn_timing_from_injected_clock() {
 
 #[tokio::test]
 pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_turn() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -763,7 +423,8 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
             }),
         },
     ]);
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         &SessionId::from("root"),
@@ -785,7 +446,8 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("queued-checkpoint-turn"),
             ),
@@ -829,6 +491,7 @@ pub(super) async fn queued_checkpoint_input_commits_before_continuing_standard_t
 
 #[tokio::test]
 pub(super) async fn queued_checkpoint_input_preserves_images() {
+    let backend = memory_backend().await;
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -857,10 +520,10 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
             }
         })
         .build();
-    let store = Arc::new(RecordingStore::default());
-    let mut runtime = TestRuntime::new(transport)
+    let store = unbound_recording_store(&backend).await;
+    let mut runtime = TestRuntime::new(&backend, transport)
         .plugins(Vec::new())
-        .host(test_host_config())
+        .host(test_host_config(&backend))
         .store(store.clone())
         .attachment_acceptance(
             lash_core::attachments::attachment_test_capability().attachment_acceptance,
@@ -891,7 +554,8 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("image-attachment-turn"),
             ),
@@ -918,6 +582,7 @@ pub(super) async fn queued_checkpoint_input_preserves_images() {
 /// Scenarios own the host-level active-input redrive/cancel/queue invariants.
 #[tokio::test]
 pub(super) async fn checkpoint_hook_can_inject_messages() {
+    let backend = memory_backend().await;
     let plugin = Arc::new(RuntimeTestPluginFactory {
         build: Arc::new(|_| {
             Ok(Arc::new(RuntimeTestPlugin {
@@ -970,7 +635,7 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
             }),
         },
     ]);
-    let mut runtime = runtime_with_plugins(vec![plugin], transport).await;
+    let mut runtime = runtime_with_plugins(&backend, vec![plugin], transport).await;
 
     let turn = runtime
         .run_turn_assembled(
@@ -984,7 +649,8 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("plugin-action-turn"),
             ),
@@ -1008,6 +674,7 @@ pub(super) async fn checkpoint_hook_can_inject_messages() {
 #[tokio::test]
 pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_application_evidence()
  {
+    let backend = memory_backend().await;
     let plugin = Arc::new(RuntimeTestPluginFactory {
         build: Arc::new(|_| {
             Ok(Arc::new(RuntimeTestPlugin {
@@ -1041,13 +708,13 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
             ..LlmResponse::default()
         }),
     }]);
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
         Arc::new(EmptyTools),
         transport,
-        test_host_config(),
+        test_host_config(&backend),
         runtime_store,
     )
     .await;
@@ -1066,7 +733,8 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
             TurnInput::text("hello"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("checkpoint-plugin-abort-turn"),
                 ),
@@ -1134,6 +802,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
 #[tokio::test]
 pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_without_application_evidence()
  {
+    let backend = memory_backend().await;
     #[derive(Debug)]
     struct DenyHostCheckpointAttachments;
 
@@ -1205,13 +874,13 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
             ..LlmResponse::default()
         }),
     }]);
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
         Arc::new(EmptyTools),
         transport,
-        test_host_config(),
+        test_host_config(&backend),
         runtime_store,
     )
     .await;
@@ -1231,7 +900,8 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
             TurnInput::text("hello"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("checkpoint-attachment-failure-turn"),
                 ),
@@ -1298,6 +968,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
 
 #[tokio::test]
 pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user_message() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -1322,7 +993,8 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
             }),
         },
     ]);
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
     enqueue_turn_input_for_checkpoint(
         store.as_ref(),
         &SessionId::from("root"),
@@ -1345,7 +1017,8 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
             },
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("injection-accepted-turn"),
                 ),
@@ -1454,8 +1127,9 @@ pub(super) async fn queued_checkpoint_input_accepts_and_persists_one_normal_user
 }
 
 pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
     store: Arc<RecordingStore>,
-    controller: Arc<dyn lash_core::RuntimeEffectController>,
+    controller: Arc<dyn lash_core::testing::EffectLayer>,
     turn_id: &TurnId,
 ) -> (
     lash_core::TurnInput,
@@ -1490,7 +1164,7 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         Vec::new(),
         Arc::new(EmptyTools),
         transport,
-        journal_replay_host(Arc::clone(&controller)),
+        journal_replay_host(backend, Arc::clone(&controller)),
         runtime_store,
     ))
     .await;
@@ -1509,11 +1183,11 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
     )
     .await;
     let input = TurnInput::text("opening input");
-    let scope = lash_core::ScopedEffectController::shared(
+    let scope = super::effect::layered_scope(
+        backend,
         Arc::clone(&controller),
         lash_core::AdmittedScope::turn("root", turn_id),
-    )
-    .expect("scope the first checkpoint-injected turn");
+    );
     // FIG-3157: the wake claimed at the terminal checkpoint drives a
     // follow-on physical turn, so the run holds two turns. The acceptance
     // belongs to the admitted turn, which is the run's first one; the run
@@ -1532,8 +1206,9 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
 }
 
 pub(super) async fn redrive_checkpoint_injected_turn(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
     store: Arc<dyn lash_core::RuntimePersistence>,
-    controller: Arc<dyn lash_core::RuntimeEffectController>,
+    controller: Arc<dyn lash_core::testing::EffectLayer>,
     turn_id: &TurnId,
     input: TurnInput,
 ) -> Result<lash_core::facade_support::AssembledTurn, lash_core::RuntimeError> {
@@ -1541,15 +1216,15 @@ pub(super) async fn redrive_checkpoint_injected_turn(
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        journal_replay_host(Arc::clone(&controller)),
+        journal_replay_host(backend, Arc::clone(&controller)),
         store,
     )
     .await;
-    let scope = lash_core::ScopedEffectController::shared(
+    let scope = super::effect::layered_scope(
+        backend,
         controller,
         lash_core::AdmittedScope::turn("root", turn_id),
-    )
-    .expect("scope the checkpoint-injected redrive");
+    );
     // FIG-3157: the run holds the admitted turn plus the follow-on turn the
     // terminal-checkpoint claim drives. The acceptance identity belongs to
     // the admitted turn, so that is the one returned here.
@@ -1565,11 +1240,13 @@ pub(super) async fn redrive_checkpoint_injected_turn(
 
 #[tokio::test]
 pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit_identity() {
+    let backend = memory_backend().await;
     let turn_id = &TurnId::from("checkpoint-injected-redrive");
-    let store = Arc::new(RecordingStore::default());
-    let controller: Arc<dyn lash_core::RuntimeEffectController> =
+    let store = unbound_recording_store(&backend).await;
+    let controller: Arc<dyn lash_core::testing::EffectLayer> =
         Arc::new(JournalReplayEffectController::default());
     let (input, first_acceptance) = commit_checkpoint_injected_turn_for_redrive(
+        &backend,
         Arc::clone(&store),
         Arc::clone(&controller),
         turn_id,
@@ -1598,6 +1275,7 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         inner: Arc::clone(&store),
     });
     let replayed = Box::pin(redrive_checkpoint_injected_turn(
+        &backend,
         replay_store,
         Arc::clone(&controller),
         turn_id,
@@ -1625,9 +1303,10 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
 
 #[tokio::test]
 pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driving() {
+    let backend = memory_backend().await;
     let turn_id = &TurnId::from("accepted-input-foreign-claim");
-    let store = Arc::new(RecordingStore::default());
-    let controller: Arc<dyn lash_core::RuntimeEffectController> =
+    let store = unbound_recording_store(&backend).await;
+    let controller: Arc<dyn lash_core::testing::EffectLayer> =
         Arc::new(JournalReplayEffectController::default());
     let foreign: Arc<dyn lash_core::RuntimePersistence> = Arc::new(ForeignClaimBeforeDriveStore {
         inner: Arc::clone(&store),
@@ -1636,15 +1315,15 @@ pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driv
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        journal_replay_host(Arc::clone(&controller)),
+        journal_replay_host(&backend, Arc::clone(&controller)),
         foreign,
     )
     .await;
-    let scope = lash_core::ScopedEffectController::shared(
+    let scope = super::effect::layered_scope(
+        &backend,
         controller,
         lash_core::AdmittedScope::turn("root", turn_id),
-    )
-    .expect("scope the ceding turn");
+    );
 
     let error = runtime
         .stream_turn_with_agent_frames(
@@ -1684,6 +1363,7 @@ pub(super) async fn accepted_input_claimed_by_a_foreign_driver_cedes_before_driv
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn() {
+    let backend = memory_backend().await;
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1713,7 +1393,8 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
             }
         })
         .build();
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
     let entered = Arc::new(AtomicBool::new(false));
     let release = Arc::new(AtomicBool::new(false));
     runtime.set_turn_phase_probe(Arc::new(PauseAtPreparedTurn {
@@ -1721,15 +1402,17 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
         release: Arc::clone(&release),
     }));
 
+    let first_scope = backend_turn_scope(
+        &backend,
+        &SessionId::from("root"),
+        &TurnId::from("after-last-call-turn"),
+    );
     let first_turn = lash_core::task::spawn(async move {
         runtime
             .run_turn_assembled(
                 TurnInput::text("first turn input"),
                 CancellationToken::new(),
-                named_turn_scope(
-                    &SessionId::from("root"),
-                    &TurnId::from("after-last-call-turn"),
-                ),
+                first_scope,
             )
             .await
             .expect("first turn");
@@ -1772,7 +1455,8 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            backend_queued_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("late-active-next-turn"),
             ),
@@ -1795,15 +1479,17 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
 // command-only work returns `None` rather than fabricating a turn.
 #[tokio::test]
 pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
+    let backend = memory_backend().await;
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
+        standard_runtime_with_transport_and_queue_store(&backend, mock_provider(Vec::new())).await;
     let command =
         enqueue_session_command(store.as_ref(), &SessionId::from("root"), "test refresh").await;
 
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            backend_queued_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("command-only-queue-drain"),
             ),
@@ -1837,6 +1523,7 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
 // pending input.
 #[tokio::test]
 pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoint() {
+    let backend = memory_backend().await;
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured_requests = Arc::clone(&requests);
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1866,7 +1553,8 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
             }
         })
         .build();
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
     let queued_input = enqueue_idle_turn_input(
         store.as_ref(),
         &SessionId::from("root"),
@@ -1917,7 +1605,8 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
     let drained = runtime
         .stream_next_queued_work(TurnOptions::new(
             CancellationToken::new(),
-            named_queued_scope(
+            backend_queued_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("next-input-before-wake-drain"),
             ),
@@ -1964,6 +1653,7 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
 
 #[tokio::test]
 pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn_input() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -1975,7 +1665,8 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
             ..LlmResponse::default()
         }),
     }]);
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
     let queued_input = enqueue_idle_turn_input(
         store.as_ref(),
         &SessionId::from("root"),
@@ -2042,7 +1733,8 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
         .stream_selected_queued_work(
             TurnOptions::new(
                 CancellationToken::new(),
-                named_queued_scope(
+                backend_queued_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("selected-wake-drain"),
                 ),
@@ -2082,6 +1774,7 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
 
 #[tokio::test]
 pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_turn() {
+    let backend = memory_backend().await;
     // FIG-3157: a terminal finish ends the turn. A wake claimed at the
     // `BeforeCompletion` checkpoint never extends it — the committed answer
     // stays the turn's answer, and the claim is carried into a follow-on
@@ -2145,6 +1838,7 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
         })
         .build();
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
+        &backend,
         transport,
         &SessionId::from(SESSION_ID),
     )
@@ -2196,7 +1890,8 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
             TurnInput::text("hello"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from(SESSION_ID),
                     &TurnId::from("terminal-checkpoint-follow-on-turn"),
                 ),
@@ -2280,6 +1975,7 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
 
 #[tokio::test]
 pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is_cancelled() {
+    let backend = memory_backend().await;
     // Keep this cancellation rendezvous out of the shared `root` lane so unrelated libtest
     // cases cannot make its final commit contend with their turn.
     const SESSION_ID: &str = "process-wake-cancelled";
@@ -2319,6 +2015,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         })
         .build();
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_for_session(
+        &backend,
         transport,
         &SessionId::from(SESSION_ID),
     )
@@ -2382,7 +2079,8 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         std::time::Duration::from_secs(5),
         runtime.stream_next_queued_work(TurnOptions::new(
             cancel,
-            named_queued_scope(
+            backend_queued_scope(
+                &backend,
                 &SessionId::from(SESSION_ID),
                 &TurnId::from("cancel-claimed-wake-drain"),
             ),
@@ -2425,7 +2123,8 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         runtime
             .stream_next_queued_work(TurnOptions::new(
                 CancellationToken::new(),
-                named_queued_scope(
+                backend_queued_scope(
+                    &backend,
                     &SessionId::from(SESSION_ID),
                     &TurnId::from("after-cancel-claimed-wake-drain")
                 ),

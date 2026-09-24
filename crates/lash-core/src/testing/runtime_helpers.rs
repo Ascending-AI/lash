@@ -14,14 +14,13 @@ use crate::*;
 use lash_sansio::sync::MutexExt;
 use serde_json::json;
 use std::path::PathBuf;
-use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-// The public in-memory store is the single in-memory `RuntimePersistence` impl;
-// tests use it under the historical `RecordingStore` name (its `pub`
-// fields + recording-count getters back the existing assertions).
-pub use crate::runtime::InMemorySessionStore as RecordingStore;
+pub use super::layered_backend::LayeredBackend;
+pub use super::recording_store::{
+    RecordingSessionStoreFactory, RecordingStore, SessionExecutionLeaseReleaseGate,
+};
 
 pub struct FixedAttachmentRoots(pub std::collections::BTreeSet<crate::AttachmentId>);
 
@@ -51,69 +50,14 @@ pub fn default_state() -> RuntimeSessionState {
     state
 }
 
-/// Stand-alone scoped controller backed by a wired `NativeEffectHost` (group
-/// executors registered), not a bare controller: turns driven through this
-/// scope now open effect groups for their tool calls, and a group open against
-/// a controller with no registered `GroupExecutors` resolver is refused
-/// (`EffectGroupUnsupported`, ADR 0099 §3). The scoped controller holds the
-/// host `Arc` so the `ToolChildHost`'s weak `EffectHost` stays live.
-///
-/// `process_env_store` must be the store the turn's execution context
-/// publishes recorded envs into: group children resolve `execution_env`
-/// against it and never invent an environment (ADR 0099 §3).
-pub fn native_scope_with_process_env_store(
-    admitted: crate::AdmittedScope,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-) -> crate::ScopedEffectController<'static> {
-    let host = Arc::new(crate::NativeEffectHost::default());
-    let effect_host: Arc<dyn crate::EffectHost> = host.clone();
-    effect_host.install_tool_child_host(crate::ToolChildHost::new(&effect_host, process_env_store));
-    crate::ScopedEffectController::shared(host, admitted).expect("native execution scope")
-}
-
-pub fn native_scope(admitted: crate::AdmittedScope) -> crate::ScopedEffectController<'static> {
-    native_scope_with_process_env_store(
-        admitted,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
-    )
-}
-
-/// Process-scoped native controller pinned to the incarnation a test
-/// registry's first registration mints (registration sequence 1). Tests that
-/// drive a process runner directly stand in for the worker's admission step.
-pub fn native_process_scope(
-    process_id: impl Into<ProcessId>,
-) -> crate::ScopedEffectController<'static> {
-    native_scope(crate::AdmittedScope::process(crate::ProcessRef::new(
-        process_id,
-        crate::ProcessIncarnation::from_registration_sequence(1),
-    )))
-}
-
-/// `native_process_scope` variant naming the process-env store the turn's
-/// execution context publishes into, so group children resolve their recorded
-/// envs (ADR 0099 §3).
-pub fn native_process_scope_with_process_env_store(
-    process_id: impl Into<ProcessId>,
-    process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-) -> crate::ScopedEffectController<'static> {
-    native_scope_with_process_env_store(
-        crate::AdmittedScope::process(crate::ProcessRef::new(
-            process_id,
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        )),
-        process_env_store,
-    )
-}
-
 /// Admits `admitted` on a runtime host's own effect host.
 ///
 /// A turn-driving test must bind its scope to the host the turn runs on: the
 /// driver publishes the live opener to that host's `ToolChildHost` registry,
 /// the execution context publishes recorded envs to that host's env store,
 /// and group children resolve both through the executors registered on the
-/// admitted controller — a scope minted on a foreign controller (the bare
-/// `native_scope` family) leaves every child unroutable (ADR 0099 §2, §3).
+/// admitted controller — a scope minted on a foreign controller leaves every
+/// child unroutable (ADR 0099 §2, §3).
 /// `scoped_static` returns `None` for hosts that lend no `'static` controller
 /// (a Restate `ctx`-bound one); there the caller's own bound controller is the
 /// scope and this helper does not apply.
@@ -127,6 +71,57 @@ pub fn host_admitted_scope(
         .scoped_static(admitted)
         .expect("effect host scoped_static")
         .expect("effect host lends a 'static controller for this scope")
+}
+
+/// Admits `admitted` on `backend`'s effect host: the host a runtime built
+/// over `backend` runs on, so its tool-child routing and env store are the
+/// runtime's own.
+pub fn backend_admitted_scope(
+    backend: &Arc<dyn crate::Backend>,
+    admitted: crate::AdmittedScope,
+) -> crate::ScopedEffectController<'static> {
+    backend
+        .effect_host()
+        .scoped_static(admitted)
+        .expect("effect host scoped_static")
+        .expect("effect host lends a 'static controller for this scope")
+}
+
+/// `backend_admitted_scope` for a turn scope.
+pub fn backend_turn_scope(
+    backend: &Arc<dyn crate::Backend>,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+) -> crate::ScopedEffectController<'static> {
+    backend_admitted_scope(backend, crate::AdmittedScope::turn(session_id, turn_id))
+}
+
+/// `backend_admitted_scope` for a queued-work drain scope.
+pub fn backend_queued_scope(
+    backend: &Arc<dyn crate::Backend>,
+    session_id: &SessionId,
+    drain_id: &TurnId,
+) -> crate::ScopedEffectController<'static> {
+    backend_admitted_scope(
+        backend,
+        crate::AdmittedScope::queue_drain(session_id, drain_id.as_str()),
+    )
+}
+
+/// `backend_admitted_scope` for the process scope a registry's first
+/// registration mints (registration sequence 1), standing in for the worker's
+/// admission step.
+pub fn backend_process_scope(
+    backend: &Arc<dyn crate::Backend>,
+    process_id: impl Into<ProcessId>,
+) -> crate::ScopedEffectController<'static> {
+    backend_admitted_scope(
+        backend,
+        crate::AdmittedScope::process(crate::ProcessRef::new(
+            process_id,
+            crate::ProcessIncarnation::from_registration_sequence(1),
+        )),
+    )
 }
 
 /// `host_admitted_scope` for a turn scope.
@@ -164,23 +159,6 @@ pub fn host_process_scope(
             crate::ProcessIncarnation::from_registration_sequence(1),
         )),
     )
-}
-
-pub fn named_turn_scope(
-    session_id: &SessionId,
-    turn_id: &TurnId,
-) -> crate::ScopedEffectController<'static> {
-    native_scope(crate::AdmittedScope::turn(session_id, turn_id))
-}
-
-pub fn named_queued_scope(
-    session_id: &SessionId,
-    drain_id: &TurnId,
-) -> crate::ScopedEffectController<'static> {
-    native_scope(crate::AdmittedScope::queue_drain(
-        session_id,
-        drain_id.as_str(),
-    ))
 }
 
 pub trait ReadModelState {
@@ -304,174 +282,33 @@ pub fn set_runtime_provider(runtime: &mut LashRuntime, provider: crate::Provider
 
 pub use crate::testing::standard_test_policy;
 
-pub fn test_host_config() -> EmbeddedRuntimeHost {
-    let mut config = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+/// A host over `backend` whose provider resolver answers with an empty mock
+/// provider.
+pub fn test_host_config(backend: &Arc<dyn crate::Backend>) -> EmbeddedRuntimeHost {
+    let mut config = test_runtime_host_config(backend);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(
         mock_provider(Vec::new()).into_handle(),
     ));
     EmbeddedRuntimeHost::new(config)
-        .with_session_store_factory(Arc::new(crate::InMemorySessionStoreFactory::new()))
 }
 
-pub fn test_host_config_with_trace_path(path: PathBuf) -> EmbeddedRuntimeHost {
-    let mut config = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+pub fn test_host_config_with_trace_path(
+    backend: &Arc<dyn crate::Backend>,
+    path: PathBuf,
+) -> EmbeddedRuntimeHost {
+    let mut config = test_runtime_host_config(backend);
     config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path)));
     EmbeddedRuntimeHost::new(config)
 }
 
-pub fn test_host_config_with_trace_path_and_stream_events(path: PathBuf) -> EmbeddedRuntimeHost {
-    let mut config = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+pub fn test_host_config_with_trace_path_and_stream_events(
+    backend: &Arc<dyn crate::Backend>,
+    path: PathBuf,
+) -> EmbeddedRuntimeHost {
+    let mut config = test_runtime_host_config(backend);
     config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(path)));
     config.tracing.trace_level = lash_trace::TraceLevel::Extended;
     EmbeddedRuntimeHost::new(config)
-}
-
-#[derive(Clone, Default)]
-pub struct RecordingSessionStoreFactory {
-    stores: Arc<StdMutex<Vec<Arc<RecordingStore>>>>,
-    defer_metadata_to_admission: bool,
-}
-
-impl RecordingSessionStoreFactory {
-    pub fn stores(&self) -> Vec<Arc<RecordingStore>> {
-        self.stores.lock_recover().clone()
-    }
-
-    pub fn deferring_metadata_to_admission(mut self) -> Self {
-        self.defer_metadata_to_admission = true;
-        self
-    }
-}
-
-// RecordingSessionStoreFactory retains every attachment-aware store it creates,
-// so its root-set answer is the union of those stores' manifests.
-#[async_trait::async_trait]
-#[diagnostic::do_not_recommend]
-impl crate::AttachmentRootSet for RecordingSessionStoreFactory {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<std::collections::BTreeSet<crate::AttachmentId>, crate::StoreError> {
-        let mut refs = std::collections::BTreeSet::new();
-        for store in self.stores() {
-            crate::AttachmentManifest::forget_aged_uncommitted_intents(
-                &*store,
-                intent_grace_cutoff_epoch_ms,
-            )
-            .await?;
-            refs.extend(crate::AttachmentManifest::list_all_refs(&*store).await?);
-        }
-        Ok(refs)
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        id: &crate::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, crate::StoreError> {
-        for store in self.stores() {
-            if crate::AttachmentManifest::has_live_ref_for_id(
-                &*store,
-                id,
-                intent_grace_cutoff_epoch_ms,
-            )
-            .await?
-            {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-}
-
-#[async_trait::async_trait]
-impl SessionStoreFactory for RecordingSessionStoreFactory {
-    async fn create_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn crate::store::RuntimePersistence>, crate::StoreError> {
-        let store = Arc::new(RecordingStore::default());
-        if !self.defer_metadata_to_admission {
-            *store.session_meta.lock_recover() = Some(crate::SessionMeta {
-                pending_observer_intents: Vec::new(),
-                session_id: request.session_id.clone(),
-                relation: request.relation.clone(),
-            });
-        }
-        self.stores.lock_recover().push(Arc::clone(&store));
-        Ok(store as Arc<dyn crate::store::RuntimePersistence>)
-    }
-
-    async fn open_existing_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, String> {
-        Ok(self
-            .stores
-            .lock_recover()
-            .iter()
-            .find(|store| {
-                store
-                    .session_meta
-                    .lock_recover()
-                    .as_ref()
-                    .is_some_and(|meta| meta.session_id == request.session_id)
-            })
-            .cloned()
-            .map(|store| store as Arc<dyn crate::store::RuntimePersistence>))
-    }
-
-    // The recorded stores are the catalog, so a by-id lookup is the same scan
-    // the request-shaped seam performs.
-    async fn open_existing_store_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, crate::StoreError> {
-        Ok(self
-            .stores
-            .lock_recover()
-            .iter()
-            .find(|store| {
-                store
-                    .session_meta
-                    .lock_recover()
-                    .as_ref()
-                    .is_some_and(|meta| meta.session_id == *session_id)
-            })
-            .cloned()
-            .map(|store| store as Arc<dyn crate::store::RuntimePersistence>))
-    }
-
-    // Recorded stores are retained, never tombstoned: this fixture drops no
-    // session, so no id has a deletion marker.
-    async fn session_was_deleted(&self, _session_id: &SessionId) -> Result<bool, String> {
-        Ok(false)
-    }
-
-    async fn delete_session(
-        &self,
-        _session_id: &SessionId,
-    ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
-        Ok(crate::store::SessionBlobReclaimReport::default())
-    }
-
-    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
-    async fn count_unsettled_turns(
-        &self,
-    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
-        Err(crate::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::count_unsettled_turns",
-        })
-    }
 }
 
 pub fn plugin_session_with_orchestrating_tool(
@@ -506,21 +343,87 @@ pub fn plugin_session_with_tools(
 
 pub struct EmptyTools;
 
+/// Advance `store`'s durable head the way another writer would: load the
+/// persisted session (or start from an empty one when the bound session has no
+/// head yet), apply `change`, and commit it as the next revision.
+/// Returns the head that commit wrote.
+pub async fn advance_session_head(
+    store: &dyn crate::RuntimePersistence,
+    usage_deltas: &[crate::TokenLedgerEntry],
+    change: impl FnOnce(&mut RuntimeSessionState),
+) -> crate::SessionHeadMeta {
+    let persisted = crate::store::load_persisted_session_state(store)
+        .await
+        .expect("load the persisted session");
+    let mut state = match persisted {
+        Some(state) => state,
+        // A session with no committed head: the other writer commits its
+        // first one.
+        None => {
+            let meta = store
+                .load_session_meta()
+                .await
+                .expect("load the session binding")
+                .expect("the store is bound to a session");
+            let mut state =
+                RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+            state.session_id = meta.session_id;
+            state
+        }
+    };
+    change(&mut state);
+    store
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
+            &state,
+            usage_deltas,
+        ))
+        .await
+        .expect("commit the advanced head");
+    store
+        .load_session_head_meta()
+        .await
+        .expect("read the advanced head")
+        .expect("the advanced head exists")
+}
+
+/// A fresh root session store for `session_id` from `backend`'s catalog,
+/// under a [`RecordingStore`].
+pub async fn recording_session_store(
+    backend: &Arc<dyn crate::Backend>,
+    session_id: impl Into<SessionId>,
+) -> Arc<RecordingStore> {
+    let store = backend
+        .session_store_factory()
+        .create_store(&crate::SessionStoreCreateRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.into(),
+            relation: crate::SessionRelation::Root,
+            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        })
+        .await
+        .expect("create a session store from the backend catalog");
+    Arc::new(RecordingStore::over(store))
+}
+
 pub fn test_commit_budget() -> crate::CommitBudget {
     crate::CommitBudget::bounded(1024 * 1024, 512)
 }
 
-pub fn test_runtime_host_config() -> RuntimeHostConfig {
-    RuntimeHostConfig::in_memory(
+/// A host config over `backend` with the test commit budget and a batching
+/// bound of one.
+pub fn test_runtime_host_config(backend: &Arc<dyn crate::Backend>) -> RuntimeHostConfig {
+    RuntimeHostConfig::new(
+        Arc::clone(backend),
         test_commit_budget(),
         crate::QueuedWorkBatchingConfig::new(1),
     )
 }
 
 pub fn test_runtime_host_config_with_provider(
+    backend: &Arc<dyn crate::Backend>,
     provider: crate::ProviderHandle,
 ) -> RuntimeHostConfig {
-    let mut config = test_runtime_host_config();
+    let mut config = test_runtime_host_config(backend);
     config.providers.provider_resolver = Arc::new(crate::SingleProviderResolver::new(provider));
     config
 }
@@ -552,15 +455,17 @@ pub struct TestRuntime {
 }
 
 impl TestRuntime {
-    pub fn new(transport: TestProvider) -> Self {
+    /// A runtime over `backend`: its host, and its process registry unless
+    /// [`Self::without_process_registry`] drops it.
+    pub fn new(backend: &Arc<dyn crate::Backend>, transport: TestProvider) -> Self {
         Self {
             attachment_acceptance: Default::default(),
             plugins: crate::testing::test_standard_protocol_factories(),
             tools: Arc::new(EmptyTools),
             transport,
-            host: test_host_config(),
+            host: test_host_config(backend),
             store: None,
-            process_registry: Some(Arc::new(crate::TestLocalProcessRegistry::default())),
+            process_registry: Some(backend.process_registry()),
             session_id: None,
         }
     }
@@ -583,7 +488,12 @@ impl TestRuntime {
         self
     }
 
+    /// Replace the host. Its backend's process registry replaces the
+    /// runtime's unless the runtime runs without one.
     pub fn host(mut self, host: EmbeddedRuntimeHost) -> Self {
+        if self.process_registry.is_some() {
+            self.process_registry = Some(host.core.backend().process_registry());
+        }
         self.host = host;
         self
     }
@@ -706,8 +616,11 @@ impl TestRuntime {
     }
 }
 
-pub async fn standard_runtime_with_transport(transport: TestProvider) -> LashRuntime {
-    TestRuntime::new(transport).build().await
+pub async fn standard_runtime_with_transport(
+    backend: &Arc<dyn crate::Backend>,
+    transport: TestProvider,
+) -> LashRuntime {
+    TestRuntime::new(backend, transport).build().await
 }
 pub type RuntimeTestPluginBuilder = dyn Fn(&crate::PluginSessionContext) -> Result<Arc<dyn crate::SessionPlugin>, crate::PluginError>
     + Send
@@ -766,18 +679,23 @@ impl crate::SessionPlugin for RuntimeTestPlugin {
 }
 
 pub async fn runtime_with_plugins(
+    backend: &Arc<dyn crate::Backend>,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
     transport: TestProvider,
 ) -> LashRuntime {
-    TestRuntime::new(transport).plugins(plugins).build().await
+    TestRuntime::new(backend, transport)
+        .plugins(plugins)
+        .build()
+        .await
 }
 
 pub async fn runtime_with_plugins_and_tools(
+    backend: &Arc<dyn crate::Backend>,
     plugins: Vec<Arc<dyn crate::PluginFactory>>,
     tools: Arc<dyn crate::ToolProvider>,
     transport: TestProvider,
 ) -> LashRuntime {
-    TestRuntime::new(transport)
+    TestRuntime::new(backend, transport)
         .plugins(plugins)
         .tools(tools)
         .build()
@@ -790,7 +708,8 @@ pub async fn runtime_with_plugins_and_tools_and_host(
     transport: TestProvider,
     host: EmbeddedRuntimeHost,
 ) -> LashRuntime {
-    TestRuntime::new(transport)
+    let backend = Arc::clone(host.core.backend());
+    TestRuntime::new(&backend, transport)
         .plugins(plugins)
         .tools(tools)
         .host(host)
@@ -805,7 +724,8 @@ pub async fn runtime_with_plugins_and_tools_and_host_and_store(
     host: EmbeddedRuntimeHost,
     store: Arc<dyn crate::RuntimePersistence>,
 ) -> LashRuntime {
-    TestRuntime::new(transport)
+    let backend = Arc::clone(host.core.backend());
+    TestRuntime::new(&backend, transport)
         .plugins(plugins)
         .tools(tools)
         .host(host)
@@ -978,7 +898,11 @@ pub async fn standard_runtime_with_transport_and_host(
     transport: TestProvider,
     host: EmbeddedRuntimeHost,
 ) -> LashRuntime {
-    TestRuntime::new(transport).host(host).build().await
+    let backend = Arc::clone(host.core.backend());
+    TestRuntime::new(&backend, transport)
+        .host(host)
+        .build()
+        .await
 }
 
 /// Reopen a session that session initialisation committed, through the
@@ -990,11 +914,7 @@ pub fn reopen_session_runtime<'a>(
     session_id: &'a SessionId,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = LashRuntime> + Send + 'a>> {
     Box::pin(async move {
-        let factory = parent
-            .host
-            .session_store_factory
-            .as_ref()
-            .expect("session store factory");
+        let factory = parent.host.core.session_store_factory();
         let store = factory
             .open_existing_store_by_id(session_id)
             .await
@@ -1013,14 +933,9 @@ pub fn reopen_session_runtime<'a>(
             .plugins()
             .host()
             .clone();
-        let mut env = crate::RuntimeEnvironment::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        )
-        .with_plugin_host(Arc::new(plugin_host))
-        .with_runtime_host_config(parent.host.core.clone())
-        .with_session_store_factory(Arc::clone(factory))
-        .build();
+        let mut env = crate::RuntimeEnvironment::builder(parent.host.core.clone())
+            .with_plugin_host(Arc::new(plugin_host))
+            .build();
         env.work = parent.host.work.clone();
         let mut child = LashRuntime::from_environment(
             &env,

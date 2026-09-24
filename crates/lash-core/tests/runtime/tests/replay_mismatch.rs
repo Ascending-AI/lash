@@ -1,4 +1,4 @@
-use super::effect::{RejectingEffectController, runtime_host_config_with_native_controller};
+use super::effect::{RejectingEffectController, runtime_host_config_with_effect_layer};
 use super::*;
 
 struct ProxyPumpingReplayMismatchController {
@@ -14,36 +14,10 @@ impl ProxyPumpingReplayMismatchController {
 }
 
 #[async_trait::async_trait]
-impl AwaitEventResolver for ProxyPumpingReplayMismatchController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        self.rejecting.await_event_authority_binding_id()
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.rejecting.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.rejecting.resolve_await_event(key, resolution).await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for ProxyPumpingReplayMismatchController {
-    fn effect_journaling(&self) -> EffectJournaling {
-        self.rejecting.effect_journaling()
-    }
-
+impl lash_core::testing::EffectLayer for ProxyPumpingReplayMismatchController {
     async fn execute_effect(
         &self,
+        inner: &dyn RuntimeEffectController,
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
@@ -57,73 +31,34 @@ impl RuntimeEffectController for ProxyPumpingReplayMismatchController {
         ) {
             return std::future::pending().await;
         }
-        self.rejecting
-            .execute_effect(envelope, local_executor)
-            .await
+        lash_core::testing::EffectLayer::execute_effect(
+            &self.rejecting,
+            inner,
+            envelope,
+            local_executor,
+        )
+        .await
     }
 
     async fn open_effect_group(
         &self,
+        inner: &dyn RuntimeEffectController,
         group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.rejecting.open_effect_group(group).await
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.rejecting.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.rejecting.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.rejecting.close_effect_group(handle, disposition).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.rejecting.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.rejecting
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
+        lash_core::testing::EffectLayer::open_effect_group(&self.rejecting, inner, group).await
     }
 }
 
 #[tokio::test]
 async fn controller_owned_replay_mismatch_parks_the_turn_with_structured_summary() {
+    let backend = memory_backend().await;
     let controller = Arc::new(RejectingEffectController::default().with_replay_mismatch());
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        EmbeddedRuntimeHost::new(runtime_host_config_with_native_controller(
+        EmbeddedRuntimeHost::new(runtime_host_config_with_effect_layer(
+            &backend,
             controller.clone(),
         )),
     )
@@ -133,11 +68,11 @@ async fn controller_owned_replay_mismatch_parks_the_turn_with_structured_summary
         .run_turn_assembled(
             TurnInput::text("hello"),
             CancellationToken::new(),
-            ScopedEffectController::shared(
+            super::effect::layered_scope(
+                &backend,
                 controller,
                 AdmittedScope::turn("root", "replay-mismatch-controller"),
-            )
-            .expect("replay-mismatch execution scope"),
+            ),
         )
         .await
         .expect_err("a replay divergence parks the turn (FIG-3587)");
@@ -167,23 +102,30 @@ fn assert_parked_replay_mismatch(error: &RuntimeError) {
 
 #[tokio::test]
 async fn proxied_controller_owned_replay_mismatch_parks_the_turn_with_structured_summary() {
+    let backend = memory_backend().await;
     let controller = Arc::new(ProxyPumpingReplayMismatchController::new());
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        EmbeddedRuntimeHost::new(runtime_host_config_with_native_controller(
+        EmbeddedRuntimeHost::new(runtime_host_config_with_effect_layer(
+            &backend,
             controller.clone(),
         )),
     )
     .await;
+    let layered = super::effect::layered_controller(
+        &backend,
+        controller.clone(),
+        AdmittedScope::turn("root", "proxied-replay-mismatch-controller"),
+    );
     let (proxy, requests) = lash_core::runtime::effect::EffectTaskController::scoped(
-        controller.as_ref(),
+        layered.as_ref(),
         AdmittedScope::turn("root", "proxied-replay-mismatch-controller"),
     )
     .expect("proxied replay-mismatch execution scope");
     let controller_task = lash_core::task::spawn({
-        let controller = Arc::clone(&controller);
+        let controller = Arc::clone(&layered);
         async move {
             let pump_scope = ExecutionScope::runtime_operation("proxied-replay-mismatch-pump");
             lash_core::runtime::effect::drive_effect_controller_task(

@@ -29,14 +29,8 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 
 #[tokio::test]
 async fn embedded_runtime_builder_loads_state_from_store() {
-    let store = Arc::new(
-        SqliteBackend::memory()
-            .await
-            .expect("memory backend")
-            .open_store()
-            .await
-            .expect("store"),
-    );
+    let backend = SqliteBackend::memory().await.expect("memory backend");
+    let store = Arc::new(backend.open_store().await.expect("store"));
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("stored-session"),
         policy: SessionPolicy {
@@ -69,8 +63,11 @@ async fn embedded_runtime_builder_loads_state_from_store() {
 
     let runtime = Box::pin(
         LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
+            lash_core::facade_support::RuntimeHostConfig::new(
+                Arc::new(backend),
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::QueuedWorkBatchingConfig::new(1),
+            ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )
         .with_store(store.clone() as Arc<dyn RuntimePersistence>)
@@ -97,14 +94,8 @@ async fn embedded_runtime_builder_loads_state_from_store() {
 
 #[tokio::test]
 async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() {
-    let store = Arc::new(
-        SqliteBackend::memory()
-            .await
-            .expect("memory backend")
-            .open_store()
-            .await
-            .expect("store"),
-    );
+    let backend = SqliteBackend::memory().await.expect("memory backend");
+    let store = Arc::new(backend.open_store().await.expect("store"));
     let state = RuntimeSessionState {
         session_id: SessionId::from("alpha"),
         policy: SessionPolicy {
@@ -127,8 +118,11 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
 
     let err = match Box::pin(
         LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
+            lash_core::facade_support::RuntimeHostConfig::new(
+                Arc::new(backend),
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::QueuedWorkBatchingConfig::new(1),
+            ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )
         .with_store(store as Arc<dyn RuntimePersistence>)

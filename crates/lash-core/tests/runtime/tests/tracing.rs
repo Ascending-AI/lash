@@ -48,12 +48,16 @@ fn completed_text_call(text: &str) -> MockCall {
     }
 }
 
-async fn run_composition_probe_turn(runtime: &mut LashRuntime, turn_id: &TurnId) {
+async fn run_composition_probe_turn(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    runtime: &mut LashRuntime,
+    turn_id: &TurnId,
+) {
     runtime
         .run_turn_assembled(
             TurnInput::text(turn_id),
             CancellationToken::new(),
-            named_turn_scope(&SessionId::from("root"), turn_id),
+            backend_turn_scope(backend, &SessionId::from("root"), turn_id),
         )
         .await
         .expect("composition probe turn");
@@ -61,6 +65,7 @@ async fn run_composition_probe_turn(runtime: &mut LashRuntime, turn_id: &TurnId)
 
 #[tokio::test]
 async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_noise() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         completed_text_call("first"),
         completed_text_call("unchanged"),
@@ -77,18 +82,18 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
     ));
     let mut runtime = standard_runtime_with_transport_and_host(
         transport,
-        test_host_config_with_trace_path(trace_path.clone()),
+        test_host_config_with_trace_path(&backend, trace_path.clone()),
     )
     .await;
 
     let serializations_before = lash_core::trace::composition_schema_serialization_count();
-    run_composition_probe_turn(&mut runtime, &TurnId::from("first-composition")).await;
+    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("first-composition")).await;
     let serializations_after_first = lash_core::trace::composition_schema_serialization_count();
     assert!(
         serializations_after_first > serializations_before,
         "the first composition fingerprints and materializes its tool contracts"
     );
-    run_composition_probe_turn(&mut runtime, &TurnId::from("same-composition")).await;
+    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("same-composition")).await;
     assert_eq!(
         lash_core::trace::composition_schema_serialization_count(),
         serializations_after_first,
@@ -106,7 +111,12 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
         })
         .await
         .expect("apply route-noise model");
-    run_composition_probe_turn(&mut runtime, &TurnId::from("route-capacity-noise")).await;
+    run_composition_probe_turn(
+        &backend,
+        &mut runtime,
+        &TurnId::from("route-capacity-noise"),
+    )
+    .await;
     runtime
         .add_prompt_contribution(lash_core::PromptContribution::guidance(
             "Changed policy",
@@ -114,7 +124,7 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
         ))
         .await
         .expect("change session prompt layer");
-    run_composition_probe_turn(&mut runtime, &TurnId::from("changed-prompt")).await;
+    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("changed-prompt")).await;
 
     let entries = composition_change_entries(&trace_path);
     assert_eq!(
@@ -138,6 +148,7 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
 
 #[tokio::test]
 async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ordered_schemas() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         completed_text_call("tool present"),
         completed_text_call("tool absent"),
@@ -155,11 +166,11 @@ async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ord
         Vec::new(),
         Arc::new(EchoTool),
         transport,
-        test_host_config_with_trace_path(trace_path.clone()),
+        test_host_config_with_trace_path(&backend, trace_path.clone()),
     )
     .await;
 
-    run_composition_probe_turn(&mut runtime, &TurnId::from("tool-member")).await;
+    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("tool-member")).await;
     let mut tool_state = runtime.tool_state().expect("live tool state");
     tool_state
         .set_membership(&lash_core::ToolId::from("tool:echo_tool"), false)
@@ -168,8 +179,8 @@ async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ord
         .apply_tool_state(tool_state)
         .await
         .expect("apply tool membership change");
-    run_composition_probe_turn(&mut runtime, &TurnId::from("tool-removed")).await;
-    run_composition_probe_turn(&mut runtime, &TurnId::from("tool-still-removed")).await;
+    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("tool-removed")).await;
+    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("tool-still-removed")).await;
 
     let entries = composition_change_entries(&trace_path);
     assert_eq!(
@@ -242,6 +253,7 @@ impl lash_core::ToolProvider for SchemaChangingTool {
 
 #[tokio::test]
 async fn composition_trace_fires_once_when_same_member_tool_schema_changes() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![
         completed_text_call("first schema"),
         completed_text_call("second schema"),
@@ -262,18 +274,23 @@ async fn composition_trace_fires_once_when_same_member_tool_schema_changes() {
         Vec::new(),
         tool.clone() as Arc<dyn lash_core::ToolProvider>,
         transport,
-        test_host_config_with_trace_path(trace_path.clone()),
+        test_host_config_with_trace_path(&backend, trace_path.clone()),
     )
     .await;
 
-    run_composition_probe_turn(&mut runtime, &TurnId::from("schema-one")).await;
+    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("schema-one")).await;
     *tool.revision.lock_recover() = 2;
     runtime
         .refresh_session_tool_catalog()
         .await
         .expect("refresh changed tool schema");
-    run_composition_probe_turn(&mut runtime, &TurnId::from("schema-two")).await;
-    run_composition_probe_turn(&mut runtime, &TurnId::from("schema-two-unchanged")).await;
+    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("schema-two")).await;
+    run_composition_probe_turn(
+        &backend,
+        &mut runtime,
+        &TurnId::from("schema-two-unchanged"),
+    )
+    .await;
 
     let entries = composition_change_entries(&trace_path);
     assert_eq!(entries.len(), 2, "one schema change emits exactly once");
@@ -332,6 +349,7 @@ where
 
 #[tokio::test]
 async fn runtime_session_graph_service_routes_standard_compaction_event_to_real_sink() {
+    let backend = memory_backend().await;
     let trace_path = std::env::temp_dir().join(format!(
         "lash-runtime-plugin-trace-{}-{}.jsonl",
         std::process::id(),
@@ -342,7 +360,7 @@ async fn runtime_session_graph_service_routes_standard_compaction_event_to_real_
     ));
     let runtime = standard_runtime_with_transport_and_host(
         mock_provider(Vec::new()),
-        test_host_config_with_trace_path(trace_path.clone()),
+        test_host_config_with_trace_path(&backend, trace_path.clone()),
     )
     .await;
     let graph = runtime
@@ -373,6 +391,7 @@ async fn runtime_session_graph_service_routes_standard_compaction_event_to_real_
 
 #[tokio::test]
 async fn provider_spans_are_children_of_the_turn_span() {
+    let backend = memory_backend().await;
     let provider = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -388,7 +407,7 @@ async fn provider_spans_are_children_of_the_turn_span() {
             })
         })
         .build();
-    let mut runtime = standard_runtime_with_transport(provider).await;
+    let mut runtime = standard_runtime_with_transport(&backend, provider).await;
     let capture = SpanCapture::default();
     let subscriber = Registry::default().with(capture.clone());
     ::tracing::subscriber::set_global_default(subscriber).expect("install capture subscriber");
@@ -406,7 +425,8 @@ async fn provider_spans_are_children_of_the_turn_span() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("provider-span-parentage"),
             ),
@@ -427,6 +447,7 @@ async fn provider_spans_are_children_of_the_turn_span() {
 }
 
 async fn assert_standard_tool_lifecycle(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
     call_id: &str,
     tool_name: &str,
     input_json: &str,
@@ -472,7 +493,7 @@ async fn assert_standard_tool_lifecycle(
         plugins,
         Arc::new(EchoTool),
         transport,
-        test_host_config_with_trace_path(trace_path.clone()),
+        test_host_config_with_trace_path(backend, trace_path.clone()),
     )
     .await;
     let turn_events = RecordingTurnEvents::default();
@@ -610,9 +631,11 @@ async fn assert_standard_tool_lifecycle(
 
 #[tokio::test]
 async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
+    let backend = memory_backend().await;
     // Successful prepared calls keep the one-pair contract: the reporting
     // repair must not duplicate the start already emitted by batch execution.
     Box::pin(assert_standard_tool_lifecycle(
+        &backend,
         "call-success",
         "echo_tool",
         r#"{"value":"sample"}"#,
@@ -622,160 +645,34 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
     .await;
 }
 
-/// A controller that hosts groups on an embedded native substrate, so the
-/// turn driver's `ToolInvocation` group children open, defer, and settle
-/// against the same registry the test resolves out of band.
-struct PendingToolResolutionController {
-    inner: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
-}
+/// A layer over the backend's host: the turn driver's `ToolInvocation` group
+/// children open, defer, and settle against the backend registry the test
+/// resolves out of band.
+struct PendingToolResolutionController;
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for PendingToolResolutionController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(format!("pending-resolution-controller:{:p}", self))
-    }
-
-    async fn prepare_completion_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
-        self.inner
-            .prepare_completion_key(scope, wait, may_defer)
-            .await
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.inner.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for PendingToolResolutionController {
+impl lash_core::testing::EffectLayer for PendingToolResolutionController {
     async fn execute_effect(
         &self,
+        inner: &dyn RuntimeEffectController,
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
         // The turn's cancel watch issues peek effects the local executor does
-        // not cover; the embedded registry answers them.
+        // not cover; the backend's registry answers them.
         if let lash_core::RuntimeEffectCommand::PeekAwaitEvent { key } = &envelope.command {
             return Ok(lash_core::RuntimeEffectOutcome::PeekAwaitEvent {
-                resolution: self.inner.peek_await_event(key).await?,
+                resolution: inner.peek_await_event(key).await?,
             });
         }
         local_executor.execute(envelope).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
     }
 }
 
 /// An `echo_tool` that parks on its issued completion key and lets the test
 /// resolve it out of band — the group-path shape of "pending then resolved".
 struct PendingEchoTool {
-    resolver: Arc<lash_core::facade_support::NativeRuntimeEffectController>,
+    resolver: Arc<dyn lash_core::EffectHost>,
 }
 
 #[async_trait::async_trait]
@@ -806,6 +703,7 @@ impl lash_core::ToolProvider for PendingEchoTool {
             .to_string();
         tokio::task::yield_now().await;
         let _ = resolver
+            .await_event_resolver()
             .resolve_await_event(
                 &key,
                 lash_core::Resolution::Ok(serde_json::json!({
@@ -834,6 +732,7 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
 
 #[tokio::test]
 async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
+    let backend = memory_backend().await;
     let call_id = "call-pending";
     let transport = mock_provider(vec![
         MockCall {
@@ -858,26 +757,22 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
             .expect("clock")
             .as_nanos()
     ));
-    let inner = Arc::new(
-        lash_core::facade_support::NativeRuntimeEffectController::default()
-            .allow_process_lifetime_completion_keys(),
-    );
-    let controller: Arc<dyn lash_core::RuntimeEffectController> =
-        Arc::new(PendingToolResolutionController {
-            inner: Arc::clone(&inner),
-        });
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(PendingEchoTool {
-        resolver: Arc::clone(&inner),
+        resolver: backend.effect_host(),
     });
-    let mut config = test_runtime_host_config();
+    let mut config =
+        crate::runtime_support::effect_recording_authority::runtime_host_config_with_effect_layer(
+            &backend,
+            Arc::new(PendingToolResolutionController),
+        );
     config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(
         trace_path.clone(),
     )));
-    config.control.effect_host =
-        crate::runtime_support::effect_recording_authority::controller_effect_host(Arc::clone(
-            &controller,
-        ));
-    crate::runtime_support::effect_recording_authority::reinstall_tool_child_host(&mut config);
+    let scope = host_turn_scope(
+        &config,
+        &SessionId::from("root"),
+        &TurnId::from("pending-tool-turn"),
+    );
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         tools,
@@ -890,15 +785,7 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
     let turn = runtime
         .stream_turn(
             TurnInput::text("call the pending tool"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                lash_core::ScopedEffectController::shared(
-                    controller,
-                    lash_core::AdmittedScope::turn("root", "pending-tool-turn"),
-                )
-                .expect("scoped controller"),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), scope).with_turn_events(&turn_events),
         )
         .await
         .expect("turn");
@@ -946,7 +833,9 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
 
 #[tokio::test]
 async fn unavailable_tool_name_emits_an_ordered_lifecycle_pair() {
+    let backend = memory_backend().await;
     Box::pin(assert_standard_tool_lifecycle(
+        &backend,
         "call-missing-name",
         "missing_tool",
         r#"{"value":1}"#,
@@ -958,7 +847,9 @@ async fn unavailable_tool_name_emits_an_ordered_lifecycle_pair() {
 
 #[tokio::test]
 async fn invalid_tool_arguments_emit_an_ordered_lifecycle_pair() {
+    let backend = memory_backend().await;
     Box::pin(assert_standard_tool_lifecycle(
+        &backend,
         "call-invalid-args",
         "echo_tool",
         r#"{"other":true}"#,
@@ -970,6 +861,7 @@ async fn invalid_tool_arguments_emit_an_ordered_lifecycle_pair() {
 
 #[tokio::test]
 async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
+    let backend = memory_backend().await;
     let refusal = Arc::new(lash_core::plugin::StaticPluginFactory::new(
         "tool-refusal",
         lash_core::facade_support::PluginSpec::new().with_before_tool_call(Arc::new(|_ctx| {
@@ -983,6 +875,7 @@ async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
         })),
     ));
     Box::pin(assert_standard_tool_lifecycle(
+        &backend,
         "call-hook-refusal",
         "echo_tool",
         r#"{"value":"blocked"}"#,
@@ -994,6 +887,7 @@ async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
 
 #[tokio::test]
 async fn standard_runtime_trace_records_stream_event_entries() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -1042,7 +936,7 @@ async fn standard_runtime_trace_records_stream_event_entries() {
     ));
     let mut runtime = standard_runtime_with_transport_and_host(
         transport,
-        test_host_config_with_trace_path_and_stream_events(trace_path.clone()),
+        test_host_config_with_trace_path_and_stream_events(&backend, trace_path.clone()),
     )
     .await;
 
@@ -1058,7 +952,8 @@ async fn standard_runtime_trace_records_stream_event_entries() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("trace-stream-events-turn"),
             ),
@@ -1186,6 +1081,7 @@ async fn standard_runtime_trace_records_stream_event_entries() {
 
 #[tokio::test]
 async fn extended_runtime_trace_records_provider_request_and_stream_events() {
+    let backend = memory_backend().await;
     let transport = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -1251,7 +1147,7 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
     ));
     let mut runtime = standard_runtime_with_transport_and_host(
         transport,
-        test_host_config_with_trace_path_and_stream_events(trace_path.clone()),
+        test_host_config_with_trace_path_and_stream_events(&backend, trace_path.clone()),
     )
     .await;
 
@@ -1267,7 +1163,8 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("trace-provider-stream-turn"),
             ),
@@ -1359,7 +1256,12 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
 
 #[tokio::test]
 async fn provider_request_trace_sender_requires_extended_level_and_sink() {
-    async fn assert_sender_absent(host: EmbeddedRuntimeHost, turn_id: &TurnId) {
+    let backend = memory_backend().await;
+    async fn assert_sender_absent(
+        backend: &std::sync::Arc<dyn lash_core::Backend>,
+        host: EmbeddedRuntimeHost,
+        turn_id: &TurnId,
+    ) {
         let transport = TestProvider::builder()
             .kind("mock")
             .requires_streaming(true)
@@ -1387,7 +1289,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
                     turn_context: lash_core::TurnContext::default(),
                 },
                 CancellationToken::new(),
-                named_turn_scope(&SessionId::from("root"), turn_id),
+                backend_turn_scope(backend, &SessionId::from("root"), turn_id),
             )
             .await
             .expect("turn");
@@ -1402,14 +1304,16 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
             .as_nanos()
     ));
     Box::pin(assert_sender_absent(
-        test_host_config_with_trace_path(trace_path.clone()),
+        &backend,
+        test_host_config_with_trace_path(&backend, trace_path.clone()),
         &TurnId::from("standard-trace-level"),
     ))
     .await;
 
-    let mut no_sink = test_host_config();
+    let mut no_sink = test_host_config(&backend);
     no_sink.core.tracing.trace_level = lash_trace::TraceLevel::Extended;
     Box::pin(assert_sender_absent(
+        &backend,
         no_sink,
         &TurnId::from("extended-without-sink"),
     ))
@@ -1420,6 +1324,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
 
 #[tokio::test]
 async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -1450,7 +1355,7 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
     ));
     let mut runtime = standard_runtime_with_transport_and_host(
         transport,
-        test_host_config_with_trace_path(trace_path.clone()),
+        test_host_config_with_trace_path(&backend, trace_path.clone()),
     )
     .await;
 
@@ -1466,7 +1371,8 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("trace-standard-turn"),
             ),
@@ -1505,6 +1411,7 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
 
 #[tokio::test]
 async fn standard_runtime_trace_records_failed_llm_calls() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Err(lash_core::llm::transport::LlmTransportError::new(
@@ -1524,7 +1431,7 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
     ));
     let mut runtime = standard_runtime_with_transport_and_host(
         transport,
-        test_host_config_with_trace_path(trace_path.clone()),
+        test_host_config_with_trace_path(&backend, trace_path.clone()),
     )
     .await;
 
@@ -1540,7 +1447,8 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("trace-failed-llm-turn"),
             ),

@@ -880,8 +880,11 @@ mod tests {
     async fn runtime_rejects_bad_cursors_before_replay_store_gap_handling() {
         let runtime = Box::pin(
             LashRuntime::builder(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
+                crate::RuntimeHostConfig::new(
+                    crate::testing::memory_backend().await,
+                    crate::CommitBudget::bounded(1024 * 1024, 512),
+                    crate::QueuedWorkBatchingConfig::new(1),
+                ),
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("session-a")
@@ -936,8 +939,11 @@ mod tests {
     async fn empty_is_proven_continuity_not_missing_history_for_future_revision() {
         let runtime = Box::pin(
             LashRuntime::builder(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
+                crate::RuntimeHostConfig::new(
+                    crate::testing::memory_backend().await,
+                    crate::CommitBudget::bounded(1024 * 1024, 512),
+                    crate::QueuedWorkBatchingConfig::new(1),
+                ),
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("future-revision-cursor")
@@ -993,8 +999,11 @@ mod tests {
     async fn publish_revision_matches_the_single_export_across_a_commit() {
         let runtime = Box::pin(
             LashRuntime::builder(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
+                crate::RuntimeHostConfig::new(
+                    crate::testing::memory_backend().await,
+                    crate::CommitBudget::bounded(1024 * 1024, 512),
+                    crate::QueuedWorkBatchingConfig::new(1),
+                ),
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("revision-equivalence")
@@ -1029,8 +1038,11 @@ mod tests {
     async fn publish_keeps_frame_switch_immediately_before_resident_change() {
         let runtime = Box::pin(
             LashRuntime::builder(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
+                crate::RuntimeHostConfig::new(
+                    crate::testing::memory_backend().await,
+                    crate::CommitBudget::bounded(1024 * 1024, 512),
+                    crate::QueuedWorkBatchingConfig::new(1),
+                ),
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("publish-order")
@@ -1076,8 +1088,11 @@ mod tests {
     async fn publication_holds_no_full_state_graph_pin() {
         let runtime = Box::pin(
             LashRuntime::builder(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
+                crate::RuntimeHostConfig::new(
+                    crate::testing::memory_backend().await,
+                    crate::CommitBudget::bounded(1024 * 1024, 512),
+                    crate::QueuedWorkBatchingConfig::new(1),
+                ),
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("graph-pin")
@@ -1128,8 +1143,11 @@ mod tests {
     async fn failed_authoritative_batch_does_not_publish_auxiliary_event() {
         let runtime = Box::pin(
             LashRuntime::builder(
-                crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1),
+                crate::RuntimeHostConfig::new(
+                    crate::testing::memory_backend().await,
+                    crate::CommitBudget::bounded(1024 * 1024, 512),
+                    crate::QueuedWorkBatchingConfig::new(1),
+                ),
                 crate::testing::runtime_lease_owner(),
             )
             .with_session_id("auxiliary-reconciliation")

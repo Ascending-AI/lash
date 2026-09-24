@@ -1,5 +1,4 @@
 use super::*;
-use crate::EffectHost as _;
 use crate::SessionId;
 use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
 use crate::session_model::{ConversationRecord, MessageRole, Part};
@@ -123,17 +122,12 @@ fn chronological_event_order(graph: &SessionGraph) -> Vec<String> {
         })
         .collect()
 }
-fn stored_graph_with_head_leaf(store: &RecordingStore) -> SessionGraph {
-    let graph = store.session_graph.lock_recover().clone();
-    SessionGraph::from_shared_nodes(
-        graph.nodes.clone(),
-        store
-            .session_head_meta
-            .lock_recover()
-            .as_ref()
-            .and_then(|meta| meta.leaf_node_id.clone()),
-    )
-    .expect("recorded head leaf resolves in the stored graph")
+async fn stored_graph_with_head_leaf(store: &RecordingStore) -> SessionGraph {
+    crate::SessionCommitStore::load_session(store)
+        .await
+        .expect("load the stored session")
+        .expect("the session has a committed head")
+        .graph
 }
 fn state_with_graph(graph: SessionGraph) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
@@ -214,12 +208,9 @@ fn frame_switch_commit_input<'a>(
 
 #[tokio::test]
 async fn final_commit_retry_preserves_honoured_after_step_settlement() {
-    let host = Arc::new(crate::NativeEffectHost::default());
-    let store = Arc::new(
-        RecordingStore::default().with_turn_cancellation_authority_for_testing(
-            crate::TurnCancellationAuthority::new(host.turn_control_binding_id(), host.clone()),
-        ),
-    );
+    let backend = crate::testing::sqlite_memory_backend().await;
+    let host: Arc<dyn crate::EffectHost> = backend.effect_host();
+    let store = Arc::new(crate::testing::unbound_recording_store_on(&backend).await);
     let mut state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
     state.session_id = SessionId::from("final-cancel-cas");
     state.ensure_agent_frame_initialized();
@@ -642,7 +633,7 @@ fn reopening_a_previous_frame_refuses_and_keeps_the_current_frame() {
 /// target check.
 #[tokio::test]
 async fn final_commit_refuses_a_second_frame_switch_author_naming_another_frame() {
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let state = state_with_graph(SessionGraph::from_active_read_state(&[text_message(
         "u0",
         MessageRole::User,
@@ -709,7 +700,7 @@ async fn final_commit_refuses_a_second_frame_switch_author_naming_another_frame(
 /// dropping one author's seeds past a frame-node-id-only guard.
 #[tokio::test]
 async fn final_commit_refuses_a_second_frame_switch_author_with_other_seed_nodes() {
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let state = state_with_graph(SessionGraph::from_active_read_state(&[text_message(
         "u0",
         MessageRole::User,
@@ -769,7 +760,7 @@ async fn final_commit_refuses_a_second_frame_switch_author_with_other_seed_nodes
 /// seed nodes and the reason of the author the slot already answered.
 #[tokio::test]
 async fn final_commit_opens_one_frame_for_two_agreeing_switch_authors() {
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let state = state_with_graph(SessionGraph::from_active_read_state(&[text_message(
         "u0",
         MessageRole::User,
@@ -842,7 +833,7 @@ async fn final_commit_opens_one_frame_for_two_agreeing_switch_authors() {
 #[tokio::test]
 async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durable_write() {
     let clock = crate::SystemClock;
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let mut state = state_with_graph(SessionGraph::default());
     let frame_a = super::super::open_agent_frame_in_state_with_clock(
         &mut state,
@@ -997,7 +988,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
         .await
         .expect("the next turn commits normally after the refused switch");
     assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
-    let stored_graph = stored_graph_with_head_leaf(&store);
+    let stored_graph = stored_graph_with_head_leaf(&store).await;
     assert_eq!(
         stored_graph
             .nearest_frame_node_id(stored_graph.leaf_node_id.as_deref())
@@ -1047,7 +1038,7 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
     let user = text_message("u0", MessageRole::User, "hello");
     let assistant = text_message("a0", MessageRole::Assistant, "hi");
     let trajectory = test_protocol_event("trajectory");
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let (mut pipeline, _lease) =
         leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
     pipeline
@@ -1113,7 +1104,7 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
         .expect("final commit");
 
     assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
-    let stored_graph = stored_graph_with_head_leaf(&store);
+    let stored_graph = stored_graph_with_head_leaf(&store).await;
     let expected = vec!["message:u0", "message:a0", "protocol:trajectory"];
     assert_eq!(persisted_event_order(&stored_graph), expected);
     assert_eq!(chronological_event_order(&stored_graph), expected);
@@ -1137,7 +1128,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
         )]),
         origin: None,
     };
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let (mut pipeline, _lease) =
         leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
     let session_id = pipeline.state().session_id.clone();
@@ -1232,7 +1223,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
         .expect("final commit");
 
     assert_eq!(*store.runtime_commit_count.lock_recover(), 1);
-    let stored_graph = stored_graph_with_head_leaf(&store);
+    let stored_graph = stored_graph_with_head_leaf(&store).await;
     let path = stored_graph.active_path_nodes();
     let plugin_nodes = path
         .iter()
@@ -1273,7 +1264,7 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             )
         })
         .collect::<Vec<_>>();
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let (mut pipeline, _lease) =
         leased_boundary(&store, state_with_graph(SessionGraph::default())).await;
     pipeline
@@ -1332,13 +1323,18 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             && max_nodes == crate::RuntimeCommit::MAX_COMMIT_NODE_COUNT
     ));
     assert_eq!(*store.runtime_commit_count.lock_recover(), 0);
-    assert!(store.raw_graph_nodes_for_testing().is_empty());
+    assert!(
+        crate::SessionCommitStore::load_session(&store)
+            .await
+            .expect("load session")
+            .is_none_or(|read| read.graph.nodes.is_empty())
+    );
 }
 #[tokio::test]
 async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs() {
-    let backend = crate::InMemoryAttachmentStore::new();
+    let backend = crate::testing::memory_backend().await.attachment_store();
     let attachment = crate::AttachmentStore::put(
-        &backend,
+        backend.as_ref(),
         vec![1, 2, 3],
         crate::AttachmentCreateMeta::new(
             crate::MediaType::parse("image/png").unwrap(),
@@ -1364,7 +1360,7 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
     let roots = FixedAttachmentRoots(committed.into_iter().collect());
     let report = crate::reclaim_unreferenced_attachments(
         &roots,
-        &backend,
+        backend.as_ref(),
         crate::AttachmentReclamationPolicy {
             grace_period_ms: 0,
             empty_root_set: crate::EmptyRootSetPolicy::Refuse,
@@ -1375,7 +1371,7 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
 
     assert_eq!(report.reclaimed_count, 0);
     assert_eq!(
-        crate::AttachmentStore::get(&backend, &attachment.id)
+        crate::AttachmentStore::get(backend.as_ref(), &attachment.id)
             .await
             .expect("replayed exec attachment survives GC")
             .bytes,
@@ -1391,7 +1387,7 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
         usage_entry("child", "gpt", 5),
         usage_entry("turn", "gpt", 17),
     ];
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let (mut pipeline, _lease) = leased_boundary(&store, state_with_graph(graph.clone())).await;
     let usage =
         crate::store::RuntimeUsageDelta::for_operation(&pipeline.final_operation(), &usage_entries)
@@ -1434,7 +1430,15 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
         .await
         .expect("commit");
 
-    assert_eq!(store.usage_deltas.lock_recover().len(), 2);
+    assert_eq!(
+        crate::SessionCommitStore::load_session(&store)
+            .await
+            .expect("load committed session")
+            .expect("committed head")
+            .token_ledger
+            .len(),
+        2
+    );
     assert_eq!(pipeline.state_mut().token_ledger.len(), 2);
     assert!(pipeline.state_mut().execution_state_snapshot().is_none());
     assert!(pipeline.state_mut().head_revision > 0);
@@ -1445,7 +1449,7 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
 /// and writes nothing; it never drops the row and commits the rest of the turn.
 #[tokio::test]
 async fn recovered_final_commit_cedes_when_a_peer_supersedes_its_restored_queue_row() {
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let graph = SessionGraph::from_active_read_state(&[text_message(
         "u0",
         MessageRole::User,
@@ -1584,9 +1588,6 @@ async fn recovered_final_commit_cedes_when_a_peer_supersedes_its_restored_queue_
         .expect("list peer-owned row");
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].batch_id, peer_claim.batches[0].batch_id);
-    let raw = store.raw_queued_work_for_testing();
-    assert_eq!(raw.len(), 1);
-    assert_eq!(raw[0].5, Some(peer_claim.session_lease_generation));
 }
 
 #[tokio::test]
@@ -1615,7 +1616,7 @@ async fn final_commit_rejects_claim_derived_content_without_settlement() {
             applications: Vec::new(),
         },
     };
-    let store = RecordingStore::default();
+    let store = crate::testing::unbound_recording_store().await;
     let (mut queue_pipeline, queue_lease) =
         leased_boundary(&store, state_with_graph(graph.clone())).await;
     let queue_state = queue_pipeline.export_state_for_assembly();

@@ -32,10 +32,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
         })
         .build()
         .into_handle();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
+    let mut host = memory_host_config().await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
@@ -152,10 +149,7 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
         })
         .build()
         .into_handle();
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
+    let mut host = memory_host_config().await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
@@ -459,11 +453,9 @@ finish(await handle);
         .build()
         .into_handle();
     let corpus_clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
-    let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_clock(Arc::clone(&corpus_clock));
+    let mut host = memory_host_config()
+        .await
+        .with_clock(Arc::clone(&corpus_clock));
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );
@@ -526,7 +518,6 @@ finish(await handle);
                 plugin_factories.clone(),
             )),
             host.clone(),
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),

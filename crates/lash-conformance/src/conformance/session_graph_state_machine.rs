@@ -1380,10 +1380,11 @@ async fn property_runtime(
         None => host.build_session(request.session_id.clone()),
     }
     .map_err(|error| error.to_string())?;
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    ));
+    let runtime_host =
+        crate::EmbeddedRuntimeHost::new(crate::LawBackend::in_process().host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
         Arc::clone(store),

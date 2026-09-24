@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::plugin::{PluginFactory, PluginHost, PluginSession};
 use crate::{
     EmbeddedRuntimeHost, LashRuntime, PluginStack, ProcessRegistry, RuntimeHostConfig,
-    RuntimePersistence, RuntimeSessionState, SessionError, SessionPolicy, SessionStoreFactory,
+    RuntimePersistence, RuntimeSessionState, SessionError, SessionPolicy,
 };
 
 enum PluginSource {
@@ -20,9 +20,6 @@ pub struct EmbeddedRuntimeBuilder {
     initial_state: Option<RuntimeSessionState>,
     plugin_source: PluginSource,
     core: RuntimeHostConfig,
-    session_store_factory: Option<Arc<dyn SessionStoreFactory>>,
-    trigger_store: Option<Arc<dyn crate::TriggerStore>>,
-    process_definitions: Option<Arc<dyn crate::ProcessDefinitionRegistry>>,
     store: Option<Arc<dyn RuntimePersistence>>,
     attachment_manifest_store: Option<Arc<dyn RuntimePersistence>>,
     drivers: Box<EmbeddedRuntimeDriverBindings>,
@@ -59,11 +56,10 @@ impl Default for EmbeddedRuntimeDriverBindings {
 }
 
 impl EmbeddedRuntimeBuilder {
-    pub fn new(
-        commit_budget: crate::CommitBudget,
-        queued_work_batching: crate::QueuedWorkBatchingConfig,
-        runtime_lease_owner: crate::LeaseOwnerIdentity,
-    ) -> Self {
+    /// A builder over `core`, whose one backend supplies every store port
+    /// and the effect host the runtime runs on (ADR 0102, D2). There is no
+    /// in-memory default: a runtime cannot be built without a backend.
+    pub fn new(core: RuntimeHostConfig, runtime_lease_owner: crate::LeaseOwnerIdentity) -> Self {
         Self {
             runtime_lease_owner,
             session_id: None,
@@ -71,13 +67,7 @@ impl EmbeddedRuntimeBuilder {
             plugin_options: crate::PluginOptions::default(),
             initial_state: None,
             plugin_source: PluginSource::Host(PluginHost::empty()),
-            // `RuntimeHostConfig` has no `Default`; start from an explicitly
-            // named in-memory core. Callers that need durable stores override
-            // it with `with_runtime_host`.
-            core: RuntimeHostConfig::in_memory(commit_budget, queued_work_batching),
-            session_store_factory: None,
-            trigger_store: Some(Arc::new(crate::InMemoryTriggerStore::default())),
-            process_definitions: None,
+            core,
             store: None,
             attachment_manifest_store: None,
             drivers: Box::default(),
@@ -122,23 +112,6 @@ impl EmbeddedRuntimeBuilder {
 
     pub fn with_plugin_stack(self, stack: PluginStack) -> Self {
         self.with_plugin_factories(stack.into_factories())
-    }
-
-    pub fn with_runtime_host(mut self, core: RuntimeHostConfig) -> Self {
-        self.core = core;
-        self
-    }
-
-    pub fn with_attachment_store(
-        mut self,
-        attachment_store: Arc<dyn crate::AttachmentStore>,
-    ) -> Self {
-        self.core.durability.attachment_store = Arc::new(
-            crate::SessionAttachmentStore::ephemeral(attachment_store).with_max_attachment_bytes(
-                self.core.durability.attachment_store.max_attachment_bytes(),
-            ),
-        );
-        self
     }
 
     pub fn with_prompt_template(mut self, prompt_template: crate::PromptTemplate) -> Self {
@@ -190,27 +163,6 @@ impl EmbeddedRuntimeBuilder {
         provider_resolver: Arc<dyn crate::RuntimeProviderResolver>,
     ) -> Self {
         self.core.providers.provider_resolver = provider_resolver;
-        self
-    }
-
-    pub fn with_session_store_factory(
-        mut self,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
-    ) -> Self {
-        self.session_store_factory = Some(session_store_factory);
-        self
-    }
-
-    pub fn with_trigger_store(mut self, store: Arc<dyn crate::TriggerStore>) -> Self {
-        self.trigger_store = Some(store);
-        self
-    }
-
-    pub fn with_process_definition_registry(
-        mut self,
-        registry: Arc<dyn crate::ProcessDefinitionRegistry>,
-    ) -> Self {
-        self.process_definitions = Some(registry);
         self
     }
 
@@ -391,12 +343,7 @@ impl EmbeddedRuntimeBuilder {
         if let Some(manifest_store) = self.attachment_manifest_store {
             persistence = persistence.with_attachment_manifest_store(manifest_store);
         }
-        let embedded_host = EmbeddedRuntimeHost {
-            core: self.core,
-            session_store_factory: self.session_store_factory,
-            trigger_store: self.trigger_store,
-            process_definitions: self.process_definitions,
-        };
+        let embedded_host = EmbeddedRuntimeHost::new(self.core);
         // `assemble_runtime` owns the (store, registry) wiring + residency so the
         // worker rebuild cannot drift from the live open path.
         let queued = Arc::clone(&self.drivers.queued);
@@ -426,13 +373,12 @@ impl EmbeddedRuntimeBuilder {
 }
 
 impl LashRuntime {
-    /// A later [`with_runtime_host`](EmbeddedRuntimeBuilder::with_runtime_host) call replaces
-    /// that host config wholesale, including its commit budget.
+    /// A builder over `core` and its one backend; see
+    /// [`EmbeddedRuntimeBuilder::new`].
     pub fn builder(
-        commit_budget: crate::CommitBudget,
-        queued_work_batching: crate::QueuedWorkBatchingConfig,
+        core: RuntimeHostConfig,
         runtime_lease_owner: crate::LeaseOwnerIdentity,
     ) -> EmbeddedRuntimeBuilder {
-        EmbeddedRuntimeBuilder::new(commit_budget, queued_work_batching, runtime_lease_owner)
+        EmbeddedRuntimeBuilder::new(core, runtime_lease_owner)
     }
 }

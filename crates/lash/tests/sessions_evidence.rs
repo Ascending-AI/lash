@@ -134,8 +134,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::durability::RuntimeHostConfig| {
         let _ = &value.durability;
     });
-    // W0044: lash::durability::RuntimeHostConfig::in_memory [function]
-    let _ = lash::durability::RuntimeHostConfig::in_memory;
     // W0045: lash::durability::RuntimeHostConfig::new [function]
     let _ = lash::durability::RuntimeHostConfig::new;
     // W0046: lash::durability::RuntimeHostConfig::tracing [field]

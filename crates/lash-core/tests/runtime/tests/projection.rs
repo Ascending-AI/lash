@@ -84,19 +84,13 @@ impl lash_core::plugin::ProtocolSessionPlugin for AppendRollbackProtocolSession 
     ) -> Result<(), lash_core::SessionError> {
         self.protocol_dirty.store(true, Ordering::SeqCst);
         if self.advance_store_head {
-            self.store
-                .save_session_head_meta(
-                    lash_core::store::SessionHeadMeta::assemble(
-                        &lash_core::testing::runtime_internals::SessionHeadPayload::default()
-                            .session_id,
-                        lash_core::testing::runtime_internals::SessionHeadPayload::default(),
-                        1,
-                        None,
-                        None,
-                    )
-                    .expect("the default head payload is keyed on its own session"),
-                )
-                .await;
+            // Another writer lands a commit while the append is in flight.
+            lash_core::testing::runtime_helpers::advance_session_head(
+                self.store.as_ref(),
+                &[],
+                |_| {},
+            )
+            .await;
         }
         Ok(())
     }
@@ -130,6 +124,7 @@ impl lash_core::plugin::ProtocolDriverPlugin for UnusedAppendRollbackProtocolDri
 
 #[tokio::test]
 async fn presentation_step_only_changes_model_observation() {
+    let backend = memory_backend().await;
     let committed_results = Arc::new(tokio::sync::Mutex::new(Vec::<serde_json::Value>::new()));
     let committed_results_hook = Arc::clone(&committed_results);
     let plugin = Arc::new(RuntimeTestPluginFactory {
@@ -199,7 +194,8 @@ async fn presentation_step_only_changes_model_observation() {
         },
     ]);
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(EchoTool);
-    let mut runtime = runtime_with_plugins_and_tools(vec![plugin], tools, transport).await;
+    let mut runtime =
+        runtime_with_plugins_and_tools(&backend, vec![plugin], tools, transport).await;
 
     let turn = runtime
         .run_turn_assembled(
@@ -247,6 +243,7 @@ async fn presentation_step_only_changes_model_observation() {
 
 #[tokio::test]
 async fn completed_turns_are_persisted_for_custom_runtime_store() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![LlmStreamEvent::Delta {
             block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
@@ -269,9 +266,9 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
         }),
     }]);
 
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let plugins = plugin_session_with_tools(&SessionId::from("root"), Arc::new(EmptyTools));
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         Arc::clone(&plugins),
         store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
@@ -313,7 +310,8 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("custom-store-projection-turn"),
             ),
@@ -338,7 +336,8 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
 
 #[tokio::test]
 async fn preopened_store_binds_without_remapping_initial_frame() {
-    let store = Arc::new(RecordingStore::default());
+    let backend = memory_backend().await;
+    let store = unbound_recording_store(&backend).await;
     let policy = standard_test_policy();
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root("preopened-session"))
@@ -356,7 +355,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
         .current_frame_node_id
         .clone()
         .expect("provisional initial frame");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugin_session_with_tools(&SessionId::from("preopened-session"), Arc::new(EmptyTools)),
         store as Arc<dyn lash_core::store::RuntimePersistence>,
@@ -402,27 +401,13 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
 
 #[tokio::test]
 async fn park_returns_error_when_final_commit_fails() {
-    let store = Arc::new(RecordingStore::default());
-    store
-        .save_session_head_meta(
-            lash_core::store::SessionHeadMeta::assemble(
-                &SessionId::from("other-session"),
-                lash_core::testing::runtime_internals::SessionHeadPayload {
-                    session_id: SessionId::from("other-session"),
-                    ..lash_core::testing::runtime_internals::SessionHeadPayload::default()
-                },
-                0,
-                None,
-                None,
-            )
-            .expect("the foreign head row is keyed on the foreign session"),
-        )
-        .await;
+    let backend = memory_backend().await;
+    let store = unbound_recording_store(&backend).await;
     let plugins = plugin_session_with_tools(&SessionId::from("park-session"), Arc::new(EmptyTools));
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        store as Arc<dyn lash_core::store::RuntimePersistence>,
+        Arc::clone(&store) as Arc<dyn lash_core::store::RuntimePersistence>,
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -442,6 +427,10 @@ async fn park_returns_error_when_final_commit_fails() {
     .await
     .expect("runtime");
 
+    store.fail_next_runtime_commit(lash_core::StoreError::Backend(
+        "park-session final commit refused".to_string(),
+    ));
+
     let err = match Box::pin(runtime.park()).await {
         Ok(_) => panic!("park should fail when final persistence fails"),
         Err(err) => err,
@@ -449,13 +438,13 @@ async fn park_returns_error_when_final_commit_fails() {
 
     let message = err.to_string();
     assert!(message.contains("failed to persist runtime state"));
-    assert!(message.contains("other-session"));
-    assert!(message.contains("park-session"));
+    assert!(message.contains("park-session final commit refused"));
 }
 
 #[tokio::test]
 async fn failed_append_restores_runtime_and_protocol_session_state() {
-    let store = Arc::new(RecordingStore::default());
+    let backend = memory_backend().await;
+    let store = unbound_recording_store(&backend).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -467,7 +456,7 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
             advance_store_head: true,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
         store as Arc<dyn lash_core::store::RuntimePersistence>,
@@ -519,7 +508,8 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
 
 #[tokio::test]
 async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
-    let store = Arc::new(RecordingStore::default());
+    let backend = memory_backend().await;
+    let store = unbound_recording_store(&backend).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -531,7 +521,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
             advance_store_head: false,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugins,
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
@@ -598,7 +588,8 @@ fn append_session_nodes_lost_response_retry_replays_and_refreshes_resident_state
 }
 
 async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
-    let store = Arc::new(RecordingStore::default());
+    let backend = memory_backend().await;
+    let store = unbound_recording_store(&backend).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -610,7 +601,7 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
             advance_store_head: false,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
         store as Arc<dyn lash_core::store::RuntimePersistence>,
@@ -722,7 +713,8 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
 
 #[tokio::test]
 async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state() {
-    let store = Arc::new(RecordingStore::default());
+    let backend = memory_backend().await;
+    let store = unbound_recording_store(&backend).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -734,7 +726,7 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
             advance_store_head: false,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
         Arc::clone(&store) as Arc<dyn lash_core::store::RuntimePersistence>,
@@ -792,8 +784,9 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
 
 #[tokio::test]
 async fn failed_append_rollback_preserves_a_deleted_session_cause() {
+    let backend = memory_backend().await;
     let session_id = "deleted-during-append-rollback";
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let fail_restore = Arc::new(AtomicBool::new(false));
@@ -806,7 +799,7 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
             advance_store_head: false,
         })]);
     let plugins = plugin_host.build_session("root").expect("plugins");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
         store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
@@ -873,6 +866,7 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
 
 #[tokio::test]
 async fn completed_turns_are_persisted_in_session_graph() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -905,7 +899,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
         }),
     }]);
 
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let base_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(EmptyTools);
     let base_provider_factory = Arc::clone(&base_provider);
     let plugin_host =
@@ -915,7 +909,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
                 .with_tool_provider(Arc::clone(&base_provider_factory)),
         ))]);
     let plugins = plugin_host.build_session("root").expect("plugins");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         Arc::clone(&plugins),
         store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
@@ -947,7 +941,8 @@ async fn completed_turns_are_persisted_in_session_graph() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("root"),
                 &TurnId::from("parked-custom-store-projection-turn"),
             ),

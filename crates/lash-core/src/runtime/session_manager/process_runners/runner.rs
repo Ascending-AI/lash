@@ -122,7 +122,7 @@ impl RuntimeSessionServices {
         let session_id = self.current.session_id.clone();
         let plugins = Arc::clone(&self.current.plugins);
         let store = self.current.store.clone();
-        let session_store_factory = self.current.host.session_store_factory.clone();
+        let session_store_factory = Some(self.current.host.core.session_store_factory());
         let queued_work = Arc::clone(self.current.host.queued_work());
         let process_registry_available = self.current.host.process_registry().is_some();
         let process_work = self
@@ -161,7 +161,7 @@ impl RuntimeSessionServices {
                 execution_write_authority: execution_write_authority.clone(),
                 process_work: process_work_for_runtime.clone(),
                 store: services.current.store.clone(),
-                session_store_factory: services.current.host.session_store_factory.clone(),
+                session_store_factory: Some(services.current.host.core.session_store_factory()),
                 queued_work: Arc::clone(services.current.host.queued_work()),
                 process_wake_delivery_policy: services
                     .current

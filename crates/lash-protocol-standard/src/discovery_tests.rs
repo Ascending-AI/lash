@@ -243,22 +243,10 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
             .expect("clock")
             .as_nanos()
     ));
-    // The turn's scoped controller and the runtime's effect host must share
-    // one native controller: group opens issued by the turn forward to it,
-    // and the tool-child resolver `RuntimeHostConfig::new` installs lands on
-    // the same controller's group map.
-    let native = Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default());
-    let mut host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::new(
-            lash_core::facade_support::NativeEffectHost::with_native_controller(Arc::clone(
-                &native,
-            )),
-        ),
-        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new()),
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    );
+    // The turn's scope comes from the runtime's own effect host: group opens
+    // issued by the turn and the tool-child resolver `RuntimeHostConfig::new`
+    // installs meet on that host.
+    let (backend, mut host) = super::tests::test_host().await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider_handle),
     );
@@ -299,15 +287,10 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     } else {
         "discovery-refusal-all"
     };
-    let scoped_controller = lash_core::ScopedEffectController::shared(
-        native,
-        lash_core::AdmittedScope::turn(session_id, "turn-1"),
-    )
-    .expect("scoped controller");
+    let scoped_controller = super::tests::test_turn_scope(&backend, session_id);
     let mut runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
+            host,
             lash_core::LeaseOwnerIdentity::opaque(
                 "protocol-standard-test-worker",
                 "protocol-standard-test-boot",
@@ -315,7 +298,6 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         )
         .with_session_id(session_id)
         .with_policy(policy)
-        .with_runtime_host(host)
         .with_plugin_factories(factories)
         .build(),
     )

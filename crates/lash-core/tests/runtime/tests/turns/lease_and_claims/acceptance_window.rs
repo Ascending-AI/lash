@@ -16,7 +16,6 @@ pub(super) const LATE_TAB_INPUT: &str = "second tab input admitted after the blo
 /// the FIG-3078 race: admit, journal the turn's message block, admit a second
 /// tab's `next_turn` input, then lose the worker.
 pub(super) struct AcceptanceWindowJournalController {
-    native: lash_core::facade_support::NativeRuntimeEffectController,
     journal: std::sync::Mutex<
         HashMap<
             String,
@@ -36,7 +35,6 @@ pub(super) struct AcceptanceWindowJournalController {
 impl AcceptanceWindowJournalController {
     pub(super) fn new(store: Arc<RecordingStore>) -> Self {
         Self {
-            native: lash_core::facade_support::NativeRuntimeEffectController::default(),
             journal: std::sync::Mutex::new(HashMap::new()),
             late_admission: std::sync::Mutex::new(Some(store)),
             admitted_late: std::sync::Mutex::new(None),
@@ -63,86 +61,15 @@ impl AcceptanceWindowJournalController {
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for AcceptanceWindowJournalController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(format!("acceptance-window-journal:{:p}", self))
-    }
-
-    async fn prepare_completion_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
-        self.native
-            .prepare_completion_key(scope, wait, may_defer)
-            .await
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &lash_core::ExecutionScope,
-        wait: lash_core::AwaitEventWaitIdentity,
-    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        resolution: lash_core::Resolution,
-    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
-        self.native.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &lash_core::AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
-        self.native
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), lash_core::RuntimeError> {
-        self.native
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::RuntimeEffectController for AcceptanceWindowJournalController {
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
-        lash_core::EffectJournaling::Journaled
-    }
-
+impl lash_core::testing::EffectLayer for AcceptanceWindowJournalController {
     async fn execute_effect(
         &self,
+        inner: &dyn RuntimeEffectController,
         envelope: lash_core::RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<lash_core::RuntimeEffectOutcome, lash_core::RuntimeEffectControllerError> {
         if !self.journaling.load(Ordering::SeqCst) {
-            return self.native.execute_effect(envelope, local_executor).await;
+            return inner.execute_effect(envelope, local_executor).await;
         }
         let replay_key = envelope.invocation.replay_key().to_string();
         let reconstructed = envelope.canonical_form()?;
@@ -171,7 +98,7 @@ impl lash_core::RuntimeEffectController for AcceptanceWindowJournalController {
             envelope.command,
             lash_core::RuntimeEffectCommand::LlmCall { .. }
         );
-        let outcome = self.native.execute_effect(envelope, local_executor).await?;
+        let outcome = inner.execute_effect(envelope, local_executor).await?;
         self.journal
             .lock_recover()
             .insert(replay_key, (reconstructed, outcome.clone()));
@@ -191,65 +118,5 @@ impl lash_core::RuntimeEffectController for AcceptanceWindowJournalController {
             }
         }
         Ok(outcome)
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.native.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.register_group_executors(executors)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.native.await_next_settlement(handle, cancel).await
-    }
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.read_group_settlement(group_key, rank).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.close_effect_group(handle, disposition).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
     }
 }

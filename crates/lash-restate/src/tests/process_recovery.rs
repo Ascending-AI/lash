@@ -39,7 +39,8 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
         Arc::clone(&registry_b),
         store_factory,
         vec![snapshot_recovery_tool_factory()],
-    );
+    )
+    .await;
     let _ = worker_b
         .drive_pending_processes()
         .await
@@ -180,7 +181,8 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
             snapshot_recovery_tool_factory(),
             invalid_lashlang_binding_factory(),
         ],
-    );
+    )
+    .await;
     let _ = worker_b
         .drive_pending_processes()
         .await
@@ -195,7 +197,8 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
         Arc::clone(&registry_b),
         store_factory,
         vec![snapshot_recovery_tool_factory()],
-    );
+    )
+    .await;
     let _ = worker_c
         .drive_pending_processes()
         .await
@@ -530,7 +533,8 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
     let worker = recovery_worker(
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    );
+    )
+    .await;
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),
         Arc::clone(&registry),
@@ -624,7 +628,8 @@ pub(super) async fn process_sleep_wake_verdict_failure_retries_before_settling_r
     let worker = recovery_worker(
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    );
+    )
+    .await;
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),
         Arc::clone(&registry),
@@ -749,7 +754,8 @@ pub(super) async fn process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_e
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
         vec![snapshot_recovery_tool_factory()],
-    );
+    )
+    .await;
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),
         Arc::clone(&registry),
@@ -895,7 +901,8 @@ pub(super) async fn typescript_artifact_runs_through_process_engine_to_terminal(
     let worker = recovery_worker(
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
-    );
+    )
+    .await;
     let _ = worker
         .drive_pending_processes()
         .await
@@ -1013,7 +1020,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         "the trigger-started process must be on the recovery worklist after reopen"
     );
 
-    let worker_b = recovery_worker(Arc::clone(&registry_b), Arc::clone(&store_factory));
+    let worker_b = recovery_worker(Arc::clone(&registry_b), Arc::clone(&store_factory)).await;
     let _ = worker_b
         .drive_pending_processes()
         .await
@@ -1343,11 +1350,7 @@ pub(super) async fn process_deployment_driver_and_workflow_share_registry() {
 
     let worker = DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
         Arc::new(lash_core::facade_support::PluginHost::empty()),
-        lash_core::facade_support::RuntimeHostConfig::in_memory(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-        ),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        memory_host_config().await,
         lash_core_worker::WorkerProcessWork::External(process_work),
         Arc::new(lash_core::NoQueuedWork::new()),
         lash_core::testing::runtime_lease_owner(),

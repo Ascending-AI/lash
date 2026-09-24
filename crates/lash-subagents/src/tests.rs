@@ -16,8 +16,8 @@ use crate::rlm_support::{
 use lash_core::llm::types::{LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole};
 use lash_core::runtime::RuntimeSessionState;
 use lash_core::{
-    SessionPolicy, TestLocalProcessRegistry, facade_support::LashRuntime,
-    facade_support::PluginFactory, facade_support::PluginHost, facade_support::ProcessRuntimeHost,
+    SessionPolicy, facade_support::LashRuntime, facade_support::PluginFactory,
+    facade_support::PluginHost, facade_support::ProcessRuntimeHost,
     facade_support::RuntimeHostConfig, facade_support::TraceRuntimeSubject,
     test_support::RuntimeServices,
 };
@@ -1103,8 +1103,13 @@ async fn run_seed_probe_inner(
         .map(|store| Arc::clone(store) as Arc<dyn lash_core::facade_support::TraceSink>);
     let trace_context = lash_core::TraceContext::default();
     let language_features = LashlangLanguageFeatures::default().with_label_annotations();
-    let process_env_store =
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
+    // One SQLite memory backend (ADR 0102) holds every port of the probe; the
+    // handle lives for the whole probe, and with it the databases.
+    let backend: Arc<dyn lash_core::Backend> = Arc::new(
+        lash_sqlite_store::SqliteBackend::memory()
+            .await
+            .expect("open a SQLite memory backend"),
+    );
     // The RLM protocol plugin (which compiles + stores the parent turn's process
     // artifacts) and the process engine that the worker runs those artifacts
     // through must share ONE artifact store; otherwise the worker cannot load the
@@ -1139,7 +1144,7 @@ async fn run_seed_probe_inner(
         // surface only exists if this factory is in the session's factories.
         Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
     ];
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let registry = backend.process_registry();
     let host_plugins = PluginHost::new(factories.clone());
     let process_abilities = LashlangAbilities::default().with_sleep();
     let mut extensions = host_plugins.extensions().clone();
@@ -1170,19 +1175,17 @@ async fn run_seed_probe_inner(
         .build_session("root")
         .expect("plugin session");
     let embedded = lash_core::facade_support::EmbeddedRuntimeHost::new({
-        let mut config = RuntimeHostConfig::in_memory(
+        let mut config = RuntimeHostConfig::new(
+            Arc::clone(&backend),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
         config.providers.provider_resolver = Arc::new(
             lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
         );
-        config = config
-            .with_process_env_store(process_env_store.clone())
-            .with_process_engine_registration(lash_core::ProcessEngineRegistration::accepting(
-                process_engine.clone(),
-            ));
-        config
+        config.with_process_engine_registration(lash_core::ProcessEngineRegistration::accepting(
+            process_engine.clone(),
+        ))
     });
     let policy = SessionPolicy {
         provider_id: provider.kind().to_string(),
@@ -1197,27 +1200,23 @@ async fn run_seed_probe_inner(
     // nested case here (`handle = start spawn_child` then `await handle`) because
     // the worker runs each process on its own task, so the parent's await never
     // parks the runner away from the child.
-    let worker_registry = Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>;
-    let watched = lash_core::facade_support::watch_process_registry(worker_registry);
+    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&registry));
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
             factories,
             {
-                let mut config = RuntimeHostConfig::in_memory(
+                let mut config = RuntimeHostConfig::new(
+                    Arc::clone(&backend),
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
                     lash_core::QueuedWorkBatchingConfig::new(1),
                 );
                 config.providers.provider_resolver = Arc::new(
                     lash_core::facade_support::SingleProviderResolver::new(provider.clone()),
                 );
-                config = config
-                    .with_process_env_store(process_env_store)
-                    .with_process_engine_registration(
-                        lash_core::ProcessEngineRegistration::accepting(process_engine),
-                    );
-                config
+                config.with_process_engine_registration(
+                    lash_core::ProcessEngineRegistration::accepting(process_engine),
+                )
             },
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
@@ -1258,11 +1257,11 @@ async fn run_seed_probe_inner(
     .await
     .expect("runtime");
 
-    let scoped_effect_controller = lash_core::ScopedEffectController::shared(
-        Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
-        lash_core::AdmittedScope::turn("root", "subagent-test-turn"),
-    )
-    .expect("test execution scope");
+    let scoped_effect_controller = backend
+        .effect_host()
+        .scoped_static(lash_core::AdmittedScope::turn("root", "subagent-test-turn"))
+        .expect("test execution scope")
+        .expect("the backend host lends a static controller");
     let turn = Box::pin(runtime.run_turn_assembled(
         input,
         tokio_util::sync::CancellationToken::new(),
@@ -1277,6 +1276,7 @@ async fn run_seed_probe_inner(
         child_prompt: prompt,
         child_execution_count,
         process_registry: registry,
+        _backend: backend,
     }
 }
 
@@ -1286,7 +1286,9 @@ struct SeedProbe {
     outcome: lash_core::facade_support::TurnOutcome,
     child_prompt: Option<String>,
     child_execution_count: Arc<AtomicUsize>,
-    process_registry: Arc<TestLocalProcessRegistry>,
+    process_registry: Arc<dyn lash_core::ProcessRegistry>,
+    /// Holds the probe's memory backend, whose databases the registry reads.
+    _backend: Arc<dyn lash_core::Backend>,
 }
 
 impl SeedProbe {
@@ -1303,10 +1305,8 @@ impl SeedProbe {
     /// The one subagent process this probe's parent spawned, as a polling
     /// host observes it.
     async fn observed_subagent_process(&self) -> lash_core::facade_support::ObservedProcess {
-        let observer = lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(
-            &self.process_registry,
-        )
-            as Arc<dyn lash_core::ProcessRegistry>);
+        let observer =
+            lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(&self.process_registry));
         let observed = observer
             .list(&lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,

@@ -135,21 +135,16 @@ async fn build_migrated_runtime(parts: MigratedRuntimeParts) -> crate::LashRunti
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     Box::pin(
-        crate::LashRuntime::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-            crate::testing::runtime_lease_owner(),
-        )
-        .with_session_id(&parts.session_id)
-        .with_policy(policy)
-        .with_initial_state(state)
-        .with_runtime_host(parts.host)
-        .with_plugin_factories(parts.factories)
-        .with_store(parts.store)
-        .with_process_registry(parts.registry)
-        .with_process_work(parts.process_work)
-        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
-        .build(),
+        crate::LashRuntime::builder(parts.host, crate::testing::runtime_lease_owner())
+            .with_session_id(&parts.session_id)
+            .with_policy(policy)
+            .with_initial_state(state)
+            .with_plugin_factories(parts.factories)
+            .with_store(parts.store)
+            .with_process_registry(parts.registry)
+            .with_process_work(parts.process_work)
+            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .build(),
     )
     .await
     .expect("build the migrated-tools conformance runtime")
@@ -225,11 +220,12 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         .expect("register the cancel_process target");
 
     let (model, model_calls) = migrated_model(prefix, &target);
-    let mut host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_effect_host(Arc::clone(&effect_host));
+    let mut host = crate::LawBackend::in_process()
+        .with_effect_host(Arc::clone(&effect_host))
+        .host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let echo: Arc<dyn crate::ToolProvider> = Arc::new(crate::testing::FixtureTools);
@@ -248,7 +244,6 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         lash_core_worker::DurableProcessWorkerConfig::new(
             Arc::new(crate::facade_support::PluginHost::new(factories.clone())),
             host.clone(),
-            Arc::new(crate::InMemorySessionStoreFactory::new()),
             lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
             Arc::new(crate::NoQueuedWork::new()),
             crate::testing::runtime_lease_owner(),

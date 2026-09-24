@@ -26,18 +26,12 @@ pub(crate) use lash_core_ids::stable_identity;
 pub(crate) use lash_core_ids::{operational_metrics, stable_hash, task};
 pub use lash_core_store::await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};
 pub(crate) use lash_core_store::runtime_error::{RuntimeError, RuntimeErrorCode};
-#[cfg(test)]
-pub(crate) use lash_core_store::session_policy::SessionPolicy;
-#[cfg(test)]
-pub(crate) use lash_core_store::session_state::RuntimeSessionState;
-#[cfg(test)]
-pub(crate) use lash_core_store::store::SessionBinding;
 pub(crate) use lash_core_store::store::{
     LeaseClaimNonce, LeaseOwnerIdentity, LeaseTimings, SessionExecutionLease,
     SessionExecutionLeaseRenewalInstallMismatch, StoreError,
 };
 pub(crate) use lash_core_store::{store, store_backend_support};
-pub(crate) use lash_sansio::{ProcessId, SessionId};
 #[cfg(test)]
-pub(crate) use lash_sansio::{TurnBudget, TurnId};
+pub(crate) use lash_sansio::TurnId;
+pub(crate) use lash_sansio::{ProcessId, SessionId};
 pub use retirement::*;

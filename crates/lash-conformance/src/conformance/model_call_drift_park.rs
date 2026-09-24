@@ -70,29 +70,24 @@ async fn build_runtime(parts: DriftParts, temperature: Option<f64>) -> crate::La
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     Box::pin(
-        crate::LashRuntime::builder(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-            crate::testing::runtime_lease_owner(),
-        )
-        .with_session_id(&parts.session_id)
-        .with_policy(policy)
-        .with_initial_state(state)
-        .with_runtime_host(parts.host)
-        .with_plugin_factories(
-            parts
-                .protocol
-                .iter()
-                .cloned()
-                .chain([super::cell_binding_drift::probe_factory(
-                    parts.probe,
-                    Arc::clone(&parts.executions),
-                )])
-                .collect(),
-        )
-        .with_store(parts.store)
-        .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
-        .build(),
+        crate::LashRuntime::builder(parts.host, crate::testing::runtime_lease_owner())
+            .with_session_id(&parts.session_id)
+            .with_policy(policy)
+            .with_initial_state(state)
+            .with_plugin_factories(
+                parts
+                    .protocol
+                    .iter()
+                    .cloned()
+                    .chain([super::cell_binding_drift::probe_factory(
+                        parts.probe,
+                        Arc::clone(&parts.executions),
+                    )])
+                    .collect(),
+            )
+            .with_store(parts.store)
+            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .build(),
     )
     .await
     .expect("build the model-call drift conformance runtime")
@@ -175,11 +170,12 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
             }
         })
         .build();
-    let mut host = crate::RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_effect_host(Arc::clone(&effect_host));
+    let mut host = crate::LawBackend::in_process()
+        .with_effect_host(Arc::clone(&effect_host))
+        .host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let store = Arc::new(crate::InMemorySessionStore::new());

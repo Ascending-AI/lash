@@ -62,16 +62,19 @@ pub(crate) async fn run_sleep_process_started_under(
         input.process_identity(),
     ));
     let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
-    let effect_host = lash_core::facade_support::NativeEffectHost::default();
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend");
+    let effect_host = lash_core::Backend::effect_host(&backend);
     let scoped = lash_core::EffectHost::scoped_static(
-        &effect_host,
+        effect_host.as_ref(),
         lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
             process_id.clone(),
             incarnation,
         )),
     )
     .expect("valid process scope")
-    .expect("native controller");
+    .expect("the backend host lends a static controller");
     let parent = lash_core::RuntimeInvocation::effect(
         lash_core::EffectAddress::new(
             lash_core::ExecutionScope::process(process_id.clone()),

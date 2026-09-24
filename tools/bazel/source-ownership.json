@@ -87,6 +87,7 @@
         "tests/runtime/tests/replay_mismatch.rs",
         "tests/runtime/tests/replay_origin.rs",
         "tests/runtime/tests/session_freshness.rs",
+        "tests/runtime/tests/session_lease_guard.rs",
         "tests/runtime/tests/session_lease_observability.rs",
         "tests/runtime/tests/stream_accumulator.rs",
         "tests/runtime/tests/stream_evidence.rs",

@@ -129,7 +129,8 @@ pub(crate) mod helpers {
 
     #[tokio::test]
     async fn recording_factory_root_set_keeps_committed_blob() {
-        let factory = RecordingSessionStoreFactory::default();
+        let sqlite = crate::testing::memory_backend().await;
+        let factory = RecordingSessionStoreFactory::over(sqlite.session_store_factory());
         let request = crate::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("recording-factory-gc"),
@@ -137,7 +138,7 @@ pub(crate) mod helpers {
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
         let store = factory.create_store(&request).await.expect("create store");
-        let backend = Arc::new(crate::InMemoryAttachmentStore::new());
+        let backend = sqlite.attachment_store();
         let attachment_backend: Arc<dyn crate::AttachmentStore> = backend.clone();
         let manifest: Arc<dyn crate::AttachmentManifest> = store.clone();
         let session = crate::SessionAttachmentStore::new(
@@ -186,10 +187,13 @@ pub(crate) mod helpers {
 
     #[tokio::test]
     async fn test_runtime_process_registry_defaults_and_can_be_disabled() {
-        let runtime = TestRuntime::new(mock_provider(Vec::new())).build().await;
+        let backend = crate::testing::memory_backend().await;
+        let runtime = TestRuntime::new(&backend, mock_provider(Vec::new()))
+            .build()
+            .await;
         assert!(runtime.host.process_registry().is_some());
 
-        let runtime = TestRuntime::new(mock_provider(Vec::new()))
+        let runtime = TestRuntime::new(&backend, mock_provider(Vec::new()))
             .without_process_registry()
             .build()
             .await;

@@ -560,9 +560,7 @@ impl LashRuntime {
     pub async fn list_trigger_registrations(
         &self,
     ) -> Result<Vec<crate::TriggerRegistration>, SessionError> {
-        let store = self.host.trigger_store.as_ref().ok_or_else(|| {
-            SessionError::Protocol("trigger store is unavailable in this runtime".to_string())
-        })?;
+        let store = self.host.core.trigger_store();
         let records = store
             .list_subscriptions(crate::TriggerSubscriptionFilter::for_session(
                 self.state.session_id.clone(),
@@ -579,9 +577,7 @@ impl LashRuntime {
         &self,
         source_type: impl Into<crate::TriggerEventType>,
     ) -> Result<Vec<crate::TriggerRegistration>, SessionError> {
-        let store = self.host.trigger_store.as_ref().ok_or_else(|| {
-            SessionError::Protocol("trigger store is unavailable in this runtime".to_string())
-        })?;
+        let store = self.host.core.trigger_store();
         let mut filter =
             crate::TriggerSubscriptionFilter::for_session(self.state.session_id.clone());
         filter.source_type = Some(source_type.into().to_string());
@@ -952,10 +948,9 @@ mod plugin_state_boundary_tests {
     #[tokio::test]
     async fn plugin_event_boundary_itself_contains_the_accepted_state_write() {
         let collector = CheckpointWriteCollector::default();
-        let factory = ObservedSessionStoreFactory::new(
-            Arc::new(crate::facade_support::InMemorySessionStoreFactory::new()),
-            collector.clone(),
-        );
+        let backend = crate::testing::memory_backend().await;
+        let factory =
+            ObservedSessionStoreFactory::new(backend.session_store_factory(), collector.clone());
         let policy = crate::SessionPolicy {
             model: crate::ModelSpec::builder("plugin-state-model")
                 .context_window_tokens(4096)
@@ -978,7 +973,8 @@ mod plugin_state_boundary_tests {
         let plugins = crate::PluginHost::new(factories)
             .build_session("event-state")
             .unwrap();
-        let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::in_memory(
+        let runtime_host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+            backend,
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         ));

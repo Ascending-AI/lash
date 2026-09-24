@@ -410,16 +410,22 @@ impl lash_core::testing::EffectLayer for TriggerEffectCapture {
 }
 
 impl TriggerEffectCapture {
-    /// A fresh memory backend's effect host with this capture layered over
-    /// it.
-    async fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
-        let backend = lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a memory backend");
-        Arc::new(lash_core::testing::LayeredEffectHost::new(
-            backend.effect_host(),
-            Arc::new(self.clone()),
+    /// A fresh memory backend with this capture layered over its effect
+    /// host.
+    async fn backend(&self) -> Arc<dyn lash_core::Backend> {
+        let layer: Arc<dyn lash_core::testing::EffectLayer> = Arc::new(self.clone());
+        lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
+            lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .expect("open a memory backend"),
         ))
+        .map_effect_host(|host| Arc::new(lash_core::testing::LayeredEffectHost::new(host, layer)))
+        .into_backend()
+    }
+
+    /// [`Self::backend`]'s effect host.
+    async fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
+        self.backend().await.effect_host()
     }
 
     /// The registration drafts the runtime sent, in order.
@@ -1025,14 +1031,13 @@ async fn execute_trigger_process_with_originator(
 ) -> TriggerProcessResult {
     let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
         Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
-    let trigger_store: Arc<dyn lash_core::TriggerStore> =
-        Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
     let capture = TriggerEffectCapture::default();
-    let effect_host = capture.effect_host().await;
+    let backend = capture.backend().await;
+    let registry = backend.process_registry();
+    let registry_dyn = Arc::clone(&registry);
+    let trigger_store = backend.trigger_store();
+    let process_env_store = backend.process_env_store();
+    let effect_host = backend.effect_host();
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -1047,9 +1052,7 @@ async fn execute_trigger_process_with_originator(
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&effect_host),
-        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
-        process_env_store.clone(),
+        Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -1068,12 +1071,10 @@ async fn execute_trigger_process_with_originator(
                 lash_core::testing::test_code_protocol_factories(),
             )),
             runtime_host,
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
-        .with_trigger_store(trigger_store.clone())
         .with_session_policy(session_policy.clone()),
     )
     .expect("valid trigger process worker");

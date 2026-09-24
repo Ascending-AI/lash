@@ -42,6 +42,10 @@ mod runtime {
         pub(crate) use std::sync::Mutex as StdMutex;
         pub(crate) use tokio::sync::mpsc;
 
+        pub(crate) use crate::runtime_support::{
+            memory_backend, memory_backend_with_clock, reopened_backend, sqlite_memory_backend,
+            unbound_recording_store, unbound_recording_store_with_clock, unbound_store,
+        };
         pub(crate) use lash_core::llm::transport::LlmTransportError;
         pub(crate) use lash_core::llm::types::{LlmProviderTraceEvent, LlmUsage};
         pub(crate) use lash_core::plugin::StaticPluginFactory;

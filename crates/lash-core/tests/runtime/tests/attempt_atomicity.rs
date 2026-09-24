@@ -38,21 +38,34 @@ const DIRECT_MODEL: &str = "mock-model";
 const DIRECT_TEXT: &str = "unstubbed direct answer";
 const FOLLOW_ON_EFFECT_ID: &str = "attempt-atomicity-follow-on";
 
-/// A controller-owned tier stand-in.
+/// A controller-owned tier stand-in over a backend's own controller for the
+/// matrix turn.
 struct ControllerOwnedTier {
-    inner: lash_core::facade_support::NativeRuntimeEffectController,
+    inner: Arc<dyn lash_core::RuntimeEffectController>,
+}
+
+/// `backend`'s own controller for the matrix turn.
+fn matrix_turn_controller(
+    backend: &Arc<dyn lash_core::Backend>,
+) -> Arc<dyn lash_core::RuntimeEffectController> {
+    lash_core::testing::runtime_helpers::backend_admitted_scope(
+        backend,
+        lash_core::AdmittedScope::turn(SESSION, TURN),
+    )
+    .owned_controller()
+    .expect("a static controller is shared")
 }
 
 impl ControllerOwnedTier {
-    fn ordinal_addressed() -> Self {
+    fn ordinal_addressed(backend: &Arc<dyn lash_core::Backend>) -> Self {
         Self {
-            inner: lash_core::facade_support::NativeRuntimeEffectController::default(),
+            inner: matrix_turn_controller(backend),
         }
     }
 
-    fn key_addressed() -> Self {
+    fn key_addressed(backend: &Arc<dyn lash_core::Backend>) -> Self {
         Self {
-            inner: lash_core::facade_support::NativeRuntimeEffectController::default(),
+            inner: matrix_turn_controller(backend),
         }
     }
 }
@@ -168,9 +181,11 @@ struct Fixtures {
     /// The backend whose registry and process-exec-env store the matrix
     /// runs over; held so its in-memory databases outlive every row.
     backend: lash_sqlite_store::SqliteBackend,
+    /// The same backend, as the handle a host config and a tier take.
+    backend_handle: Arc<dyn lash_core::Backend>,
     host: Arc<lash_core::testing::MockSessionManager>,
     registry: Arc<dyn lash_core::ProcessRegistry>,
-    trigger_store: Arc<lash_core::facade_support::InMemoryTriggerStore>,
+    trigger_store: Arc<dyn lash_core::TriggerStore>,
     lease: lash_core::ProcessLease,
     child_process_starts: Arc<AtomicUsize>,
     /// A real runtime, kept alive so the direct-completion client handed to the
@@ -194,16 +209,17 @@ fn direct_mock_call() -> super::helpers::MockCall {
 }
 
 async fn fixtures() -> Fixtures {
+    let backend = crate::runtime::tests::sqlite_memory_backend().await;
+    let backend_handle: Arc<dyn lash_core::Backend> = Arc::new(backend.clone());
     let runtime = Box::pin(super::helpers::runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(lash_core::testing::EmptyToolProvider),
         super::helpers::mock_provider(vec![direct_mock_call(), direct_mock_call()]),
-        lash_core::runtime::EmbeddedRuntimeHost::new(super::helpers::test_runtime_host_config()),
+        lash_core::runtime::EmbeddedRuntimeHost::new(super::helpers::test_runtime_host_config(
+            &backend_handle,
+        )),
     ))
     .await;
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("memory backend");
     let registry = lash_core::Backend::process_registry(&backend);
     let host = Arc::new(
         lash_core::testing::MockSessionManager::default()
@@ -289,9 +305,10 @@ async fn fixtures() -> Fixtures {
         )
         .await
         .expect("start live matrix process");
-    let trigger_store = Arc::new(lash_core::facade_support::InMemoryTriggerStore::default());
+    let trigger_store = lash_core::Backend::trigger_store(&backend);
     Fixtures {
         backend,
+        backend_handle,
         host,
         registry,
         trigger_store,
@@ -381,7 +398,7 @@ fn tool_context_with_provider<'run>(
         session_graph: fixtures.host.clone(),
         processes,
         trigger_router: Some(lash_core::facade_support::TriggerRouter::new(
-            Arc::clone(&fixtures.trigger_store) as Arc<dyn lash_core::TriggerStore>,
+            Arc::clone(&fixtures.trigger_store),
             lash_core::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
         )),
         process_definitions: None,
@@ -502,7 +519,7 @@ impl lash_core::ToolProvider for PureLeafProbeProvider {
 async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
     capability_inventory::assert_capability_inventory_complete();
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::ordinal_addressed();
+    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
@@ -557,7 +574,7 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
 #[tokio::test]
 async fn pure_execute_provider_routes_through_the_attempt_context_without_controller_crossing() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::ordinal_addressed();
+    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
@@ -651,7 +668,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
 #[tokio::test]
 async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::ordinal_addressed();
+    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let command = lash_core::ProcessCommand::Cancel {
@@ -772,7 +789,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
 #[tokio::test]
 async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::key_addressed();
+    let tier = ControllerOwnedTier::key_addressed(&fixtures.backend_handle);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
@@ -869,7 +886,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
 #[tokio::test]
 async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_commands() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::key_addressed();
+    let tier = ControllerOwnedTier::key_addressed(&fixtures.backend_handle);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
@@ -937,13 +954,14 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
 
 #[tokio::test]
 async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overcounts() {
-    let tier = ControllerOwnedTier::key_addressed();
+    let fixtures_backend = crate::runtime::tests::memory_backend().await;
+    let tier = ControllerOwnedTier::key_addressed(&fixtures_backend);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let identity =
         lash_core::derive_tool_intent_identity(&SessionId::from(SESSION), TURN, Some(CALL_ID), 9)
             .expect("literal intent identity");
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry = fixtures_backend.process_registry();
     registry
         .register_process(
             lash_core::ProcessRegistration::new(
@@ -1039,11 +1057,11 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
 async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identical_bytes() {
     let fixtures = fixtures().await;
     let controller = super::effect::RecordingEffectController::default().with_replay_by_key();
-    let scoped = lash_core::ScopedEffectController::borrowed(
-        &controller,
+    let scoped = super::effect::layered_scope(
+        &fixtures.backend_handle,
+        Arc::new(controller.clone()),
         lash_core::AdmittedScope::turn(SESSION, TURN),
-    )
-    .expect("scoped replaying controller");
+    );
     let tool = tool_context(scoped, &fixtures);
     let dispatch = tool
         .runtime_dispatch
@@ -1128,16 +1146,16 @@ struct JournalEntry {
 /// and a command that meets a different recorded entry at its ordinal is
 /// refused the way an ordinal-addressed engine refuses it (Restate `RT0016`).
 struct OrdinalJournaledTier {
-    inner: lash_core::facade_support::NativeRuntimeEffectController,
+    inner: Arc<dyn lash_core::RuntimeEffectController>,
     journal: std::sync::Mutex<Vec<JournalEntry>>,
     replaying: std::sync::atomic::AtomicBool,
     cursor: AtomicUsize,
 }
 
 impl OrdinalJournaledTier {
-    fn recording() -> Self {
+    fn recording(backend: &Arc<dyn lash_core::Backend>) -> Self {
         Self {
-            inner: lash_core::facade_support::NativeRuntimeEffectController::default(),
+            inner: matrix_turn_controller(backend),
             journal: std::sync::Mutex::new(Vec::new()),
             replaying: std::sync::atomic::AtomicBool::new(false),
             cursor: AtomicUsize::new(0),
@@ -1347,7 +1365,7 @@ fn attempt_done_outcome() -> lash_core::RuntimeEffectOutcome {
 #[tokio::test]
 async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_mismatch() {
     let fixtures = fixtures().await;
-    let tier = OrdinalJournaledTier::recording();
+    let tier = OrdinalJournaledTier::recording(&fixtures.backend_handle);
     let bodies_entered = Arc::new(AtomicUsize::new(0));
 
     let first_incarnation_bodies = Arc::clone(&bodies_entered);
@@ -1491,7 +1509,7 @@ fn direct_llm_request(request_id: &str) -> lash_core::LlmRequest {
 #[tokio::test]
 async fn attempt_scoped_client_keeps_direct_llm_completions_out_of_the_journal() {
     let fixtures = fixtures().await;
-    let tier = ControllerOwnedTier::ordinal_addressed();
+    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let scoped = lash_core::ScopedEffectController::borrowed(
@@ -1604,7 +1622,8 @@ fn raw_client_probe<'run>(
 }
 
 async fn assert_raw_client_probe_starts_unbound(fixtures: &Fixtures) {
-    let tier = ControllerOwnedTier::ordinal_addressed();
+    let fixtures_backend = crate::runtime::tests::memory_backend().await;
+    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures_backend);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let provider = Arc::new(RawClientDirectProvider::default());
@@ -1657,7 +1676,7 @@ async fn assert_raw_client_probe_starts_unbound(fixtures: &Fixtures) {
 async fn execution_context_attempt_dispatch_binds_the_direct_client() {
     let fixtures = fixtures().await;
     assert_raw_client_probe_starts_unbound(&fixtures).await;
-    let tier = ControllerOwnedTier::ordinal_addressed();
+    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let provider = Arc::new(RawClientDirectProvider::default());
@@ -1670,7 +1689,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
     let execution_context = lash_core::RuntimeExecutionContext::new(
         SessionId::from(SESSION.to_string()),
         dispatch,
-        Arc::new(lash_core::InMemoryProcessExecutionEnvStore::new()),
+        fixtures.backend_handle.process_env_store(),
         Arc::new(lash_core::facade_support::SessionAttachmentStore::unavailable()),
         Arc::new(lash_core::facade_support::ChronologicalProjection::default()),
         None,
@@ -1718,7 +1737,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
 async fn prepared_attempt_runner_dispatch_binds_the_direct_client() {
     let fixtures = fixtures().await;
     assert_raw_client_probe_starts_unbound(&fixtures).await;
-    let tier = ControllerOwnedTier::ordinal_addressed();
+    let tier = ControllerOwnedTier::ordinal_addressed(&fixtures.backend_handle);
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let provider = Arc::new(RawClientDirectProvider::default());

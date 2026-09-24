@@ -215,7 +215,7 @@ fn build_turn_ctx_with_graph(
         session_lifecycle: manager.clone(),
         session_graph,
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+            Arc::new(lash_core::testing::UnavailableEffectController),
             lash_core::AdmittedScope::turn(session_id, "standard-compaction-test-turn"),
         )
         .expect("test scoped effect controller"),
@@ -266,7 +266,7 @@ fn build_compaction_ctx_with_services(
         session_lifecycle,
         session_graph,
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+            Arc::new(lash_core::testing::UnavailableEffectController),
             lash_core::AdmittedScope::runtime_operation("standard-compaction-compact-test"),
         )
         .expect("test scoped effect controller"),
@@ -947,7 +947,7 @@ fn transform_state_ctx_with_services(
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: graph,
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+            Arc::new(lash_core::testing::UnavailableEffectController),
             lash_core::AdmittedScope::runtime_operation("standard-compaction-recovery-test"),
         )
         .expect("test scoped effect controller"),

@@ -1,15 +1,15 @@
-error[E0061]: this function takes 2 arguments but 0 arguments were supplied
+error[E0061]: this function takes 3 arguments but 1 argument was supplied
  --> tests/ui/runtime_host_config_requires_commit_budget.rs:2:17
   |
-2 |     let _host = lash::durability::RuntimeHostConfig::in_memory();
-  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-- two arguments of type `CommitBudget` and `QueuedWorkBatchingConfig` are missing
+2 |     let _host = lash::durability::RuntimeHostConfig::new(backend);
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^--------- two arguments of type `CommitBudget` and `QueuedWorkBatchingConfig` are missing
   |
 note: associated function defined here
  --> $WORKSPACE/crates/lash-core-execution/src/runtime/host.rs
   |
-  |     pub fn in_memory(
-  |            ^^^^^^^^^
+  |     pub fn new(
+  |            ^^^
 help: provide the arguments
   |
-2 |     let _host = lash::durability::RuntimeHostConfig::in_memory(/* CommitBudget */, /* QueuedWorkBatchingConfig */);
-  |                                                                ++++++++++++++++++++++++++++++++++++++++++++++++++
+2 |     let _host = lash::durability::RuntimeHostConfig::new(backend, /* CommitBudget */, /* QueuedWorkBatchingConfig */);
+  |                                                                 ++++++++++++++++++++++++++++++++++++++++++++++++++++

@@ -217,6 +217,7 @@ lash_rust_integration_test(
         "tests/runtime/tests/replay_mismatch.rs",
         "tests/runtime/tests/replay_origin.rs",
         "tests/runtime/tests/session_freshness.rs",
+        "tests/runtime/tests/session_lease_guard.rs",
         "tests/runtime/tests/session_lease_observability.rs",
         "tests/runtime/tests/stream_accumulator.rs",
         "tests/runtime/tests/stream_evidence.rs",
@@ -978,7 +979,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/core_contracts.rs", "tests/runtime/tests/language_runtime_value.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/replay_mismatch.rs", "tests/runtime/tests/replay_origin.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/session_lease_observability.rs", "tests/runtime/tests/stream_accumulator.rs", "tests/runtime/tests/stream_evidence.rs", "tests/runtime/tests/tracing.rs", "tests/runtime/tests/usage.rs"],
+    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/core_contracts.rs", "tests/runtime/tests/language_runtime_value.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/replay_mismatch.rs", "tests/runtime/tests/replay_origin.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/session_lease_guard.rs", "tests/runtime/tests/session_lease_observability.rs", "tests/runtime/tests/stream_accumulator.rs", "tests/runtime/tests/stream_evidence.rs", "tests/runtime/tests/tracing.rs", "tests/runtime/tests/usage.rs"],
     test_env = {"RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",
@@ -1009,7 +1010,7 @@ lash_rust_feature_test(
     library_crate_name = "lash_core",
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
-    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/core_contracts.rs", "tests/runtime/tests/language_runtime_value.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/replay_mismatch.rs", "tests/runtime/tests/replay_origin.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/session_lease_observability.rs", "tests/runtime/tests/stream_accumulator.rs", "tests/runtime/tests/stream_evidence.rs", "tests/runtime/tests/tracing.rs", "tests/runtime/tests/usage.rs"],
+    srcs_patterns = ["tests/runtime_observability.rs", "tests/runtime_support/**/*.rs", "tests/runtime/tests/assembler.rs", "tests/runtime/tests/core_contracts.rs", "tests/runtime/tests/language_runtime_value.rs", "tests/runtime/tests/projection.rs", "tests/runtime/tests/replay_mismatch.rs", "tests/runtime/tests/replay_origin.rs", "tests/runtime/tests/session_freshness.rs", "tests/runtime/tests/session_lease_guard.rs", "tests/runtime/tests/session_lease_observability.rs", "tests/runtime/tests/stream_accumulator.rs", "tests/runtime/tests/stream_evidence.rs", "tests/runtime/tests/tracing.rs", "tests/runtime/tests/usage.rs"],
     test_env = {"RUST_TEST_THREADS": "1"},
     tags = [
         "feature-lane",

@@ -7,6 +7,8 @@ use super::*;
 
 #[tokio::test]
 pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
+    let sqlite = sqlite_memory_backend().await;
+    let backend: Arc<dyn lash_core::Backend> = Arc::new(sqlite.clone());
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -72,9 +74,10 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
             }
         })
         .build();
-    let store = Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    // The SQLite store itself, so the test reads its raw usage journal.
+    let store = Arc::new(sqlite.open_store().await.expect("open an unbound store"));
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    let mut runtime = TestRuntime::new(transport)
+    let mut runtime = TestRuntime::new(&backend, transport)
         .store(runtime_store)
         .without_process_registry()
         .build()
@@ -85,7 +88,8 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
             TurnInput::text("retry a truncated stream"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("failed-attempt-usage-ledgered"),
                 ),
@@ -100,7 +104,10 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
     // The failed attempt's billed usage and the successful retry's usage are
     // two facts: the durable journal holds one delta each, and the report
     // sums both.
-    let deltas = store.raw_usage_deltas_for_testing();
+    let deltas = store
+        .load_usage_deltas()
+        .await
+        .expect("load the durable usage journal");
     assert_eq!(
         deltas.len(),
         2,
@@ -127,6 +134,8 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
 
 #[tokio::test]
 pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
+    let sqlite = sqlite_memory_backend().await;
+    let backend: Arc<dyn lash_core::Backend> = Arc::new(sqlite.clone());
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -172,9 +181,10 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
             }
         })
         .build();
-    let store = Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    // The SQLite store itself, so the test reads its raw usage journal.
+    let store = Arc::new(sqlite.open_store().await.expect("open an unbound store"));
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    let mut runtime = TestRuntime::new(transport)
+    let mut runtime = TestRuntime::new(&backend, transport)
         .store(runtime_store)
         .without_process_registry()
         .build()
@@ -185,7 +195,8 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
             TurnInput::text("every attempt fails"),
             TurnOptions::new(
                 CancellationToken::new(),
-                named_turn_scope(
+                backend_turn_scope(
+                    &backend,
                     &SessionId::from("root"),
                     &TurnId::from("all-attempts-failed-usage-ledgered"),
                 ),
@@ -204,7 +215,10 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
 
     // No response was ever counted into the turn's cumulative usage, so each
     // failed attempt's reported partial usage lands as its own delta.
-    let deltas = store.raw_usage_deltas_for_testing();
+    let deltas = store
+        .load_usage_deltas()
+        .await
+        .expect("load the durable usage journal");
     assert_eq!(
         deltas.len(),
         2,

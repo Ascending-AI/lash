@@ -141,10 +141,9 @@ impl CheckpointWriteEvent {
 /// Shared sink used by every store handle created during one generated run.
 ///
 /// This observes commits made through decorated `SessionStoreFactory` handles.
-/// `DurableProcessWorker` task bodies currently construct a bare
-/// `InMemorySessionStore` inside lash-core and are therefore explicitly outside
-/// this collector's coverage; transcript consumers are warned at their emitter
-/// boundary too.
+/// `DurableProcessWorker` task bodies run storeless reconstruction runtimes
+/// that commit no session state, so they are outside this collector's
+/// coverage; transcript consumers are warned at their emitter boundary too.
 #[derive(Clone, Debug, Default)]
 pub struct CheckpointWriteCollector {
     state: Arc<Mutex<CheckpointWriteCollectorState>>,
@@ -677,7 +676,9 @@ mod tests {
 
         let collector = CheckpointWriteCollector::default();
         let factory = ObservedSessionStoreFactory::new(
-            Arc::new(crate::facade_support::InMemorySessionStoreFactory::new()),
+            crate::testing::memory_backend()
+                .await
+                .session_store_factory(),
             collector.clone(),
         );
         let store = factory

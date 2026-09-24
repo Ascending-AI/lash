@@ -85,16 +85,7 @@ pub struct CoreTriggerAdmin {
 
 impl CoreTriggerAdmin {
     fn store(&self) -> Result<Arc<dyn lash_core::TriggerStore>> {
-        self.core
-            .env
-            .trigger_store
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| {
-                EmbedError::Plugin(lash_core::PluginError::Session(
-                    "trigger store is unavailable in this runtime".to_string(),
-                ))
-            })
+        Ok(self.core.env.core.trigger_store())
     }
 
     pub async fn emit(

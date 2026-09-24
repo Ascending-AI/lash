@@ -98,7 +98,8 @@ pub(super) async fn run_invocation(
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
         vec![counting_tool_plugin(Arc::clone(executions))],
-    );
+    )
+    .await;
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(context));
     let scope = controller
         .process_scope_for_test(

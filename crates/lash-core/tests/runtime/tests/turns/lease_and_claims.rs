@@ -9,6 +9,7 @@ use acceptance_window::{AcceptanceWindowJournalController, LATE_TAB_INPUT};
 
 #[tokio::test]
 pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_and_settles_turn() {
+    let backend = memory_backend().await;
     let controller = Arc::new(
         super::effect::RecordingEffectController::default().with_always_failing_cancel_watch(),
     );
@@ -69,9 +70,10 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
         .build();
     let clock = Arc::new(CancelWatchTestClock(lash_core::testing::TestClock::new(0)));
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let config = super::effect::runtime_host_config_with_native_controller(controller.clone())
+    let config = super::effect::runtime_host_config_with_effect_layer(&backend, controller.clone())
         .with_clock(host_clock);
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RecordingStore::default());
+    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
+        unbound_recording_store(&backend).await;
     lash_core::testing::store_fixtures::bind_conformance_session(
         &driver_store,
         &lash_core::SessionId::from("root"),
@@ -105,7 +107,7 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
                 TurnInput::text("tear down after the cancellation watcher gives up"),
                 TurnOptions::new(
                     turn_cancel,
-                    named_turn_scope(&SessionId::from("root"), &TurnId::from(turn_id)),
+                    backend_turn_scope(&backend, &SessionId::from("root"), &TurnId::from(turn_id)),
                 )
                 .with_turn_events(&turn_events_for_task),
             )
@@ -191,6 +193,7 @@ pub(super) async fn cancellation_watch_exhaustion_tears_down_committed_cancel_an
 
 #[tokio::test]
 pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
+    let backend = memory_backend().await;
     let (delta_sent_tx, delta_sent_rx) = tokio::sync::oneshot::channel::<()>();
     let delta_sent_tx = Arc::new(Mutex::new(Some(delta_sent_tx)));
     let transport = TestProvider::builder()
@@ -216,7 +219,7 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
             }
         })
         .build();
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let cancel = CancellationToken::new();
     let turn_cancel = cancel.clone();
     let turn_events = RecordingTurnEvents::default();
@@ -284,6 +287,7 @@ pub(super) async fn cancelled_provider_stream_does_not_commit_partial_output() {
 
 #[tokio::test]
 pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed_attempt_usage() {
+    let backend = memory_backend().await;
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -352,7 +356,7 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
             }
         })
         .build();
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
 
     let assembled = runtime
         .stream_turn(
@@ -394,6 +398,7 @@ pub(super) async fn truncated_retry_resets_partial_tool_calls_and_retains_failed
 
 #[tokio::test]
 pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt_reset() {
+    let backend = memory_backend().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -435,7 +440,7 @@ pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt
             }
         })
         .build();
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let turn_events = RecordingTurnEvents::default();
 
     let assembled = runtime
@@ -488,6 +493,7 @@ pub(super) async fn counted_provider_regeneration_emits_one_host_visible_attempt
 
 #[tokio::test(start_paused = true)]
 pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_attempt_reset() {
+    let backend = memory_backend().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -531,7 +537,7 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
             }
         })
         .build();
-    let mut runtime = standard_runtime_with_transport(transport).await;
+    let mut runtime = standard_runtime_with_transport(&backend, transport).await;
     let turn_events = RecordingTurnEvents::default();
 
     let assembled = runtime
@@ -572,6 +578,7 @@ pub(super) async fn courtesy_retry_after_regeneration_emits_one_host_visible_att
 
 #[tokio::test]
 pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence() {
+    let backend = memory_backend().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let lost_text = std::iter::repeat_n("discarded", 256)
@@ -648,9 +655,9 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
             }
         })
         .build();
-    let store = Arc::new(lash_core::facade_support::InMemorySessionStore::new());
+    let store = unbound_recording_store(&backend).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    let mut runtime = TestRuntime::new(transport)
+    let mut runtime = TestRuntime::new(&backend, transport)
         .store(runtime_store)
         .without_process_registry()
         .build()
@@ -833,6 +840,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
 /// lane, before provider work or durable input acceptance (ADR 0077).
 #[tokio::test]
 pub(super) async fn foreground_turn_is_refused_when_session_lane_is_held() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -844,7 +852,8 @@ pub(super) async fn foreground_turn_is_refused_when_session_lane_is_held() {
             ..LlmResponse::default()
         }),
     }]);
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
     let owner = lease_owner("other-runtime");
     let held_lease =
         lash_core::store::SessionExecutionLeaseStore::try_claim_session_execution_lease(
@@ -896,6 +905,7 @@ pub(super) async fn foreground_turn_is_refused_when_session_lane_is_held() {
 
 #[tokio::test]
 pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is_held() {
+    let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -907,7 +917,8 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
             ..LlmResponse::default()
         }),
     }]);
-    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(transport).await;
+    let (mut runtime, store) =
+        standard_runtime_with_transport_and_queue_store(&backend, transport).await;
     enqueue_idle_turn_input(
         store.as_ref(),
         &SessionId::from("root"),
@@ -991,9 +1002,11 @@ pub(super) async fn idle_queued_work_noops_without_claiming_when_session_lane_is
 
 #[tokio::test]
 pub(super) async fn durable_controller_waits_for_busy_session_lane_before_draining_queued_input() {
+    let backend = memory_backend().await;
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        &backend,
         mock_provider(Vec::new()),
         store_clock,
     )
@@ -1025,12 +1038,12 @@ pub(super) async fn durable_controller_waits_for_busy_session_lane_before_draini
             .with_engine_paced_lane(),
     );
     runtime.host.core.control.effect_host =
-        super::effect::controller_effect_host(controller.clone());
-    let scope = lash_core::ScopedEffectController::shared(
+        super::effect::layered_effect_host(&backend, controller.clone());
+    let scope = super::effect::layered_scope(
+        &backend,
         controller,
         lash_core::AdmittedScope::queue_drain("root", "queued-failover-wake"),
-    )
-    .expect("durable queued-turn scope");
+    );
     let mut drain = lash_core::task::spawn(async move {
         runtime
             .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
@@ -1069,9 +1082,11 @@ pub(super) async fn durable_controller_waits_for_busy_session_lane_before_draini
 /// leaves both the holder row and the queued row exactly as it found them.
 #[tokio::test]
 pub(super) async fn durable_controller_reports_a_retryable_busy_lane_when_the_holder_is_alive() {
+    let backend = memory_backend().await;
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        &backend,
         mock_provider(Vec::new()),
         store_clock,
     )
@@ -1102,11 +1117,11 @@ pub(super) async fn durable_controller_reports_a_retryable_busy_lane_when_the_ho
             .with_controller_owned_replay()
             .with_engine_paced_lane(),
     );
-    let scope = lash_core::ScopedEffectController::shared(
+    let scope = super::effect::layered_scope(
+        &backend,
         controller,
         lash_core::AdmittedScope::queue_drain("root", "queued-live-holder"),
-    )
-    .expect("durable queued-turn scope");
+    );
     let mut drain = lash_core::task::spawn(async move {
         runtime
             .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
@@ -1175,9 +1190,11 @@ pub(super) async fn durable_controller_reports_a_retryable_busy_lane_when_the_ho
 /// and redrive leave settlement to the engine.
 #[tokio::test]
 pub(super) async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pending() {
+    let backend = memory_backend().await;
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        &backend,
         mock_provider(Vec::new()),
         store_clock,
     )
@@ -1207,11 +1224,11 @@ pub(super) async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pen
             .with_controller_owned_replay()
             .with_engine_paced_lane(),
     );
-    let scope = lash_core::ScopedEffectController::shared(
+    let scope = super::effect::layered_scope(
+        &backend,
         controller,
         lash_core::AdmittedScope::queue_drain("root", "queued-cancelled-wait"),
-    )
-    .expect("durable queued cancellation scope");
+    );
     let cancel = CancellationToken::new();
     let drain_cancel = cancel.clone();
     let drain = lash_core::task::spawn(async move {
@@ -1268,9 +1285,11 @@ pub(super) async fn cancelling_a_durable_busy_lane_wait_keeps_the_queued_row_pen
 /// observed TTL with the same typed retryable error.
 #[tokio::test]
 pub(super) async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait_budget() {
+    let backend = memory_backend().await;
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        &backend,
         mock_provider(Vec::new()),
         store_clock,
     )
@@ -1300,11 +1319,11 @@ pub(super) async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait
             .with_controller_owned_replay()
             .with_engine_paced_lane(),
     );
-    let scope = lash_core::ScopedEffectController::shared(
+    let scope = super::effect::layered_scope(
+        &backend,
         controller,
         lash_core::AdmittedScope::queue_drain("root", "queued-frozen-holder"),
-    )
-    .expect("durable queued-turn scope");
+    );
     let error = runtime
         .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
         .await
@@ -1350,8 +1369,9 @@ pub(super) async fn durable_controller_stops_waiting_for_a_busy_lane_at_the_wait
 /// one-shot `Busy -> None` drain contract.
 #[tokio::test]
 pub(super) async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_contract() {
+    let backend = memory_backend().await;
     let (mut runtime, store) =
-        standard_runtime_with_transport_and_queue_store(mock_provider(Vec::new())).await;
+        standard_runtime_with_transport_and_queue_store(&backend, mock_provider(Vec::new())).await;
     enqueue_idle_turn_input(
         store.as_ref(),
         &SessionId::from("root"),
@@ -1374,11 +1394,11 @@ pub(super) async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_
     let controller = Arc::new(
         super::effect::RecordingEffectController::default().with_controller_owned_replay(),
     );
-    let scope = lash_core::ScopedEffectController::shared(
+    let scope = super::effect::layered_scope(
+        &backend,
         controller,
         lash_core::AdmittedScope::queue_drain("root", "queued-replay-owner"),
-    )
-    .expect("controller-owned replay queued-turn scope");
+    );
     let busy_result = runtime
         .stream_next_queued_work(TurnOptions::new(CancellationToken::new(), scope))
         .await
@@ -1413,9 +1433,11 @@ pub(super) async fn controller_owned_replay_alone_keeps_the_one_shot_busy_drain_
 
 #[tokio::test]
 pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_ttl_expires() {
+    let backend = memory_backend().await;
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let (mut runtime, store) = standard_runtime_with_transport_and_queue_store_clock(
+        &backend,
         mock_provider(Vec::new()),
         store_clock,
     )
@@ -1496,15 +1518,16 @@ pub(super) async fn session_command_waits_in_durable_queue_until_session_lease_t
 
 #[tokio::test]
 pub(super) async fn session_command_claim_lease_expiry_surfaces_session_execution_lease_lost() {
+    let backend = memory_backend().await;
     let clock = Arc::new(StepExpiryClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        test_host_config(),
+        test_host_config(&backend),
         runtime_store,
     )
     .await;
@@ -1535,15 +1558,16 @@ pub(super) async fn session_command_claim_lease_expiry_surfaces_session_executio
 
 #[tokio::test]
 pub(super) async fn idle_queued_work_claim_lease_expiry_retains_pending_admission() {
+    let backend = memory_backend().await;
     let clock = Arc::new(StepExpiryClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        test_host_config(),
+        test_host_config(&backend),
         runtime_store,
     )
     .await;
@@ -1574,6 +1598,7 @@ pub(super) async fn idle_queued_work_claim_lease_expiry_retains_pending_admissio
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits() {
+    let backend = memory_backend().await;
     const SESSION_ID: &str = "concurrent-real-turn-admission";
 
     let session_id = SESSION_ID;
@@ -1582,7 +1607,7 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
     );
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
     let build_runtime = |answer: &'static str| {
         let transport = mock_provider(vec![MockCall {
             stream_events: Vec::new(),
@@ -1597,11 +1622,13 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
         }]);
         let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
         let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
+        let backend = Arc::clone(&backend);
         async move {
-            TestRuntime::new(transport)
+            TestRuntime::new(&backend, transport)
                 .tools(Arc::new(EmptyTools))
                 .host(lash_core::facade_support::EmbeddedRuntimeHost::new(
-                    lash_core::facade_support::RuntimeHostConfig::in_memory(
+                    lash_core::facade_support::RuntimeHostConfig::new(
+                        std::sync::Arc::clone(&backend),
                         lash_core::CommitBudget::bounded(1024 * 1024, 512),
                         lash_core::QueuedWorkBatchingConfig::new(1),
                     )
@@ -1704,11 +1731,12 @@ pub(super) async fn concurrent_real_turn_commits_record_product_admission_waits(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_same_runtime_turn()
 {
+    let backend = memory_backend().await;
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
     let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let registry = backend.process_registry();
     registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
@@ -1770,12 +1798,13 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
         })
         .build();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let config = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_clock(host_clock);
-    let mut runtime = TestRuntime::new(transport)
+    let mut runtime = TestRuntime::new(&backend, transport)
         .plugins(Vec::new())
         .tools(tools)
         .host(lash_core::facade_support::EmbeddedRuntimeHost::new(config))
@@ -1836,12 +1865,13 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
     }]);
     let successor_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let successor_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let successor_config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let successor_config = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
     .with_clock(successor_clock);
-    let mut successor = TestRuntime::new(successor_transport)
+    let mut successor = TestRuntime::new(&backend, successor_transport)
         .plugins(Vec::new())
         .host(lash_core::facade_support::EmbeddedRuntimeHost::new(
             successor_config,
@@ -1891,9 +1921,10 @@ pub(super) async fn committed_intent_survives_takeover_and_head_cas_loss_in_the_
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 pub(super) async fn activated_successor_loses_head_cas_after_predecessor_publication_without_stranding_turn()
  {
+    let backend = memory_backend().await;
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
     let mut predecessor_final = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(standard_test_policy())
@@ -1928,7 +1959,8 @@ pub(super) async fn activated_successor_loses_head_cas_after_predecessor_publica
     }]);
     let successor_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let successor_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let successor_config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let successor_config = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -2038,9 +2070,10 @@ pub(super) async fn activated_successor_loses_head_cas_after_predecessor_publica
 // `renewal_failure_mid_turn_does_not_select_a_durable_branch`.
 #[tokio::test]
 pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_final_commit() {
+    let backend = memory_backend().await;
     let clock = Arc::new(ManualClock::new(1_000));
     let store_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let store = Arc::new(RecordingStore::with_clock(store_clock));
+    let store = unbound_recording_store_with_clock(&backend, store_clock).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel();
     let (provider_continue_tx, provider_continue_rx) = tokio::sync::oneshot::channel();
@@ -2077,7 +2110,8 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
         })
         .build();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let mut config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let mut config = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -2125,7 +2159,8 @@ pub(super) async fn unobserved_lease_loss_does_not_stop_foreground_turn_before_f
     }]);
     let successor_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let successor_host_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let successor_config = lash_core::facade_support::RuntimeHostConfig::in_memory(
+    let successor_config = lash_core::facade_support::RuntimeHostConfig::new(
+        std::sync::Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -2236,17 +2271,18 @@ fn single_answer_provider(text: &str) -> TestProvider {
 /// once by the next turn.
 #[tokio::test]
 pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_the_next_turn() {
+    let backend = memory_backend().await;
     let turn_id = &TurnId::from("claim-window-worker-replacement");
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let controller = Arc::new(AcceptanceWindowJournalController::new(Arc::clone(&store)));
-    let shared: Arc<dyn lash_core::RuntimeEffectController> = controller.clone();
+    let shared: Arc<dyn lash_core::testing::EffectLayer> = controller.clone();
     let input = TurnInput::text("first tab input");
 
     let mut first_worker = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
         single_answer_provider("journaled answer"),
-        journal_replay_host(Arc::clone(&shared)),
+        journal_replay_host(&backend, Arc::clone(&shared)),
         Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
     ))
     .await;
@@ -2255,11 +2291,11 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
             input.clone(),
             TurnOptions::new(
                 CancellationToken::new(),
-                lash_core::ScopedEffectController::shared(
+                super::effect::layered_scope(
+                    &backend,
                     Arc::clone(&shared),
                     lash_core::AdmittedScope::turn("root", turn_id),
-                )
-                .expect("scope the replaced worker"),
+                ),
             ),
         )
         .await
@@ -2275,23 +2311,21 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        journal_replay_host(Arc::clone(&shared)),
+        journal_replay_host(&backend, Arc::clone(&shared)),
         Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
     ))
     .await;
-    let replayed = Box::pin(
-        replacement.stream_turn(
-            input,
-            TurnOptions::new(
-                CancellationToken::new(),
-                lash_core::ScopedEffectController::shared(
-                    Arc::clone(&shared),
-                    lash_core::AdmittedScope::turn("root", turn_id),
-                )
-                .expect("scope the replacement worker"),
+    let replayed = Box::pin(replacement.stream_turn(
+        input,
+        TurnOptions::new(
+            CancellationToken::new(),
+            super::effect::layered_scope(
+                &backend,
+                Arc::clone(&shared),
+                lash_core::AdmittedScope::turn("root", turn_id),
             ),
         ),
-    )
+    ))
     .await
     .expect("the replacement must replay the journaled message block, not a re-claimed one");
     let acceptance = replayed
@@ -2319,20 +2353,18 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         Vec::new(),
         Arc::new(EmptyTools),
         single_answer_provider("answer for the second tab"),
-        journal_replay_host(Arc::clone(&shared)),
+        journal_replay_host(&backend, Arc::clone(&shared)),
         Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
     ))
     .await;
-    let drained = Box::pin(
-        next_turn_worker.stream_next_queued_work(TurnOptions::new(
-            CancellationToken::new(),
-            lash_core::ScopedEffectController::shared(
-                Arc::clone(&shared),
-                lash_core::AdmittedScope::queue_drain("root", "claim-window-late-input-drain"),
-            )
-            .expect("scope the next turn"),
-        )),
-    )
+    let drained = Box::pin(next_turn_worker.stream_next_queued_work(TurnOptions::new(
+        CancellationToken::new(),
+        super::effect::layered_scope(
+            &backend,
+            Arc::clone(&shared),
+            lash_core::AdmittedScope::queue_drain("root", "claim-window-late-input-drain"),
+        ),
+    )))
     .await
     .expect("the deferred second-tab input must drain on the next turn")
     .ran();

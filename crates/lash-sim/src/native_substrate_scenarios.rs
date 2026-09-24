@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::facade_support::{
-    CommitBudget, InMemorySessionStoreFactory, PluginHost, ProcessAdmissionIntake,
-    ProcessEngineRegistry, ProcessRecoveryOperation, ProcessWorkerFault, QueuedWorkBatchingConfig,
-    RuntimeHostConfig, watch_process_registry,
+    CommitBudget, PluginHost, ProcessAdmissionIntake, ProcessEngineRegistry,
+    ProcessRecoveryOperation, ProcessWorkerFault, QueuedWorkBatchingConfig, RuntimeHostConfig,
+    watch_process_registry,
 };
 use lash_core::sync::MutexExt as _;
 use lash_core::{
@@ -227,7 +227,15 @@ impl ProcessAdmissionScenario {
         });
         let fault_sink = AdmissionFaultSink::default();
 
-        let mut runtime_host = RuntimeHostConfig::in_memory(
+        let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
+            lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .expect("open a SQLite memory backend"),
+        ))
+        .map_process_registry(|_| Arc::clone(&registry))
+        .into_backend();
+        let mut runtime_host = RuntimeHostConfig::new(
+            backend,
             CommitBudget::bounded(1024 * 1024, 512),
             QueuedWorkBatchingConfig::new(1),
         );
@@ -298,7 +306,6 @@ impl ProcessAdmissionScenario {
                 lash_protocol_standard::StandardProtocolPluginFactory::new(),
             )])),
             runtime_host,
-            Arc::new(InMemorySessionStoreFactory::new()),
             WorkerProcessWork::SelfNative(watched.clone()),
             Arc::new(NoQueuedWork::new()),
             LeaseOwnerIdentity::opaque(

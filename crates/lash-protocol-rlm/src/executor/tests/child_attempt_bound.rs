@@ -89,9 +89,9 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
 
     let published: Arc<dyn lashlang::LashlangArtifactStore> =
         Arc::new(lashlang::InMemoryLashlangArtifactStore::new());
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let process_env_store = backend.process_env_store();
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -111,8 +111,9 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
         let process_env_store = Arc::clone(&process_env_store);
         let surface = surface.clone();
         let session_policy = session_policy.clone();
+        let backend = Arc::clone(&backend);
         async move {
-            let effect_host = memory_effect_host().await;
+            let effect_host = backend.effect_host();
             let processes: Arc<dyn lash_core::ProcessService> =
                 Arc::new(TypeScriptSignalProcessService {
                     registry: registry.clone(),
@@ -231,10 +232,10 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
             inner: Arc::clone(&published),
             reads: Arc::clone(&reads),
         });
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        Arc::new(lash_core::facade_support::InMemoryProcessExecutionEnvStore::new());
-    let effect_host = memory_effect_host().await;
+    let backend = memory_backend().await;
+    let registry = backend.process_registry();
+    let process_env_store = backend.process_env_store();
+    let effect_host = backend.effect_host();
     let surface = LashlangSurface::new(
         lashlang::LashlangAbilities::default(),
         lashlang::LashlangLanguageFeatures::default(),
@@ -248,9 +249,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&effect_host),
-        Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
-        process_env_store.clone(),
+        Arc::clone(&backend),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -262,7 +261,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
             ),
         ),
     );
-    let registry_dyn: Arc<dyn lash_core::ProcessRegistry> = registry.clone();
+    let registry_dyn = Arc::clone(&registry);
     let watched = lash_core::facade_support::watch_process_registry(registry_dyn);
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::new(
@@ -270,7 +269,6 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
                 lash_core::testing::test_code_protocol_factories(),
             )),
             runtime_host,
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             lash_core::testing::runtime_lease_owner(),

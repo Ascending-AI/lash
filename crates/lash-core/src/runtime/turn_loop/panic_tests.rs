@@ -1,5 +1,9 @@
 use super::*;
-use crate::runtime::tests::helpers::{MockCall, TestRuntime, mock_provider, named_turn_scope};
+use crate::runtime::tests::helpers::{
+    MockCall, RecordingStore, TestRuntime, host_turn_scope, mock_provider, recording_session_store,
+};
+
+const SESSION_ID: &str = "lease-panic-witness";
 
 struct PanicBeforeCommit;
 
@@ -13,18 +17,21 @@ impl RuntimeTurnPhaseProbe for PanicBeforeCommit {
     fn end(&self, _phase: RuntimeTurnPhase) {}
 }
 
-async fn runtime(store: Arc<InMemorySessionStore>) -> LashRuntime {
-    TestRuntime::new(mock_provider(vec![MockCall {
-        stream_events: Vec::new(),
-        response: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: "done".to_string(),
-                response_meta: None,
-            }],
-            ..LlmResponse::default()
-        }),
-    }]))
-    .with_session_id("lease-panic-witness")
+async fn runtime(backend: &Arc<dyn crate::Backend>, store: Arc<RecordingStore>) -> LashRuntime {
+    TestRuntime::new(
+        backend,
+        mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "done".to_string(),
+                    response_meta: None,
+                }],
+                ..LlmResponse::default()
+            }),
+        }]),
+    )
+    .with_session_id(SESSION_ID)
     .store(store)
     .build()
     .await
@@ -41,20 +48,19 @@ async fn contained_panic_waits_for_lease_release_acknowledgement() {
 }
 
 async fn assert_immediate_successor(gate_release: bool) {
-    let store = Arc::new(InMemorySessionStore::new());
-    let mut first = runtime(Arc::clone(&store)).await;
-    let mut successor = runtime(Arc::clone(&store)).await;
+    let backend = crate::testing::memory_backend().await;
+    let store = recording_session_store(&backend, SESSION_ID).await;
+    let mut first = runtime(&backend, Arc::clone(&store)).await;
+    let mut successor = runtime(&backend, Arc::clone(&store)).await;
     let session_id = first.state.session_id.clone();
     first.set_turn_phase_probe(Arc::new(PanicBeforeCommit));
     let gate = gate_release.then(|| store.gate_session_execution_lease_release());
+    let scope = host_turn_scope(&first.host.core, &session_id, &TurnId::from("panic"));
     let task = crate::task::spawn(async move {
         first
             .stream_turn_with_agent_frames(
                 TurnInput::text("panic"),
-                TurnOptions::new(
-                    CancellationToken::new(),
-                    named_turn_scope(&session_id, &TurnId::from("panic")),
-                ),
+                TurnOptions::new(CancellationToken::new(), scope),
             )
             .await
     });
@@ -88,17 +94,16 @@ async fn assert_immediate_successor(gate_release: bool) {
 
 #[tokio::test]
 async fn happy_turn_keeps_atomic_lease_release_without_extra_call() {
-    let store = Arc::new(InMemorySessionStore::new());
-    let mut successor = runtime(Arc::clone(&store)).await;
-    let mut runtime = runtime(Arc::clone(&store)).await;
+    let backend = crate::testing::memory_backend().await;
+    let store = recording_session_store(&backend, SESSION_ID).await;
+    let mut successor = runtime(&backend, Arc::clone(&store)).await;
+    let mut runtime = runtime(&backend, Arc::clone(&store)).await;
     let session_id = runtime.state.session_id.clone();
+    let scope = host_turn_scope(&runtime.host.core, &session_id, &TurnId::from("happy"));
     runtime
         .stream_turn_with_agent_frames(
             TurnInput::text("complete"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                named_turn_scope(&session_id, &TurnId::from("happy")),
-            ),
+            TurnOptions::new(CancellationToken::new(), scope),
         )
         .await
         .expect("happy turn completes");

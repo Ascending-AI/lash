@@ -38,6 +38,8 @@ mod attachment_owner;
 mod attachment_store;
 mod await_event_cold;
 mod backend;
+mod law_backend;
+pub(crate) use law_backend::LawBackend;
 mod cancelled_turn_withheld_input;
 mod cell_binding_drift;
 pub mod cold_process_turn_parent;

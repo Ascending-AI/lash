@@ -37,7 +37,6 @@ pub use self::recovery::{
 };
 pub use crate::DEFAULT_PROCESS_EXECUTION_CONCURRENCY;
 
-use crate::InMemorySessionStore;
 use crate::RuntimeHostConfig;
 use crate::runtime::EmbeddedRuntimeBuilder;
 use crate::{
@@ -100,16 +99,16 @@ pub struct DurableProcessWorkerConfig {
     #[cfg(test)]
     cancel_watcher_ready: Option<Arc<tokio::sync::Notify>>,
     pub plugin_host: Arc<PluginHost>,
+    /// The host config and its one backend, which supplies the session
+    /// catalog and trigger store this worker reaches (ADR 0102, D2).
     pub runtime_host: RuntimeHostConfig,
     pub session_policy: crate::SessionPolicy,
-    pub session_store_factory: Arc<dyn SessionStoreFactory>,
     /// Host-facing sink this worker reports [`ProcessWorkerFault`]s on.
     ///
     /// Wire the same sink the registry decorator was built with: a drive
     /// admits rows and returns, so the faults that strand an admitted row
     /// afterwards have no other honest way back to the host.
     pub process_event_sink: Option<Arc<dyn crate::ProcessEventSink>>,
-    pub trigger_store: Arc<dyn crate::TriggerStore>,
     pub native_substrate: crate::NativeSubstrateConfig,
     process_work: WorkerProcessWork,
     queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
@@ -140,21 +139,17 @@ impl DurableProcessWorkerConfig {
     pub fn new(
         plugin_host: Arc<PluginHost>,
         runtime_host: RuntimeHostConfig,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
         process_work: WorkerProcessWork,
         queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
         lease_owner: crate::LeaseOwnerIdentity,
     ) -> Self {
-        let clock = Arc::clone(&runtime_host.clock);
         Self {
             plugin_host,
             runtime_host,
             session_policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-            session_store_factory,
             process_event_sink: None,
             #[cfg(test)]
             cancel_watcher_ready: None,
-            trigger_store: Arc::new(crate::InMemoryTriggerStore::with_clock(clock)),
             native_substrate: crate::NativeSubstrateConfig::default(),
             process_work,
             queued_work,
@@ -165,9 +160,15 @@ impl DurableProcessWorkerConfig {
         }
     }
 
-    pub fn with_trigger_store(mut self, store: Arc<dyn crate::TriggerStore>) -> Self {
-        self.trigger_store = store;
-        self
+    /// The backend's session catalog, which every session this worker
+    /// creates, opens or reconstructs goes through.
+    pub fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
+        self.runtime_host.session_store_factory()
+    }
+
+    /// The backend's trigger store, whose deliveries this worker drives.
+    pub fn trigger_store(&self) -> Arc<dyn crate::TriggerStore> {
+        self.runtime_host.trigger_store()
     }
 
     pub fn with_session_policy(mut self, policy: crate::SessionPolicy) -> Self {
@@ -225,7 +226,6 @@ impl DurableProcessWorkerConfig {
     pub fn from_plugin_factories(
         plugin_factories: impl IntoIterator<Item = Arc<dyn PluginFactory>>,
         runtime_host: RuntimeHostConfig,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
         process_work: WorkerProcessWork,
         queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
         lease_owner: crate::LeaseOwnerIdentity,
@@ -233,7 +233,6 @@ impl DurableProcessWorkerConfig {
         Self::new(
             Arc::new(PluginHost::new(plugin_factories.into_iter().collect())),
             runtime_host,
-            session_store_factory,
             process_work,
             queued_work,
             lease_owner,
@@ -243,7 +242,6 @@ impl DurableProcessWorkerConfig {
     pub fn from_plugin_stack(
         plugin_stack: PluginStack,
         runtime_host: RuntimeHostConfig,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
         process_work: WorkerProcessWork,
         queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
         lease_owner: crate::LeaseOwnerIdentity,
@@ -251,7 +249,6 @@ impl DurableProcessWorkerConfig {
         Self::from_plugin_factories(
             plugin_stack.into_factories(),
             runtime_host,
-            session_store_factory,
             process_work,
             queued_work,
             lease_owner,
@@ -921,7 +918,7 @@ impl DurableProcessWorker {
     async fn reconcile_trigger_deliveries(
         &self,
     ) -> Result<Option<ProcessAdmissionReport>, PluginError> {
-        let candidates = self.config.trigger_store.list_deliveries().await?;
+        let candidates = self.config.trigger_store().list_deliveries().await?;
         if candidates.is_empty() {
             return Ok(None);
         }
@@ -937,12 +934,28 @@ impl DurableProcessWorker {
             .into_iter()
             .collect::<BTreeSet<_>>();
         let process_work = self.process_wiring();
-        let router =
-            crate::TriggerRouter::new(Arc::clone(&self.config.trigger_store), process_work.clone())
-                .with_process_artifacts(
-                    Arc::clone(&self.config.runtime_host.durability.process_env_store),
-                    self.config.runtime_host.process_engines.clone(),
-                );
+        // The reconcile admits what it starts in one explicit drive below and
+        // hands that drive's report to its caller. A start's own advisory poke
+        // would admit the row in a nested drive whose report nobody reads,
+        // and this call would then meet its own row as `Busy`; the starts
+        // therefore register without poking.
+        #[expect(
+            clippy::expect_used,
+            reason = "the substrate config was validated when the worker was built"
+        )]
+        let start_wiring = crate::ProcessWorkWiring::new(
+            process_work.watched().clone(),
+            Arc::new(RegistrationOnlyProcessWork {
+                inner: Arc::clone(process_work.port()),
+            }),
+        )
+        .with_work_cadence(self.config.native_substrate.work_cadence.clone())
+        .expect("native substrate config was validated when the worker was built");
+        let router = crate::TriggerRouter::new(self.config.trigger_store(), start_wiring)
+            .with_process_artifacts(
+                Arc::clone(&self.config.runtime_host.durability.process_env_store),
+                self.config.runtime_host.process_engines.clone(),
+            );
         let mut started_any = false;
         for delivery in candidates {
             if missing_process_ids.contains(&delivery.process_id) {
@@ -1554,7 +1567,7 @@ impl DurableProcessWorker {
     ) -> Result<LashRuntime, PluginError> {
         let attachment_manifest_store = self
             .config
-            .session_store_factory
+            .session_store_factory()
             .create_store(&crate::SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
@@ -1567,30 +1580,22 @@ impl DurableProcessWorker {
                     "failed to open process attachment owner store for `{session_id}`: {err}"
                 ))
             })?;
-        // Process execution sessions are reconstruction-only and must not alias
-        // a parent-bound factory's runtime state. Attachment intents still use
-        // the factory store so their process owner remains durable.
-        let store = Arc::new(InMemorySessionStore::default());
+        // A process execution runtime is reconstruction-only: it runs on the
+        // storeless path, keeps its session state in memory for the run and
+        // persists none of it, so it never aliases a parent-bound catalog's
+        // runtime state. Attachment intents still go to the catalog store so
+        // the process owner of every blob stays durable.
         let process_work = self.process_wiring();
         let builder = EmbeddedRuntimeBuilder::new(
-            self.config.runtime_host.durability.commit_budget,
-            self.config
-                .runtime_host
-                .durability
-                .queued_work_batching
-                .clone(),
+            self.config.runtime_host.clone(),
             self.config.lease_owner.clone(),
         )
         .with_session_id(session_id.to_string())
         .with_plugin_host(self.config.plugin_host.as_ref().clone())
-        .with_runtime_host(self.config.runtime_host.clone())
         .with_policy(policy)
         .with_plugin_options(plugin_options)
-        .with_session_store_factory(Arc::clone(&self.config.session_store_factory))
-        .with_trigger_store(Arc::clone(&self.config.trigger_store))
         .with_process_work(process_work)
         .with_attachment_manifest_store(attachment_manifest_store)
-        .with_store(store)
         .with_queued_work(Arc::clone(&self.config.queued_work));
         Box::pin(builder.build()).await.map_err(|err| {
             PluginError::Session(format!(
@@ -1643,10 +1648,40 @@ impl super::native_substrate::NativeProcessAdmissionDriver for DurableProcessWor
     }
 }
 
+/// The process port a trigger-delivery reconcile starts rows through: it
+/// registers them and leaves admission to the reconcile's own explicit drive,
+/// whose report reaches the caller. Waiting on a started row is the worker's
+/// port as usual.
+struct RegistrationOnlyProcessWork {
+    inner: Arc<dyn crate::ProcessWorkSubstrate>,
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessWorkSubstrate for RegistrationOnlyProcessWork {
+    async fn admit_pending_processes(
+        &self,
+        _reason: &str,
+    ) -> Result<ProcessAdmissionReport, PluginError> {
+        Ok(ProcessAdmissionReport {
+            intake: ProcessAdmissionIntake::Coalesced,
+            ..ProcessAdmissionReport::default()
+        })
+    }
+
+    async fn await_process_terminal(
+        &self,
+        process_ref: &crate::ProcessRef,
+    ) -> Result<crate::ProcessTerminalWait, PluginError> {
+        self.inner.await_process_terminal(process_ref).await
+    }
+}
+
 #[cfg(test)]
 mod permit_tests;
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod test_backend;
 
 /// The replay refusal a process run ended on, when it is one that parks
 /// (FIG-3586): the body could not replay its journal and dispatched nothing.

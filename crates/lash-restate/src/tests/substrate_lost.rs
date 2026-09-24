@@ -420,7 +420,8 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
         Arc::clone(&registry),
         Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
         vec![counting_tool_plugin(Arc::clone(&executions))],
-    );
+    )
+    .await;
     let registration = two_segment_tool_registration(&process_id).await;
     registry
         .register_process(registration.clone())

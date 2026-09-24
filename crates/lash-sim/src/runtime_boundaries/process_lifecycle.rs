@@ -78,7 +78,6 @@ pub(super) fn lifecycle_worker(
                 lash_protocol_standard::StandardProtocolPluginFactory::new(),
             )])),
             runtime_host,
-            Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
             WorkerProcessWork::SelfNative(watched),
             Arc::new(lash_core::NoQueuedWork::new()),
             owner,

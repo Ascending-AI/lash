@@ -11,7 +11,6 @@ use lash_core_execution::store::load_persisted_session_state;
 use lash_core_execution::{
     ForkSessionRequest, OperationId, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
     SessionRelation, SessionStoreCreateRequest, SessionStoreFactory,
-    facade_support::InMemorySessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 use lash_sqlite_store::SqliteSessionStoreFactory;
@@ -381,8 +380,14 @@ async fn measured_refcount_replacement_operations() {
         .expect("connect benchmark Postgres");
     let sqlite_dir = tempfile::tempdir().expect("SQLite benchmark directory");
     let run_id = uuid::Uuid::new_v4().simple().to_string();
+    let sqlite_memory = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend");
     let backends: Vec<(&str, Arc<dyn SessionStoreFactory>)> = vec![
-        ("in_memory", Arc::new(InMemorySessionStoreFactory::new())),
+        (
+            "sqlite_memory",
+            lash_core_execution::Backend::session_store_factory(&sqlite_memory),
+        ),
         (
             "sqlite",
             Arc::new(SqliteSessionStoreFactory::new(sqlite_dir.path())),

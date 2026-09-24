@@ -794,9 +794,69 @@ fn postgres_public_turn_scope(
     .expect("scope PostgreSQL public turn")
 }
 
-async fn public_signal_runtime(
+/// The one backend a law's runtime runs over: `storage`'s PostgreSQL ports,
+/// with `effect_host` (a host over the same storage, possibly under a test
+/// layer) and `registry` (the law's handle on the same storage's registry) in
+/// place of the backend's own.
+///
+/// These laws certify the PostgreSQL effect journal and registry. The session
+/// history a law runtime and its worker's child runtimes commit is outside what
+/// they check, so each law runtime keeps it in a detached session catalog of
+/// its own (see [`detached_session_store`]). A law "crashes" a host by
+/// aborting its turn task while that host's child runtimes live on, so a
+/// catalog shared across hosts would leave the redrive waiting on a child
+/// session lease the crashed host still renews.
+async fn pg_law_backend(
+    storage: &PostgresStorage,
     effect_host: Arc<dyn EffectHost>,
     registry: Arc<dyn lash_core_execution::ProcessRegistry>,
+) -> Arc<dyn lash_core_execution::Backend> {
+    let detached = held_memory_backend().await;
+    // The laws write no attachment; the backend's attachment port is an
+    // in-process byte store.
+    lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
+        lash_postgres_store::PostgresBackend::new(
+            storage,
+            Arc::new(lash_core::facade_support::InMemoryAttachmentStore::new()),
+        ),
+    ))
+    .map_effect_host(|_| effect_host)
+    .map_process_registry(|_| registry)
+    .map_session_store_factory(|_| lash_core_execution::Backend::session_store_factory(&detached))
+    .into_backend()
+}
+
+/// A fresh SQLite memory backend, held for the life of the test binary: its
+/// named in-memory databases live while any handle does, and the stores it
+/// hands out reach sibling databases by name.
+async fn held_memory_backend() -> lash_sqlite_store::SqliteBackend {
+    static HELD: std::sync::Mutex<Vec<lash_sqlite_store::SqliteBackend>> =
+        std::sync::Mutex::new(Vec::new());
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend");
+    HELD.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(backend.clone());
+    backend
+}
+
+/// The law runtime's session store. These laws certify the PostgreSQL effect
+/// journal and registry; the session history the runtime commits is outside
+/// what they check, so it lives in a detached SQLite memory store rather than
+/// in PostgreSQL session rows a rerun would inherit.
+async fn detached_session_store() -> Arc<dyn lash_core_execution::RuntimePersistence> {
+    Arc::new(
+        held_memory_backend()
+            .await
+            .open_store()
+            .await
+            .expect("open a detached session store"),
+    )
+}
+
+async fn public_signal_runtime(
+    backend: Arc<dyn lash_core_execution::Backend>,
     provider_calls: Arc<AtomicUsize>,
     model_calls: Arc<AtomicUsize>,
     kind: PublicIntentKind,
@@ -842,28 +902,26 @@ async fn public_signal_runtime(
         })
         .build()
         .into_handle();
-    let mut host = lash_core_execution::facade_support::RuntimeHostConfig::in_memory(
+    let registry = backend.process_registry();
+    let mut host = lash_core_execution::facade_support::RuntimeHostConfig::new(
+        backend,
         lash_core_execution::CommitBudget::bounded(1024 * 1024, 512),
         lash_core_execution::QueuedWorkBatchingConfig::new(1),
     );
-    host = host.with_effect_host(effect_host);
     host.providers.provider_resolver =
         Arc::new(lash_core_execution::facade_support::SingleProviderResolver::new(model));
     let policy = public_runtime_policy();
-    let store: Arc<dyn lash_core_execution::RuntimePersistence> =
-        Arc::new(lash_core_execution::facade_support::InMemorySessionStore::new());
+    let store = detached_session_store().await;
     let watched = lash_core_execution::facade_support::watch_process_registry(registry);
     let registry = Arc::clone(watched.registry());
     Box::pin(
         lash_core::facade_support::LashRuntime::builder(
-            lash_core_execution::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core_execution::QueuedWorkBatchingConfig::new(1),
+            host,
             lash_core_execution::testing::runtime_lease_owner(),
         )
         .with_session_id(SESSION)
         .with_policy(policy.clone())
         .with_initial_state(public_runtime_state(&policy))
-        .with_runtime_host(host)
         .with_plugin_factories(
             lash_core_execution::testing::test_standard_protocol_factories()
                 .into_iter()
@@ -1332,8 +1390,12 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
         })
     };
     let mut first = public_signal_runtime(
-        crossing_host(first_host.clone()),
-        Arc::clone(&registry),
+        pg_law_backend(
+            &storage,
+            crossing_host(first_host.clone()),
+            Arc::clone(&registry),
+        )
+        .await,
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
         PublicIntentKind::Signal,
@@ -1403,8 +1465,12 @@ async fn public_provider_signal_intent_wakes_and_redrives_byte_identically_on_po
     let replay_host = Arc::new(storage.effect_host());
     replay_host.start_replay();
     let mut replay = public_signal_runtime(
-        crossing_host(replay_host.clone()),
-        Arc::clone(&registry),
+        pg_law_backend(
+            &storage,
+            crossing_host(replay_host.clone()),
+            Arc::clone(&registry),
+        )
+        .await,
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
         PublicIntentKind::Signal,
@@ -1508,8 +1574,7 @@ async fn public_provider_parent_end_row_is_recovered_after_a_crash_before_the_le
     let model_calls = Arc::new(AtomicUsize::new(0));
     let effect_host = Arc::new(storage.effect_host());
     let mut first = public_signal_runtime(
-        effect_host.clone(),
-        Arc::clone(&registry),
+        pg_law_backend(&storage, effect_host.clone(), Arc::clone(&registry)).await,
         Arc::clone(&provider_calls),
         Arc::clone(&model_calls),
         PublicIntentKind::ParentEnd,

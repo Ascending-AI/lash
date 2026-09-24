@@ -1,6 +1,9 @@
-//! Effect-controller test support: a strict replay journal plus controllers
-//! that refuse concurrency, reject effects, or answer with the wrong outcome
-//! shape. The doubles share the recording harness in the parent module.
+//! Effect-layer test support: a strict replay journal plus layers that
+//! record, reject effects, or answer with the wrong outcome shape. Each double
+//! is an [`EffectLayer`](lash_core::testing::EffectLayer) over a real backend's
+//! effect host (FIG-3580): it answers the effects it models itself and leaves
+//! every group operation, await-event registry read and journal lever to the
+//! backend underneath.
 
 use crate::runtime_support::*;
 
@@ -76,7 +79,6 @@ impl StrictReplayJournal {
 
 #[derive(Default)]
 pub struct RejectingEffectController {
-    pub native: NativeRuntimeEffectController,
     pub abort_invocation_on_failure: bool,
     pub mismatch_summary: Option<RuntimeEffectReplayMismatchReport>,
 }
@@ -94,74 +96,10 @@ impl RejectingEffectController {
 }
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for RejectingEffectController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(format!("rejecting-controller:{:p}", self))
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        self.native.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<Resolution, RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.native
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.native
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for RejectingEffectController {
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
-        if self.abort_invocation_on_failure {
-            lash_core::EffectJournaling::Journaled
-        } else {
-            lash_core::EffectJournaling::Local
-        }
-    }
-
+impl lash_core::testing::EffectLayer for RejectingEffectController {
     async fn execute_effect(
         &self,
+        _inner: &dyn RuntimeEffectController,
         envelope: RuntimeEffectEnvelope,
         _local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
@@ -187,120 +125,23 @@ impl RuntimeEffectController for RejectingEffectController {
 
     async fn open_effect_group(
         &self,
+        _inner: &dyn RuntimeEffectController,
         _group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
         Err(lash_core::effect_groups_unsupported(
             "RejectingEffectController",
         ))
     }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RejectingEffectController",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "RejectingEffectController",
-        ))
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
-    }
 }
 
 #[derive(Default)]
-pub struct WrongOutcomeEffectController {
-    pub native: NativeRuntimeEffectController,
-}
+pub struct WrongOutcomeEffectController;
 
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for WrongOutcomeEffectController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(format!("wrong-outcome-controller:{:p}", self))
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        self.native.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<Resolution, RuntimeError> {
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.native
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.native
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for WrongOutcomeEffectController {
+impl lash_core::testing::EffectLayer for WrongOutcomeEffectController {
     async fn execute_effect(
         &self,
+        _inner: &dyn RuntimeEffectController,
         envelope: RuntimeEffectEnvelope,
         _local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
@@ -315,51 +156,12 @@ impl RuntimeEffectController for WrongOutcomeEffectController {
 
     async fn open_effect_group(
         &self,
+        _inner: &dyn RuntimeEffectController,
         _group: lash_core::RuntimeEffectGroup,
     ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
         Err(lash_core::effect_groups_unsupported(
             "WrongOutcomeEffectController",
         ))
-    }
-
-    async fn await_next_settlement(
-        &self,
-        _handle: &mut lash_core::EffectGroupHandle,
-        _cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "WrongOutcomeEffectController",
-        ))
-    }
-
-    async fn close_effect_group(
-        &self,
-        _handle: lash_core::EffectGroupHandle,
-        _disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        Err(lash_core::effect_groups_unsupported(
-            "WrongOutcomeEffectController",
-        ))
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
     }
 }
 
@@ -387,7 +189,6 @@ pub struct RecordingEffectController {
     pub records: Arc<Mutex<Vec<EffectControllerRecord>>>,
     pub envelopes: Arc<Mutex<Vec<String>>>,
     pub llm_calls: Arc<Mutex<usize>>,
-    pub native: NativeRuntimeEffectController,
     pub cancel_after_llm: bool,
     pub cancel_after_step: bool,
     pub escalate_after_llm: bool,
@@ -413,9 +214,6 @@ pub struct RecordingEffectController {
             std::sync::atomic::AtomicBool,
         )>,
     >,
-    /// Get-or-init slot for `EffectHost::install_tool_child_host` when the
-    /// recorder itself is installed as a runtime's effect host.
-    pub tool_children: std::sync::OnceLock<Arc<lash_core::facade_support::ToolChildHost>>,
 }
 
 impl RecordingEffectController {
@@ -440,24 +238,6 @@ impl RecordingEffectController {
 
     /// A replaying owner with no live cancel state: every canned gate
     /// resolution is off, so what replay sees comes from the journal alone.
-    /// A fresh double whose group operations land on `native`: the scoped
-    /// twin of a host-side recorder shares its substrate, where the host's
-    /// tool-child resolver is registered.
-    pub fn sharing_group_substrate(native: NativeRuntimeEffectController) -> Self {
-        Self {
-            native,
-            ..Self::default()
-        }
-    }
-
-    /// This double on a fresh group substrate: a new owner is a new process,
-    /// which shares the journal but not the previous owner's in-memory group
-    /// table or the tool-child resolver registered on it.
-    pub fn on_fresh_group_substrate(mut self) -> Self {
-        self.native = NativeRuntimeEffectController::default();
-        self
-    }
-
     pub fn without_canned_cancel(mut self) -> Self {
         self.cancel_after_llm = false;
         self.cancel_after_step = false;
@@ -606,67 +386,24 @@ impl RecordingEffectController {
     }
 }
 
-pub fn scoped_test_turn<'a>(
-    controller: &'a dyn RuntimeEffectController,
-    turn_id: &TurnId,
-) -> ScopedEffectController<'a> {
-    ScopedEffectController::borrowed(controller, AdmittedScope::turn("root", turn_id))
-        .expect("scoped effect controller")
-}
-
 #[async_trait::async_trait]
-impl lash_core::AwaitEventResolver for RecordingEffectController {
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        Some(format!(
-            "recording-controller:{:p}",
-            Arc::as_ptr(&self.records)
-        ))
-    }
-
+impl lash_core::testing::EffectLayer for RecordingEffectController {
     async fn acquire_queued_lane(
         &self,
+        inner: &dyn lash_core::AwaitEventResolver,
         lane: Arc<dyn lash_core::QueuedLaneProbe>,
         cancel: CancellationToken,
     ) -> Result<lash_core::QueuedLaneAcquisition, RuntimeError> {
         if self.engine_paced_lane {
-            self.wait_out_crashed_lane_holder(lane, cancel).await
+            inner.wait_out_crashed_lane_holder(lane, cancel).await
         } else {
-            match lane.try_acquire().await? {
-                lash_core::QueuedLaneAttempt::Acquired(guard) => {
-                    Ok(lash_core::QueuedLaneAcquisition::Acquired(guard))
-                }
-                lash_core::QueuedLaneAttempt::Busy(_) => {
-                    Ok(lash_core::QueuedLaneAcquisition::NotAcquired)
-                }
-            }
+            inner.acquire_queued_lane(lane, cancel).await
         }
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.native.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.native.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        self.native.peek_await_event(key).await
     }
 
     async fn await_await_event(
         &self,
+        inner: &dyn lash_core::AwaitEventResolver,
         key: &AwaitEventKey,
         cancel: CancellationToken,
         deadline: Option<std::time::Instant>,
@@ -695,40 +432,12 @@ impl lash_core::AwaitEventResolver for RecordingEffectController {
                 "cancel resolver remains unavailable",
             ));
         }
-        self.native.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.native
-            .revoke_await_events_for_session(session_id)
-            .await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.native
-            .cancel_await_events_for_session(session_id)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for RecordingEffectController {
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
-        if self.controller_owned_replay {
-            lash_core::EffectJournaling::Journaled
-        } else {
-            lash_core::EffectJournaling::Local
-        }
+        inner.await_await_event(key, cancel, deadline).await
     }
 
     async fn execute_effect(
         &self,
+        inner: &dyn RuntimeEffectController,
         envelope: RuntimeEffectEnvelope,
         local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
@@ -972,16 +681,16 @@ impl RuntimeEffectController for RecordingEffectController {
                     _ => None,
                 };
                 if let Some(resolution) = resolution {
-                    self.native.resolve_await_event(&key, resolution).await?;
+                    inner.resolve_await_event(&key, resolution).await?;
                 }
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent {
-                    resolution: self.native.peek_await_event(&key).await?,
+                    resolution: inner.peek_await_event(&key).await?,
                 })
             }
             RuntimeEffectCommand::PeekAwaitEvent { key }
                 if self.cancel_after_llm && *self.llm_calls.lock_recover() > 0 =>
             {
-                self.native
+                inner
                     .resolve_await_event(
                         &key,
                         Resolution::Ok(serde_json::json!({
@@ -995,14 +704,14 @@ impl RuntimeEffectController for RecordingEffectController {
                     )
                     .await?;
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent {
-                    resolution: self.native.peek_await_event(&key).await?,
+                    resolution: inner.peek_await_event(&key).await?,
                 })
             }
             RuntimeEffectCommand::PeekAwaitEvent { key }
                 if matches!(self.cancel_watch, CancelWatchBehavior::AlwaysError { .. }) =>
             {
                 Ok(RuntimeEffectOutcome::PeekAwaitEvent {
-                    resolution: self.native.peek_await_event(&key).await?,
+                    resolution: inner.peek_await_event(&key).await?,
                 })
             }
             RuntimeEffectCommand::PeekAwaitEvent { .. } => {
@@ -1087,70 +796,5 @@ impl RuntimeEffectController for RecordingEffectController {
         self.strict_replay
             .record(strict_replay, command_kind, &outcome);
         outcome
-    }
-
-    // A tool batch is a durable effect group now (FIG-3397), so the recorder
-    // hosts groups on its embedded native substrate: opens and settlements
-    // forward there, and the tool-child resolver registered through
-    // `register_group_executors` lands on the same group map.
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.native.open_effect_group(group).await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.read_group_settlement(group_key, rank).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.register_group_executors(executors)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.native.await_next_settlement(handle, cancel).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native.close_effect_group(handle, disposition).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.native.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.native
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
     }
 }

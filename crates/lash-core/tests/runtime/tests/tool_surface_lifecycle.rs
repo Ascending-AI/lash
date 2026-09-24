@@ -118,18 +118,12 @@ fn dynamic_plugin_host(
 }
 
 fn runtime_environment(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
     plugin_host: Arc<lash_core::facade_support::PluginHost>,
 ) -> lash_core::facade_support::RuntimeEnvironment {
-    lash_core::facade_support::RuntimeEnvironment::builder(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_plugin_host(plugin_host)
-    .with_runtime_host_config(test_host_config().core)
-    .with_session_store_factory(Arc::new(
-        lash_core::facade_support::InMemorySessionStoreFactory::new(),
-    ))
-    .build()
+    lash_core::facade_support::RuntimeEnvironment::builder(test_host_config(backend).core)
+        .with_plugin_host(plugin_host)
+        .build()
 }
 
 struct AllowNamedProcess {
@@ -230,14 +224,20 @@ fn plugin_catalog_names(runtime: &LashRuntime) -> Vec<String> {
 
 #[tokio::test]
 async fn parked_resume_keeps_the_store_bound_session_id() {
+    let backend = memory_backend().await;
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
-    let env = runtime_environment(plugin_host);
-    let store = Arc::new(RecordingStore::default());
-    *store.session_meta.lock_recover() = Some(lash_core::SessionMeta {
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("parked-session"),
-        relation: lash_core::SessionRelation::Root,
-    });
+    let env = runtime_environment(&backend, plugin_host);
+    let store = unbound_recording_store(&backend).await;
+    lash_core::SessionCommitStore::save_session_meta(
+        store.as_ref(),
+        lash_core::SessionMeta {
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from("parked-session"),
+            relation: lash_core::SessionRelation::Root,
+        },
+    )
+    .await
+    .expect("save session meta");
     let owner = lash_core::LeaseOwnerIdentity::opaque("parked-test-worker", "parked-test-boot");
     let runtime = LashRuntime::from_environment(
         &env,
@@ -258,17 +258,13 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
         expected.session_id
     );
 
-    let admissions_before_resume = store
-        .session_admission_count
-        .load(std::sync::atomic::Ordering::SeqCst);
+    let admissions_before_resume = store.session_admission_count();
     let parked = Box::pin(runtime.park()).await.expect("park runtime");
     let resumed = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("resume runtime");
     assert_eq!(
-        store
-            .session_admission_count
-            .load(std::sync::atomic::Ordering::SeqCst),
+        store.session_admission_count(),
         admissions_before_resume + 1,
         "resume must pass through durable admission"
     );
@@ -285,6 +281,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
 
 #[tokio::test]
 async fn park_resume_restores_tool_and_subagent_authority() {
+    let backend = memory_backend().await;
     let visible = DynamicToolSpec::new(
         "tool:authority_visible",
         "authority_visible",
@@ -320,9 +317,9 @@ async fn park_resume_restores_tool_and_subagent_authority() {
             },
         )
         .expect("initial authority plugin session");
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("authority-worker", "authority-boot");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
         store,
@@ -344,7 +341,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
         .expect("persist authority runtime");
 
     surface.replace(vec![visible, hidden.clone()]);
-    let env = runtime_environment(plugin_host);
+    let env = runtime_environment(&backend, plugin_host);
     let resumed = LashRuntime::resume(parked, &env, owner)
         .await
         .expect("resume authority runtime");
@@ -370,6 +367,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
 
 #[tokio::test]
 async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authority() {
+    let backend = memory_backend().await;
     let hidden = DynamicToolSpec::new(
         "tool:persisted_broader",
         "persisted_broader",
@@ -388,9 +386,9 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
             },
         )
         .expect("narrower live-authority plugin session");
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("persisted-worker", "persisted-boot");
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
         store,
@@ -416,7 +414,7 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
     let parked = Box::pin(runtime.park())
         .await
         .expect("persist broader authority");
-    let resumed = LashRuntime::resume(parked, &runtime_environment(plugin_host), owner)
+    let resumed = LashRuntime::resume(parked, &runtime_environment(&backend, plugin_host), owner)
         .await
         .expect("resume broader persisted authority");
 
@@ -429,6 +427,7 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
 
 #[tokio::test]
 async fn tool_access_setter_changes_the_next_model_request_in_both_directions() {
+    let backend = memory_backend().await;
     let tool = DynamicToolSpec::new(
         "tool:mutable-authority",
         "mutable_authority",
@@ -437,8 +436,8 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
     let surface = Arc::new(DynamicToolSurface::new(vec![tool.clone()]));
     let provider: Arc<dyn lash_core::ToolProvider> = surface;
     let plugin_host = dynamic_plugin_host(provider);
-    let env = runtime_environment(plugin_host);
-    let store = Arc::new(RecordingStore::default());
+    let env = runtime_environment(&backend, plugin_host);
+    let store = unbound_recording_store(&backend).await;
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -481,7 +480,8 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         .run_turn_assembled(
             TurnInput::text("observe the narrowed surface"),
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("mutable-authority-requests"),
                 &TurnId::from("narrowed-request"),
             ),
@@ -496,7 +496,8 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         .run_turn_assembled(
             TurnInput::text("observe the widened surface"),
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("mutable-authority-requests"),
                 &TurnId::from("widened-request"),
             ),
@@ -520,6 +521,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
 
 #[tokio::test]
 async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
+    let backend = memory_backend().await;
     let tool = DynamicToolSpec::new(
         "tool:live-discovery-authority",
         "live_discovery_authority",
@@ -528,12 +530,12 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
     let surface = Arc::new(DynamicToolSurface::new(vec![tool.clone()]));
     let provider: Arc<dyn lash_core::ToolProvider> = surface;
     let plugin_host = dynamic_plugin_host(provider);
-    let env = runtime_environment(plugin_host);
+    let env = runtime_environment(&backend, plugin_host);
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("mutable-authority-discovery")),
-        Some(Arc::new(RecordingStore::default())),
+        Some(unbound_recording_store(&backend).await),
         lash_core::testing::runtime_lease_owner(),
     )
     .await
@@ -571,6 +573,7 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
 
 #[tokio::test]
 async fn updated_tool_access_survives_park_and_resume() {
+    let backend = memory_backend().await;
     let hidden = DynamicToolSpec::new(
         "tool:updated-authority-hidden",
         "updated_authority_hidden",
@@ -579,8 +582,8 @@ async fn updated_tool_access_survives_park_and_resume() {
     let surface = Arc::new(DynamicToolSurface::new(vec![hidden.clone()]));
     let provider: Arc<dyn lash_core::ToolProvider> = surface;
     let plugin_host = dynamic_plugin_host(provider);
-    let env = runtime_environment(plugin_host);
-    let store = Arc::new(RecordingStore::default());
+    let env = runtime_environment(&backend, plugin_host);
+    let store = unbound_recording_store(&backend).await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("updated-authority-worker", "boot");
     let mut runtime = LashRuntime::from_environment(
         &env,
@@ -614,9 +617,10 @@ async fn updated_tool_access_survives_park_and_resume() {
 
 #[tokio::test]
 async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
+    let backend = memory_backend().await;
     let plugin_host = dynamic_plugin_host(Arc::new(DynamicToolSurface::default()));
-    let env = runtime_environment(plugin_host);
-    let store = Arc::new(RecordingStore::default());
+    let env = runtime_environment(&backend, plugin_host);
+    let store = unbound_recording_store(&backend).await;
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -658,9 +662,10 @@ async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
 
 #[tokio::test]
 async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes() {
+    let backend = memory_backend().await;
     let session_id = "filter-session";
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+    let registry = backend.process_registry();
+    let factory = backend.session_store_factory();
     let target_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: Vec::new(),
@@ -670,23 +675,18 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         })
         .await
         .expect("create filter target store");
-    let core = test_host_config()
+    let core = test_host_config(&backend)
         .core
         .with_process_tool_visibility_filter(Arc::new(AllowNamedProcess {
             allowed: "allowed-process".to_string(),
         }));
-    let env = lash_core::facade_support::RuntimeEnvironment::builder(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
-    .with_runtime_host_config(core)
-    .with_process_work(lash_core::testing::process_work_wiring_for_registry(
-        registry.clone(),
-    ))
-    .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
-    .with_session_store_factory(factory.clone())
-    .build();
+    let env = lash_core::facade_support::RuntimeEnvironment::builder(core)
+        .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
+        .with_process_work(lash_core::testing::process_work_wiring_for_registry(
+            registry.clone(),
+        ))
+        .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+        .build();
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -749,7 +749,8 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         .expect("runtime session services")
         .model_tool_process_service();
     let scope = || {
-        lash_core::ProcessOpScope::new(named_turn_scope(
+        lash_core::ProcessOpScope::new(backend_turn_scope(
+            &backend,
             &SessionId::from(session_id),
             &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
@@ -942,20 +943,18 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
 
 #[tokio::test]
 async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() {
+    let backend = memory_backend().await;
     let session_id = "pruned-model-handle-session";
     let process_id = "pruned-previous-turn-process";
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let env = lash_core::facade_support::RuntimeEnvironment::builder(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
-    .with_runtime_host_config(test_host_config().core)
-    .with_process_work(lash_core::testing::process_work_wiring_for_registry(
-        registry.clone(),
-    ))
-    .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
-    .build();
+    let registry = backend.process_registry();
+    let env =
+        lash_core::facade_support::RuntimeEnvironment::builder(test_host_config(&backend).core)
+            .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
+            .with_process_work(lash_core::testing::process_work_wiring_for_registry(
+                registry.clone(),
+            ))
+            .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+            .build();
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -1012,7 +1011,8 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
         .expect("runtime session services")
         .model_tool_process_service();
     let scope = || {
-        lash_core::ProcessOpScope::new(named_turn_scope(
+        lash_core::ProcessOpScope::new(backend_turn_scope(
+            &backend,
             &SessionId::from(session_id),
             &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
@@ -1079,21 +1079,18 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
 
 #[tokio::test]
 async fn session_creation_applies_only_named_process_observers_with_typed_outcomes() {
+    let backend = memory_backend().await;
     let parent_session_id = "observer-parent";
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let factory = Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
-    let env = lash_core::facade_support::RuntimeEnvironment::builder(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
-    .with_runtime_host_config(test_host_config().core)
-    .with_process_work(lash_core::testing::process_work_wiring_for_registry(
-        registry.clone(),
-    ))
-    .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
-    .with_session_store_factory(factory.clone())
-    .build();
+    let registry = backend.process_registry();
+    let factory = backend.session_store_factory();
+    let env =
+        lash_core::facade_support::RuntimeEnvironment::builder(test_host_config(&backend).core)
+            .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
+            .with_process_work(lash_core::testing::process_work_wiring_for_registry(
+                registry.clone(),
+            ))
+            .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+            .build();
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -1128,7 +1125,8 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                     ),
                 ),
                 options,
-                lash_core::ProcessOpScope::new(named_turn_scope(
+                lash_core::ProcessOpScope::new(backend_turn_scope(
+                    &backend,
                     &SessionId::from(parent_session_id),
                     &TurnId::from(format!("{process_id}-turn")),
                 )),
@@ -1366,6 +1364,7 @@ fn text_response(text: &str) -> TestProvider {
 
 #[tokio::test]
 async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flapping() {
+    let backend = memory_backend().await;
     let original = DynamicToolSpec::new(
         "tool:original",
         "original",
@@ -1379,8 +1378,8 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     let surface = Arc::new(DynamicToolSurface::new(vec![original.clone()]));
     let provider: Arc<dyn lash_core::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
-    let env = runtime_environment(plugin_host);
-    let store = Arc::new(RecordingStore::default());
+    let env = runtime_environment(&backend, plugin_host);
+    let store = unbound_recording_store(&backend).await;
     let store_dyn: Arc<dyn lash_core::RuntimePersistence> = store.clone();
     let owner = lash_core::LeaseOwnerIdentity::opaque("surface-test-worker", "surface-test-boot");
 
@@ -1442,7 +1441,8 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         .run_turn_assembled(
             TurnInput::text("commit the rebuilt surface"),
             CancellationToken::new(),
-            named_turn_scope(
+            backend_turn_scope(
+                &backend,
                 &SessionId::from("persisted-live-surface"),
                 &TurnId::from("surface-commit"),
             ),
@@ -1483,6 +1483,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
 
 #[tokio::test]
 async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_policy() {
+    let backend = memory_backend().await;
     let curated = DynamicToolSpec::new(
         "tool:curated",
         "curated",
@@ -1501,7 +1502,7 @@ async fn session_fork_discovers_live_tools_and_preserves_curation_and_hidden_pol
     let surface = Arc::new(DynamicToolSurface::new(vec![curated.clone()]));
     let provider: Arc<dyn lash_core::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
-    let env = runtime_environment(plugin_host);
+    let env = runtime_environment(&backend, plugin_host);
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -1663,6 +1664,7 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
 
 #[tokio::test]
 async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidden_tool() {
+    let backend = memory_backend().await;
     let original = DynamicToolSpec::new(
         "tool:compose_original",
         "compose_original",
@@ -1701,7 +1703,7 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
             ..LlmResponse::default()
         }),
     }]);
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::testing::runtime_internals::RuntimeServices::new(
         plugins,
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
@@ -1750,6 +1752,7 @@ async fn composed_session_catalog_discovers_callable_tool_without_exposing_hidde
 
 #[tokio::test]
 async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
+    let backend = memory_backend().await;
     let visible = DynamicToolSpec::new(
         "tool:cold_visible",
         "cold_visible",
@@ -1771,14 +1774,14 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     ]));
     let provider: Arc<dyn lash_core::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
-    let store = Arc::new(RecordingStore::default());
+    let store = unbound_recording_store(&backend).await;
     let plugins = build_hidden_session(
         plugin_host.as_ref(),
         &SessionId::from("cold-hidden-child"),
         hidden.name,
         None,
     );
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
         store.clone(),
@@ -1822,7 +1825,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
         hidden.name,
         state.plugin_state(),
     );
-    let runtime_host = test_host_config();
+    let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
         store,
@@ -1847,6 +1850,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
 
 #[tokio::test]
 async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplicates() {
+    let backend = memory_backend().await;
     let original = DynamicToolSpec::new(
         "tool:orphan-original",
         "orphaned_name",
@@ -1865,8 +1869,8 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
     let surface = Arc::new(DynamicToolSurface::new(vec![original.clone()]));
     let provider: Arc<dyn lash_core::ToolProvider> = surface.clone();
     let plugin_host = dynamic_plugin_host(provider);
-    let env = runtime_environment(plugin_host);
-    let store = Arc::new(RecordingStore::default());
+    let env = runtime_environment(&backend, plugin_host);
+    let store = unbound_recording_store(&backend).await;
     let owner = lash_core::LeaseOwnerIdentity::opaque("orphan-test-worker", "orphan-test-boot");
     let mut runtime = LashRuntime::from_environment(
         &env,
@@ -1953,12 +1957,13 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
 
 #[tokio::test]
 async fn public_apply_tool_state_round_trip_keeps_delta_and_generation_fencing() {
+    let backend = memory_backend().await;
     let first = DynamicToolSpec::new("tool:apply-first", "apply_first", "first live tool");
     let second = DynamicToolSpec::new("tool:apply-second", "apply_second", "second live tool");
     let surface = Arc::new(DynamicToolSurface::new(vec![first.clone(), second.clone()]));
     let provider: Arc<dyn lash_core::ToolProvider> = surface;
     let plugin_host = dynamic_plugin_host(provider);
-    let env = runtime_environment(plugin_host);
+    let env = runtime_environment(&backend, plugin_host);
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -2063,30 +2068,29 @@ fn process_engine_registration_rejects_a_kind_mismatch() {
 /// Shared fixture: a runtime whose only process engine is
 /// [`PayloadGatedEngine`], plus the registry the started rows land in.
 async fn payload_gated_engine_runtime(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
     session_id: &SessionId,
-) -> (Arc<lash_core::TestLocalProcessRegistry>, LashRuntime) {
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let core = test_host_config().core.with_process_engine_registration(
-        lash_core::ProcessEngineRegistration::new(
-            Arc::new(PayloadGatedEngine),
-            lash_core::ProcessEngineAdmission::new(
-                PAYLOAD_GATED_ENGINE_KIND,
-                admit_payload_gated_engine,
-            ),
-        )
-        .expect("payload-gated engine and admission share a fixed kind"),
-    );
-    let env = lash_core::facade_support::RuntimeEnvironment::builder(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
-    .with_runtime_host_config(core)
-    .with_process_work(lash_core::testing::process_work_wiring_for_registry(
-        registry.clone(),
-    ))
-    .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
-    .build();
+) -> (Arc<dyn lash_core::ProcessRegistry>, LashRuntime) {
+    let registry = backend.process_registry();
+    let core = test_host_config(backend)
+        .core
+        .with_process_engine_registration(
+            lash_core::ProcessEngineRegistration::new(
+                Arc::new(PayloadGatedEngine),
+                lash_core::ProcessEngineAdmission::new(
+                    PAYLOAD_GATED_ENGINE_KIND,
+                    admit_payload_gated_engine,
+                ),
+            )
+            .expect("payload-gated engine and admission share a fixed kind"),
+        );
+    let env = lash_core::facade_support::RuntimeEnvironment::builder(core)
+        .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
+        .with_process_work(lash_core::testing::process_work_wiring_for_registry(
+            registry.clone(),
+        ))
+        .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+        .build();
     let runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
@@ -2099,8 +2103,12 @@ async fn payload_gated_engine_runtime(
     (registry, runtime)
 }
 
-fn payload_gated_scope(session_id: &SessionId) -> lash_core::ProcessOpScope<'_> {
-    lash_core::ProcessOpScope::new(named_turn_scope(
+fn payload_gated_scope(
+    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    session_id: &SessionId,
+) -> lash_core::ProcessOpScope<'static> {
+    lash_core::ProcessOpScope::new(backend_turn_scope(
+        backend,
         session_id,
         &TurnId::from(uuid::Uuid::new_v4().to_string()),
     ))
@@ -2133,7 +2141,7 @@ fn payload_gated_request(
 }
 
 async fn started_row_identity(
-    registry: &Arc<lash_core::TestLocalProcessRegistry>,
+    registry: &Arc<dyn lash_core::ProcessRegistry>,
     process_id: &ProcessId,
 ) -> lash_core::ProcessIdentity {
     lash_core::ProcessQuery::get_process(registry.as_ref(), process_id)
@@ -2143,10 +2151,7 @@ async fn started_row_identity(
         .identity
 }
 
-async fn no_rows_registered(
-    registry: &Arc<lash_core::TestLocalProcessRegistry>,
-    process_ids: &[&str],
-) {
+async fn no_rows_registered(registry: &Arc<dyn lash_core::ProcessRegistry>, process_ids: &[&str]) {
     for process_id in process_ids {
         assert!(
             lash_core::ProcessQuery::get_process(registry.as_ref(), &ProcessId::from(*process_id))
@@ -2160,9 +2165,13 @@ async fn no_rows_registered(
 
 #[tokio::test]
 async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_gate() {
+    let backend = memory_backend().await;
     let session_id = "recorded-intent-engine-session";
-    let (registry, runtime) =
-        Box::pin(payload_gated_engine_runtime(&SessionId::from(session_id))).await;
+    let (registry, runtime) = Box::pin(payload_gated_engine_runtime(
+        &backend,
+        &SessionId::from(session_id),
+    ))
+    .await;
     let service = runtime
         .runtime_session_services()
         .expect("runtime session services")
@@ -2183,7 +2192,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         .start_from_request(
             &SessionId::from(session_id),
             request(&ProcessId::from("direct-invalid"), invalid_payload.clone()),
-            payload_gated_scope(&SessionId::from(session_id)),
+            payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
         .expect_err("a direct start must not admit an unvalidated engine payload");
@@ -2194,7 +2203,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
                 &ProcessId::from("recorded-invalid"),
                 invalid_payload.clone(),
             ),
-            payload_gated_scope(&SessionId::from(session_id)),
+            payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
         .expect_err("a recorded-intent start must not admit an unvalidated engine payload");
@@ -2219,7 +2228,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         .start_from_request(
             &SessionId::from(session_id),
             request(&ProcessId::from("direct-valid"), valid_payload.clone()),
-            payload_gated_scope(&SessionId::from(session_id)),
+            payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
         .expect("valid direct engine start");
@@ -2227,7 +2236,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         .start_from_recorded_intent(
             &SessionId::from(session_id),
             request(&ProcessId::from("recorded-valid"), valid_payload.clone()),
-            payload_gated_scope(&SessionId::from(session_id)),
+            payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
         .expect("valid recorded-intent engine start");
@@ -2246,9 +2255,13 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
 
 #[tokio::test]
 async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct_start() {
+    let backend = memory_backend().await;
     let session_id = "recorded-intent-unregistered-kind-session";
-    let (registry, runtime) =
-        Box::pin(payload_gated_engine_runtime(&SessionId::from(session_id))).await;
+    let (registry, runtime) = Box::pin(payload_gated_engine_runtime(
+        &backend,
+        &SessionId::from(session_id),
+    ))
+    .await;
     let service = runtime
         .runtime_session_services()
         .expect("runtime session services")
@@ -2268,7 +2281,7 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
                 .start_from_request(
                     &SessionId::from(session_id),
                     request(&ProcessId::from("direct-unregistered")),
-                    payload_gated_scope(&SessionId::from(session_id)),
+                    payload_gated_scope(&backend, &SessionId::from(session_id)),
                 )
                 .await
                 .expect_err("a direct start must not admit an unregistered engine kind"),
@@ -2279,7 +2292,7 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
                 .start_from_recorded_intent(
                     &SessionId::from(session_id),
                     request(&ProcessId::from("recorded-unregistered")),
-                    payload_gated_scope(&SessionId::from(session_id)),
+                    payload_gated_scope(&backend, &SessionId::from(session_id)),
                 )
                 .await
                 .expect_err("a recorded-intent start must not admit an unregistered engine kind"),
@@ -2296,9 +2309,13 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
 
 #[tokio::test]
 async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
+    let backend = memory_backend().await;
     let session_id = "recorded-intent-no-env-session";
-    let (registry, runtime) =
-        Box::pin(payload_gated_engine_runtime(&SessionId::from(session_id))).await;
+    let (registry, runtime) = Box::pin(payload_gated_engine_runtime(
+        &backend,
+        &SessionId::from(session_id),
+    ))
+    .await;
     let service = runtime
         .runtime_session_services()
         .expect("runtime session services")
@@ -2328,7 +2345,7 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         .start_from_request(
             &SessionId::from(session_id),
             no_env(&ProcessId::from("direct-no-env")),
-            payload_gated_scope(&SessionId::from(session_id)),
+            payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
         .expect("a direct start captures the live session env for itself");
@@ -2341,7 +2358,7 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         .start_from_recorded_intent(
             &SessionId::from(session_id),
             no_env(&ProcessId::from("recorded-no-env")),
-            payload_gated_scope(&SessionId::from(session_id)),
+            payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
         .expect_err("a recorded start carries its own env or none at all");

@@ -11,15 +11,21 @@ use super::*;
 /// terminalizes `Failed` instead.
 #[tokio::test]
 async fn session_turn_against_a_catalog_without_by_id_lookup_fails_in_one_admission() {
-    let raw_registry = Arc::new(TestLocalProcessRegistry::default());
-    let raw_registry_port: Arc<dyn ProcessRegistry> = raw_registry.clone();
+    let mut factory = None;
+    let backend = crate::testing::runtime_helpers::LayeredBackend::over(memory_backend().await)
+        .map_session_store_factory(|inner| {
+            let layer = Arc::new(NoByIdLookupSessionStoreFactory::over(inner));
+            factory = Some(Arc::clone(&layer));
+            layer
+        })
+        .into_backend();
+    let factory = factory.expect("the catalog layer is installed");
     let sink = Arc::new(RecordingProcessEventSink::default());
     let watched = crate::watch_process_registry_with_sink(
-        raw_registry_port,
+        backend.process_registry(),
         Some(Arc::clone(&sink) as Arc<dyn crate::ProcessEventSink>),
     );
     let registry = Arc::clone(watched.registry());
-    let factory = Arc::new(NoByIdLookupSessionStoreFactory::default());
     let policy = test_session_policy();
     // This test drives the attempt by hand, so the idle dispatcher's
     // autonomous rescan is pushed outside the test's window.
@@ -27,11 +33,7 @@ async fn session_turn_against_a_catalog_without_by_id_lookup_fails_in_one_admiss
         Arc::new(PluginHost::new(
             crate::testing::test_standard_protocol_factories(),
         )),
-        RuntimeHostConfig::in_memory(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        ),
-        factory.clone(),
+        test_host_config(&backend),
         crate::WorkerProcessWork::SelfNative(watched),
         Arc::new(crate::NoQueuedWork::new()),
         local_owner("no-by-id-lookup-worker", "host-a", "no-by-id-lookup"),

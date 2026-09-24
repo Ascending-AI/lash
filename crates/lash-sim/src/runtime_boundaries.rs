@@ -1012,7 +1012,15 @@ impl RuntimeBoundaryHarness {
             LeaseOwnerIdentity::opaque("sim-dead-owner", format!("before-the-crash:{session}"));
         let silent_owner =
             LeaseOwnerIdentity::opaque("sim-silent-owner", format!("sim-silent-owner:{session}"));
-        let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::in_memory(
+        let backend = lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
+            lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .map_err(|err| RuntimeBoundaryError::new(err.to_string()))?,
+        ))
+        .map_process_registry(|_| Arc::clone(&registry))
+        .into_backend();
+        let mut runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
+            backend,
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );

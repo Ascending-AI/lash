@@ -180,10 +180,7 @@ impl ProductionToolCell {
             })
             .build()
             .into_handle();
-        let mut host = lash_core::facade_support::RuntimeHostConfig::in_memory(
-            lash_core::CommitBudget::bounded(1024 * 1024, 512),
-            lash_core::QueuedWorkBatchingConfig::new(1),
-        );
+        let mut host = memory_host_config().await;
         host.providers.provider_resolver = Arc::new(
             lash_core::facade_support::SingleProviderResolver::new(provider),
         );
@@ -439,8 +436,7 @@ impl ProductionToolCell {
     async fn runtime_from_head(&self) -> lash_core::facade_support::LashRuntime {
         Box::pin(
             lash_core::facade_support::LashRuntime::builder(
-                lash_core::CommitBudget::bounded(1024 * 1024, 512),
-                lash_core::QueuedWorkBatchingConfig::new(1),
+                self.host.clone(),
                 lash_core::LeaseOwnerIdentity::opaque(
                     "lash-restate-head-reader",
                     "lash-restate-head-reader-boot",
@@ -448,7 +444,6 @@ impl ProductionToolCell {
             )
             .with_session_id(&self.session_id)
             .with_policy(self.policy.clone())
-            .with_runtime_host(self.host.clone())
             .with_plugin_factories(self.plugin_factories.clone())
             .with_store(Arc::clone(&self.runtime_store))
             .build(),

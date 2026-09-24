@@ -7,6 +7,7 @@ use super::*;
 
 #[tokio::test]
 async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run() {
+    let backend = memory_backend().await;
     let recorder = RecordingEffectController::default()
         .with_cancel_after_llm()
         .with_controller_owned_replay();
@@ -14,7 +15,7 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
         Vec::new(),
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
-        host_with_effect_recorder(recorder.clone()),
+        host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
 
@@ -22,7 +23,7 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
         .run_turn_assembled(
             TurnInput::text("cancel while the model is running"),
             CancellationToken::new(),
-            scoped_test_turn(&recorder, &TurnId::from("llm-cancel-boundary")),
+            scoped_test_turn(&backend, &recorder, &TurnId::from("llm-cancel-boundary")),
         )
         .await
         .expect("cancelled turn");
@@ -81,6 +82,7 @@ fn tool_attempt_count(recorder: &RecordingEffectController) -> usize {
 
 #[tokio::test]
 async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_checkpoint() {
+    let backend = memory_backend().await;
     let recorder = RecordingEffectController::default()
         .with_after_step_cancel()
         .with_controller_owned_replay();
@@ -88,7 +90,7 @@ async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_che
         Vec::new(),
         Arc::new(EchoTool),
         mock_provider(Vec::new()),
-        host_with_effect_recorder(recorder.clone()),
+        host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
 
@@ -96,7 +98,7 @@ async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_che
         .run_turn_assembled(
             TurnInput::text("use the tool, then stop after the step"),
             CancellationToken::new(),
-            scoped_test_turn(&recorder, &TurnId::from("after-step-boundary")),
+            scoped_test_turn(&backend, &recorder, &TurnId::from("after-step-boundary")),
         )
         .await
         .expect("stopped turn");
@@ -153,6 +155,7 @@ async fn after_step_cancel_on_a_controller_owned_journal_is_peeked_after_the_che
 
 #[tokio::test]
 async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_commands() {
+    let backend = memory_backend().await;
     let recorder = RecordingEffectController::default()
         .with_after_step_cancel()
         .with_escalation_after_llm()
@@ -161,7 +164,7 @@ async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_com
         Vec::new(),
         Arc::new(EchoTool),
         mock_provider(Vec::new()),
-        host_with_effect_recorder(recorder.clone()),
+        host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
 
@@ -169,7 +172,7 @@ async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_com
         .run_turn_assembled(
             TurnInput::text("use the tool, then escalate"),
             CancellationToken::new(),
-            scoped_test_turn(&recorder, &TurnId::from("escalated-after-llm")),
+            scoped_test_turn(&backend, &recorder, &TurnId::from("escalated-after-llm")),
         )
         .await
         .expect("aborted turn");
@@ -211,6 +214,7 @@ async fn escalated_abort_on_a_controller_owned_journal_lands_between_journal_com
 
 #[tokio::test]
 async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
+    let backend = memory_backend().await;
     let recorder = RecordingEffectController::default()
         .with_after_step_cancel()
         .with_controller_owned_replay()
@@ -219,14 +223,14 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
         Vec::new(),
         Arc::new(EchoTool),
         mock_provider(Vec::new()),
-        host_with_effect_recorder(recorder.clone()),
+        host_with_effect_recorder(&backend, recorder.clone()),
     )
     .await;
     let first = runtime
         .run_turn_assembled(
             TurnInput::text("use the tool, then crash before the stop commits"),
             CancellationToken::new(),
-            scoped_test_turn(&recorder, &TurnId::from("replayed-after-step")),
+            scoped_test_turn(&backend, &recorder, &TurnId::from("replayed-after-step")),
         )
         .await
         .expect("first owner stops");
@@ -241,25 +245,23 @@ async fn replayed_owner_honours_the_after_step_stop_at_the_same_identity() {
     // A new owner replays the same journal: no live cancel state, no canned
     // gate; every observation, including the after-step peek, comes back by
     // its recorded identity.
-    // A new owner is a new process: it shares the journal, never the first
-    // owner's in-memory group substrate and the tool-child resolver
-    // registered there (FIG-3397).
-    let replaying = recorder
-        .clone()
-        .without_canned_cancel()
-        .on_fresh_group_substrate();
+    // A new owner is a new process: it opens the same databases afresh, so it
+    // shares the journal but none of the first owner's in-process state
+    // (FIG-3397).
+    let replaying = recorder.clone().without_canned_cancel();
+    let new_owner = reopened_backend(&backend).await;
     let mut replayed_runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(EchoTool),
         mock_provider(Vec::new()),
-        host_with_effect_recorder(replaying.clone()),
+        host_with_effect_recorder(&new_owner, replaying.clone()),
     )
     .await;
     let replayed = replayed_runtime
         .run_turn_assembled(
             TurnInput::text("use the tool, then crash before the stop commits"),
             CancellationToken::new(),
-            scoped_test_turn(&replaying, &TurnId::from("replayed-after-step")),
+            scoped_test_turn(&backend, &replaying, &TurnId::from("replayed-after-step")),
         )
         .await
         .expect("replayed owner stops");

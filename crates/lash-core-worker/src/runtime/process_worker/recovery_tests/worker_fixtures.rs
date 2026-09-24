@@ -24,7 +24,7 @@ pub(super) async fn worker_with_engine_and_registry(
     Arc<dyn ProcessRegistry>,
     Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
-    Arc<TestLocalProcessRegistry>,
+    Arc<crate::testing::ProcessRegistryFaults>,
 ) {
     worker_with_engine_registry_timings_and_supplier(concurrency, engine, run_handle, None, None)
         .await
@@ -40,7 +40,7 @@ pub(super) async fn worker_with_engine_registry_and_timings(
     Arc<dyn ProcessRegistry>,
     Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
-    Arc<TestLocalProcessRegistry>,
+    Arc<crate::testing::ProcessRegistryFaults>,
 ) {
     worker_with_engine_registry_timings_and_supplier(
         concurrency,
@@ -98,7 +98,7 @@ pub(super) async fn worker_with_engine_and_fault_sink(
     Arc<dyn ProcessRegistry>,
     Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
-    Arc<TestLocalProcessRegistry>,
+    Arc<crate::testing::ProcessRegistryFaults>,
     Arc<RecordingProcessEventSink>,
 ) {
     let sink = Arc::new(RecordingProcessEventSink::default());
@@ -127,7 +127,7 @@ pub(super) async fn worker_with_engine_registry_timings_and_supplier(
     Arc<dyn ProcessRegistry>,
     Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
-    Arc<TestLocalProcessRegistry>,
+    Arc<crate::testing::ProcessRegistryFaults>,
 ) {
     worker_with_engine_registry_timings_supplier_and_sink(
         concurrency,
@@ -155,16 +155,12 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     Arc<dyn ProcessRegistry>,
     Arc<LateBoundProcessWork>,
     ProcessExecutionEnvRef,
-    Arc<TestLocalProcessRegistry>,
+    Arc<crate::testing::ProcessRegistryFaults>,
 ) {
-    let test_registry = Arc::new(TestLocalProcessRegistry::default());
-    let raw_registry: Arc<dyn ProcessRegistry> = test_registry.clone();
+    let (backend, test_registry) = faulted_memory_backend().await;
     let (registry, _driver_hub, process_work) =
-        late_bound_process_work_wiring(raw_registry, Arc::clone(&run_handle));
-    let mut runtime_host = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+        late_bound_process_work_wiring(backend.process_registry(), Arc::clone(&run_handle));
+    let mut runtime_host = test_host_config(&backend);
     runtime_host.process_engines = crate::ProcessEngineRegistry::new()
         .with_registration(crate::ProcessEngineRegistration::accepting(engine));
     if let Some(lease_timings) = lease_timings {
@@ -183,7 +179,6 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
             crate::testing::test_standard_protocol_factories(),
         )),
         runtime_host,
-        Arc::new(TestSessionStoreFactory::default()),
         crate::WorkerProcessWork::External(process_work),
         Arc::new(crate::NoQueuedWork::new()),
         local_owner("engine-worker", "host-a", "engine-start"),
@@ -206,26 +201,20 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
     (worker, registry, run_handle, env_ref, test_registry)
 }
 
-/// A worker whose session stores come from `factory`, for the laws that read a
-/// committed turn back out of the store the turn committed to.
-pub(super) async fn worker_with_session_store_factory(
+/// A worker over `backend`, for the laws that read a committed turn back out
+/// of the store the turn committed to.
+pub(super) async fn worker_on_backend(
     engine: Arc<dyn crate::ProcessEngine>,
-    factory: Arc<dyn SessionStoreFactory>,
+    backend: &Arc<dyn crate::Backend>,
 ) -> (
     DurableProcessWorker,
     Arc<dyn ProcessRegistry>,
     ProcessExecutionEnvRef,
-    Arc<TestLocalProcessRegistry>,
 ) {
     let run_handle = Arc::new(LateBoundProcessWork::default());
-    let test_registry = Arc::new(TestLocalProcessRegistry::default());
-    let raw_registry: Arc<dyn ProcessRegistry> = test_registry.clone();
     let (registry, _driver_hub, process_work) =
-        late_bound_process_work_wiring(raw_registry, Arc::clone(&run_handle));
-    let mut runtime_host = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    );
+        late_bound_process_work_wiring(backend.process_registry(), Arc::clone(&run_handle));
+    let mut runtime_host = test_host_config(backend);
     runtime_host.process_engines = crate::ProcessEngineRegistry::new()
         .with_registration(crate::ProcessEngineRegistration::accepting(engine));
     let policy = test_session_policy();
@@ -241,7 +230,6 @@ pub(super) async fn worker_with_session_store_factory(
             crate::testing::test_standard_protocol_factories(),
         )),
         runtime_host,
-        factory,
         crate::WorkerProcessWork::External(process_work),
         Arc::new(crate::NoQueuedWork::new()),
         local_owner("redrive-worker", "host-a", "redrive-start"),
@@ -254,7 +242,7 @@ pub(super) async fn worker_with_session_store_factory(
         .worker
         .set(worker.clone())
         .unwrap_or_else(|_| panic!("test process worker is bound exactly once"));
-    (worker, registry, env_ref, test_registry)
+    (worker, registry, env_ref)
 }
 
 pub(super) fn engine_registration(
@@ -320,36 +308,19 @@ pub(super) async fn wait_for_terminal_count(
 }
 
 pub(super) async fn native_worker(
-    registry: Arc<dyn ProcessRegistry>,
+    backend: &Arc<dyn crate::Backend>,
     lease_owner: LeaseOwnerIdentity,
 ) -> DurableProcessWorker {
-    native_worker_with_trigger_store(
-        registry,
+    let watched = crate::watch_process_registry(backend.process_registry());
+    DurableProcessWorker::new(DurableProcessWorkerConfig::new(
+        Arc::new(PluginHost::new(
+            crate::testing::test_standard_protocol_factories(),
+        )),
+        host_config_with_fixture_env(backend).await,
+        crate::WorkerProcessWork::SelfNative(watched),
+        Arc::new(crate::NoQueuedWork::new()),
         lease_owner,
-        Arc::new(crate::InMemoryTriggerStore::default()),
-    )
-    .await
-}
-
-pub(super) async fn native_worker_with_trigger_store(
-    registry: Arc<dyn ProcessRegistry>,
-    lease_owner: LeaseOwnerIdentity,
-    trigger_store: Arc<dyn TriggerStore>,
-) -> DurableProcessWorker {
-    let watched = crate::watch_process_registry(registry);
-    DurableProcessWorker::new(
-        DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(
-                crate::testing::test_standard_protocol_factories(),
-            )),
-            host_config_with_fixture_env().await,
-            Arc::new(InMemorySessionStoreFactory::default()),
-            crate::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
-            lease_owner,
-        )
-        .with_trigger_store(trigger_store),
-    )
+    ))
     .expect("valid test native substrate config")
 }
 
@@ -357,27 +328,22 @@ pub(super) async fn native_worker_with_trigger_store(
 /// driver's run handle drives this same worker, which is the shape the facade
 /// builds and the shape that produced the "a call reports its own admission as
 /// `Busy`" defect.
-pub(super) async fn reentrant_worker_with_trigger_store(
-    registry: Arc<dyn ProcessRegistry>,
+pub(super) async fn reentrant_worker(
+    backend: &Arc<dyn crate::Backend>,
     lease_owner: LeaseOwnerIdentity,
-    trigger_store: Arc<dyn TriggerStore>,
     run_handle: Arc<LateBoundProcessWork>,
 ) -> DurableProcessWorker {
     let (_driver_registry, _driver_hub, process_work) =
-        late_bound_process_work_wiring(registry, Arc::clone(&run_handle));
-    let worker = DurableProcessWorker::new(
-        DurableProcessWorkerConfig::new(
-            Arc::new(PluginHost::new(
-                crate::testing::test_standard_protocol_factories(),
-            )),
-            host_config_with_fixture_env().await,
-            Arc::new(InMemorySessionStoreFactory::default()),
-            crate::WorkerProcessWork::External(process_work),
-            Arc::new(crate::NoQueuedWork::new()),
-            lease_owner,
-        )
-        .with_trigger_store(trigger_store),
-    )
+        late_bound_process_work_wiring(backend.process_registry(), Arc::clone(&run_handle));
+    let worker = DurableProcessWorker::new(DurableProcessWorkerConfig::new(
+        Arc::new(PluginHost::new(
+            crate::testing::test_standard_protocol_factories(),
+        )),
+        host_config_with_fixture_env(backend).await,
+        crate::WorkerProcessWork::External(process_work),
+        Arc::new(crate::NoQueuedWork::new()),
+        lease_owner,
+    ))
     .expect("valid test native substrate config");
     run_handle
         .worker
@@ -386,17 +352,14 @@ pub(super) async fn reentrant_worker_with_trigger_store(
     worker
 }
 
-/// The worker's host config, with the fixture execution environment published
-/// into its own process-exec-env store: a trigger delivery the worker starts
-/// loads that environment by the reference its subscription recorded.
-async fn host_config_with_fixture_env() -> RuntimeHostConfig {
-    let config = RuntimeHostConfig::in_memory(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    )
-    .with_process_engine_registration(crate::ProcessEngineRegistration::accepting(Arc::new(
-        crate::testing::FixtureProcessEngine,
-    )));
+/// The worker's host config over `backend`, with the fixture execution
+/// environment published into the backend's process-exec-env store: a trigger
+/// delivery the worker starts loads that environment by the reference its
+/// subscription recorded.
+async fn host_config_with_fixture_env(backend: &Arc<dyn crate::Backend>) -> RuntimeHostConfig {
+    let config = test_host_config(backend).with_process_engine_registration(
+        crate::ProcessEngineRegistration::accepting(Arc::new(crate::testing::FixtureProcessEngine)),
+    );
     crate::testing::process_execution_env_fixture(config.durability.process_env_store.as_ref())
         .await;
     config

@@ -64,7 +64,7 @@ impl RuntimeScenario {
         );
         self.validate_phase_order();
         let mut context =
-            RuntimeScenarioContext::new(self.name, self.session_id, self.host_behavior);
+            RuntimeScenarioContext::new(self.name, self.session_id, self.host_behavior).await;
         for phase in self.phases {
             context.execute(phase).await;
         }
@@ -144,7 +144,12 @@ struct RuntimeScenarioContext {
 }
 
 impl RuntimeScenarioContext {
-    fn new(name: &'static str, session_id: SessionId, host_behavior: RuntimeHostBehavior) -> Self {
+    async fn new(
+        name: &'static str,
+        session_id: SessionId,
+        host_behavior: RuntimeHostBehavior,
+    ) -> Self {
+        let backend = memory_backend().await;
         let mut state = RuntimeSessionState {
             session_id: session_id.clone(),
             ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
@@ -157,7 +162,7 @@ impl RuntimeScenarioContext {
             name,
             session_id,
             host_behavior,
-            store: Arc::new(RecordingStore::with_clock(clock.clone())),
+            store: unbound_recording_store_with_clock(&backend, clock.clone()).await,
             clock,
             owner: None,
             lease: None,

@@ -62,7 +62,7 @@ pub use registration_refusals::{
     REFUSAL_FIXTURE_PROCESS_ID as PROCESS_REFUSAL_FIXTURE_PROCESS_ID,
     accepted_process_registration, refused_process_registrations,
 };
-pub use registry_faults::ProcessRegistryFaults;
+pub use registry_faults::{ProcessRegistryFaults, WorklistPagePause, WorklistPageRead};
 pub use support::TestProcessRegistryWriteExt;
 use support::{ExecutionWritePause, process_lease_expired, validate_in_memory_execution_authority};
 use types::{ManagedLeaseMap, ManagedProcessMap, ManagedProcessRecord, RegistryState};

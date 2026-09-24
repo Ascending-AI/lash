@@ -1318,8 +1318,7 @@ pub(super) async fn replay_test_runtime_with_plugins_and_registry(
     process_registry: Option<Arc<dyn ProcessRegistry>>,
 ) -> lash_core::facade_support::LashRuntime {
     let mut builder = lash_core::facade_support::LashRuntime::builder(
-        lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1),
+        host,
         lash_core::LeaseOwnerIdentity::opaque(
             "lash-restate-replay-test",
             "lash-restate-replay-test-boot",
@@ -1328,7 +1327,6 @@ pub(super) async fn replay_test_runtime_with_plugins_and_registry(
     .with_session_id(session_id)
     .with_policy(policy)
     .with_initial_state(initial_state)
-    .with_runtime_host(host)
     .with_plugin_factories(plugin_factories)
     .with_store(store);
     if let Some(process_registry) = process_registry {

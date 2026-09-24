@@ -43,7 +43,7 @@ fn peer_completed_record(mut record: ProcessRecord) -> ProcessRecord {
 }
 
 async fn seed_started_owner_bound(
-    registry: &Arc<TestLocalProcessRegistry>,
+    registry: &Arc<crate::testing::ProcessRegistryFaults>,
     process_id: &ProcessId,
     owner: &LeaseOwnerIdentity,
 ) -> ProcessRecord {
@@ -76,19 +76,17 @@ async fn seed_started_owner_bound(
 
 #[tokio::test]
 async fn drain_reports_superseded_terminal_as_peer_settled() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-superseded", "host-a", "start-a");
     let process_id = "owner-bound-superseded";
     let peer = peer_completed_record(
         seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await,
     );
-    registry
-        .set_process_terminal_write_outcome(crate::ProcessCompletionOutcome::Superseded {
-            stored: peer,
-        })
-        .await;
+    registry.set_process_terminal_write_outcome(crate::ProcessCompletionOutcome::Superseded {
+        stored: peer,
+    });
 
-    let report = native_worker(registry.clone(), owner)
+    let report = native_worker(&backend, owner)
         .await
         .drain_owner_bound_work()
         .await
@@ -119,20 +117,18 @@ async fn drain_reports_superseded_terminal_as_peer_settled() {
 
 #[tokio::test]
 async fn drain_does_not_claim_an_already_applied_terminal_as_this_pass() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-already-applied", "host-a", "start-a");
     let process_id = "owner-bound-already-applied";
     let stored = seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await;
-    registry
-        .set_process_terminal_write_outcome(crate::ProcessCompletionOutcome::AlreadyApplied {
-            stored: ProcessRecord {
-                status: ProcessStatus::Abandoned,
-                ..stored
-            },
-        })
-        .await;
+    registry.set_process_terminal_write_outcome(crate::ProcessCompletionOutcome::AlreadyApplied {
+        stored: ProcessRecord {
+            status: ProcessStatus::Abandoned,
+            ..stored
+        },
+    });
 
-    let report = native_worker(registry.clone(), owner)
+    let report = native_worker(&backend, owner)
         .await
         .drain_owner_bound_work()
         .await
@@ -160,15 +156,15 @@ async fn drain_does_not_claim_an_already_applied_terminal_as_this_pass() {
 
 #[tokio::test]
 async fn drain_reports_already_terminal_completed_as_peer_settled() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-already-terminal", "host-a", "start-a");
     let process_id = "owner-bound-already-terminal";
     let peer = peer_completed_record(
         seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await,
     );
-    registry.set_process_read_override(peer).await;
+    registry.set_process_read_override(peer);
 
-    let report = native_worker(registry, owner)
+    let report = native_worker(&backend, owner)
         .await
         .drain_owner_bound_work()
         .await
@@ -188,17 +184,15 @@ async fn drain_reports_already_terminal_completed_as_peer_settled() {
 
 #[tokio::test]
 async fn drain_reports_renewal_supersession_as_lease_lost() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-renew-superseded", "host-a", "start-a");
     let process_id = "owner-bound-renew-superseded";
     seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await;
-    registry
-        .set_process_lease_renew_error(Some(PluginError::ProcessLeaseSuperseded {
-            process_id: ProcessId::from(process_id.to_string()),
-        }))
-        .await;
+    registry.set_process_lease_renew_error(Some(PluginError::ProcessLeaseSuperseded {
+        process_id: ProcessId::from(process_id.to_string()),
+    }));
 
-    let worker = native_worker(registry, owner).await;
+    let worker = native_worker(&backend, owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 
@@ -223,17 +217,15 @@ async fn drain_reports_renewal_supersession_as_lease_lost() {
 
 #[tokio::test]
 async fn drain_reports_terminal_write_supersession_as_lease_lost() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-write-superseded", "host-a", "start-a");
     let process_id = "owner-bound-write-superseded";
     seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await;
-    registry
-        .set_process_terminal_write_error(Some(PluginError::ProcessLeaseSuperseded {
-            process_id: ProcessId::from(process_id.to_string()),
-        }))
-        .await;
+    registry.set_process_terminal_write_error(Some(PluginError::ProcessLeaseSuperseded {
+        process_id: ProcessId::from(process_id.to_string()),
+    }));
 
-    let worker = native_worker(registry, owner).await;
+    let worker = native_worker(&backend, owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 
@@ -258,18 +250,16 @@ async fn drain_reports_terminal_write_supersession_as_lease_lost() {
 
 #[tokio::test]
 async fn drain_release_failure_overrides_absent_disposition() {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-release-failure", "host-a", "start-a");
     let process_id = "owner-bound-release-failure";
     seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await;
-    registry.set_process_read_absent(true).await;
-    registry
-        .set_process_lease_release_error(Some(PluginError::Session(
-            "injected lease-release failure".to_string(),
-        )))
-        .await;
+    registry.set_process_read_absent(true);
+    registry.set_process_lease_release_error(Some(PluginError::Session(
+        "injected lease-release failure".to_string(),
+    )));
 
-    let worker = native_worker(registry, owner).await;
+    let worker = native_worker(&backend, owner).await;
     let (report, capture) = capturing(|| worker.drain_owner_bound_work()).await;
     let report = report.expect("owner drain");
 
@@ -317,12 +307,10 @@ async fn recovered_nested_registry_read_uses_backend_error_telemetry() {
         .await
         .expect("read process")
         .expect("process exists");
-    test_registry
-        .set_process_read_error_after(
-            1,
-            PluginError::Session("injected nested registry read failure".to_string()),
-        )
-        .await;
+    test_registry.set_process_read_error_after(
+        1,
+        PluginError::Session("injected nested registry read failure".to_string()),
+    );
 
     let (_outcome, capture) = capturing(|| worker.recover_process(record)).await;
 
@@ -366,11 +354,9 @@ async fn recovered_live_renewal_uses_backend_error_telemetry() {
         .await
         .expect("read process")
         .expect("process exists");
-    test_registry
-        .set_process_lease_renew_error(Some(PluginError::Session(
-            "injected live lease-renewal failure".to_string(),
-        )))
-        .await;
+    test_registry.set_process_lease_renew_error(Some(PluginError::Session(
+        "injected live lease-renewal failure".to_string(),
+    )));
 
     let (_outcome, capture) = capturing(|| worker.recover_process(record)).await;
 

@@ -12,6 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::trace_capture::{EventCapture, capturing};
+use crate::runtime::tests::{
+    memory_backend, unbound_recording_store, unbound_recording_store_with_clock,
+};
 use lash_core::LeaseOwnerIdentity;
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::facade_support::{LeaseTimings, SystemClock};
@@ -27,8 +30,8 @@ fn owner(owner_id: &str, incarnation: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, incarnation)
 }
 
-fn new_store() -> Arc<dyn lash_core::store::RuntimePersistence> {
-    Arc::new(lash_core::runtime::InMemorySessionStore::new())
+async fn new_store() -> Arc<dyn lash_core::store::RuntimePersistence> {
+    unbound_recording_store(&memory_backend().await).await
 }
 
 fn short_timings() -> LeaseTimings {
@@ -87,7 +90,7 @@ async fn published_generation(
 
 #[tokio::test]
 async fn claiming_the_lane_traces_the_session_generation_and_holder() {
-    let store = new_store();
+    let store = new_store().await;
     let claimant = owner("worker-a", "worker-a:boot-1");
     let (guard, capture) = capturing(|| async {
         SessionExecutionLeaseGuard::try_acquire(
@@ -131,7 +134,7 @@ async fn claiming_the_lane_traces_the_session_generation_and_holder() {
 #[tokio::test]
 async fn a_dead_holder_is_still_reported_as_taken_over_by_the_winner() {
     let session_id = "lease-dead-holder";
-    let store = new_store();
+    let store = new_store().await;
     let dead = owner("worker-a", "worker-a:boot-1");
     let sweeper = owner("worker-b", "worker-b:boot-1");
 
@@ -211,7 +214,7 @@ async fn a_dead_holder_is_still_reported_as_taken_over_by_the_winner() {
 #[tokio::test]
 async fn claiming_a_released_lane_reports_no_takeover() {
     let session_id = "lease-released-lane";
-    let store = new_store();
+    let store = new_store().await;
 
     let ((), capture) = capturing(|| async {
         let first = SessionExecutionLeaseGuard::try_acquire(
@@ -259,7 +262,7 @@ async fn claiming_a_released_lane_reports_no_takeover() {
 #[tokio::test]
 async fn a_live_holder_that_is_swept_reports_only_its_own_renewal_failure() {
     let session_id = "lease-takeover";
-    let store = new_store();
+    let store = new_store().await;
     let holder = owner("worker-a", "worker-a:boot-1");
     let successor = owner("worker-b", "worker-b:boot-1");
 
@@ -361,8 +364,9 @@ fn held_generation_of(capture: &EventCapture) -> String {
 
 #[tokio::test]
 async fn a_transient_renewal_error_neither_loses_the_lane_nor_reports_a_takeover() {
+    let backend = memory_backend().await;
     let session_id = "lease-transient";
-    let store = Arc::new(lash_core::runtime::InMemorySessionStore::new());
+    let store = unbound_recording_store(&backend).await;
     let holder = owner("worker-a", "worker-a:boot-1");
 
     let ((), capture) = capturing(|| async {
@@ -421,7 +425,7 @@ async fn a_transient_renewal_error_neither_loses_the_lane_nor_reports_a_takeover
 #[tokio::test]
 async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
     let session_id = "lease-busy-advisory";
-    let store = new_store();
+    let store = new_store().await;
     let holder = owner("worker-a", "worker-a:boot-1");
     let claimant = owner("worker-b", "worker-b:boot-1");
 
@@ -499,11 +503,11 @@ async fn a_lane_less_writer_that_loses_the_cas_is_still_attributable() {
 /// No lane-less attempt may rotate, release, renew, or displace the holder row.
 #[tokio::test]
 async fn busy_claimants_race_only_at_head_cas_without_touching_holder_lane() {
+    let backend = memory_backend().await;
     let session_id = "lease-successor-incarnation-race";
     let clock = Arc::new(lash_core::testing::TestClock::new(1_000));
-    let store: Arc<dyn lash_core::store::RuntimePersistence> = Arc::new(
-        lash_core::runtime::InMemorySessionStore::with_clock(clock.clone()),
-    );
+    let store: Arc<dyn lash_core::store::RuntimePersistence> =
+        unbound_recording_store_with_clock(&backend, clock.clone()).await;
     bind_test_session(&store, &SessionId::from(session_id)).await;
     let predecessor = owner("workflow-owner", "workflow-owner:predecessor");
     let winner = owner("workflow-owner", "workflow-owner:successor-winner");
@@ -646,9 +650,9 @@ async fn publish_on_one_side_of_ttl(
     advance_to_expiry: bool,
 ) -> ((u64, Option<u64>), EventCapture) {
     let clock = Arc::new(lash_core::testing::TestClock::new(5_000));
-    let store: Arc<dyn lash_core::store::RuntimePersistence> = Arc::new(
-        lash_core::runtime::InMemorySessionStore::with_clock(clock.clone()),
-    );
+    let backend = memory_backend().await;
+    let store: Arc<dyn lash_core::store::RuntimePersistence> =
+        unbound_recording_store_with_clock(&backend, clock.clone()).await;
     bind_test_session(&store, session_id).await;
     let predecessor = owner("ttl-owner", "ttl-owner:predecessor");
     let successor = owner("ttl-owner", "ttl-owner:successor");
@@ -744,7 +748,7 @@ async fn pre_ttl_advisory_and_post_ttl_displacement_converge_on_publication() {
 #[tokio::test]
 async fn a_rejected_commit_cas_traces_the_losing_generation_and_head_revisions() {
     let session_id = "lease-commit-cas";
-    let store = new_store();
+    let store = new_store().await;
     let holder = owner("worker-a", "worker-a:boot-1");
 
     let ((), capture) = capturing(|| async {

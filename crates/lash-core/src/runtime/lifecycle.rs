@@ -494,8 +494,13 @@ impl LashRuntime {
                 .await?
             }
             None => {
-                let services =
+                // A storeless runtime persists no session state, but a
+                // reconstruction runtime still records its attachment intents
+                // on the catalog store its host names, so their owner stays
+                // durable.
+                let mut services =
                     RuntimeServices::new(plugin_session, attachment_store, process_env_store);
+                services.attachment_manifest_store = attachment_manifest_store;
                 Self::from_host_state(
                     policy,
                     host,
@@ -607,24 +612,17 @@ impl LashRuntime {
             ),
         }
         .map_err(SessionError::Plugin)?;
-        let mut embedded = EmbeddedRuntimeHost::new(env.core.clone());
-        if let Some(factory) = env.session_store_factory.as_ref() {
-            embedded = embedded.with_session_store_factory(Arc::clone(factory));
-        }
-        if let Some(store) = env.trigger_store.as_ref() {
-            embedded = embedded.with_trigger_store(Arc::clone(store));
-        }
-        if let Some(registry) = env.process_definitions.as_ref() {
-            embedded = embedded.with_process_definition_registry(Arc::clone(registry));
-        }
-        Self::assemble_runtime(
+        let embedded = EmbeddedRuntimeHost::new(env.core.clone());
+        // Boxed: assembly holds a whole host config and session state across
+        // its awaits, which is cold-path weight every caller would carry.
+        Box::pin(Self::assemble_runtime(
             policy,
             embedded,
             plugin_session,
             RuntimePersistenceBindings::new(store),
             env.work.clone(),
             RuntimeSessionAssembly::resumed(state, runtime_lease_owner, runtime_lease_executor_id),
-        )
+        ))
         .await
     }
 
@@ -926,7 +924,8 @@ mod tests {
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
         };
-        let factory = crate::InMemorySessionStoreFactory::new();
+        let backend = crate::testing::memory_backend().await;
+        let factory = backend.session_store_factory();
         let store = factory
             .create_store(&request)
             .await
@@ -972,12 +971,13 @@ mod tests {
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
         };
-        let factory = crate::InMemorySessionStoreFactory::new();
+        let backend = crate::testing::memory_backend().await;
+        let factory = backend.session_store_factory();
         let store = factory
             .create_store(&request)
             .await
             .expect("create session store before parking");
-        let runtime_host = test_host_config();
+        let runtime_host = test_host_config(&backend);
         let runtime_services = crate::PersistentRuntimeServices::new(
             plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
             Arc::clone(&store),
@@ -1037,20 +1037,23 @@ mod tests {
 
         let session_id = "transient-park-commit-failure";
         let policy = standard_test_policy();
-        let factory = crate::InMemorySessionStoreFactory::new();
-        let store = factory
-            .create_store(&crate::SessionStoreCreateRequest {
-                pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session_id.to_string()),
-                relation: crate::SessionRelation::Root,
-                policy: policy.clone(),
-            })
-            .await
-            .expect("create session store before parking");
-        let runtime_host = test_host_config();
+        let backend = crate::testing::memory_backend().await;
+        let store = Arc::new(crate::testing::runtime_helpers::RecordingStore::over(
+            backend
+                .session_store_factory()
+                .create_store(&crate::SessionStoreCreateRequest {
+                    pending_observer_intents: Vec::new(),
+                    session_id: SessionId::from(session_id.to_string()),
+                    relation: crate::SessionRelation::Root,
+                    policy: policy.clone(),
+                })
+                .await
+                .expect("create session store before parking"),
+        ));
+        let runtime_host = test_host_config(&backend);
         let runtime_services = crate::PersistentRuntimeServices::new(
             plugin_session_with_tools(&SessionId::from(session_id), Arc::new(EmptyTools)),
-            store,
+            Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
             std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
             std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
         );
@@ -1069,12 +1072,9 @@ mod tests {
         )
         .await
         .expect("build runtime before injected backend failure");
-        factory
-            .raw_store_for_testing(&SessionId::from(session_id))
-            .expect("raw in-memory store")
-            .fail_next_runtime_commit(crate::StoreError::Backend(
-                "temporary park backend outage".to_string(),
-            ));
+        store.fail_next_runtime_commit(crate::StoreError::Backend(
+            "temporary park backend outage".to_string(),
+        ));
 
         let error = match Box::pin(runtime.park()).await {
             Ok(_) => panic!("park commit must surface the injected backend failure"),

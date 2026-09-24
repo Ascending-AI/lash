@@ -87,7 +87,6 @@ fn processes_area_witnesses() {
     let _: fn(
         Vec<std::sync::Arc<dyn lash::plugins::PluginFactory>>,
         lash::durability::RuntimeHostConfig,
-        std::sync::Arc<dyn lash::persistence::SessionStoreFactory>,
         lash::durability::WorkerProcessWork,
         std::sync::Arc<dyn lash::runtime::QueuedWorkSubstrate>,
         lash::persistence::LeaseOwnerIdentity,
@@ -115,10 +114,8 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::durability::DurableProcessWorkerConfig| {
         let _ = &value.session_policy;
     });
-    // W0034: lash::durability::DurableProcessWorkerConfig::session_store_factory [field]
-    field_witness(|value: &lash::durability::DurableProcessWorkerConfig| {
-        let _ = &value.session_store_factory;
-    });
+    // W0034: lash::durability::DurableProcessWorkerConfig::session_store_factory [function]
+    let _ = lash::durability::DurableProcessWorkerConfig::session_store_factory;
     // W0035: lash::durability::DurableProcessWorkerConfig::validate_process_execution_concurrency [function]
     let _ = lash::durability::DurableProcessWorkerConfig::validate_process_execution_concurrency;
     // W0037: lash::durability::DurableProcessWorkerConfig::with_process_execution_concurrency [function]
