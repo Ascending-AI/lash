@@ -618,6 +618,19 @@ impl SessionStoreFactory for RuntimePerfStoreFactory {
         };
         SessionStoreFactory::list_sessions(inner.as_ref(), filter).await
     }
+
+    // A wrapped catalog answers for itself; the standalone perf store keeps no
+    // countable catalog, so it refuses rather than report zero turns.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<lash_core::store::UnsettledTurnCounts, StoreError> {
+        let Some(inner) = &self.inner else {
+            return Err(StoreError::UnsupportedStoreOperation {
+                operation: "SessionStoreFactory::count_unsettled_turns",
+            });
+        };
+        inner.count_unsettled_turns().await
+    }
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
     AttachmentRootSet, InMemorySessionStoreFactory, RuntimePersistence, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError,
+    SessionStoreFactory, StoreError, UnsettledTurnCounts,
 };
 
 struct SilentFactory {
@@ -56,6 +56,11 @@ impl SessionStoreFactory for SilentFactory {
         session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
+    }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError> {
+        self.inner.count_unsettled_turns().await
     }
 }
 

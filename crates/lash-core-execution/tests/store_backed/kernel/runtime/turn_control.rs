@@ -123,6 +123,15 @@ mod tests {
         ) -> crate::store::MaintenanceResult<crate::SessionBlobReclaimReport> {
             Ok(crate::SessionBlobReclaimReport::default())
         }
+
+        // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
+        async fn count_unsettled_turns(
+            &self,
+        ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "SessionStoreFactory::count_unsettled_turns",
+            })
+        }
     }
 
     fn address(label: &str) -> TurnAddress {

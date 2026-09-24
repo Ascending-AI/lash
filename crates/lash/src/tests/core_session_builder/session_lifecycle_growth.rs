@@ -85,6 +85,13 @@ impl SessionStoreFactory for GrowthFactory {
             samples: Arc::clone(&self.samples),
         }))
     }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
+        lash_core::SessionStoreFactory::count_unsettled_turns(&self.inner).await
+    }
 }
 
 #[async_trait]

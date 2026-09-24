@@ -73,6 +73,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/process_scope_requires_admitted_incarnation.rs");
     t.compile_fail("tests/ui/queue_operations_left_lash_session.rs");
     t.compile_fail("tests/ui/session_store_factory_requires_by_id_lookup.rs");
+    t.compile_fail("tests/ui/session_store_factory_requires_unsettled_turn_count.rs");
     t.compile_fail("tests/ui/tool_state_generation_is_sealed.rs");
     t.compile_fail("tests/ui/orchestrating_tool_def_requires_unsafe.rs");
     t.compile_fail("tests/ui/orchestrating_tool_def_unsafe_is_auditable.rs");

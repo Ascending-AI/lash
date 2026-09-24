@@ -457,6 +457,13 @@ impl crate::SessionStoreFactory for CreateOnlyFactory {
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+        crate::SessionStoreFactory::count_unsettled_turns(&self.inner).await
+    }
 }
 
 #[tokio::test]

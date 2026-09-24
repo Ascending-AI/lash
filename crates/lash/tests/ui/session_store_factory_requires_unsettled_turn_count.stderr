@@ -1,0 +1,7 @@
+error[E0046]: not all trait items implemented, missing: `count_unsettled_turns`
+  --> tests/ui/session_store_factory_requires_unsettled_turn_count.rs:48:1
+   |
+48 | impl SessionStoreFactory for UncountedFactory {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `count_unsettled_turns` in implementation
+   |
+   = help: implement the missing item: `fn count_unsettled_turns<'life0: 'async_trait, 'async_trait>(&'life0 self) -> Pin<Box<(dyn Future<Output = Result<UnsettledTurnCounts, StoreError>> + Send + 'async_trait)>> { todo!() }`

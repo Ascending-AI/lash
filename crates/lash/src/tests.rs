@@ -866,6 +866,15 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         Ok(lash_core::SessionBlobReclaimReport::default())
     }
+
+    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::count_unsettled_turns",
+        })
+    }
 }
 
 struct BoundSessionStore {
@@ -1275,6 +1284,15 @@ impl lash_core::SessionStoreFactory for RecordingStoreFactory {
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         Ok(lash_core::SessionBlobReclaimReport::default())
     }
+
+    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::count_unsettled_turns",
+        })
+    }
 }
 
 #[derive(Default)]
@@ -1388,6 +1406,15 @@ impl lash_core::SessionStoreFactory for DeletingStoreFactory {
             .lock_recover()
             .insert(SessionId::from(session_id.to_string()));
         Ok(lash_core::SessionBlobReclaimReport::default())
+    }
+
+    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::count_unsettled_turns",
+        })
     }
 }
 

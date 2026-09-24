@@ -4,7 +4,7 @@ use lash::SessionId;
 use lash::persistence::{
     AttachmentReclamationPolicy, EmptyRootSetPolicy, InMemoryAttachmentStore,
     InMemorySessionStoreFactory, RuntimePersistence, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, reclaim_unreferenced_attachments,
+    SessionStoreFactory, StoreError, UnsettledTurnCounts, reclaim_unreferenced_attachments,
 };
 
 struct DelegatingFactory {
@@ -43,6 +43,11 @@ impl SessionStoreFactory for DelegatingFactory {
         session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
+    }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError> {
+        self.inner.count_unsettled_turns().await
     }
 }
 

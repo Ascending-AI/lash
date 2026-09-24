@@ -110,6 +110,15 @@ impl SessionStoreFactory for NoByIdLookupSessionStoreFactory {
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         Ok(crate::store::SessionBlobReclaimReport::default())
     }
+
+    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::count_unsettled_turns",
+        })
+    }
 }
 
 // These factories keep a session catalog but no attachment-root index, so
@@ -217,6 +226,15 @@ impl SessionStoreFactory for TestSessionStoreFactory {
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         Ok(crate::store::SessionBlobReclaimReport::default())
     }
+
+    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::count_unsettled_turns",
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -256,6 +274,15 @@ impl SessionStoreFactory for InMemorySessionStoreFactory {
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         Ok(crate::store::SessionBlobReclaimReport::default())
     }
+
+    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::count_unsettled_turns",
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -294,6 +321,15 @@ impl SessionStoreFactory for SegmentBoundarySessionStoreFactory {
         _session_id: &SessionId,
     ) -> crate::store::MaintenanceResult<crate::store::SessionBlobReclaimReport> {
         Ok(crate::store::SessionBlobReclaimReport::default())
+    }
+
+    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<crate::store::UnsettledTurnCounts, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::count_unsettled_turns",
+        })
     }
 }
 

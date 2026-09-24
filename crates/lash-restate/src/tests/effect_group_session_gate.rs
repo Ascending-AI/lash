@@ -91,6 +91,15 @@ impl SessionStoreFactory for OneSessionCatalog {
     ) -> lash_core::store::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         Ok(lash_core::SessionBlobReclaimReport::default())
     }
+
+    // This fixture keeps no countable catalog, so it refuses rather than report zero turns.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::count_unsettled_turns",
+        })
+    }
 }
 
 /// Counts every time the deployment asks how to run a child — the step before

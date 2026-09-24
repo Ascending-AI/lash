@@ -360,6 +360,13 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
     ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
     }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
+        self.inner.count_unsettled_turns().await
+    }
 }
 
 #[derive(Clone, Debug)]

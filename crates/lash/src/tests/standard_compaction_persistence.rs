@@ -1571,6 +1571,13 @@ impl lash_core::SessionStoreFactory for FailArmedCommitFactory {
             armed: Arc::clone(&self.armed),
         }))
     }
+
+    // A decorator forwards the deployment turn count to the catalog it wraps.
+    async fn count_unsettled_turns(
+        &self,
+    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
+        self.inner.count_unsettled_turns().await
+    }
 }
 
 #[async_trait]

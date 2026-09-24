@@ -1,10 +1,12 @@
-//! A `SessionStoreFactory` that never states its by-id answer must not compile.
+//! A `SessionStoreFactory` that never states its unsettled-turn count must
+//! not compile.
 //!
-//! `open_existing_store_by_id` is the non-creating seam a Durable Session
-//! acquires through (ADR 0097), and its two negative answers mean opposite
-//! things: `Ok(None)` is "no such session", `Err` is "this catalog cannot
-//! resolve a session by id". An inherited `Ok(None)` would report every
-//! existing session as missing, so the method is required.
+//! `LashCore::drain_status` counts the deployment's parked and in-flight turns
+//! through `count_unsettled_turns`. An inherited refusal fails the first drain
+//! at runtime, and an inherited zero would let a host retire a deployment
+//! with turns still in flight, so the method is required: a decorator
+//! forwards to the catalog it wraps, and a factory with no countable catalog
+//! returns the typed refusal itself.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -13,15 +15,15 @@ use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
     AttachmentRootSet, InMemorySessionStoreFactory, RuntimePersistence, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, UnsettledTurnCounts,
+    SessionStoreFactory, StoreError,
 };
 
-struct SilentByIdFactory {
+struct UncountedFactory {
     inner: InMemorySessionStoreFactory,
 }
 
 #[async_trait::async_trait]
-impl AttachmentRootSet for SilentByIdFactory {
+impl AttachmentRootSet for UncountedFactory {
     async fn live_attachment_refs(
         &self,
         intent_grace_cutoff_epoch_ms: u64,
@@ -43,12 +45,19 @@ impl AttachmentRootSet for SilentByIdFactory {
 }
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for SilentByIdFactory {
+impl SessionStoreFactory for UncountedFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
     ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
         self.inner.create_store(request).await
+    }
+
+    async fn open_existing_store_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
+        self.inner.open_existing_store_by_id(session_id).await
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
@@ -60,11 +69,6 @@ impl SessionStoreFactory for SilentByIdFactory {
         session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
         self.inner.delete_session(session_id).await
-    }
-
-    // A decorator forwards the deployment turn count to the catalog it wraps.
-    async fn count_unsettled_turns(&self) -> Result<UnsettledTurnCounts, StoreError> {
-        self.inner.count_unsettled_turns().await
     }
 }
 
