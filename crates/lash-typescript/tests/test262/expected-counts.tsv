@@ -1,5 +1,5 @@
 # class	qualifier	count
-fail	*	763
+fail	*	755
 fail	FIG-3650	141
 fail	FIG-3651	139
 fail	FIG-3652	105
@@ -9,13 +9,12 @@ fail	FIG-3655	34
 fail	FIG-3656	77
 fail	FIG-3657	5
 fail	FIG-3658	29
-fail	FIG-3661	8
 fail	FIG-3662	20
 harness	*	21
 harness	nativeFunctionMatcher.js	15
 harness	program-size	6
-pass	*	4062
-refused	*	14124
+pass	*	4071
+refused	*	14123
 refused	TS_ACCESSOR_UNSUPPORTED	191
 refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED	6
 refused	TS_ASSIGN_CONST	1864
@@ -29,7 +28,7 @@ refused	TS_DELETE_ARRAY_INDEX_UNSUPPORTED	2
 refused	TS_EVAL_UNSUPPORTED	349
 refused	TS_EXPRESSION_UNSUPPORTED	6
 refused	TS_FOR_OF_UNSUPPORTED	14
-refused	TS_FOR_UNSUPPORTED	651
+refused	TS_FOR_UNSUPPORTED	650
 refused	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED	96
 refused	TS_GENERATOR_UNSUPPORTED	49
 refused	TS_IMPORT_EXPORT_UNSUPPORTED	2

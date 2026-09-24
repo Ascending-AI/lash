@@ -655,6 +655,26 @@ impl Adapter {
         Ok(parse_label_comment(&first.text))
     }
 
+    /// The body of an `if`/`else` or a loop is a Statement, never a
+    /// Declaration. Strict code makes `if (x) function f() {}` the early
+    /// SyntaxError that Annex B reserves for sloppy mode, and an `async
+    /// function` declaration is a SyntaxError in either mode — but SWC still
+    /// hands the async form to the adapter as a declaration.
+    fn convert_body_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
+        if let swc::Stmt::Decl(swc::Decl::Fn(decl)) = stmt {
+            return Err(Diagnostic::new(
+                DiagnosticCode::SyntaxError,
+                if decl.function.is_async {
+                    "async functions can only be declared at the top level or inside a block"
+                } else {
+                    "in strict mode code, functions can only be declared at top level or inside a block"
+                },
+                Some(source_span(stmt.span())),
+            ));
+        }
+        self.convert_stmt(stmt)
+    }
+
     fn convert_unlabeled_stmt(&self, stmt: &swc::Stmt) -> Result<Stmt, Diagnostic> {
         if !matches!(
             stmt,
@@ -689,16 +709,16 @@ impl Adapter {
             ),
             swc::Stmt::If(stmt) => Stmt::If {
                 test: self.convert_expr(&stmt.test)?,
-                consequent: Box::new(self.convert_stmt(&stmt.cons)?),
+                consequent: Box::new(self.convert_body_stmt(&stmt.cons)?),
                 alternate: stmt
                     .alt
                     .as_deref()
-                    .map(|stmt| self.convert_stmt(stmt).map(Box::new))
+                    .map(|stmt| self.convert_body_stmt(stmt).map(Box::new))
                     .transpose()?,
             },
             swc::Stmt::While(stmt) => Stmt::While {
                 test: self.convert_expr(&stmt.test)?,
-                body: Box::new(self.convert_stmt(&stmt.body)?),
+                body: Box::new(self.convert_body_stmt(&stmt.body)?),
             },
             swc::Stmt::Break(_) => Stmt::Break,
             swc::Stmt::Continue(_) => Stmt::Continue,
@@ -758,7 +778,7 @@ impl Adapter {
                     .collect::<Result<_, Diagnostic>>()?,
             },
             swc::Stmt::DoWhile(stmt) => Stmt::DoWhile {
-                body: Box::new(self.convert_stmt(&stmt.body)?),
+                body: Box::new(self.convert_body_stmt(&stmt.body)?),
                 test: self.convert_expr(&stmt.test)?,
                 test_span: source_span(stmt.test.span()),
             },
@@ -785,7 +805,7 @@ impl Adapter {
                     .as_deref()
                     .map(|expr| self.convert_expr(expr))
                     .transpose()?,
-                body: Box::new(self.convert_stmt(&stmt.body)?),
+                body: Box::new(self.convert_body_stmt(&stmt.body)?),
             },
             swc::Stmt::ForIn(stmt) => {
                 let (pattern, kind) = self.convert_for_head(&stmt.left, span)?;
@@ -793,7 +813,7 @@ impl Adapter {
                     pattern,
                     kind,
                     object: self.convert_expr(&stmt.right)?,
-                    body: Box::new(self.convert_stmt(&stmt.body)?),
+                    body: Box::new(self.convert_body_stmt(&stmt.body)?),
                 }
             }
             swc::Stmt::ForOf(stmt) => {
@@ -809,7 +829,7 @@ impl Adapter {
                     pattern,
                     kind,
                     iterable: self.convert_expr(&stmt.right)?,
-                    body: Box::new(self.convert_stmt(&stmt.body)?),
+                    body: Box::new(self.convert_body_stmt(&stmt.body)?),
                 }
             }
             swc::Stmt::Debugger(_) => {
