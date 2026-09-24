@@ -40,9 +40,12 @@ class RatchetTest(unittest.TestCase):
         failed = dict(self.base, **{"a.js": ("fail", "TS_NEW_CODE")})
         self.assertEqual(len(ratchet.regressions(self.base, failed, frozenset({"TS_NEW_CODE"}))), 1)
 
-    def test_rejected_codes_reads_the_census(self):
+    def test_rejected_rows_reads_the_census(self):
         census = "# kind\tname\tstatus\treason\tprobe\nfeature\tx\trejected\tTS_A\tp\nfeature\ty\taccepted\t-\t-\ntypescript\tz\trejected\tTS_B\tq\n"
-        self.assertEqual(ratchet.rejected_codes(census), {"TS_A", "TS_B"})
+        self.assertEqual(
+            ratchet.rejected_rows(census),
+            {("feature", "x"): "TS_A", ("typescript", "z"): "TS_B"},
+        )
 
     def test_a_lost_pass_is_a_regression(self):
         for outcome in [("fail", "FIG-1"), ("refused", "TS_NEW_UNSUPPORTED"), ("harness", "x")]:

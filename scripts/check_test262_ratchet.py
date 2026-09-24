@@ -15,8 +15,8 @@ Owners may change (a failure moving to a narrower ticket); classes may not
 regress.
 
 One exception is a ruling, not a regression: a test that passed may become
-`refused <code>` when `<code>` is newly registered as a rejection in
-`census.tsv` in the same change. A new refusal class (an unsupported feature
+`refused <code>` when the same change adds a `rejected` row to `census.tsv`
+that names `<code>`. A new refusal class (an unsupported feature
 the dialect used to accept by accident, or a construct `tsc --strict`
 rejects) can demote tests that passed only incidentally, and the census row
 that registers it is the reviewed record of that decision. Every such move is
@@ -45,16 +45,16 @@ def parse(text: str) -> dict[str, tuple[str, str]]:
     return outcomes
 
 
-def rejected_codes(text: str) -> set[str]:
-    """The diagnostic codes `census.tsv` registers as rejections."""
-    codes = set()
+def rejected_rows(text: str) -> dict[tuple[str, str], str]:
+    """`census.tsv`'s rejection rows: (kind, name) -> the diagnostic code."""
+    rows = {}
     for line in text.splitlines():
         if not line.strip() or line.startswith("#"):
             continue
         fields = line.split("\t")
         if len(fields) >= 4 and fields[2] == "rejected":
-            codes.add(fields[3])
-    return codes
+            rows[(fields[0], fields[1])] = fields[3]
+    return rows
 
 
 def regressions(
@@ -93,10 +93,11 @@ def base_outcomes(base: str) -> dict[str, tuple[str, str]] | None:
 
 
 def new_refusal_codes(base: str) -> frozenset[str]:
-    """Rejection codes the head's census registers and the base's does not."""
-    head = rejected_codes((ROOT / CENSUS).read_text())
+    """The codes named by rejection rows the head's census adds over the base's."""
+    head = rejected_rows((ROOT / CENSUS).read_text())
     base_text = show(base, CENSUS)
-    return frozenset(head - (rejected_codes(base_text) if base_text is not None else set()))
+    base_rows = rejected_rows(base_text) if base_text is not None else {}
+    return frozenset(code for row, code in head.items() if base_rows.get(row) != code)
 
 
 def main() -> int:
@@ -112,7 +113,7 @@ def main() -> int:
     problems = regressions(base, head, ruled)
     for path, (head_class, head_qualifier) in sorted(head.items()):
         if base.get(path, (None, None))[0] == "pass" and head_class == "refused" and head_qualifier in ruled:
-            print(f"check_test262_ratchet: {path} passed at the base and is now refused by newly registered {head_qualifier}")
+            print(f"check_test262_ratchet: {path} passed at the base and is now refused by {head_qualifier}, which a new census rejection row registers")
     if problems:
         print("The Test262 record regressed against its base:", file=sys.stderr)
         for problem in problems:
