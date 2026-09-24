@@ -20,6 +20,7 @@ mod query;
 mod serial;
 mod timers;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
@@ -202,6 +203,38 @@ pub(crate) struct Shared {
     /// Told the new virtual time whenever it moves, so clocks the handlers
     /// read (a store set's) move with it.
     time_listener: OnceLock<Arc<dyn Fn(u64) + Send + Sync>>,
+    /// The server's tasks still alive: attempts and time and turn drivers.
+    tasks: Arc<AtomicUsize>,
+}
+
+/// Counts one server task while it lives.
+pub(crate) struct TaskGuard(Arc<AtomicUsize>);
+
+impl TaskGuard {
+    fn new(tasks: &Arc<AtomicUsize>) -> Self {
+        tasks.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(tasks))
+    }
+}
+
+impl Drop for TaskGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl Shared {
+    /// Spawn a server task, counted while it lives.
+    pub(crate) fn spawn<F>(&self, task: F) -> tokio::task::JoinHandle<()>
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let guard = TaskGuard::new(&self.tasks);
+        self.runtime.spawn(async move {
+            let _guard = guard;
+            task.await;
+        })
+    }
 }
 
 impl Shared {
@@ -336,8 +369,49 @@ impl Drop for Shutdown {
                     abort.abort();
                 }
             }
+            // Ingress callers still waiting on an outcome hold the server
+            // through their route; dropping their senders answers them, so
+            // their tasks end instead of keeping a dead server alive.
+            invocation.waiters.clear();
         }
         state.timers.clear();
+        state.shut_down();
+        drop(state);
+        shared.activity.notify_waiters();
+    }
+}
+
+/// Watches a server's release: taken from a live server, it tells when the
+/// last handle is gone, the server's state is freed and none of its tasks is
+/// left.
+#[derive(Clone)]
+pub struct DropWatch {
+    shared: Weak<Shared>,
+    tasks: Arc<AtomicUsize>,
+}
+
+impl DropWatch {
+    /// Whether the server is freed and all its tasks have ended.
+    pub fn is_freed(&self) -> bool {
+        self.shared.strong_count() == 0 && self.live_tasks() == 0
+    }
+
+    /// The server's tasks still alive.
+    pub fn live_tasks(&self) -> usize {
+        self.tasks.load(Ordering::SeqCst)
+    }
+
+    /// Wait until the server is freed, for at most `within` of wall time.
+    /// Returns whether it was.
+    pub async fn freed_within(&self, within: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + within;
+        while !self.is_freed() {
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        true
     }
 }
 
@@ -405,14 +479,13 @@ impl RestateTestServer {
             state: Mutex::new(state),
             activity: Arc::new(Notify::new()),
             time_listener: OnceLock::new(),
+            tasks: Arc::new(AtomicUsize::new(0)),
         });
         if let TimeMode::AutoAdvance { idle, horizon } = shared.config.time {
-            shared
-                .runtime
-                .spawn(auto_advance(Arc::downgrade(&shared), idle, horizon));
+            shared.spawn(auto_advance(Arc::downgrade(&shared), idle, horizon));
         }
         if shared.config.scheduling == Scheduling::Serial {
-            shared.runtime.spawn(serial::drive(Arc::downgrade(&shared)));
+            shared.spawn(serial::drive(Arc::downgrade(&shared)));
         }
         let shutdown = Arc::new(Shutdown {
             shared: Arc::downgrade(&shared),
@@ -440,6 +513,15 @@ impl RestateTestServer {
         let server = Self::new(config)?;
         server.register(endpoint).await?;
         Ok(server)
+    }
+
+    /// A watch on this server's release, for tests that prove a dropped
+    /// server frees everything it held.
+    pub fn drop_watch(&self) -> DropWatch {
+        DropWatch {
+            shared: Arc::downgrade(&self.shared),
+            tasks: Arc::clone(&self.shared.tasks),
+        }
     }
 
     pub fn config(&self) -> &ServerConfig {

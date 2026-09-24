@@ -47,6 +47,7 @@ pub mod server;
 pub use backend::{BackendError, HandlerAttempt, RestateTestBackend, backend};
 pub use protocol::ProtocolVersion;
 pub use server::{
-    CrashPoint, CrashRule, InvocationView, JournalEntryView, RandomCrashes, RestateTestServer,
-    RetryPolicy, Scheduling, ServerConfig, StartError, Stats, TimeMode, TimerView,
+    CrashPoint, CrashRule, DropWatch, InvocationView, JournalEntryView, RandomCrashes,
+    RestateTestServer, RetryPolicy, Scheduling, ServerConfig, StartError, Stats, TimeMode,
+    TimerView,
 };

@@ -46,6 +46,23 @@ lash_rust_unit_test(
 )
 
 lash_rust_integration_test(
+    name = "drop__test",
+    crate_features = [],
+    crate_name = "drop",
+    crate_root = "tests/drop.rs",
+    declared_features = [],
+    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "server_semantics__test",
     crate_features = [],
     crate_name = "server_semantics",
@@ -104,6 +121,7 @@ lash_batch_test(
     jobs = 2,
     memory_kb = 8388608,
     tests = [
+        ":drop__test",
         ":lash-restate-test__unit_test",
         ":server_semantics__test",
         ":suspended_turn__test",

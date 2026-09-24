@@ -55,6 +55,9 @@ impl HttpTransport for IngressTransport {
         let Some(shared) = self.shared.upgrade() else {
             return Ok(error(503, "the Restate test server has shut down"));
         };
+        if shared.lock().shut {
+            return Ok(error(503, "the Restate test server has shut down"));
+        }
         // Serial scheduling: a request a handler issues frees the turn for
         // the invocations it may wait on, and the handler resumes only once
         // its attempt holds the turn again.
@@ -203,6 +206,10 @@ fn parse_delay(query: &str) -> Result<Option<Duration>, String> {
 
 impl Routes {
     async fn route(&self, request: HttpRequest) -> HttpResponse {
+        // A request let in as the server shut down (one that waited to land).
+        if self.shared.lock().shut {
+            return error(503, "the Restate test server has shut down");
+        }
         let base = self.shared.config.ingress_url.trim_end_matches('/');
         let rest = request
             .url
